@@ -1,19 +1,5 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- */
-
-
-/*
- * The original Elite code did all the vector calculations using 8-bit integers.
+ * The original code did all the vector calculations using 8-bit integers.
  *
  * Writing all the routines in C to use 8 bit ints would have been fairly pointless.
  * I have, therefore, written a new set of routines which use floating point math.

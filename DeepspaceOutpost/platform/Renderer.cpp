@@ -1,5 +1,5 @@
 /*
- * DeepspaceOutpost - DirectX 11 / XAudio2 port of Elite: The New Kind.
+ * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
  * Renderer.cpp  (M1)
  */
@@ -13,7 +13,7 @@
 #include <iterator>
 #include <vector>
 
-using Microsoft::WRL::ComPtr;
+using winrt::com_ptr;
 
 /* scanner.bmp supplies both the HUD strip and the master 256-colour palette.
  * Its filename is read from newscan.cfg into this game-side global. */
@@ -44,15 +44,15 @@ float4 PSMain(VSOut i) : SV_Target
 }
 )";
 
-ComPtr<ID3DBlob> compileShader(const char* src, const char* entry, const char* target)
+com_ptr<ID3DBlob> compileShader(const char* src, const char* entry, const char* target)
 {
-	ComPtr<ID3DBlob> code, errors;
+	com_ptr<ID3DBlob> code, errors;
 	UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 #ifdef _DEBUG
 	flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
 	HRESULT hr = D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr,
-							entry, target, flags, 0, &code, &errors);
+							entry, target, flags, 0, code.put(), errors.put());
 	if (FAILED(hr))
 	{
 		if (errors)
@@ -82,14 +82,14 @@ bool Renderer::init(HWND hwnd)
 
 	/* Start with an opaque black canvas; the game clears the play area itself. */
 	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-	context_->ClearRenderTargetView(canvas_rtv_.Get(), black);
+	context_->ClearRenderTargetView(canvas_rtv_.get(), black);
 	return true;
 }
 
 void Renderer::shutdown()
 {
 	if (context_) context_->ClearState();
-	/* ComPtr members release automatically. */
+	/* com_ptr members release automatically. */
 }
 
 bool Renderer::createDeviceAndSwapChain(HWND hwnd)
@@ -113,17 +113,21 @@ bool Renderer::createDeviceAndSwapChain(HWND hwnd)
 	HRESULT hr = D3D11CreateDeviceAndSwapChain(
 		nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
 		wanted, static_cast<UINT>(std::size(wanted)), D3D11_SDK_VERSION,
-		&sd, &swap_chain_, &device_, &got, &context_);
+		&sd, swap_chain_.put(), device_.put(), &got, context_.put());
 
 	if (FAILED(hr))
 	{
-		/* Retry without the FLIP model for older configurations. */
+		/* Retry without the FLIP model for older configurations. Release any
+		 * partial outputs first so put() writes into null com_ptr slots. */
+		swap_chain_ = nullptr;
+		device_     = nullptr;
+		context_    = nullptr;
 		sd.BufferCount = 1;
 		sd.SwapEffect  = DXGI_SWAP_EFFECT_DISCARD;
 		hr = D3D11CreateDeviceAndSwapChain(
 			nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
 			wanted, static_cast<UINT>(std::size(wanted)), D3D11_SDK_VERSION,
-			&sd, &swap_chain_, &device_, &got, &context_);
+			&sd, swap_chain_.put(), device_.put(), &got, context_.put());
 	}
 
 	return SUCCEEDED(hr);
@@ -131,10 +135,10 @@ bool Renderer::createDeviceAndSwapChain(HWND hwnd)
 
 bool Renderer::createBackBuffer()
 {
-	ComPtr<ID3D11Texture2D> back;
-	if (FAILED(swap_chain_->GetBuffer(0, IID_PPV_ARGS(&back))))
+	com_ptr<ID3D11Texture2D> back;
+	if (FAILED(swap_chain_->GetBuffer(0, IID_PPV_ARGS(back.put()))))
 		return false;
-	return SUCCEEDED(device_->CreateRenderTargetView(back.Get(), nullptr, &back_rtv_));
+	return SUCCEEDED(device_->CreateRenderTargetView(back.get(), nullptr, back_rtv_.put()));
 }
 
 bool Renderer::createCanvasTarget()
@@ -149,21 +153,21 @@ bool Renderer::createCanvasTarget()
 	td.Usage      = D3D11_USAGE_DEFAULT;
 	td.BindFlags  = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
-	if (FAILED(device_->CreateTexture2D(&td, nullptr, &canvas_tex_)))   return false;
-	if (FAILED(device_->CreateRenderTargetView(canvas_tex_.Get(), nullptr, &canvas_rtv_))) return false;
-	if (FAILED(device_->CreateShaderResourceView(canvas_tex_.Get(), nullptr, &canvas_srv_))) return false;
+	if (FAILED(device_->CreateTexture2D(&td, nullptr, canvas_tex_.put())))   return false;
+	if (FAILED(device_->CreateRenderTargetView(canvas_tex_.get(), nullptr, canvas_rtv_.put()))) return false;
+	if (FAILED(device_->CreateShaderResourceView(canvas_tex_.get(), nullptr, canvas_srv_.put()))) return false;
 	return true;
 }
 
 bool Renderer::createPresentPipeline()
 {
-	ComPtr<ID3DBlob> vs = compileShader(kPresentHLSL, "VSMain", "vs_5_0");
-	ComPtr<ID3DBlob> ps = compileShader(kPresentHLSL, "PSMain", "ps_5_0");
+	com_ptr<ID3DBlob> vs = compileShader(kPresentHLSL, "VSMain", "vs_5_0");
+	com_ptr<ID3DBlob> ps = compileShader(kPresentHLSL, "PSMain", "ps_5_0");
 	if (!vs || !ps) return false;
 
-	if (FAILED(device_->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &present_vs_)))
+	if (FAILED(device_->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, present_vs_.put())))
 		return false;
-	if (FAILED(device_->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &present_ps_)))
+	if (FAILED(device_->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, present_ps_.put())))
 		return false;
 
 	D3D11_SAMPLER_DESC sm{};
@@ -171,7 +175,7 @@ bool Renderer::createPresentPipeline()
 	sm.AddressU = sm.AddressV = sm.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 	sm.ComparisonFunc = D3D11_COMPARISON_NEVER;
 	sm.MaxLOD = D3D11_FLOAT32_MAX;
-	if (FAILED(device_->CreateSamplerState(&sm, &present_sampler_)))
+	if (FAILED(device_->CreateSamplerState(&sm, present_sampler_.put())))
 		return false;
 
 	/* No culling (the fullscreen triangle winding is arbitrary) and scissor
@@ -181,7 +185,7 @@ bool Renderer::createPresentPipeline()
 	rs.CullMode = D3D11_CULL_NONE;
 	rs.ScissorEnable = FALSE;
 	rs.DepthClipEnable = TRUE;
-	return SUCCEEDED(device_->CreateRasterizerState(&rs, &present_raster_));
+	return SUCCEEDED(device_->CreateRasterizerState(&rs, present_raster_.put()));
 }
 
 bool Renderer::loadPalette()
@@ -282,12 +286,12 @@ void Renderer::clearCanvas(int palette_index)
 		((c >> 16) & 0xff) / 255.0f,
 		1.0f,
 	};
-	context_->ClearRenderTargetView(canvas_rtv_.Get(), rgba);
+	context_->ClearRenderTargetView(canvas_rtv_.get(), rgba);
 }
 
 void Renderer::bindCanvasTarget()
 {
-	ID3D11RenderTargetView* rtv = canvas_rtv_.Get();
+	ID3D11RenderTargetView* rtv = canvas_rtv_.get();
 	context_->OMSetRenderTargets(1, &rtv, nullptr);
 
 	D3D11_VIEWPORT vp{};
@@ -305,21 +309,21 @@ void Renderer::present()
 	if (!swap_chain_) return;
 
 	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-	ID3D11RenderTargetView* rtv = back_rtv_.Get();
+	ID3D11RenderTargetView* rtv = back_rtv_.get();
 	context_->OMSetRenderTargets(1, &rtv, nullptr);
 	context_->ClearRenderTargetView(rtv, black);
 
 	D3D11_VIEWPORT vp{};
 	computeLetterbox(vp);
 	context_->RSSetViewports(1, &vp);
-	context_->RSSetState(present_raster_.Get());
+	context_->RSSetState(present_raster_.get());
 
 	context_->IASetInputLayout(nullptr);
 	context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	context_->VSSetShader(present_vs_.Get(), nullptr, 0);
-	context_->PSSetShader(present_ps_.Get(), nullptr, 0);
-	ID3D11ShaderResourceView* srv = canvas_srv_.Get();
-	ID3D11SamplerState* smp = present_sampler_.Get();
+	context_->VSSetShader(present_vs_.get(), nullptr, 0);
+	context_->PSSetShader(present_ps_.get(), nullptr, 0);
+	ID3D11ShaderResourceView* srv = canvas_srv_.get();
+	ID3D11SamplerState* smp = present_sampler_.get();
 	context_->PSSetShaderResources(0, 1, &srv);
 	context_->PSSetSamplers(0, 1, &smp);
 	context_->Draw(3, 0);
@@ -340,7 +344,7 @@ void Renderer::resize(int clientWidth, int clientHeight)
 	client_w_ = clientWidth;
 	client_h_ = clientHeight;
 
-	back_rtv_.Reset();
+	back_rtv_ = nullptr;
 	context_->OMSetRenderTargets(0, nullptr, nullptr);
 	swap_chain_->ResizeBuffers(0, client_w_, client_h_, DXGI_FORMAT_UNKNOWN, 0);
 	createBackBuffer();

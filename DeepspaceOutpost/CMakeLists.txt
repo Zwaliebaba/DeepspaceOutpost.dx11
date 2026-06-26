@@ -1,4 +1,4 @@
-# DeepspaceOutpost - DirectX 11 / XAudio2 port of Elite: The New Kind.
+# DeepspaceOutpost - DirectX 11 / XAudio2.
 #
 # Target: a Win32 GUI executable. Portable game logic (ported from C to C++23)
 # plus the new platform layer (Win32 / Direct3D 11 / XAudio2).
@@ -57,7 +57,7 @@ if(MSVC)
     # Two conformance tiers:
     #  - The new platform layer is held to strict, idiomatic modern C++ (/permissive-,
     #    /W4) - this is freshly written code and should be clean.
-    #  - The faithfully ported Elite game logic stays /permissive (it relies on a
+    #  - The faithfully ported game logic stays /permissive (it relies on a
     #    few C-isms, e.g. string literals to char*); it is deliberately left as a
     #    thin port to avoid behavioural regressions in untested reverse-engineered
     #    math. It still compiles as C++23.
@@ -69,6 +69,11 @@ endif()
 
 # Libraries the platform layer will need across the milestones.
 target_link_libraries(DeepspaceOutpost PRIVATE
+    # Engine modules for the MMO migration. NeuronClient pulls in NeuronCore
+    # publicly; NeuronCore is listed explicitly per the module dependency contract.
+    NeuronClient
+    NeuronCore
+
     d3d11
     dxgi
     d3dcompiler

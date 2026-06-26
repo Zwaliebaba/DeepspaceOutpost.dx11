@@ -1,18 +1,4 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- *
- */
-
-/*
  * trade.c
  */
 
@@ -35,7 +21,7 @@
 #define FIREARMS	10
 
 /*
- * The following holds the Elite Planet Stock Market.
+ * The following holds the Planet Stock Market.
  */
 
 #define TONNES		0
@@ -67,7 +53,7 @@ struct stock_item stock_market[NO_OF_STOCK_ITEMS]=
 
 
 /*
- * Generate the Elite stock market.
+ * Generate the stock market.
  * The prices and quantities are affected by the planet's economy.
  * There is also a slight amount of randomness added in.
  * The random value is changed each time we hyperspace.

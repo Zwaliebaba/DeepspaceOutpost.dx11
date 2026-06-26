@@ -1,18 +1,4 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- *
- */
-
-/*
  * missions.c
  *
  * Code to handle the special missions.
@@ -73,7 +59,7 @@ char *mission1_pdesc[] =
 	"YOU CAN TACKLE THE VICIOUS SCOUNDREL IF YOU LIKE. HE'S AT ORARRA.",
 	"THERE'S A REAL DEADLY PIRATE OUT THERE.",
 	"BOY ARE YOU IN THE WRONG GALAXY!",
-	"COMING SOON: ELITE - DARKNESS FALLS.",				
+	"COMING SOON: DARKNESS FALLS.",
 };
 
 char *mission2_brief_a =

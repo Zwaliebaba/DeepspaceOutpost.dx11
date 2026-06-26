@@ -2,29 +2,33 @@
 
 ## Project Overview
 
-Earthrise is a Windows-native C++ game built with CMake and the MSVC toolchain. It is a
-restructured port of Introversion's **Darwinia**: the original game/engine code has been
-split into reusable `Neuron*` engine static libraries plus the game logic and two
-executables (a Win32 GUI client and a console server stub). It targets Windows (x64 and
-x86) and builds with the Ninja generator via CMake presets. The renderer is **Direct3D 11**,
-reached through a legacy OpenGL-over-Direct3D compatibility layer that is being migrated to
-native D3D11. Vector/matrix math is being migrated from the original Darwinia math types to
-**DirectXMath** (SIMD) via `Neuron::Math`.
+Deepspace Outpost is a Windows-native C++ game built with CMake and the MSVC toolchain. It
+targets Windows (x64 and x86) and builds with the Ninja generator via CMake presets. The
+renderer is **Direct3D 11** and audio is **XAudio2**. The codebase is mid-restructure toward a
+modular engine split into reusable `Neuron*` static libraries plus the game logic and two
+executables (a Win32 GUI client and a console server stub). Vector/matrix math is being migrated
+to **DirectXMath** (SIMD) via `Neuron::Math`.
 
-> **Status note.** The codebase is mid-restructure. Several engineering conventions below
-> (DirectXMath SIMD boundary, `winrt::com_ptr`, native-first) describe the *target* style for
-> new and migrated code; large parts of the original Darwinia code still use legacy patterns.
-> Match the file you are editing, and move legacy code toward the target style when you touch it.
+> **Status note.** Today the whole game builds as a single Win32 GUI executable,
+> **DeepspaceOutpost**, with two source tiers: faithfully ported game logic (`*.cpp` in the
+> project root, compiled `/permissive`) and a freshly written platform layer (`platform/*.cpp` —
+> Win32 / Direct3D 11 / XAudio2, compiled `/permissive- /W4`) wired to the game through contract
+> headers (`gfx.h`, `sound.h`, …). The `Neuron*` and `Server` directories are placeholders for the
+> *planned* engine libraries described below and are empty for now. `DemoShaders/` is HLSL ported
+> from the engine's GLSL, kept for **reference only** (not built). Several engineering conventions
+> below (DirectXMath SIMD boundary, `winrt::com_ptr`, native-first) describe the *target* style for
+> new and migrated code; the ported game logic still uses legacy patterns. Match the file you are
+> editing, and move legacy code toward the target style when you touch it.
 
-**Current project structure (CMake):**
+**Target project structure (CMake), once the engine split lands:**
 
 | Project | Type | Role |
 |---|---|---|
 | **NeuronCore** | Static lib | Engine foundation: math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib`, sockets, packets, connections), filesystem (`FileSys`, `FilePaths`), tasks/threads (`TasksCore`), timers, events (`EventManager`), debug, data serialization (`DataReader`/`DataWriter`, `BinaryStreamReaders`, `TextStreamReaders`, `Json`). Pulls in C++/WinRT projections via `NeuronCore.h`. |
 | **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compatibility layer, audio/sound system, input drivers, GUI/window manager, preferences. Depends on NeuronCore. |
 | **NeuronServer** | Static lib | Server engine library (currently minimal — `NeuronServer.h`). Depends on NeuronCore. |
-| **GameLogic** | Static lib | Darwinia game simulation **and** its rendering: entities (`Darwinian`, `Armyant`, `Centipede`, `Souldestroyer`, …), buildings, AI, particle systems, `Landscape` + `LandscapeRenderer`, routing/obstruction grids. Depends on **NeuronClient** (so it is client-linked, not server-only). |
-| **EarthRise** | Win32 GUI executable | Game client: `GameApp`, main loop, `CameraController`, `Renderer`, `LevelFile`, `Location`, `Team`, user input. Entry point `wWinMain` (`WinMain.cpp`). Links GameLogic. |
+| **GameLogic** | Static lib | The Deepspace Outpost game simulation **and** its rendering: world entities, AI, particle systems, and the game-specific renderers. Depends on **NeuronClient** (so it is client-linked, not server-only). |
+| **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, camera, renderer, level/world loading, user input. Entry point `wWinMain`. Links GameLogic. |
 | **Server** | Console executable | Dedicated-server stub (`Main.cpp`, entry point `main`). Links NeuronServer. |
 
 **Actual dependency graph:**
@@ -49,25 +53,25 @@ native D3D11. Vector/matrix math is being migrated from the original Darwinia ma
                  │                               │
         ┌────────▼───────┐              ┌────────▼────────┐
         │   GameLogic    │              │     Server      │
-        │ (Darwinia sim  │              │ (console server │
+        │ (game sim      │              │ (console server │
         │  + rendering)  │              │  executable)    │
         └────────┬───────┘              └─────────────────┘
                  │
-        ┌────────▼───────┐
-        │   EarthRise    │
-        │ (Win32 client  │
-        │  executable)   │
-        └────────────────┘
+        ┌────────▼────────┐
+        │ DeepspaceOutpost│
+        │ (Win32 client   │
+        │  executable)    │
+        └─────────────────┘
 ```
 
-> Note: `GameLogic` is linked by the **client** (EarthRise), not by the server. There is
+> Note: `GameLogic` is linked by the **client** (DeepspaceOutpost), not by the server. There is
 > currently no server-authoritative simulation split — the server target is a stub.
 
 ## Key Architecture Decisions
 
-- **Restructured Darwinia**: Original Darwinia game/engine code split into `Neuron*` engine
+- **Modular engine split**: Game/engine code organized into `Neuron*` engine
   libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameLogic` (the game), and two
-  executables (`EarthRise`, `Server`).
+  executables (`DeepspaceOutpost`, `Server`).
 - **Direct3D 11 rendering**: `Neuron::Graphics::Core` owns the D3D11 device, swap chain, and
   views (`ID3D11Device`, `ID3D11DeviceContext`, render/depth views).
 - **OpenGL compatibility layer**: `OpenglDirectx` emulates the original game's OpenGL calls on
@@ -85,6 +89,7 @@ native D3D11. Vector/matrix math is being migrated from the original Darwinia ma
 |---|---|
 | [coding-standards.md](coding-standards.md) | Naming, formatting, language conventions, native-first rule |
 | [copilot-instructions.md](copilot-instructions.md) | Code-generation guidance for this repository |
+| [../DemoShaders/PORTING.md](../DemoShaders/PORTING.md) | GLSL→HLSL porting guide for the reference shaders in `DemoShaders/` (reference only — not built) |
 
 ## Setup Commands
 
@@ -127,7 +132,7 @@ There is no vcpkg manifest — C++/WinRT and DirectX come from the Windows SDK.
 - Naming: files `PascalCase.cpp/.h`, classes/structs `PascalCase`, functions `PascalCase` or
   `camelCase` (match the file), members `m_` + `camelCase`, globals `g_` prefix, constants
   `UPPER_SNAKE_CASE` (some legacy `constexpr` use a `c_` prefix — match the surrounding file).
-- Indentation: 2 spaces in `Neuron*` engine code; legacy Darwinia `GameLogic` may use tabs.
+- Indentation: 2 spaces in `Neuron*` engine code; the legacy ported game logic may use tabs.
   Match the file you are editing.
 - Include guards: `#pragma once`.
 - Assertions/logging: `ASSERT`, `ASSERT_TEXT`, `DEBUG_ASSERT`, `DEBUG_WARNING`,
@@ -197,8 +202,8 @@ them. The load→compute→store boundary must be explicit.
 ## Build and Deployment
 
 - Build via CMake presets. Use Debug for local dev and Release for shipping builds.
-- The `EarthRise` target copies `GameData/` to an `Assets/` folder next to the executable as a
-  post-build step (`FileSys::SetHomeDirectory()` roots asset paths there at runtime).
+- The `DeepspaceOutpost` target copies `GameData/` next to the executable as a post-build step,
+  so the runtime reads assets (textures, sounds, fonts, `*.cfg`) from the executable's directory.
 - Confirm the targets you touched build cleanly before merging.
 
 ## Pull Request Guidelines
@@ -210,7 +215,7 @@ them. The load→compute→store boundary must be explicit.
 ## Additional Notes
 
 - Avoid adding includes already covered by `pch.h`.
-- `Neuron*` engine code favors modern C++20/23; legacy Darwinia `GameLogic` uses older patterns
+- `Neuron*` engine code favors modern C++20/23; the legacy ported game logic uses older patterns
   (raw pointers, C-style strings, custom containers). Keep those when editing legacy areas;
   use modern C++ for new code.
 - Build after changes to confirm compilation succeeds.

@@ -1,15 +1,4 @@
 /*
- * Elite - The New Kind.
- *
- * Allegro version of the keyboard routines.
- *
- * The code in this file has not been derived from the original Elite code.
- * Written by C.J.Pinder 1999-2001.
- * email: <christian@newkind.co.uk>
- *
- */
-
-/*
  * keyboard.h
  *
  * Code to handle keyboard input.

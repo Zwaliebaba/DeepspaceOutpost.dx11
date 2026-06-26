@@ -1,5 +1,5 @@
 /*
- * Elite - The New Kind  ->  DeepspaceOutpost (DirectX 11 / XAudio2 port)
+ * DeepspaceOutpost (DirectX 11 / XAudio2 port)
  *
  * compat.h
  *

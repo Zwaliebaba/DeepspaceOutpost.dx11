@@ -15,4 +15,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include sub-projects.
+#
+# Engine modules for the MMO migration. NeuronCore is the shared foundation;
+# NeuronClient and NeuronServer build on it. Declare the libraries before their
+# consumers (DeepspaceOutpost = client, Server = dedicated server).
+add_subdirectory ("NeuronCore")
+add_subdirectory ("NeuronClient")
+add_subdirectory ("NeuronServer")
+
 add_subdirectory ("DeepspaceOutpost")
+add_subdirectory ("Server")

@@ -1,17 +1,4 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- */
-
-/*
  *
  * Handle the generation of planet info...
  */
@@ -107,7 +94,7 @@ static char *desc_list[36][5] =
 
 /*
  * Generate a random number between 0 and 255.
- * This is the version used in the 6502 Elites.
+ * This is the version used in the 6502 versions.
  */
 
 int gen_rnd_number (void)
@@ -132,7 +119,7 @@ int gen_rnd_number (void)
 
 /*
  * Generate a random number between 0 and 255.
- * This is the version used in the MSX and 16bit Elites.
+ * This is the version used in the MSX and 16bit versions.
  */
 
 

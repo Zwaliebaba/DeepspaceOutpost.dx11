@@ -1,5 +1,5 @@
 /*
- * DeepspaceOutpost - DirectX 11 / XAudio2 port of Elite: The New Kind.
+ * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
  * audio_win.h
  *

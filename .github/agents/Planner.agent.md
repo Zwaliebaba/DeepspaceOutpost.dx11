@@ -27,7 +27,7 @@ You are an expert planning specialist for C/C++ game projects. Your mission is t
 - Review how similar systems are already implemented (patterns, naming, file layout)
 - Check for global state, singletons, and initialization order dependencies
 - Identify header dependencies — changes to widely-included headers trigger expensive rebuilds
-- Review build system files (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`) for conditional compilation and platform splits
+- Review build system files (`CMakeLists.txt`, `CMakePresets.json`) for conditional compilation and platform splits (there is no `vcpkg.json` — dependencies come from the Windows SDK)
 
 ### 3. Step Breakdown
 Create detailed steps with:

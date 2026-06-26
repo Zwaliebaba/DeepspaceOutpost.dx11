@@ -1,17 +1,3 @@
-/*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- *
- */
- 
  /*
   * intro.c
   *
@@ -85,8 +71,7 @@ void update_intro1 (void)
 	
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
 
-	gfx_display_centre_text (310, "Original Game (C) I.Bell & D.Braben.", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (330, "Re-engineered by C.J.Pinder.", 120, GFX_COL_WHITE);
+	gfx_display_centre_text (320, "DEEPSPACE OUTPOST", 120, GFX_COL_WHITE);
 	gfx_display_centre_text (360, "Load New Commander (Y/N)?", 140, GFX_COL_GOLD);
 }
 

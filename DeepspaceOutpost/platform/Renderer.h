@@ -1,5 +1,5 @@
 /*
- * DeepspaceOutpost - DirectX 11 / XAudio2 port of Elite: The New Kind.
+ * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
  * Renderer.h
  *
@@ -18,7 +18,7 @@
 
 #include <windows.h>
 #include <d3d11.h>
-#include <wrl/client.h>
+#include <winrt/base.h>
 #include <cstdint>
 
 class Renderer
@@ -51,8 +51,8 @@ public:
 	bool paletteLoaded() const { return palette_loaded_; }
 
 	/* Accessors for the 2D primitive layer added in later milestones. */
-	ID3D11Device*        device()  const { return device_.Get(); }
-	ID3D11DeviceContext* context() const { return context_.Get(); }
+	ID3D11Device*        device()  const { return device_.get(); }
+	ID3D11DeviceContext* context() const { return context_.get(); }
 
 private:
 	bool createDeviceAndSwapChain(HWND hwnd);
@@ -62,19 +62,19 @@ private:
 	bool loadPalette();
 	void computeLetterbox(D3D11_VIEWPORT& vp) const;
 
-	Microsoft::WRL::ComPtr<ID3D11Device>           device_;
-	Microsoft::WRL::ComPtr<ID3D11DeviceContext>    context_;
-	Microsoft::WRL::ComPtr<IDXGISwapChain>         swap_chain_;
-	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> back_rtv_;
+	winrt::com_ptr<ID3D11Device>           device_;
+	winrt::com_ptr<ID3D11DeviceContext>    context_;
+	winrt::com_ptr<IDXGISwapChain>         swap_chain_;
+	winrt::com_ptr<ID3D11RenderTargetView> back_rtv_;
 
-	Microsoft::WRL::ComPtr<ID3D11Texture2D>          canvas_tex_;
-	Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   canvas_rtv_;
-	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> canvas_srv_;
+	winrt::com_ptr<ID3D11Texture2D>          canvas_tex_;
+	winrt::com_ptr<ID3D11RenderTargetView>   canvas_rtv_;
+	winrt::com_ptr<ID3D11ShaderResourceView> canvas_srv_;
 
-	Microsoft::WRL::ComPtr<ID3D11VertexShader>   present_vs_;
-	Microsoft::WRL::ComPtr<ID3D11PixelShader>    present_ps_;
-	Microsoft::WRL::ComPtr<ID3D11SamplerState>   present_sampler_;
-	Microsoft::WRL::ComPtr<ID3D11RasterizerState> present_raster_;
+	winrt::com_ptr<ID3D11VertexShader>   present_vs_;
+	winrt::com_ptr<ID3D11PixelShader>    present_ps_;
+	winrt::com_ptr<ID3D11SamplerState>   present_sampler_;
+	winrt::com_ptr<ID3D11RasterizerState> present_raster_;
 
 	HWND hwnd_ = nullptr;
 	int  client_w_ = 0;

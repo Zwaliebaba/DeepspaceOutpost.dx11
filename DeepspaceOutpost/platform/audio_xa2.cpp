@@ -1,5 +1,5 @@
 /*
- * DeepspaceOutpost - DirectX 11 / XAudio2 port of Elite: The New Kind.
+ * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
  * audio_xa2.cpp  (M3)
  *
@@ -16,7 +16,7 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <xaudio2.h>
-#include <wrl/client.h>
+#include <winrt/base.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -28,7 +28,7 @@
 #include "audio_win.h"
 #include "platform_win.h"
 
-using Microsoft::WRL::ComPtr;
+using winrt::com_ptr;
 
 namespace {
 
@@ -61,7 +61,7 @@ Sample g_samples[NUM_SAMPLES] = {
 	{ "boop.wav",      7, 0, {}, {}, nullptr },
 };
 
-ComPtr<IXAudio2>          g_xaudio;
+com_ptr<IXAudio2>         g_xaudio;
 IXAudio2MasteringVoice*   g_master = nullptr;
 bool                      g_on = false;
 
@@ -134,7 +134,7 @@ void snd_sound_startup(void)
 		/* Already initialised on this thread is fine; keep going. */
 	}
 
-	if (FAILED(XAudio2Create(&g_xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR)))
+	if (FAILED(XAudio2Create(g_xaudio.put(), 0, XAUDIO2_DEFAULT_PROCESSOR)))
 		return;
 	if (FAILED(g_xaudio->CreateMasteringVoice(&g_master)))
 		return;
@@ -164,7 +164,7 @@ void snd_sound_shutdown(void)
 		}
 	}
 	if (g_master) { g_master->DestroyVoice(); g_master = nullptr; }
-	g_xaudio.Reset();
+	g_xaudio = nullptr;
 	g_on = false;
 }
 

@@ -1,25 +1,8 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * Alterations to vertex ordering by Thomas Harte.
- * (T.Harte@excite.com)
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- *
- */
-
-/*
  * shipface.c
  *
  * Face information for the ships.
- * Adapted from the Elite ship data published by Ian Bell.
+ * Adapted from the original ship data published by Ian Bell.
  *
  * Adapted further for clockwise vertex lists.
  */ 

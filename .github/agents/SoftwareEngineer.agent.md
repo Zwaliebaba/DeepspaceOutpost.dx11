@@ -31,7 +31,8 @@ You are an experienced **C++23 Game Developer** specializing in **Windows** deve
 - GPU debugging and profiling (PIX, RenderDoc where applicable).
 
 ### Build/Tooling
-- CMake with vcpkg dependency management.
+- CMake with the Ninja generator and the MSVC toolchain (`cl.exe`) via CMake presets. There is
+  **no vcpkg manifest** — C++/WinRT and DirectX come from the Windows SDK.
 - CI-friendly project layout and deterministic builds.
 
 ## Working Style

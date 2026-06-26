@@ -12,21 +12,32 @@ When generating code for this repository:
 
 ## Project Snapshot
 
-This is a restructured port of Introversion's **Darwinia**. The original game/engine code is
-split into `Neuron*` engine static libraries plus the game logic and two executables:
+**Deepspace Outpost** is a Windows-native C++23 game (DirectX 11 / XAudio2). The codebase is
+mid-restructure toward a modular engine: reusable `Neuron*` static libraries plus the game logic
+and two executables.
+
+> **Current status.** Today the whole game builds as a single Win32 GUI executable,
+> **DeepspaceOutpost**, made of two source tiers: faithfully ported game logic (`*.cpp` in the
+> project root, compiled `/permissive`) and a freshly written platform layer (`platform/*.cpp` —
+> Win32 / Direct3D 11 / XAudio2, compiled `/permissive- /W4`) that talks to the game through
+> contract headers (`gfx.h`, `sound.h`, …). The `Neuron*` and `Server` directories are
+> placeholders for the *planned* engine libraries below and are empty for now. `DemoShaders/`
+> holds HLSL ported from the engine's GLSL and is **reference only** — it is not part of the build.
+
+Target structure once the engine split lands:
 
 - **NeuronCore** (static lib): math, networking, filesystem, tasks, timers, events, debug,
   serialization. Includes C++/WinRT projections.
 - **NeuronClient** (static lib): Direct3D 11 graphics core, the `OpenglDirectx` GL-over-D3D
   compatibility layer, audio, input, GUI. Depends on NeuronCore.
 - **NeuronServer** (static lib): server engine library (currently minimal). Depends on NeuronCore.
-- **GameLogic** (static lib): Darwinia simulation **and** rendering. Depends on NeuronClient.
-- **EarthRise** (Win32 GUI executable, `wWinMain`): the game client. Links GameLogic.
+- **GameLogic** (static lib): the Deepspace Outpost simulation **and** rendering. Depends on NeuronClient.
+- **DeepspaceOutpost** (Win32 GUI executable, `wWinMain`): the game client. Links GameLogic.
 - **Server** (console executable, `main`): dedicated-server stub. Links NeuronServer.
 
-The renderer is **Direct3D 11** (not D3D12). Math is migrating from legacy Darwinia types to
+The renderer is **Direct3D 11** (not D3D12). Math is migrating from the legacy ported math types to
 **DirectXMath** via `Neuron::Math`. Several conventions below describe the *target* style for
-new/migrated code; legacy Darwinia code still uses older patterns — match the file you edit.
+new/migrated code; legacy ported code still uses older patterns — match the file you edit.
 
 ## Technology Version Detection
 
@@ -57,7 +68,7 @@ When context files don't provide specific guidance:
 1. Identify similar files to the one being modified or created.
 2. Analyze patterns for: naming, code organization, error handling, logging, documentation, and any existing tests.
 3. Follow the most consistent patterns found in the codebase.
-4. When conflicting patterns exist, prefer the patterns in newer `Neuron*` engine code over legacy Darwinia patterns for *new* code, but match the existing file when *editing* it.
+4. When conflicting patterns exist, prefer the patterns in newer `Neuron*` engine / `platform/` code over the legacy ported game-logic patterns for *new* code, but match the existing file when *editing* it.
 5. Never introduce patterns not found in the existing codebase.
 
 ## Code Quality Standards
@@ -97,7 +108,7 @@ When context files don't provide specific guidance:
 ## Project-Specific Guidance
 
 - Respect the solution boundaries and dependency graph:
-  - `EarthRise` (client exe) → GameLogic → NeuronClient → NeuronCore.
+  - `DeepspaceOutpost` (client exe) → GameLogic → NeuronClient → NeuronCore.
   - `Server` (server exe) → NeuronServer → NeuronCore.
   - `GameLogic` depends on **NeuronClient** and is linked by the **client**, not the server.
 - Use `ASSERT` / `ASSERT_TEXT` / `DEBUG_ASSERT` / `DEBUG_WARNING` for assertions.
@@ -106,7 +117,7 @@ When context files don't provide specific guidance:
   globals `g_`, constants `UPPER_SNAKE_CASE` (some legacy `constexpr` use a `c_` prefix — match the file).
 - Do not add `#include` directives already covered by `pch.h`. All projects use `pch.h` / `pch.cpp`,
   and most `pch.h` files just include the project umbrella header (`NeuronCore.h` / `NeuronClient.h`).
-- Legacy Darwinia `GameLogic` code uses raw pointers, C-style strings, and custom containers
+- Legacy ported game-logic code uses raw pointers, C-style strings, and custom containers
   (`Darray`, `Llist`, …); keep those patterns when editing those areas, but use modern C++ and
   standard-library types for new code.
 - `Neuron*` engine code favors modern C++ (`std::string_view`, `std::format`, `constexpr`, `[[nodiscard]]`, `noexcept`).

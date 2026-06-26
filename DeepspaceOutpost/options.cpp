@@ -1,18 +1,4 @@
 /*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- *
- */
-
-/*
  * Options.c
  */
 
@@ -354,9 +340,7 @@ void display_options (void)
 	gfx_display_centre_text (10, "GAME OPTIONS", 140, GFX_COL_GOLD);
 	gfx_draw_line (0, 36, 511, 36);
 	gfx_display_centre_text (300, "Version: Release 1.0", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (320, "www.newkind.co.uk", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (340, "Written by Christian Pinder 1999-2001", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (360, "Based on original code by Ian Bell & David Braben", 120, GFX_COL_WHITE);
+	gfx_display_centre_text (330, "Deepspace Outpost", 120, GFX_COL_WHITE);
 	
 	for (i = 0; i < NUM_OPTIONS; i++)
 		display_option_item (i);

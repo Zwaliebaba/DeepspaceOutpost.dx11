@@ -1,16 +1,3 @@
-/*
- * Elite - The New Kind.
- *
- * Reverse engineered from the BBC disk version of Elite.
- * Additional material by C.J.Pinder.
- *
- * The original Elite code is (C) I.Bell & D.Braben 1984.
- * This version re-engineered in C by C.J.Pinder 1999-2001.
- *
- * email: <christian@newkind.co.uk>
- *
- */
-
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -338,7 +325,7 @@ void draw_solid_ship (struct univ_object *univ)
 
 
 /*
- * Colour map used to generate a SNES Elite style planet.
+ * Colour map used to generate a SNES-style planet.
  * This is a quick hack and needs tidying up.
  */
 
@@ -368,7 +355,7 @@ int snes_planet_colour[] =
 
 
 /*
- * Generate a landscape map for a SNES Elite style planet.
+ * Generate a landscape map for a SNES-style planet.
  */
 
 void generate_snes_landscape (void)
@@ -618,7 +605,7 @@ void render_planet (int xo, int yo, int radius, struct vector *vec)
 /*
  * Draw a wireframe planet.
  * At the moment we just draw a circle.
- * Need to add in the two arcs that the original Elite had.
+ * Need to add in the two arcs that the original had.
  */
 
 void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
@@ -632,7 +619,7 @@ void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
  * We can currently do three different types of planet...
  * - Wireframe.
  * - Fractal landscape.
- * - SNES Elite style.
+ * - SNES-style.
  */
 
 void draw_planet (struct univ_object *planet)
