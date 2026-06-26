@@ -16,9 +16,9 @@
  * main.cpp
  *
  * Platform-independent main game handler.
- * Derived from the Allegro alg_main.c; Allegro-specific glue (joystick,
- * timer install, readkey, END_OF_MAIN, process entry point) is handled by
- * the platform layer. The portable game loop and screen handlers live here.
+ * Derived from the Allegro alg_main.c; Allegro-specific glue (timer install,
+ * readkey, END_OF_MAIN, process entry point) is handled by the platform layer.
+ * The portable game loop and screen handlers live here.
  * The platform layer calls game_main() from its WinMain.
  */
 
@@ -66,10 +66,86 @@ char message_string[80];
 int rolling;
 int climbing;
 int game_paused;
-int have_joystick;
 
 int find_input;
 char find_name[20];
+
+
+/*
+ * Flight-control responsiveness.
+ *
+ * flight_roll / flight_climb hold the ship's current turn rate (consumed by
+ * move_univ_object as alpha/beta). While a control key is held the rate ramps
+ * toward full deflection; when released it auto-centres back to zero. These
+ * steps set how many rate units we add/remove per frame - i.e. how snappily
+ * the ship reacts - without changing the top turn rate (myship.max_roll /
+ * max_climb), so handling and turn radius stay balanced. Higher = snappier.
+ * This is frame-rate independent of game speed (speed_cap): it changes how
+ * many frames the ramp takes, not how fast the game runs.
+ */
+#define ROLL_RAMP_STEP     4		/* was 2: ramp roll to full in ~8 frames not ~16 */
+#define CLIMB_RAMP_STEP    2		/* was 1: ramp climb to full in ~4 frames not 8  */
+#define ROLL_CENTRE_STEP   3		/* was 1: recentre roll ~3x faster on release    */
+#define CLIMB_CENTRE_STEP  2		/* was 1: recentre climb ~2x faster on release   */
+
+
+/*
+ * Nudge the current turn rate toward full deflection by |steps| units this
+ * frame (steps > 0 rolls/climbs one way, < 0 the other). Reuses the single-
+ * step primitives so the per-ship max_roll / max_climb clamp still applies.
+ */
+static void ramp_flight_roll (int steps)
+{
+	int i;
+
+	for (i = 0; i < steps; i++)
+		increase_flight_roll();
+	for (i = 0; i > steps; i--)
+		decrease_flight_roll();
+}
+
+
+static void ramp_flight_climb (int steps)
+{
+	int i;
+
+	for (i = 0; i < steps; i++)
+		increase_flight_climb();
+	for (i = 0; i > steps; i--)
+		decrease_flight_climb();
+}
+
+
+/*
+ * Auto-centre the turn rate back toward zero when no key is held, moving up to
+ * CENTRE_STEP units per frame but never overshooting past zero into a reversal.
+ */
+static void centre_flight_roll (void)
+{
+	int i;
+
+	for (i = 0; i < ROLL_CENTRE_STEP && flight_roll != 0; i++)
+	{
+		if (flight_roll > 0)
+			decrease_flight_roll();
+		else
+			increase_flight_roll();
+	}
+}
+
+
+static void centre_flight_climb (void)
+{
+	int i;
+
+	for (i = 0; i < CLIMB_CENTRE_STEP && flight_climb != 0; i++)
+	{
+		if (flight_climb > 0)
+			decrease_flight_climb();
+		else
+			increase_flight_climb();
+	}
+}
 
 
 
@@ -282,8 +358,7 @@ void arrow_right (void)
 				flight_roll = 0;
 			else
 			{
-				decrease_flight_roll();
-				decrease_flight_roll();
+				ramp_flight_roll(-ROLL_RAMP_STEP);
 				rolling = 1;
 			}
 			break;
@@ -316,8 +391,7 @@ void arrow_left (void)
 				flight_roll = 0;
 			else
 			{
-				increase_flight_roll();
-				increase_flight_roll();
+				ramp_flight_roll(ROLL_RAMP_STEP);
 				rolling = 1;
 			}
 			break;
@@ -358,7 +432,7 @@ void arrow_up (void)
 				flight_climb = 0;
 			else
 			{
-				decrease_flight_climb();
+				ramp_flight_climb(-CLIMB_RAMP_STEP);
 			}
 			climbing = 1;
 			break;
@@ -400,7 +474,7 @@ void arrow_down (void)
 				flight_climb = 0;
 			else
 			{
-				increase_flight_climb();
+				ramp_flight_climb(CLIMB_RAMP_STEP);
 			}
 			climbing = 1;
 			break;
@@ -698,8 +772,6 @@ void handle_flight_keys (void)
 		kbd_read_key();
 
 	kbd_poll_keyboard();
-
-	/* Joystick support is deferred to a later milestone (XInput). */
 
 	if (game_paused)
 	{
@@ -1271,22 +1343,10 @@ int game_main (void)
 				message_count--;
 
 			if (!rolling)
-			{
-				if (flight_roll > 0)
-					decrease_flight_roll();
-			
-				if (flight_roll < 0)
-					increase_flight_roll();
-			}
+				centre_flight_roll();
 
 			if (!climbing)
-			{
-				if (flight_climb > 0)
-					decrease_flight_climb();
-
-				if (flight_climb < 0)
-					increase_flight_climb();
-			}
+				centre_flight_climb();
 
 
 			if (!docked)
