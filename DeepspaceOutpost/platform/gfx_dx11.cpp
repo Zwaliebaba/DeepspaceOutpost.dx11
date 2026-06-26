@@ -15,6 +15,8 @@
  * colour).
  */
 
+#include "pch.h"
+
 #include "Renderer.h"
 #include "gfx_dx11.h"
 #include "Image.h"

@@ -4,6 +4,8 @@
  * Special Weapons And Tactics.
  */
 
+#include "pch.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

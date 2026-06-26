@@ -9,6 +9,7 @@ set(NEURONCLIENT_SOURCES
 )
 
 set(NEURONCLIENT_HEADERS
+    NeuronClient.h
     pch.h
 )
 

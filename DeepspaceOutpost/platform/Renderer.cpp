@@ -4,6 +4,8 @@
  * Renderer.cpp  (M1)
  */
 
+#include "pch.h"
+
 #include "Renderer.h"
 
 #include <d3dcompiler.h>

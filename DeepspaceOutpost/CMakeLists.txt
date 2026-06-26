@@ -37,9 +37,15 @@ set(PLATFORM_SOURCES
     platform/dialog_win.cpp
 )
 
-add_executable(DeepspaceOutpost WIN32 ${GAME_SOURCES} ${PLATFORM_SOURCES})
+add_executable(DeepspaceOutpost WIN32 pch.cpp ${GAME_SOURCES} ${PLATFORM_SOURCES})
 
 target_compile_features(DeepspaceOutpost PRIVATE cxx_std_23)
+
+# Precompiled header (pch.h / pch.cpp). pch.h pulls in NeuronClient.h ->
+# NeuronCore.h, so the engine core is available to every translation unit.
+# pch.cpp is listed above but kept out of the GAME_SOURCES/PLATFORM_SOURCES
+# conformance tiers below so it builds with the target defaults.
+target_precompile_headers(DeepspaceOutpost PRIVATE pch.h)
 
 # Contract headers (gfx.h, sound.h, ...) live in this dir; platform headers in platform/.
 target_include_directories(DeepspaceOutpost PRIVATE
@@ -54,17 +60,18 @@ if(MSVC)
         WIN32_LEAN_AND_MEAN
         NOMINMAX
     )
-    # Two conformance tiers:
-    #  - The new platform layer is held to strict, idiomatic modern C++ (/permissive-,
-    #    /W4) - this is freshly written code and should be clean.
-    #  - The faithfully ported game logic stays /permissive (it relies on a
-    #    few C-isms, e.g. string literals to char*); it is deliberately left as a
-    #    thin port to avoid behavioural regressions in untested reverse-engineered
-    #    math. It still compiles as C++23.
-    set_source_files_properties(${GAME_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "/permissive")
+    # Single conformance tier: the whole target builds with /permissive.
+    #
+    # The faithfully ported game logic relies on C-isms (e.g. string literals to
+    # char*) that /permissive- rejects, and the shared precompiled header (pch.h)
+    # must be built and consumed under the same conformance flags or MSVC raises
+    # C2855. Unifying on /permissive lets every translation unit - ported game
+    # logic and platform layer alike - share one PCH. It still compiles as C++23.
+    target_compile_options(DeepspaceOutpost PRIVATE /permissive)
+
+    # The freshly written platform layer is still held to a higher warning bar.
     set_source_files_properties(${PLATFORM_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "/permissive-;/W4")
+        COMPILE_OPTIONS "/W4")
 endif()
 
 # Libraries the platform layer will need across the milestones.

@@ -8,6 +8,8 @@
  * ("Save ...") from a load, choosing GetSaveFileName vs GetOpenFileName.
  */
 
+#include "pch.h"
+
 #include <windows.h>
 #include <commdlg.h>
 

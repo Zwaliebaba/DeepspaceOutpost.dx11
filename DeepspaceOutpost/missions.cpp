@@ -4,6 +4,8 @@
  * Code to handle the special missions.
  */
 
+#include "pch.h"
+
 #include <stdlib.h>
 #include <string.h>
  

@@ -7,6 +7,8 @@
  * Adapted further for clockwise vertex lists.
  */ 
 
+#include "pch.h"
+
 #include <stdlib.h>
 
 #include "config.h"

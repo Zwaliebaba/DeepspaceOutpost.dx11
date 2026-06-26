@@ -10,6 +10,8 @@
  * globals the game reads, mirroring the original Allegro key[] mapping.
  */
 
+#include "pch.h"
+
 #include "input_win.h"
 #include "platform_win.h"
 

@@ -12,6 +12,8 @@
  */
 
 /* WIN32_LEAN_AND_MEAN / NOMINMAX are defined by the build (CMake). */
+#include "pch.h"
+
 #include <windows.h>
 
 #include "platform_win.h"

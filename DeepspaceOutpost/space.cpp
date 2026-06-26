@@ -4,6 +4,8 @@
  * This module handles all the flight system and management of the space universe.
  */
 
+#include "pch.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <math.h>

@@ -13,6 +13,8 @@
  */
 
 /* WIN32_LEAN_AND_MEAN / NOMINMAX come from the build (CMake). */
+#include "pch.h"
+
 #include <windows.h>
 #include <mmsystem.h>
 #include <xaudio2.h>

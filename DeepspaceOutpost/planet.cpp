@@ -3,6 +3,8 @@
  * Handle the generation of planet info...
  */
 
+#include "pch.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>

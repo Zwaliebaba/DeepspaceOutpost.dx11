@@ -4,6 +4,8 @@
  * Image.cpp
  */
 
+#include "pch.h"
+
 #include "Image.h"
 
 #include <cctype>

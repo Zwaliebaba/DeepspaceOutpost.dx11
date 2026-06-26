@@ -2,6 +2,8 @@
  * trade.c
  */
 
+#include "pch.h"
+
 #include <stdlib.h>
  
 #include "config.h"
