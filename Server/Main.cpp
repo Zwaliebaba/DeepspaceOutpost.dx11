@@ -74,8 +74,11 @@ int main()
            homeName.c_str(), home.economy, home.techLevel, home.government, market[0].price);
   }
 
+  // The station sits BEHIND the spawn (negative z) and the planet far ahead
+  // (positive z), so a launching player faces the planet with the station at
+  // their back - the classic Elite launch. Still within docking range of spawn.
   const ECS::EntityId station = world.Create();
-  world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 3000 } });
+  world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, -3000 } });
   world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
   // The station is a (near-indestructible) combat target so firing on it is a
   // detectable crime; it never initiates fire (autoEngage = false).
