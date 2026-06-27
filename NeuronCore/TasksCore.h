@@ -2,26 +2,11 @@
 
 namespace Neuron::Tasks
 {
-  using namespace Windows::Foundation;
-
   class Core
   {
     public:
       static void Startup();
       static void Shutdown();
-
-      template <typename... ArgTypes>
-      static Windows::System::Threading::ThreadPoolTimer RunPeriodic(std::function<void(ArgTypes...)> _function, TimeSpan _time,
-                                                                     bool _periodic, ArgTypes... args)
-      {
-        if (_periodic)
-        {
-          Windows::System::Threading::TimerElapsedHandler timeElapsedHandler = [=]()-> void { _function(args...); };
-          return Windows::System::Threading::ThreadPoolTimer::CreateTimer(timeElapsedHandler, _time);
-        }
-        Windows::System::Threading::TimerElapsedHandler timeElapsedHandler = [=]()-> void { _function(args...); };
-        return Windows::System::Threading::ThreadPoolTimer::CreatePeriodicTimer(timeElapsedHandler, _time);
-      }
   };
 
   class Thread : NonCopyable

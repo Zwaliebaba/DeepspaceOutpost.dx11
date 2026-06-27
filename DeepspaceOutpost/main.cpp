@@ -1339,8 +1339,6 @@ int game_main (void)
 
 			if (!docked)
 			{
-				gfx_acquire_screen();
-					
 				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
 					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
 					(current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) ||
@@ -1362,7 +1360,6 @@ int game_main (void)
 				if (docked)
 				{
 					update_console();
-					gfx_release_screen();
 					continue;
 				}
 
@@ -1390,8 +1387,6 @@ int game_main (void)
 					}
 				}
 
-				gfx_release_screen();
-			
 				mcount--;
 				if (mcount < 0)
 					mcount = 255;

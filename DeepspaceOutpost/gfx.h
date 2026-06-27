@@ -108,8 +108,6 @@
 int gfx_graphics_startup (void);
 void gfx_graphics_shutdown (void);
 void gfx_update_screen (void);
-void gfx_acquire_screen (void);
-void gfx_release_screen (void);
 void gfx_plot_pixel (int x, int y, int col);
 void gfx_fast_plot_pixel (int x, int y, int col);
 void gfx_draw_filled_circle (int cx, int cy, int radius, int circle_colour);
