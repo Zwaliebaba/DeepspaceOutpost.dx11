@@ -18,6 +18,7 @@ set(GAMELOGIC_HEADERS
     FlightSystem.h
     Economy.h
     Galaxy.h
+    GalaxyGen.h
     Combat.h
     SnapshotBuilder.h
     AreaOfInterest.h

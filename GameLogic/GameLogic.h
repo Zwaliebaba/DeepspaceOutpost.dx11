@@ -18,6 +18,7 @@
 #include "FlightSystem.h"
 #include "Economy.h"
 #include "Galaxy.h"
+#include "GalaxyGen.h"
 #include "Combat.h"
 #include "SnapshotBuilder.h"
 #include "AreaOfInterest.h"
