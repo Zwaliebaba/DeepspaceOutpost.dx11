@@ -201,7 +201,7 @@ void dock_player (void)
 	PlayerFlight().climb = 0;
 	PlayerDefense().frontShield = 255;
 	PlayerDefense().aftShield = 255;
-	energy = 255;
+	PlayerDefense().energy = 255;
 	PlayerCaps().altitude = 255;
 	PlayerCaps().cabTemp = 30;
 	reset_weapons();
@@ -357,33 +357,33 @@ void update_cabin_temp (void)
 
 void regenerate_shields (void)
 {
-	if (energy > 127)
+	if (PlayerDefense().energy > 127)
 	{
 		if (PlayerDefense().frontShield < 255)
 		{
 			PlayerDefense().frontShield++;
-			energy--;
+			PlayerDefense().energy--;
 		}
 	
 		if (PlayerDefense().aftShield < 255)
 		{
 			PlayerDefense().aftShield++;
-			energy--;
+			PlayerDefense().energy--;
 		}
 	}
 		
-	energy++;
-	energy += cmdr.energy_unit;
-	if (energy > 255)
-		energy = 255;
+	PlayerDefense().energy++;
+	PlayerDefense().energy += cmdr.energy_unit;
+	if (PlayerDefense().energy > 255)
+		PlayerDefense().energy = 255;
 }
 
 
 void decrease_energy (int amount)
 {
-	energy += amount;
+	PlayerDefense().energy += amount;
 
-	if (energy <= 0)
+	if (PlayerDefense().energy <= 0)
 		do_game_over();
 }
 
@@ -862,10 +862,10 @@ void display_energy (void)
 {
 	int e1,e2,e3,e4;
 
-	e1 = energy > 64 ? 64 : energy;
-	e2 = energy > 128 ? 64 : energy - 64;
-	e3 = energy > 192 ? 64 : energy - 128;
-	e4 = energy - 192;  	
+	e1 = PlayerDefense().energy > 64 ? 64 : PlayerDefense().energy;
+	e2 = PlayerDefense().energy > 128 ? 64 : PlayerDefense().energy - 64;
+	e3 = PlayerDefense().energy > 192 ? 64 : PlayerDefense().energy - 128;
+	e4 = PlayerDefense().energy - 192;  	
 	
 	if (e4 > 0)
 		display_dial_bar (e4, 416, 61);

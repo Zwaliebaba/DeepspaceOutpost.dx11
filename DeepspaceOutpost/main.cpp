@@ -173,7 +173,7 @@ void initialise_game(void)
 	docked = 1;
 	PlayerDefense().frontShield = 255;
 	PlayerDefense().aftShield = 255;
-	energy = 255;
+	PlayerDefense().energy = 255;
 	draw_lasers = 0;
 	mcount = 0;
 	hyper_ready = 0;
@@ -1415,7 +1415,7 @@ int game_main (void)
 
 				if ((mcount & 31) == 10)
 				{
-					if (energy < 50)
+					if (PlayerDefense().energy < 50)
 					{
 						info_message ("ENERGY LOW");
 						snd_play_sample (SND_BEEP);

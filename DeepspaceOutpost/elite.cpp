@@ -39,8 +39,9 @@ int planet_render_style = 0;
 int game_over;
 int docked;
 int finish;
-/* PlayerFlight().speed/roll/climb migrated to the FlightRates component (PlayerFlight()). */
-int energy;	/* PlayerDefense().frontShield/PlayerDefense().aftShield/PlayerDefense().laserHeat migrated to Defense (PlayerDefense()) */
+/* Player ship dynamic state (flight rates, shields, energy, laser heat) now
+   lives in ECS components on the player entity - see GameComponents.h and the
+   PlayerFlight()/PlayerDefense() accessors (GameUniverse.h). */
 int detonate_bomb;
 int auto_pilot;
 

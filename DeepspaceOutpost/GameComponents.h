@@ -83,7 +83,7 @@ namespace Neuron::Game
   };
 
   // The player's defensive / power state (legacy globals front_shield,
-  // aft_shield, energy, laser_temp). `energy` is migrated in a later pass.
+  // aft_shield, energy, laser_temp).
   struct Defense
   {
     int frontShield = 0;

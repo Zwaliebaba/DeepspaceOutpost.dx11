@@ -542,7 +542,7 @@ void display_commander_status (void)
 			}
 		}
  
-		if ((condition == 2) && (energy < 128))
+		if ((condition == 2) && (PlayerDefense().energy < 128))
 			condition = 3;
 	}
 	

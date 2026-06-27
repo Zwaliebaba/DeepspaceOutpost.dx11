@@ -128,7 +128,6 @@ extern int planet_render_style;
 extern int game_over;
 extern int docked;
 extern int finish;
-extern int energy;
 extern int mcount;
 extern int detonate_bomb;
 extern int witchspace;
