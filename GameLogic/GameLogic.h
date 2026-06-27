@@ -15,6 +15,7 @@
 #include "SimComponents.h"
 #include "MotionSystem.h"
 #include "Economy.h"
+#include "Galaxy.h"
 
 namespace Neuron::GameLogic
 {
