@@ -146,6 +146,28 @@ TEST(Ecs_EachIteratesMatchingEntities)
   CHECK(velocityCount == 1);
 }
 
+TEST(Ecs_EachTwoComponentsIntersects)
+{
+  Registry r;
+  EntityId a = r.Create();   // Position only
+  EntityId b = r.Create();   // Position + Velocity
+  EntityId c = r.Create();   // Velocity only
+  r.Add<Position>(a, Position{ 1, 1 });
+  r.Add<Position>(b, Position{ 2, 2 });
+  r.Add<Velocity>(b, Velocity{ 9, 0 });
+  r.Add<Velocity>(c, Velocity{ 8, 0 });
+
+  int matched = 0;
+  r.Each<Position, Velocity>([&](EntityId id, Position& p, Velocity& v)
+  {
+    ++matched;
+    CHECK(id == b);          // only b has both
+    CHECK(p.x == 2);
+    CHECK(v.dx == 9);
+  });
+  CHECK(matched == 1);
+}
+
 TEST(Ecs_RemoveMiddleKeepsOthersIntact)
 {
   // Exercises the sparse-set swap-and-pop path.

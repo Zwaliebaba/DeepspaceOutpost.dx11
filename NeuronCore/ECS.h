@@ -221,6 +221,23 @@ namespace Neuron::ECS
       });
     }
 
+    // Visit every entity that has BOTH components A and B as (EntityId, A&, B&).
+    // Iterates the A pool and probes B, so it is cheapest when A is the rarer
+    // component. (Systems use this, e.g. "every ship with Transform and Motion".)
+    template <typename A, typename B, typename Fn>
+    void Each(Fn&& _fn)
+    {
+      Pool<A>* pa = TryPoolFor<A>();
+      Pool<B>* pb = TryPoolFor<B>();
+      if (pa == nullptr || pb == nullptr)
+        return;
+      pa->Each([&](uint32_t _idx, A& _a)
+      {
+        if (B* b = pb->TryGet(_idx))
+          _fn(EntityId{ _idx, m_generations[_idx] }, _a, *b);
+      });
+    }
+
     [[nodiscard]] std::size_t AliveCount() const
     {
       std::size_t n = 0;
