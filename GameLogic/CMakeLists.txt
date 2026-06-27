@@ -19,6 +19,7 @@ set(GAMELOGIC_HEADERS
     Economy.h
     Galaxy.h
     Combat.h
+    SnapshotBuilder.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

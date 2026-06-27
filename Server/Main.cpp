@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "GameLogic.h"
+#include "NetLib.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -10,14 +11,25 @@ int main()
 	printf("Starting DSOServer (GameLogic v%u)...\n", GameLogic::Version());
 	CoreEngine::Startup();
 
+	// Bring up the networking stack and a UDP socket to publish snapshots from.
+	// Snapshots go to a client on the loopback for now; with no listener the
+	// datagrams are simply dropped, which is fine for the standalone server.
+	Net::NetStartup();
+	Net::UdpSocket socket;
+	const bool netReady = socket.Open();   // unbound sender
+	const Net::Endpoint client = Net::MakeEndpoint(127, 0, 0, 1, 50000);
+
 	// The authoritative world is an ECS registry that GameLogic ticks. Seed one
-	// moving entity so the loop demonstrates the server simulation advancing.
+	// steerable ship under full throttle so the loop demonstrates the sim
+	// advancing AND the replication path carrying its transform + orientation.
 	ECS::Registry world;
 	const ECS::EntityId ship = world.Create();
 	world.Add<GameLogic::WorldTransform>(ship, GameLogic::WorldTransform{ { 0, 0, 0 } });
-	world.Add<GameLogic::Velocity>(ship, GameLogic::Velocity{ { 100, 0, 0 } });
+	world.Add<GameLogic::Flight>(ship, GameLogic::Flight{});
+	world.Add<GameLogic::FlightIntent>(ship, GameLogic::FlightIntent{ 0.0, 0.05, 1.0 });
 
-	uint64_t ticks = 0;
+	uint32_t ticks = 0;
+	uint64_t datagrams = 0;
 	bool stop = false;
 	while (!stop)
 	{
@@ -26,12 +38,28 @@ int main()
 		GameLogic::Tick(world);   // advance the authoritative simulation one tick
 		++ticks;
 
+		// Serialize the world state and publish it to the client.
+		if (netReady)
+		{
+			const Net::WorldSnapshot snap = GameLogic::BuildWorldSnapshot(world, ticks);
+			Net::DataWriter writer;
+			Net::WriteSnapshot(writer, snap);
+			if (socket.SendTo(client, writer.Data(), writer.Size()) > 0)
+				++datagrams;
+		}
+
 		if (Timer::Core::GetTotalSeconds() > 10)
 			stop = true;
 	}
 
 	const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(ship);
-	printf("Ran %llu sim ticks; ship world x = %lld\n",
-	       static_cast<unsigned long long>(ticks),
-	       static_cast<long long>(t.position.x));
+	printf("Ran %u sim ticks; sent %llu snapshots; ship world pos = (%lld, %lld, %lld)\n",
+	       ticks,
+	       static_cast<unsigned long long>(datagrams),
+	       static_cast<long long>(t.position.x),
+	       static_cast<long long>(t.position.y),
+	       static_cast<long long>(t.position.z));
+
+	socket.Close();
+	Net::NetShutdown();
 }
