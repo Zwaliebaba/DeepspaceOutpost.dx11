@@ -25,6 +25,9 @@ add_subdirectory ("NeuronCore")
 add_subdirectory ("NeuronClient")
 add_subdirectory ("NeuronServer")
 
+# Server-only authoritative simulation (headless ECS systems).
+add_subdirectory ("GameLogic")
+
 add_subdirectory ("DeepspaceOutpost")
 add_subdirectory ("Server")
 

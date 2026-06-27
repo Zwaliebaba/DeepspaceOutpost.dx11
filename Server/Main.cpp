@@ -1,30 +1,37 @@
-﻿#include "pch.h"
+#include "pch.h"
+
+#include "GameLogic.h"
 
 using namespace winrt;
-using namespace Windows::Foundation;
-
-static uint32_t g_value = 12;
-
-fire_and_forget SayHello()
-{
-	co_await resume_background();
-
-  g_value = 34;
-}
+using namespace Neuron;
 
 int main()
 {
-	printf("Starting DSOServer...\n");
+	printf("Starting DSOServer (GameLogic v%u)...\n", GameLogic::Version());
 	CoreEngine::Startup();
-	SayHello();
 
-  bool stop = false;
+	// The authoritative world is an ECS registry that GameLogic ticks. Seed one
+	// moving entity so the loop demonstrates the server simulation advancing.
+	ECS::Registry world;
+	const ECS::EntityId ship = world.Create();
+	world.Add<GameLogic::WorldTransform>(ship, GameLogic::WorldTransform{ { 0, 0, 0 } });
+	world.Add<GameLogic::Velocity>(ship, GameLogic::Velocity{ { 100, 0, 0 } });
+
+	uint64_t ticks = 0;
+	bool stop = false;
 	while (!stop)
 	{
-	  Timer::Core::Update();
+		Timer::Core::Update();
+
+		GameLogic::Tick(world);   // advance the authoritative simulation one tick
+		++ticks;
+
 		if (Timer::Core::GetTotalSeconds() > 10)
-      stop = true;
+			stop = true;
 	}
 
-  printf("g_value = %d\n", g_value);
+	const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(ship);
+	printf("Ran %llu sim ticks; ship world x = %lld\n",
+	       static_cast<unsigned long long>(ticks),
+	       static_cast<long long>(t.position.x));
 }

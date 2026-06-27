@@ -11,6 +11,7 @@ set(TEST_SOURCES
     UniverseTests.cpp
     MathTests.cpp
     SpatialTests.cpp
+    MotionTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)
@@ -23,6 +24,7 @@ target_compile_features(Tests PRIVATE cxx_std_23)
 target_include_directories(Tests PRIVATE
     ${CMAKE_SOURCE_DIR}/NeuronCore
     ${CMAKE_SOURCE_DIR}/DeepspaceOutpost
+    ${CMAKE_SOURCE_DIR}/GameLogic
 )
 
 if(MSVC)
