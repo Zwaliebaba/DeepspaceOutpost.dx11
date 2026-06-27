@@ -353,7 +353,7 @@ TEST(Station_TeleportToUnknownSystemFails)
 TEST(Station_ProcessUndock)
 {
   ECS::Registry w;
-  SpawnStation(w, 0, 0, 0);
+  ECS::EntityId stn = SpawnStation(w, 0, 0, 0);
   ECS::EntityId p = SpawnTrader(w, 0, 1000);
 
   Net::StationRequest dock;
@@ -366,4 +366,42 @@ TEST(Station_ProcessUndock)
   Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, undock);
   CHECK(r.status == Net::StationStatus::Ok);
   CHECK(!w.Get<GameLogic::DockState>(p).docked);
+
+  // Ejected a fixed distance in front of the station (so a forward burn leaves
+  // rather than instantly re-docking).
+  const Math::Vector3i64 station = w.Get<GameLogic::WorldTransform>(stn).position;
+  CHECK((w.Get<GameLogic::WorldTransform>(p).position ==
+         station + Math::Vector3i64{ 0, 0, GameLogic::LAUNCH_OFFSET }));
+}
+
+TEST(Station_UndockResetsFlightToFaceOutward)
+{
+  ECS::Registry w;
+  ECS::EntityId stn = SpawnStation(w, 0, 0, 0);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+  // A player with a tumbling, mis-oriented flight state at the dock.
+  GameLogic::Flight tumbling;
+  tumbling.nose = Math::Vector3d{ 0.0, 0.0, -1.0 };   // facing back at the station
+  tumbling.roll = 0.3;
+  tumbling.speed = 50.0;
+  w.Add<GameLogic::Flight>(p, tumbling);
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
+
+  Net::StationRequest undock;
+  undock.kind = Net::StationRequestKind::Undock;
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, undock);
+
+  const GameLogic::Flight& f = w.Get<GameLogic::Flight>(p);
+  CHECK((f.nose.x == 0.0 && f.nose.y == 0.0 && f.nose.z == 1.0));   // pointing outward (+z)
+  CHECK(f.speed == 0.0);
+  CHECK(f.roll == 0.0);
+
+  // Outward nose + ejected ahead of the station => station is behind the player,
+  // so the forgiving "station ahead" dock check cannot re-trigger on launch.
+  const Math::Vector3i64 player = w.Get<GameLogic::WorldTransform>(p).position;
+  const Math::Vector3i64 station = w.Get<GameLogic::WorldTransform>(stn).position;
+  CHECK(station.z < player.z);   // station is behind (smaller z) the outward-facing player
 }

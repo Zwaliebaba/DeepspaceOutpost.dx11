@@ -224,7 +224,10 @@ void dock_player (void)
  * Check if we are correctly aligned to dock.
  */
 
-int is_docking (int sn)
+// Alignment test against a single object (the station) in camera space. Shared
+// by the legacy index-based path and the replicated render path, which has no
+// global local_objects[] table to index into.
+int is_docking_obj (struct local_object *obj)
 {
 	struct vector vec;
 	double fz;
@@ -232,25 +235,31 @@ int is_docking (int sn)
 
 	if (auto_pilot)		// Don't want it to kill anyone!
 		return 1;
-	
-	fz = local_objects[sn].rotmat[2].z;
+
+	fz = obj->rotmat[2].z;
 
 	if (fz > -0.90)
 		return 0;
-	
-	vec = unit_vector (&local_objects[sn].location);
+
+	vec = unit_vector (&obj->location);
 
 	if (vec.z < 0.927)
 		return 0;
-	
-	ux = local_objects[sn].rotmat[1].x;
+
+	ux = obj->rotmat[1].x;
 	if (ux < 0)
 		ux = -ux;
-	
+
 	if (ux < 0.84)
 		return 0;
-	 
+
 	return 1;
+}
+
+
+int is_docking (int sn)
+{
+	return is_docking_obj (&local_objects[sn]);
 }
 
 
@@ -642,6 +651,11 @@ void update_local_objects (void)
  * (see game_main); otherwise update_local_objects() runs as before.
  */
 
+// World-unit distance to the closest replicated station this frame (1e18 = none
+// in view). Lets the docking computer dock only when actually in range, matching
+// the server's proximity gate so it never optimistically docks from across AOI.
+static double s_nearest_station_dist = 1.0e18;
+
 void render_replicated_objects (void)
 {
 	ActiveRenderQueue().StartRender();
@@ -656,6 +670,14 @@ void render_replicated_objects (void)
 
 	const Neuron::Client::Camera cam = Neuron::Client::CurrentCamera();
 
+	// Rebuild ship_count[] from what the server actually replicated this tick, so
+	// the legacy "is a station nearby?" tests (safe zone, docking computer) work
+	// off the live world instead of the retired single-player spawner.
+	for (int t = 0; t <= NO_OF_SHIPS; t++)
+		ship_count[t] = 0;
+
+	s_nearest_station_dist = 1.0e18;   // recomputed below from the live stations
+
 	int drawn = 0;
 	for (const Neuron::Client::RenderRecord& rec : records)
 	{
@@ -667,6 +689,10 @@ void render_replicated_objects (void)
 		struct local_object obj;
 		memset (&obj, 0, sizeof(obj));
 		obj.type = (rec.type != 0) ? rec.type : SHIP_VIPER;
+		if (obj.type > 0 && obj.type <= NO_OF_SHIPS)
+			ship_count[obj.type]++;
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && rec.distance < s_nearest_station_dist)
+			s_nearest_station_dist = rec.distance;
 		obj.location = rec.location;
 		obj.rotmat[0] = rec.rotmat[0];
 		obj.rotmat[1] = rec.rotmat[1];
@@ -676,6 +702,24 @@ void render_replicated_objects (void)
 		Neuron::Client::ApplyCamera (cam, &obj);
 		draw_ship (&obj);
 		++drawn;
+
+		// Docking. Authentic Elite demands a precise slot alignment, but with a
+		// static (non-spinning) station and network lag that is punishing, and a
+		// fresh commander has no docking computer. So we dock forgivingly: fly up
+		// to the station (within ~600 units) with it ahead of you and you dock.
+		// The server still gates on its own proximity check (kDockRange), so this
+		// only ever completes when genuinely at a station.
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && obj.distance < 600)
+		{
+			struct vector approach = unit_vector (&obj.location);
+			if (approach.z > 0.5)   // station roughly ahead -> dock
+			{
+				snd_play_sample (SND_DOCK);
+				dock_player ();
+				current_screen = SCR_BREAK_PATTERN;
+				break;
+			}
+		}
 	}
 
 	ActiveRenderQueue().FinishRender();
@@ -1304,9 +1348,12 @@ void launch_player (void)
 
 void engage_docking_computer (void)
 {
-	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
+	// Only dock when genuinely within the server's docking range (it will reject
+	// and strand us otherwise). 5000 world units matches the server's kDockRange.
+	if ((ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC]) &&
+		s_nearest_station_dist < 5000.0)
 	{
-		snd_play_sample (SND_DOCK);					
+		snd_play_sample (SND_DOCK);
 		dock_player();
 		current_screen = SCR_BREAK_PATTERN;
 	}

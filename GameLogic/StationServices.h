@@ -304,6 +304,11 @@ namespace Neuron::GameLogic
     return found ? result : ECS::EntityId{};
   }
 
+  // How far in front of a station a launching player is ejected (world units).
+  // Comfortably outside both the server dock range and the client dock trigger so
+  // a fresh launch never instantly re-docks.
+  constexpr int64_t LAUNCH_OFFSET = 2000;
+
   // Apply a station request to `_player`'s authoritative components and the market
   // of the station they are docked at, returning the response to send back. Dock
   // attaches to the nearest in-range station; trades hit THAT station's market.
@@ -348,9 +353,33 @@ namespace Neuron::GameLogic
       }
 
       case Net::StationRequestKind::Undock:
+      {
+        // Eject the player clear of the station and facing outward, so flying
+        // forward leaves rather than immediately re-docking. Launch a fixed
+        // distance along +z (well outside both the server dock range and the
+        // client's dock trigger) with a clean, level basis.
+        const ECS::EntityId stn{ dock->stationId, 0 };
+        WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+        const WorldTransform* st = _world.TryGet<WorldTransform>(stn);
+        if (pt != nullptr && st != nullptr)
+        {
+          pt->position = st->position;
+          pt->position += Math::Vector3i64{ 0, 0, LAUNCH_OFFSET };
+          if (Flight* f = _world.TryGet<Flight>(_player))
+          {
+            f->side = Math::Vector3d{ 1.0, 0.0, 0.0 };
+            f->roof = Math::Vector3d{ 0.0, 1.0, 0.0 };
+            f->nose = Math::Vector3d{ 0.0, 0.0, 1.0 };
+            f->roll = 0.0;
+            f->pitch = 0.0;
+            f->speed = 0.0;
+            f->carry = Math::Vector3d{ 0.0, 0.0, 0.0 };
+          }
+        }
         dock->docked = false;
         resp.status = Net::StationStatus::Ok;
         break;
+      }
 
       case Net::StationRequestKind::Buy:
       case Net::StationRequestKind::Sell:
