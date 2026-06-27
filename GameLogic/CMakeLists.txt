@@ -23,6 +23,7 @@ set(GAMELOGIC_HEADERS
     AreaOfInterest.h
     DespawnTracker.h
     ServerSessions.h
+    CombatSystem.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

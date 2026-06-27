@@ -50,6 +50,25 @@ int main()
   ECS::EntityId propB = world.Create();
   world.Add<GameLogic::WorldTransform>(propB, GameLogic::WorldTransform{ { 0, 3000, 0 } });
 
+  // Two opposing NPC combatants so the authoritative combat system is live.
+  const ECS::EntityId red = world.Create();
+  world.Add<GameLogic::WorldTransform>(red, GameLogic::WorldTransform{ { 1000, 0, 0 } });
+  world.Add<GameLogic::Combatant>(red, GameLogic::Combatant{ /*team*/ 0, /*energy*/ 100, /*laser*/ 2, /*range*/ 8000 });
+  const ECS::EntityId blue = world.Create();
+  world.Add<GameLogic::WorldTransform>(blue, GameLogic::WorldTransform{ { 2000, 0, 0 } });
+  world.Add<GameLogic::Combatant>(blue, GameLogic::Combatant{ /*team*/ 1, /*energy*/ 100, /*laser*/ 2, /*range*/ 8000 });
+
+  // The ported galaxy/economy systems, live on the server: generate the home
+  // system from the canonical seed and its market.
+  {
+    const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
+    const std::string homeName = GameLogic::NamePlanet(GameLogic::BASE_GALAXY_SEED);
+    GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT];
+    GameLogic::GenerateMarket(home.economy, GameLogic::BASE_GALAXY_SEED.f, market);
+    printf("Home system %s: economy %d, tech %d, gov %d; food price %d\n",
+           homeName.c_str(), home.economy, home.techLevel, home.government, market[0].price);
+  }
+
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
   GameLogic::ServerSessions sessions;
   GameLogic::DespawnTracker despawns;
@@ -94,6 +113,15 @@ int main()
     // Demonstrate a despawn mid-run.
     if (tick == 300 && world.IsValid(propB))
       world.Destroy(propB);
+
+    // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
+    //     destroy the wrecks (their removal also rides the despawn diff below).
+    for (const GameLogic::Kill& kill : GameLogic::StepCombat(world))
+    {
+      sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                         Net::EncodeDeath(kill.victim.index, kill.killer));
+      world.Destroy(kill.victim);
+    }
 
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
     //    as a reliable event to all remaining clients.

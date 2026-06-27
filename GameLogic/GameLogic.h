@@ -23,6 +23,7 @@
 #include "AreaOfInterest.h"
 #include "DespawnTracker.h"
 #include "ServerSessions.h"
+#include "CombatSystem.h"
 
 namespace Neuron::GameLogic
 {
