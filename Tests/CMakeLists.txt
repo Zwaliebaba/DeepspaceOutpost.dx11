@@ -29,6 +29,7 @@ set(TEST_SOURCES
     CombatSystemTests.cpp
     StationServicesTests.cpp
     StationProtocolTests.cpp
+    SpawnDirectorTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)

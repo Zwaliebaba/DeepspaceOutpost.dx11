@@ -1360,6 +1360,7 @@ static void send_player_input (void)
 	in.rollAxis = (float)((kbd_right_pressed ? 1 : 0) - (kbd_left_pressed ? 1 : 0));
 	in.pitchAxis = (float)((kbd_up_pressed ? 1 : 0) - (kbd_down_pressed ? 1 : 0));
 	in.throttle = (float)throttle;
+	in.fire = (kbd_fire_pressed != 0);
 
 	Neuron::Client::ReplicationClientInstance().SendInput(in);
 }

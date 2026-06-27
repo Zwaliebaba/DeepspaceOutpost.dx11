@@ -25,6 +25,7 @@ namespace Neuron::Net
     float rollAxis = 0.0f;     // [-1, 1] desired roll  (right positive)
     float pitchAxis = 0.0f;    // [-1, 1] desired pitch (up positive)
     float throttle = 0.0f;     // [ 0, 1] desired forward throttle
+    bool fire = false;         // fire the front laser this frame
   };
 
   inline void WriteInput(DataWriter& _w, const ClientInput& _in)
@@ -35,6 +36,7 @@ namespace Neuron::Net
     _w.WriteF32(_in.rollAxis);
     _w.WriteF32(_in.pitchAxis);
     _w.WriteF32(_in.throttle);
+    _w.WriteU8(_in.fire ? 1 : 0);
   }
 
   [[nodiscard]] inline bool ReadInput(DataReader& _r, ClientInput& _out)
@@ -47,6 +49,7 @@ namespace Neuron::Net
     _out.rollAxis = _r.ReadF32();
     _out.pitchAxis = _r.ReadF32();
     _out.throttle = _r.ReadF32();
+    _out.fire = _r.ReadU8() != 0;
     return _r.Ok();
   }
 }

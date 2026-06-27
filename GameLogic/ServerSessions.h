@@ -24,6 +24,7 @@
 
 #include "SimComponents.h"
 #include "StationServices.h"
+#include "CombatSystem.h"
 
 namespace Neuron::GameLogic
 {
@@ -138,6 +139,11 @@ namespace Neuron::GameLogic
       _world.Add<CargoHold>(e, CargoHold{});
       _world.Add<DockState>(e, DockState{});
       _world.Add<Equipment>(e, Equipment{});
+      // Combat/faction state: a player is on the Player team, fires only on
+      // command (autoEngage = false), and starts with a clean record.
+      _world.Add<PlayerTag>(e, PlayerTag{});
+      _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ 255, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
+      _world.Add<Wanted>(e, Wanted{});
       return e;
     }
 

@@ -24,6 +24,7 @@ set(GAMELOGIC_HEADERS
     DespawnTracker.h
     ServerSessions.h
     CombatSystem.h
+    SpawnDirector.h
     StationServices.h
 )
 

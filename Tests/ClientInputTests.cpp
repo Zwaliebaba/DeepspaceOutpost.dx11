@@ -15,6 +15,7 @@ TEST(Input_RoundTrips)
   in.rollAxis = -1.0f;
   in.pitchAxis = 0.5f;
   in.throttle = 0.25f;
+  in.fire = true;
 
   Net::DataWriter w;
   Net::WriteInput(w, in);
@@ -26,6 +27,7 @@ TEST(Input_RoundTrips)
   CHECK(out.rollAxis == -1.0f);
   CHECK(out.pitchAxis == 0.5f);
   CHECK(out.throttle == 0.25f);
+  CHECK(out.fire == true);
 }
 
 TEST(Input_RejectsForeignMagic)

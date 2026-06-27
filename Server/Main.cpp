@@ -17,6 +17,8 @@ namespace
   constexpr int kAoiRadiusCells = 1;                      // viewers see +/- 1 cell
   constexpr uint32_t kSessionTimeoutTicks = 300;          // reap a client idle this long
   constexpr int64_t kDockRange = 5000;                    // how close a player must be to dock
+  constexpr int64_t kFireRange = 6000;                    // player front-laser reach
+  constexpr double kAimCone = 0.9;                        // ~25deg aiming cone for a hit
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -73,10 +75,14 @@ int main()
 
   const ECS::EntityId station = world.Create();
   world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 0 } });
+  // The station is a (near-indestructible) combat target so firing on it is a
+  // detectable crime; it never initiates fire (autoEngage = false).
+  world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
 
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
   GameLogic::ServerSessions sessions;
   GameLogic::DespawnTracker despawns;
+  GameLogic::SpawnDirector spawner(/*seed*/ 0x51EEDu, /*intervalTicks*/ 600, /*maxNpcs*/ 12);
 
   uint8_t recv[2048];
   uint32_t tick = 0;
@@ -100,7 +106,33 @@ int main()
           Net::DataReader reader(recv, size);
           Net::ClientInput in;
           if (Net::ReadInput(reader, in))
-            sessions.OnInput(world, from, in, tick);
+          {
+            const ECS::EntityId player = sessions.OnInput(world, from, in, tick);
+
+            // Player fired: resolve a forward shot. Hitting the station or police
+            // is a crime - the first offence summons police to hunt the player.
+            if (in.fire && world.IsValid(player))
+            {
+              const GameLogic::FireOutcome shot = GameLogic::ResolvePlayerFire(world, player, kFireRange, kAimCone);
+              if (shot.hit)
+              {
+                if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
+                {
+                  GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
+                  if (wnt != nullptr && wnt->level == 0)
+                    spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
+                  if (wnt != nullptr)
+                    wnt->level++;
+                }
+                if (shot.destroyed)
+                {
+                  sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                                     Net::EncodeDeath(shot.target.index, player.index));
+                  world.Destroy(shot.target);
+                }
+              }
+            }
+          }
           break;
         }
         case Net::EVENT_MAGIC:
@@ -131,9 +163,11 @@ int main()
       }
     }
 
-    // 2. Advance the authoritative simulation one tick.
+    // 2. Advance the authoritative simulation one tick, then run dynamic spawning
+    //    (periodic pirate encounters near players).
     GameLogic::Tick(world);
     ++tick;
+    spawner.Step(world, tick);
 
     // Demonstrate a despawn mid-run.
     if (tick == 300 && world.IsValid(propB))
@@ -143,6 +177,17 @@ int main()
     //     destroy the wrecks (their removal also rides the despawn diff below).
     for (const GameLogic::Kill& kill : GameLogic::StepCombat(world))
     {
+      // A player "death" is a simple in-place respawn (restore hull, clear record)
+      // until persistence/respawn points exist; NPCs are destroyed as wrecks.
+      if (world.IsValid(kill.victim) && world.TryGet<GameLogic::PlayerTag>(kill.victim) != nullptr)
+      {
+        if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(kill.victim))
+          c->energy = 255;
+        if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(kill.victim))
+          wnt->level = 0;
+        continue;
+      }
+
       sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
                          Net::EncodeDeath(kill.victim.index, kill.killer));
       world.Destroy(kill.victim);
