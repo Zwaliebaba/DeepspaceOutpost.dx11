@@ -42,11 +42,12 @@ first milestone.
 ### The five migration blockers
 1. **Global singleton state, sized for one player.** `elite.h` exposes
    `extern struct commander cmdr;`, `extern struct player_ship myship;`,
-   `extern struct univ_object universe[MAX_UNIV_OBJECTS];` and many loose flight
+   `extern struct local_object local_objects[MAX_LOCAL_OBJECTS];` (renamed from
+   the old `universe[]`) and many loose flight
    globals (`flight_speed`, `front_shield`, `energy`, `mcount`, …). There is no
    "player N" — the whole program *is* one player.
-2. **`MAX_UNIV_OBJECTS == 20`, local-system-only.** The "universe" is a tiny
-   fixed array of the objects around one player. An open `int64³` world needs a
+2. **`MAX_LOCAL_OBJECTS == 20`, local-system-only.** The `local_objects` array
+   is a tiny fixed set of the objects around one player. An open `int64³` world needs a
    **dynamic entity store** with spatial indexing.
 3. **Simulation and rendering are fused.** Measured `gfx_*` call counts:
 
@@ -64,8 +65,8 @@ first milestone.
    | `missions.cpp` | mission UI text | **36** | → client UI |
    | `docked.cpp` | station/trade UI | **98** | → client UI |
 
-   `update_universe()` in `space.cpp` both **moves** objects and **draws** them
-   in one pass — this fusion is the core thing to break.
+   `update_local_objects()` in `space.cpp` both **moves** objects and **draws**
+   them in one pass — this fusion is the core thing to break.
 4. **Local-file persistence.** `file.cpp` saves the 256-byte `commander` block
    with `fopen/fwrite`. Must become server-side authoritative storage in MS SQL.
 5. **Deterministic, integer physics & procedural galaxy** (`random.cpp` seeds,
@@ -98,30 +99,54 @@ first milestone.
 The same headless **Universe sim** code links into both: the server runs it
 authoritatively; the client runs a copy for **prediction** of the local ship.
 
-### 2.1 Naming conventions
+### 2.1 House style (single, project-wide)
 
-New engine code must follow the convention of the layer it lands in — the repo
-already has three:
+The repo currently has **three** divergent styles (Neuron engine PascalCase,
+platform `camelCase`/`palette_`/`kCanvasWidth`, and ported snake_case). We
+standardize on **one house style** for the whole project — the **Neuron engine
+convention**, because it is the foundation everything else is built on:
 
-| Layer | Types | Methods / functions | Params | Members | Constants |
-|---|---|---|---|---|---|
-| **Neuron engine** (`NeuronCore/Client/Server`, incl. new `GameLogic`) | `PascalCase` | **`PascalCase`** (`Startup`, `Normalize`) | `_camelCase` (`_value`) | `m_` (`m_running`) | `UPPER_CASE` (`ENGINE_VERSION`) |
-| **Platform layer** (`DeepspaceOutpost/platform/`) | `PascalCase` | **`camelCase`** (`init`, `clearCanvas`) | `camelCase` | trailing `_` (`palette_`) | `kPascalCase` (`kCanvasWidth`) |
-| **Ported Elite logic** (`space.cpp`, …) | `snake_case` / `struct vector` | **`snake_case`** (`update_universe`) | `snake_case` | file globals | `UPPER_CASE` macros |
+| Element | House style | Example |
+|---|---|---|
+| Namespaces | `PascalCase`, nested under `Neuron::` | `Neuron::GameLogic` |
+| Types (class/struct/enum) | `PascalCase` | `Universe`, `RenderQueue`, `EntityId` |
+| Methods & free functions | `PascalCase` | `Tick()`, `AddEntity()`, `Normalize()` |
+| Parameters | `_camelCase` | `_value`, `_deltaTime` |
+| Member variables | `m_` + `camelCase` | `m_running`, `m_entities` |
+| Locals | `camelCase` | `entityCount` |
+| Constants / enumerators | `UPPER_CASE` | `ENGINE_VERSION`, `MAX_ENTITIES` |
+| Integer world vector | `PascalCase`, matches `Math::Vector3` | **`Vector3i64`** (not `Vec3i64`) |
 
-**Rules for the migration:**
-- All new MMO subsystems — `GameLogic`, `Universe`, networking, AOI,
-  replication, persistence — are **Neuron engine** code → use the **PascalCase**
-  method style, `_camelCase` params, `m_` members, `UPPER_CASE` constants, and
-  live under the `Neuron::` namespace (e.g. `Neuron::GameLogic`).
-- New types use `PascalCase` everywhere (`Universe`, `RenderQueue`, `EntityId`,
-  `Vector3i64`). The 64-bit integer world vector is named **`Vector3i64`** to
-  match `Neuron::Math::Vector3`, *not* `Vec3i64`.
-- Functions added **inside ported `.cpp` files** keep that file's local
-  `snake_case` (e.g. the new `render_universe()` sits next to `update_universe()`
-  in `space.cpp`) until the file is fully modernized into the engine layer.
-- New code added **inside `platform/`** matches the platform `camelCase` /
-  `kPascalCase` style (e.g. the `RenderQueue` consumer on the platform side).
+**Migration of the existing divergent styles** (folded into the phases, not a
+big-bang rewrite):
+- **Platform layer** (`Renderer::init` → `Renderer::Init`, `palette_` →
+  `m_palette`, `kCanvasWidth` → `CANVAS_WIDTH`): converted file-by-file as the
+  render seam (A1) touches it.
+- **Ported Elite logic**: stays `snake_case` only while still legacy; each file
+  adopts the house style as it is modernized into the engine (A1–A4). New
+  functions added to a still-legacy file temporarily match that file's local
+  `snake_case` (e.g. `render_local_objects()` beside the renamed
+  `update_local_objects()` in `space.cpp`) and are renamed when the file moves
+  to the engine.
+
+### 2.2 Legacy de-naming — *done first, frees the `Universe` name*
+
+So the **new** `Neuron::Universe` is clean and never confused with the old
+20-object local array, the legacy "universe" identifiers were renamed up front
+(complete, repo-wide, behaviour-preserving — pure identifier rename):
+
+| Legacy (removed) | Renamed to | Notes |
+|---|---|---|
+| `struct univ_object` | `struct local_object` | the old per-object record |
+| `universe[]` | `local_objects[]` | the fixed local-bubble array |
+| `MAX_UNIV_OBJECTS` | `MAX_LOCAL_OBJECTS` | (was 20) |
+| `update_universe()` | `update_local_objects()` | move+draw pass (split in A1) |
+| `clear_universe()` | `clear_local_objects()` | |
+| `move_univ_object()` | `move_local_object()` | |
+| `univ` (local ptr) | `obj` | object pointer in `threed`/`swat` |
+
+The name **`Universe`** is now reserved exclusively for the new clean,
+house-style global world container introduced in A2/A3.
 
 ---
 
@@ -141,16 +166,21 @@ Each phase is independently shippable/testable. Phases A0–A4 are the
 **Goal: a headless, multi-instance simulation core extracted from rendering,
 with no global singletons — without changing on-screen behavior.**
 
+- **A0 — Legacy de-naming *(done).*** Repo-wide, behaviour-preserving rename of
+  the old `universe`/`univ_object` identifiers to `local_objects`/`local_object`
+  (see §2.2) so the new clean `Neuron::Universe` owns that name. This lands
+  first, before any new `Universe` code is written.
 - **A1 — Render seam.** Stop game logic from calling `gfx_*` directly. Introduce
   a `RenderQueue` (list of draw commands: line/polygon/sprite/text). The sim
   *emits* draw commands; the platform layer consumes them. Convert `space.cpp`,
-  `threed.cpp`, `swat.cpp` so `update_universe()` does **move-only**, and a new
-  `render_universe()` walks the entity list to emit draw commands.
+  `threed.cpp`, `swat.cpp` so `update_local_objects()` does **move-only**, and a
+  new `render_local_objects()` walks the entity list to emit draw commands.
 - **A2 — De-globalize into a `Universe` object.** Move `cmdr`, `myship`,
-  the flight globals, and the universe array into a `Universe` struct passed by
-  reference. (Mechanical but large; do it file-by-file behind the A1 seam.)
+  the flight globals, and the `local_objects` array into the new house-style
+  `Neuron::Universe` passed by reference. (Mechanical but large; do it
+  file-by-file behind the A1 seam.)
 - **A3 — Dynamic entity store + `int64³` coordinates.** Replace
-  `univ_object universe[20]` with a growable entity container keyed by a stable
+  `local_object local_objects[20]` with a growable entity container keyed by a stable
   `EntityId`. Add absolute `Vector3i64` position to each entity. Implement the
   **floating-origin** transform: render math stays 32-bit relative to the local
   ship; the world position is `int64`. Keep the deterministic integer physics.
@@ -236,7 +266,7 @@ with no global singletons — without changing on-screen behavior.**
 - **Determinism.** Keep the integer/fixed-point physics; it makes prediction,
   reconciliation, and reproducible bug reports tractable. Avoid float
   nondeterminism in shared sim paths.
-- **From 20 objects to thousands.** `MAX_UNIV_OBJECTS=20` is replaced by a
+- **From 20 objects to thousands.** `MAX_LOCAL_OBJECTS=20` is replaced by a
   dynamic store; AOI keeps the *per-client* working set small even though the
   world total is large.
 - **Tick model.** Fixed timestep server tick (20–30 Hz); snapshots at the tick
