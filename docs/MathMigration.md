@@ -15,13 +15,17 @@ replacement, and sequences the work in independently shippable phases.
 
 ## 1. Decisions (locked)
 
-These three forks were settled up front; the rest of the plan assumes them.
+These forks were settled up front; the rest of the plan assumes them.
 
 | Decision | Choice | Consequence |
 |---|---|---|
-| **Precision** | **Full float32 / DirectXMath.** | Sim *and* render math move to `XMVECTOR`/`XMMATRIX`. The ported flight model goes from `double` to `float`; numeric results and exact determinism of the old double path will shift. See [§7 Precision & determinism](#7-precision--determinism-risk). |
+| **Precision** | **Full float32 / DirectXMath.** | Sim *and* render math move to `XMVECTOR`/`XMMATRIX`. The ported flight model goes from `double` to `float`; numeric results of the old double path will shift. See [§7 Precision & determinism](#7-precision--determinism-risk). |
 | **`Vector3d` / `Vector3i64`** | **Fold `Vector3d` into DirectXMath where it fits; keep `Vector3i64` as int64.** | Small-magnitude, local-frame `Vector3d` data that feeds render/flight becomes `XMVECTOR` (compute) / `XMFLOAT3` (storage). `Vector3i64` stays — int64 world coordinates have no DirectXMath equivalent and must not lose precision (see [`MathTests`](../Tests/MathTests.cpp)). The `int64 → float` rebase happens at the floating-origin boundary via `Vector3i64::RelativeTo`. |
 | **`GameMath.h` helper layer** | **Use `Neuron::Math` helpers freely.** | `Neuron::Math` is the sanctioned helper layer; calling `Normalize`, `Cross`, `Dot`, `RotateAround`, `Vector3::FORWARD`, etc. is *not* a native-first violation. The no-wrapper rule applies to **new** code: do **not** add fresh thin forwarders, and do **not** keep the legacy `vector.h` wrappers alive. |
+| **Determinism** | **Reproducible-enough (no cross-machine bit-exactness).** | Same-build reproducibility is the bar; no lockstep/replay bit-exact guarantee. Default `/fp` is acceptable — no path is forced to stay integer/fixed-point for determinism's sake. |
+| **`Transform.rotmat` storage** | **`XMFLOAT4X4` (engine-uniform).** | Matches the rest of the engine's matrices for uniform `XMLoadFloat4x4`/`XMStoreFloat4x4` and easy translation folding; the 3×3 rotation basis occupies the upper-left, row 3 / column 3 identity. |
+| **Legacy type naming** | **Fix the docs to match the code.** | `AGENTS.md` / `coding-standards.md` get updated to say `struct vector` / `Matrix`; the code is **not** renamed (the types are deleted in Phase 7 anyway). |
+| **Serialization** | **`Transform.location` / `rotmat` are not persisted as 3×double.** | The storage switch is internal-only — **no** wire/save format version bump is required. |
 
 ---
 
@@ -105,7 +109,7 @@ the plan is self-contained:
 |---|---|---|---|
 | `struct vector` (3 doubles) | `XMVECTOR` | `XMFLOAT3` | w-lane unused / 0 for points & directions |
 | `Vector` (alias) | `XMVECTOR` | `XMFLOAT3` | same as above |
-| `Matrix` (`vector[3]`, 3×3 basis) | `XMMATRIX` | `XMFLOAT3X3` | rotation/orientation basis; use `XMFLOAT4X4` only if a translation/projection is folded in |
+| `Matrix` (`vector[3]`, 3×3 basis) | `XMMATRIX` | `XMFLOAT4X4` | rotation/orientation basis in the upper-left 3×3; `XMFLOAT4X4` chosen for engine uniformity (decision §1) |
 | `Vector3d` (small-magnitude local) | `XMVECTOR` | `XMFLOAT3` | fold in **only** where data is local-frame & feeds render/flight; keep `double` if a routine genuinely needs >float precision |
 | `Vector3i64` (world) | — | `Vector3i64` | **unchanged**; convert to `XMVECTOR` at the floating-origin rebase via `RelativeTo` then `XMVectorSet`/`XMLoadFloat3` |
 
@@ -160,8 +164,7 @@ locked before storage layout churns the ECS.
 
 ### Phase 1 — Reconcile the helper layer & docs *(no behavior change)*
 - Fix `AGENTS.md` / `coding-standards.md` to name the real legacy types
-  (`struct vector` / `Matrix`), or rename the legacy types to the documented
-  `LegacyVector3` / `Matrix33` for one release to ease grepping — **pick one** (open question Q1).
+  (`struct vector` / `Matrix`); the code is **not** renamed (decision §1).
 - Confirm `GameMath.h` already covers the Phase-5 call sites; add any genuinely
   missing real helper (e.g. a Gram–Schmidt `Orthonormalize(XMMATRIX)` to replace
   `tidy_matrix`) **once**, in `Neuron::Math`.
@@ -176,14 +179,14 @@ locked before storage layout churns the ECS.
 ### Phase 3 — Migrate storage types (`Transform`, `local_object`)
 - In [`GameComponents.h`](../DeepspaceOutpost/GameComponents.h) and
   [`space.h`](../DeepspaceOutpost/space.h): `Vector location → XMFLOAT3`,
-  `Matrix rotmat → XMFLOAT3X3`.
+  `Matrix rotmat → XMFLOAT4X4` (decision §1).
 - This is the **highest-blast-radius** change (every consumer touches these), so
-  it lands as a focused commit. Serialization / snapshot code that reads these
-  fields (`SnapshotBuilder`, `Replication`, `DataReader/Writer`) must be checked —
-  `XMFLOAT3` is 3×float (12 bytes) vs. the old 3×double (24 bytes); wire/format
-  sizes change and any persisted layout must be versioned.
+  it lands as a focused commit. These fields are **not** persisted as 3×double
+  (decision §1), so the switch is internal-only — **no** wire/save format version
+  bump. Still build and run the snapshot/replication paths to confirm nothing
+  assumed the old in-memory layout.
 - At each compute site introduce explicit `XMLoadFloat3` / `XMStoreFloat3`
-  (and `XMLoadFloat3x3` / `XMStoreFloat3x3`) at the load→compute→store boundary.
+  (and `XMLoadFloat4x4` / `XMStoreFloat4x4`) at the load→compute→store boundary.
 
 ### Phase 4 — Migrate `space.cpp` (sim / motion)
 - Rewrite `move_local_object`, `rotate_vec`, approach/docking vectors in
@@ -224,12 +227,15 @@ locked before storage layout churns the ECS.
 Moving the **authoritative** flight/rotation path from `double` to `float32` is
 the one behavioral risk in this plan and deserves explicit attention:
 
-- **Determinism.** The roadmap calls out deterministic integer/fixed-point
-  physics as a server asset ([`MIGRATION_ROADMAP.md` §"good news"](MIGRATION_ROADMAP.md)).
-  Float32 SIMD is deterministic on a fixed ISA/compiler but differs bit-for-bit
-  from the old double path and potentially across `/fp` modes and x86 vs. x64.
-  If lockstep/replay determinism is ever required, pin `/fp:precise` (or
-  `/fp:strict`) and avoid FMA-contraction differences; record the chosen mode.
+- **Determinism.** The bar is **reproducible-enough**, not cross-machine
+  bit-exactness (decision §1), so default `/fp` is acceptable and no path is
+  forced to stay integer/fixed-point. Note that float32 SIMD still differs
+  bit-for-bit from the old double path and potentially across x86 vs. x64 — fine
+  under this bar, but if a future feature (lockstep/replay) raises it, revisit:
+  pin `/fp:precise` (or `/fp:strict`) and avoid FMA-contraction differences. The
+  roadmap's deterministic integer/fixed-point physics
+  ([`MIGRATION_ROADMAP.md` §"good news"](MIGRATION_ROADMAP.md)) remains in
+  integer where it already is — this migration only moves the float/double math.
 - **Drift.** Re-orthonormalization (`tidy_matrix` → Gram–Schmidt) matters more in
   float32; keep it every frame so the rotation basis doesn't skew.
 - **World precision is unaffected** — absolute positions stay `Vector3i64`; only
@@ -256,19 +262,16 @@ the one behavioral risk in this plan and deserves explicit attention:
 
 ---
 
-## 9. Open questions
+## 9. Resolved decisions
 
-1. **Legacy type naming.** `AGENTS.md`/`coding-standards.md` say
-   `LegacyVector2/3` & `Matrix33/34`; the code says `struct vector` & `Matrix`.
-   Fix the docs to match the code, or rename the code to match the docs? (Phase 1)
-2. **Serialized / wire layout.** Does any persisted save or net snapshot encode
-   `Transform.location` / `rotmat` as 3×double today? If so, the `XMFLOAT3` /
-   `XMFLOAT3X3` switch needs a format version bump — confirm the snapshot/
-   serialization owners before Phase 3.
-3. **Determinism requirement.** Is bit-exact cross-machine determinism a hard
-   requirement for the server sim now, or only "reproducible enough"? This sets
-   the `/fp` mode and whether any sim path must stay integer/fixed-point rather
-   than float32. (Affects Phase 4.)
-4. **`Matrix` storage choice.** `XMFLOAT3X3` (rotation only, 36 bytes) vs.
-   `XMFLOAT4X4` (uniform with the rest of the engine's matrices, 64 bytes) for
-   `rotmat` — confirm preference. The plan assumes `XMFLOAT3X3`.
+The earlier open questions are now settled (folded into [§1](#1-decisions-locked)):
+
+1. **Legacy type naming** → fix `AGENTS.md`/`coding-standards.md` to match the
+   code (`struct vector` / `Matrix`); don't rename the code. (Phase 1)
+2. **Serialized / wire layout** → `Transform.location` / `rotmat` are **not**
+   persisted as 3×double; the storage switch is internal-only, **no** format
+   version bump. (Phase 3)
+3. **Determinism** → **reproducible-enough**, not bit-exact; default `/fp`,
+   nothing forced to stay integer for determinism. (Phase 4 / §7)
+4. **`Matrix` storage** → **`XMFLOAT4X4`** (engine-uniform), not `XMFLOAT3X3`.
+   (Phase 3)
