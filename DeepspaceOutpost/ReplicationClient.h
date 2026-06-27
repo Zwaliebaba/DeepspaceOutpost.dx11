@@ -23,6 +23,7 @@
 #include "SnapshotInterpolator.h"
 #include "ReliableChannel.h"
 #include "ClientInput.h"
+#include "StationProtocol.h"
 
 namespace Neuron::Client
 {
@@ -46,6 +47,15 @@ namespace Neuron::Client
     // Send the player's intent to the server (no-op until the server endpoint is
     // known and the socket is open).
     void SendInput(const Net::ClientInput& _input);
+
+    // Queue a reliable station request (dock/undock/buy/sell) to the server. The
+    // authoritative StationResponse arrives later via PollEvent(). No-op until
+    // the client is open.
+    void SendStationRequest(const Net::StationRequest& _request)
+    {
+      if (m_open)
+        Net::SendStationRequest(m_events, _request);
+    }
 
     // Interpolated state of `_id` at `_alpha` in [0,1], or false if unknown.
     [[nodiscard]] bool Sample(uint32_t _id, double _alpha, Net::EntitySnapshot& _out) const

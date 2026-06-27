@@ -13,6 +13,16 @@ namespace
     _m[_i].price = _price;
     _m[_i].quantity = _qty;
   }
+
+  ECS::EntityId SpawnTrader(ECS::Registry& _w, int64_t _x, int _credits)
+  {
+    ECS::EntityId e = _w.Create();
+    _w.Add<GameLogic::WorldTransform>(e, GameLogic::WorldTransform{ { _x, 0, 0 } });
+    _w.Add<GameLogic::Wallet>(e, GameLogic::Wallet{ _credits });
+    _w.Add<GameLogic::CargoHold>(e, GameLogic::CargoHold{});
+    _w.Add<GameLogic::DockState>(e, GameLogic::DockState{});
+    return e;
+  }
 }
 
 TEST(Station_BuyMovesCreditsCargoAndStock)
@@ -124,4 +134,71 @@ TEST(Station_CanDockOnlyWithinRange)
 {
   CHECK(GameLogic::CanDock(Math::Vector3i64{ 0, 0, 0 }, Math::Vector3i64{ 100, 0, 0 }, /*range*/ 200));
   CHECK(!GameLogic::CanDock(Math::Vector3i64{ 0, 0, 0 }, Math::Vector3i64{ 500, 0, 0 }, 200));
+}
+
+TEST(Station_ProcessDockSucceedsInRangeFailsOutOfRange)
+{
+  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
+
+  ECS::Registry w1;
+  ECS::EntityId near = SpawnTrader(w1, /*x*/ 100, 1000);
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  dock.stationId = 9;
+  Net::StationResponse r1 = GameLogic::ProcessStationRequest(w1, near, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  CHECK(r1.status == Net::StationStatus::Ok);
+  CHECK(w1.Get<GameLogic::DockState>(near).docked);
+  CHECK(w1.Get<GameLogic::DockState>(near).stationId == 9);
+
+  ECS::Registry w2;
+  ECS::EntityId farAway = SpawnTrader(w2, /*x*/ 100000, 1000);
+  Net::StationResponse r2 = GameLogic::ProcessStationRequest(w2, farAway, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  CHECK(r2.status == Net::StationStatus::CantDock);
+  CHECK(!w2.Get<GameLogic::DockState>(farAway).docked);
+}
+
+TEST(Station_ProcessBuyNeedsDockThenSucceeds)
+{
+  ECS::Registry w;
+  ECS::EntityId p = SpawnTrader(w, 0, /*credits*/ 1000);
+  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
+  SetItem(market, 0, /*price*/ 10, /*qty*/ 50);
+
+  Net::StationRequest buy;
+  buy.kind = Net::StationRequestKind::Buy;
+  buy.commodity = 0;
+  buy.quantity = 4;
+
+  // Not docked yet.
+  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, buy);
+  CHECK(fail.status == Net::StationStatus::NotDocked);
+
+  // Dock, then buy.
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+
+  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, buy);
+  CHECK(ok.status == Net::StationStatus::Ok);
+  CHECK(ok.credits == 960);
+  CHECK(ok.cargo == 4);
+  CHECK(w.Get<GameLogic::Wallet>(p).credits == 960);
+}
+
+TEST(Station_ProcessUndock)
+{
+  ECS::Registry w;
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  CHECK(w.Get<GameLogic::DockState>(p).docked);
+
+  Net::StationRequest undock;
+  undock.kind = Net::StationRequestKind::Undock;
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, undock);
+  CHECK(r.status == Net::StationStatus::Ok);
+  CHECK(!w.Get<GameLogic::DockState>(p).docked);
 }

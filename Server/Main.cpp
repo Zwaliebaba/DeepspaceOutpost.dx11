@@ -5,6 +5,7 @@
 #include "SnapshotPacketizer.h"
 #include "GameEvents.h"
 #include "ClientInput.h"
+#include "StationProtocol.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -15,6 +16,7 @@ namespace
   constexpr int64_t kAoiCellSize = 100000;                // interest-management cell size
   constexpr int kAoiRadiusCells = 1;                      // viewers see +/- 1 cell
   constexpr uint32_t kSessionTimeoutTicks = 300;          // reap a client idle this long
+  constexpr int64_t kDockRange = 5000;                    // how close a player must be to dock
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -58,16 +60,19 @@ int main()
   world.Add<GameLogic::WorldTransform>(blue, GameLogic::WorldTransform{ { 2000, 0, 0 } });
   world.Add<GameLogic::Combatant>(blue, GameLogic::Combatant{ /*team*/ 1, /*energy*/ 100, /*laser*/ 2, /*range*/ 8000 });
 
-  // The ported galaxy/economy systems, live on the server: generate the home
-  // system from the canonical seed and its market.
+  // The ported galaxy/economy systems, live on the server: the home system, its
+  // market, and a dockable station entity at the origin.
+  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT];
   {
     const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
     const std::string homeName = GameLogic::NamePlanet(GameLogic::BASE_GALAXY_SEED);
-    GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT];
     GameLogic::GenerateMarket(home.economy, GameLogic::BASE_GALAXY_SEED.f, market);
     printf("Home system %s: economy %d, tech %d, gov %d; food price %d\n",
            homeName.c_str(), home.economy, home.techLevel, home.government, market[0].price);
   }
+
+  const ECS::EntityId station = world.Create();
+  world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 0 } });
 
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
   GameLogic::ServerSessions sessions;
@@ -103,6 +108,26 @@ int main()
           break;
         default:
           break;
+      }
+    }
+
+    // 1b. Process station requests (dock/buy/sell) delivered on each session's
+    //     reliable channel, replying with the authoritative result.
+    const Math::Vector3i64 stationPos =
+        world.IsValid(station) ? world.Get<GameLogic::WorldTransform>(station).position : Math::Vector3i64{};
+    for (auto& entry : sessions.All())
+    {
+      GameLogic::Session& s = entry.second;
+      Net::ReliableMessage msg;
+      while (s.events.Receive(msg))
+      {
+        Net::StationRequest req;
+        if (Net::DecodeStationRequest(msg, req))
+        {
+          const Net::StationResponse resp =
+              GameLogic::ProcessStationRequest(world, s.entity, market, stationPos, kDockRange, req);
+          Net::SendStationResponse(s.events, resp);
+        }
       }
     }
 
