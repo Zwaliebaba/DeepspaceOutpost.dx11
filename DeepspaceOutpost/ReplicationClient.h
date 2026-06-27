@@ -1,12 +1,14 @@
 #pragma once
 
-// ReplicationClient - the client's receive loop for replicated world state.
+// ReplicationClient - the client's network endpoint for the server world.
 //
-// Owns a bound UDP socket and a SnapshotInterpolator. Pump() drains every
-// datagram waiting on the socket and feeds it to the interpolator; the render
-// code then asks for interpolated, floating-origin-rebased entities. This is
-// where the client STOPS simulating and starts displaying the server's
-// authoritative world.
+// Owns a bound UDP socket, a SnapshotInterpolator (unreliable bulk state), and a
+// ReliableChannel (ordered events). Pump() drains every datagram waiting on the
+// socket, routes it by magic, and feeds the right stream; the render code then
+// asks for interpolated, floating-origin-rebased entities. SendInput() pushes the
+// player's intent the other way. This is where the client STOPS simulating and
+// becomes a thin presentation + input terminal for the server's authoritative
+// world.
 //
 // It is inert until Open() succeeds: a default (closed) client makes Pump() a
 // no-op, so the existing single-player path is unchanged until replication is
@@ -14,11 +16,13 @@
 // so it is safe to include anywhere in the client.
 
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 #include "NetLib.h"
 #include "SnapshotInterpolator.h"
 #include "ReliableChannel.h"
+#include "ClientInput.h"
 
 namespace Neuron::Client
 {
@@ -30,9 +34,18 @@ namespace Neuron::Client
     void Close();
     [[nodiscard]] bool IsOpen() const { return m_open; }
 
-    // Drain all datagrams currently queued on the socket into the interpolator.
-    // No-op when closed. Bounded so a flood cannot stall the frame.
+    // Where to send input/acks. Set from config up front, and refreshed from the
+    // source address of whatever the server actually sends us.
+    void SetServerEndpoint(const Net::Endpoint& _ep) { m_server = _ep; m_haveServer = true; }
+
+    // Drain all datagrams currently queued on the socket, routing each by magic
+    // into the interpolator or the reliable channel, and auto-applying the
+    // AssignPlayer handshake. No-op when closed; bounded so a flood can't stall.
     void Pump();
+
+    // Send the player's intent to the server (no-op until the server endpoint is
+    // known and the socket is open).
+    void SendInput(const Net::ClientInput& _input);
 
     // Interpolated state of `_id` at `_alpha` in [0,1], or false if unknown.
     [[nodiscard]] bool Sample(uint32_t _id, double _alpha, Net::EntitySnapshot& _out) const
@@ -50,20 +63,23 @@ namespace Neuron::Client
     [[nodiscard]] std::size_t Count() const { return m_interp.Count(); }
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 
-    // Pop the next reliably-delivered event (despawn/death/chat), in order, or
-    // false if none are ready. Decode with the GameEvents.h helpers.
-    bool PollEvent(Net::ReliableMessage& _out) { return m_events.Receive(_out); }
+    // Pop the next reliably-delivered application event (despawn/death/chat), in
+    // order, or false if none are ready. (AssignPlayer is consumed internally.)
+    bool PollEvent(Net::ReliableMessage& _out);
 
-    // The entity id the local player controls. Its replicated position is used as
-    // the floating origin for rendering, and it is not drawn as a separate ship.
+    // The entity id the local player controls. Set by the AssignPlayer handshake;
+    // its replicated position is the floating origin and it is not drawn.
     void SetLocalPlayer(uint32_t _id) { m_localPlayer = _id; }
     [[nodiscard]] uint32_t LocalPlayer() const { return m_localPlayer; }
 
   private:
     Net::UdpSocket m_socket;
-    Net::SnapshotInterpolator m_interp;   // unreliable bulk state
-    Net::ReliableChannel m_events;        // reliable ordered events
+    Net::SnapshotInterpolator m_interp;            // unreliable bulk state
+    Net::ReliableChannel m_events;                 // reliable ordered events
+    std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
+    Net::Endpoint m_server;
     uint32_t m_localPlayer = 0;
+    bool m_haveServer = false;
     bool m_open = false;
   };
 

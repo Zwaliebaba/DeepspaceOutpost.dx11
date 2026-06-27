@@ -2,6 +2,8 @@
 
 #include "ReplicationClient.h"
 
+#include "GameEvents.h"
+
 namespace Neuron::Client
 {
   namespace
@@ -52,12 +54,16 @@ namespace Neuron::Client
       if (got <= 0)
         break;   // 0 = nothing pending, <0 = error: stop draining this frame
 
+      // Learn/refresh the server's address from whatever it sends us.
+      m_server = from;
+      m_haveServer = true;
+
       // One socket carries both streams; route each datagram by its magic.
       const std::size_t size = static_cast<std::size_t>(got);
       switch (Net::PeekMagic(buffer, size))
       {
         case Net::SNAPSHOT_MAGIC:
-          m_interp.Apply(buffer, size);     // unreliable bulk state
+          m_interp.Apply(buffer, size);        // unreliable bulk state
           break;
         case Net::EVENT_MAGIC:
           m_events.ReadPacket(buffer, size);   // reliable ordered events
@@ -66,6 +72,45 @@ namespace Neuron::Client
           break;   // unknown/foreign datagram: ignore
       }
     }
+
+    // Drain reliable events: AssignPlayer is the handshake (consumed here); the
+    // rest are queued for the application via PollEvent().
+    Net::ReliableMessage msg;
+    while (m_events.Receive(msg))
+    {
+      uint32_t playerId = 0;
+      if (Net::DecodeAssignPlayer(msg, playerId))
+        m_localPlayer = playerId;
+      else
+        m_appEvents.push_back(std::move(msg));
+    }
+
+    // Send our cumulative ack back so the server stops resending delivered
+    // events (the packet also carries any client->server reliable messages).
+    if (m_haveServer)
+    {
+      const std::vector<uint8_t> ack = m_events.WritePacket();
+      m_socket.SendTo(m_server, ack.data(), ack.size());
+    }
+  }
+
+  void ReplicationClient::SendInput(const Net::ClientInput& _input)
+  {
+    if (!m_open || !m_haveServer)
+      return;
+
+    Net::DataWriter writer;
+    Net::WriteInput(writer, _input);
+    m_socket.SendTo(m_server, writer.Data(), writer.Size());
+  }
+
+  bool ReplicationClient::PollEvent(Net::ReliableMessage& _out)
+  {
+    if (m_appEvents.empty())
+      return false;
+    _out = std::move(m_appEvents.front());
+    m_appEvents.pop_front();
+    return true;
   }
 
   ReplicationClient& ReplicationClientInstance()

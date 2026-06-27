@@ -1321,6 +1321,30 @@ void info_message (const char *message)
  * window, Direct3D 11 device and XAudio2 engine have been created.
  */
 
+// Gather the player's flight intent from the keyboard and send it to the server.
+// Used only in thin-client mode; the server maps it onto the authoritative ship.
+static void send_player_input (void)
+{
+	static uint32_t seq = 0;
+	static double throttle = 0.0;
+
+	if (kbd_inc_speed_pressed)
+		throttle += 0.04;
+	if (kbd_dec_speed_pressed)
+		throttle -= 0.04;
+	if (throttle < 0.0) throttle = 0.0;
+	if (throttle > 1.0) throttle = 1.0;
+
+	Neuron::Net::ClientInput in;
+	in.sequence = ++seq;
+	in.rollAxis = (float)((kbd_right_pressed ? 1 : 0) - (kbd_left_pressed ? 1 : 0));
+	in.pitchAxis = (float)((kbd_up_pressed ? 1 : 0) - (kbd_down_pressed ? 1 : 0));
+	in.throttle = (float)throttle;
+
+	Neuron::Client::ReplicationClientInstance().SendInput(in);
+}
+
+
 int game_main (void)
 {
 	read_config_file();
@@ -1342,8 +1366,10 @@ int game_main (void)
 	// Server. No env var => the single-player game runs exactly as before.
 	if (getenv("DSO_REPLICATION"))
 	{
-		Neuron::Client::ReplicationClientInstance().Open(50000);
-		Neuron::Client::ReplicationClientInstance().SetLocalPlayer(0);
+		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+		rc.Open(50000);
+		rc.SetServerEndpoint(Neuron::Net::MakeEndpoint(127, 0, 0, 1, 40000));
+		// LocalPlayer is set by the server's AssignPlayer handshake; default 0.
 	}
 
 	finish = 0;
@@ -1383,6 +1409,10 @@ int game_main (void)
 			climbing = 0;
 
 			handle_flight_keys ();
+
+			// In thin-client mode, the player's intent goes to the server.
+			if (Neuron::Client::ReplicationClientInstance().IsOpen())
+				send_player_input ();
 
 			if (game_paused)
 				continue;

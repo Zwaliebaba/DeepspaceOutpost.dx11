@@ -28,6 +28,7 @@ set(NEURONCORE_HEADERS
     SnapshotInterpolator.h
     ReliableChannel.h
     GameEvents.h
+    ClientInput.h
     NetLib.h
     Debug.h
     FileSys.h

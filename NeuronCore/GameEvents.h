@@ -23,7 +23,26 @@ namespace Neuron::Net
     EntityDespawn = 1,   // an entity left the world (the thing absence can't convey)
     EntityDeath = 2,     // a kill: victim + killer
     Chat = 3,            // a chat line: sender + text
+    AssignPlayer = 4,    // "you control entity N" - the connect handshake reply
   };
+
+  // --- Assign player (connect handshake) ------------------------------------
+
+  [[nodiscard]] inline std::vector<uint8_t> EncodeAssignPlayer(uint32_t _entityId)
+  {
+    DataWriter w;
+    w.WriteU32(_entityId);
+    return w.Bytes();
+  }
+
+  [[nodiscard]] inline bool DecodeAssignPlayer(const ReliableMessage& _m, uint32_t& _entityId)
+  {
+    if (_m.type != static_cast<uint16_t>(EventType::AssignPlayer))
+      return false;
+    DataReader r(_m.payload.data(), _m.payload.size());
+    _entityId = r.ReadU32();
+    return r.Ok();
+  }
 
   // --- Entity despawn -------------------------------------------------------
 
@@ -103,5 +122,10 @@ namespace Neuron::Net
   inline uint32_t SendChat(ReliableChannel& _ch, uint32_t _senderId, const std::string& _text)
   {
     return _ch.Send(static_cast<uint16_t>(EventType::Chat), EncodeChat(_senderId, _text));
+  }
+
+  inline uint32_t SendAssignPlayer(ReliableChannel& _ch, uint32_t _entityId)
+  {
+    return _ch.Send(static_cast<uint16_t>(EventType::AssignPlayer), EncodeAssignPlayer(_entityId));
   }
 }

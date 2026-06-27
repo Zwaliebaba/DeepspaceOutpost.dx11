@@ -4,6 +4,7 @@
 #include "NetLib.h"
 #include "SnapshotPacketizer.h"
 #include "GameEvents.h"
+#include "ClientInput.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -53,6 +54,11 @@ int main()
   GameLogic::DespawnTracker despawns;
   Net::ReliableChannel events;        // reliable event stream to the client
 
+  // Connect handshake: tell the client which entity it controls (resent until
+  // acked over the reliable channel).
+  Net::SendAssignPlayer(events, player.index);
+
+  uint32_t lastInputSeq = 0;          // latest client input applied (drops stale)
   uint32_t ticks = 0;
   uint64_t datagrams = 0;
   bool stop = false;
@@ -97,8 +103,34 @@ int main()
         const int got = socket.RecvFrom(recvBuffer, sizeof(recvBuffer), from);
         if (got <= 0)
           break;
-        if (Net::PeekMagic(recvBuffer, static_cast<std::size_t>(got)) == Net::EVENT_MAGIC)
-          events.ReadPacket(recvBuffer, static_cast<std::size_t>(got));
+
+        const std::size_t size = static_cast<std::size_t>(got);
+        switch (Net::PeekMagic(recvBuffer, size))
+        {
+          case Net::EVENT_MAGIC:
+            events.ReadPacket(recvBuffer, size);   // client acks
+            break;
+
+          case Net::INPUT_MAGIC:
+          {
+            // Client intent: apply the latest to the player's authoritative
+            // FlightIntent (stale/duplicate sequences are dropped).
+            Net::DataReader reader(recvBuffer, size);
+            Net::ClientInput in;
+            if (Net::ReadInput(reader, in) && in.sequence > lastInputSeq && world.IsValid(player))
+            {
+              lastInputSeq = in.sequence;
+              GameLogic::FlightIntent& fi = world.Get<GameLogic::FlightIntent>(player);
+              fi.rollAxis = in.rollAxis;
+              fi.pitchAxis = in.pitchAxis;
+              fi.throttle = in.throttle;
+            }
+            break;
+          }
+
+          default:
+            break;
+        }
       }
     }
 
