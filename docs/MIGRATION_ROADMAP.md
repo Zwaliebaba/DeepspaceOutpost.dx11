@@ -23,6 +23,10 @@ first milestone.
 | Persistence | **Microsoft SQL Server** (accounts, ships, inventory, market, world state) |
 | Wire format | **Hand-rolled binary** for the hot path (snapshots/input); JSON (NeuronCore::Json) for cold path (handshake/config) |
 | Entity model | **ECS** — an **in-house** Entity Component System in NeuronCore; the de-globalized `Universe` *is* the ECS world (introduced ECS-first at A2, not bolted on later) |
+| Logic boundary | **`GameLogic` is server-only authority** (AI, economy, combat, spawning). Client links only **`GameShared`** — the deterministic motion/component slice it needs for prediction. |
+| Test harness | A **headless `BotClient`** (no render/audio) drives scripted/AI bots over the real net stack for load/soak testing (esp. the 100-player test). |
+| Code standards | Follow the repo's **`.github/coding-standards.md`** as the single source of truth (see §2.1). |
+| Docs location | All project docs live in **`docs/`** (matches the standards' layout). |
 | "Modernize client" scope | **Decouple simulation from rendering + de-globalize state into the ECS**; keep the faithful wireframe look |
 
 ---
@@ -78,57 +82,80 @@ first milestone.
 
 ## 2. Target architecture
 
+Modules and their dependency direction (lower layers never depend on higher
+ones — per the standards' *Layers and Dependencies* rule):
+
+| Module | Kind | Role | Depends on |
+|---|---|---|---|
+| `NeuronCore` | lib | Engine foundation: **ECS**, math/fixed-point, `Vector3i64`, tasks, timers, JSON, raw-UDP socket, binary serialize. No gameplay. | — |
+| `GameShared` | lib | **Deterministic, headless** gameplay shared by client *and* server: ECS component definitions (`Transform`, `Motion`, `ShipDef`…), the **motion/physics integration** system, ship-data tables. The *only* sim code the client needs (for prediction). | `NeuronCore` |
+| `GameLogic` | lib | **SERVER-ONLY authority**: AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no `gfx`. | `GameShared` |
+| `NeuronClient` | lib | Client net + reliability, prediction/reconciliation, snapshot interpolation. **Does not link `GameLogic`.** | `GameShared` |
+| `NeuronServer` | lib | Server net + AOI/replication + persistence (MS SQL). | `GameLogic` |
+| `DeepspaceOutpost` | **exe** | Game client: DX11 render, input, UI/HUD, audio. | `NeuronClient`, `GameShared`, platform |
+| `BotClient` | **exe** | **Headless test client** — scripted/AI bots, **no render/audio**, for heavy load & soak testing. Same net stack as the real client. | `NeuronClient`, `GameShared` |
+| `Server` | **exe** | Dedicated server host: loop, sessions, fixed-tick scheduler. | `NeuronServer`, `GameLogic` |
+
 ```
-            ┌──────────────────────────── NeuronCore (shared) ────────────────────────────┐
-            │  math · fixed-point · int64 vec3 · ECS · tasks · timers · JSON · UDP socket   │
-            └──────────────────────────────────────────────────────────────────────────────┘
-                       ▲                                              ▲
-          ┌────────────┴───────────────┐                ┌─────────────┴──────────────┐
-          │        NeuronClient        │                │        NeuronServer         │
-          │  net client · reliability  │                │  authoritative Universe sim    │
-          │  prediction/reconciliation │                │  AOI/replication · MS SQL   │
-          │  snapshot interpolation    │                │  reliability · binary proto │
-          └────────────┬───────────────┘                └─────────────┬──────────────┘
-                       ▲                                              ▲
-          ┌────────────┴───────────────┐                ┌─────────────┴──────────────┐
-          │   DeepspaceOutpost (.exe)  │                │        Server (.exe)        │
-          │  render (DX11) · input ·   │   ──UDP──▶      │  host loop · sessions ·     │
-          │  UI/HUD · audio · predict  │   ◀─snapshot─   │  tick scheduler · persist   │
-          └────────────────────────────┘                └─────────────────────────────┘
+  client input  ──UDP──▶   Server   ──UDP snapshots──▶  client / BotClient
+   (DeepspaceOutpost or BotClient)   (authoritative sim: GameLogic over GameShared/ECS)
 ```
 
-The same headless **Universe sim** code links into both: the server runs it
-authoritatively; the client runs a copy for **prediction** of the local ship.
+**Why the split (answers "shouldn't GameLogic be server-only?"):** yes — the
+*authority* (AI, economy, combat resolution, spawning) lives in `GameLogic`,
+**server-side only**. The client never runs it. But server-authoritative play
+**with client prediction** (Phase E) needs the client to integrate *its own
+ship's* motion locally; that small **deterministic** slice lives in `GameShared`,
+which both sides link. If you ever drop prediction in favour of pure
+interpolation, `GameShared` shrinks to just the ECS component definitions and the
+client becomes effectively logic-free.
+
+**Headless BotClient (answers "can I have a headless client for bot testing?"):**
+yes — and it falls out almost for free once A1 makes the sim headless. `BotClient`
+links the *same* `NeuronClient` + `GameShared` net/prediction stack as the real
+game but swaps the DX11/audio/UI front-end for a **null render sink** and a
+**bot-input driver** (scripted flight paths or simple AI). It connects over the
+real UDP protocol, so N bot processes (or N bots per process) drive genuine
+server load — this is the harness used for the 100-player load test in Phase H.
 
 ### 2.1 House style (single, project-wide)
 
-The repo currently has **three** divergent styles (Neuron engine PascalCase,
-platform `camelCase`/`palette_`/`kCanvasWidth`, and ported snake_case). We
-standardize on **one house style** for the whole project — the **Neuron engine
-convention**, because it is the foundation everything else is built on:
+The **single source of truth** is the repo's **`.github/coding-standards.md`**.
+It was updated so **functions/methods are `PascalCase`** (matching the NeuronCore
+engine, which becomes the reference for the house style). Summary:
 
 | Element | House style | Example |
 |---|---|---|
 | Namespaces | `PascalCase`, nested under `Neuron::` | `Neuron::GameLogic` |
-| Types (class/struct/enum) | `PascalCase` | `Universe`, `RenderQueue`, `EntityId` |
-| Methods & free functions | `PascalCase` | `Tick()`, `AddEntity()`, `Normalize()` |
-| Parameters | `_camelCase` | `_value`, `_deltaTime` |
+| Types (class/struct/enum) | `PascalCase`; `enum class` w/ explicit base | `Universe`, `RenderQueue`, `EntityId`, `enum class ShipType : int8_t` |
+| Methods & free functions | **`PascalCase`** | `Tick()`, `AddEntity()`, `Normalize()` |
+| Parameters | `_camelCase` (Neuron convention) | `_value`, `_deltaTime` |
 | Member variables | `m_` + `camelCase` | `m_running`, `m_entities` |
 | Locals | `camelCase` | `entityCount` |
-| Constants / enumerators | `UPPER_CASE` | `ENGINE_VERSION`, `MAX_ENTITIES` |
+| Constants / macros / `constexpr` | `UPPER_SNAKE_CASE` | `ENGINE_VERSION`, `MAX_ENTITIES` |
 | Integer world vector | `PascalCase`, matches `Math::Vector3` | **`Vector3i64`** (not `Vec3i64`) |
+| New file names | `PascalCase.cpp/.h` for engine types/modules; keep `snake_case` when editing existing ported files | `Universe.h`, vs. `space.cpp` |
 
-**Migration of the existing divergent styles** (folded into the phases, not a
-big-bang rewrite):
-- **Platform layer** (`Renderer::init` → `Renderer::Init`, `palette_` →
-  `m_palette`, `kCanvasWidth` → `CANVAS_WIDTH`): converted file-by-file as the
-  render seam (A1) touches it.
-- **Ported Elite logic**: stays `snake_case` only while still legacy; each file
+**Outliers to migrate** (folded into the phases, not a big-bang rewrite):
+- **Platform layer** is the main non-conformant code now: `camelCase` methods
+  (`Renderer::init` → `Init`, `clearCanvas` → `ClearCanvas`), trailing-underscore
+  members (`palette_` → `m_palette`), and `kPascalCase` constants
+  (`kCanvasWidth` → `CANVAS_WIDTH`). Converted file-by-file as the render seam
+  (A1) touches it.
+- **Ported Elite logic** stays `snake_case` only while still legacy; each file
   adopts the house style as it is modernized into the engine (A1–A4). New
   functions added to a still-legacy file temporarily match that file's local
   `snake_case` (e.g. `render_local_objects()` beside the renamed
   `update_local_objects()` in `space.cpp`) and are renamed when the file moves
   to the engine.
+- **NeuronCore** is already conformant on method casing (`Startup`, `Normalize`).
+
+> **Native-First (from the standards):** new subsystems must add genuine
+> behavior, not thinly wrap a native API. The in-house ECS, the UDP
+> reliability layer, and the binary serializer all qualify (real abstractions /
+> invariants); a bare pass-through around `winsock` would not. Prefer std
+> containers except where the ECS storage's measured layout needs justify a
+> custom container.
 
 ### 2.2 Legacy de-naming — *done first, frees the `Universe` name*
 
@@ -216,23 +243,40 @@ with no global singletons — without changing on-screen behavior.**
   **floating-origin** transform: render/physics math stays 32-bit relative to
   the local ship while the authoritative world position is `int64`. Keep the
   deterministic integer physics. (Smaller now that A2 already built the ECS.)
-- **A4 — Extract `GameLogic` into a library** that links into both
-  `NeuronClient` and `NeuronServer`, compiles **headless** (no DX11/audio), and
-  ticks via a fixed timestep. Move the already-pure files (`pilot`, `trade`,
-  `planet` gen, `elite` data) in first; then the split `space`/`swat`.
-- **Deliverable:** single-player game still runs identically, but now on top of
-  a headless, de-globalized, `int64`-world sim core. **This is the keystone.**
+- **A4 — Split into `GameShared` + `GameLogic` libraries** (both **headless** —
+  no DX11/audio, fixed-timestep tick):
+  - **`GameShared`** (links both client and server): the ECS component
+    definitions and the **deterministic motion/physics integration** — the only
+    sim slice the client needs for prediction — plus the ship-data tables.
+  - **`GameLogic`** (**server-only**): the authority systems — AI/tactics
+    (`pilot`, `swat` resolution), economy (`trade`), spawning/encounters,
+    missions, damage/legal status. Links `GameShared`; **the client never links
+    it.**
+  - Move the already-pure files (`pilot`, `trade`, `planet` gen, `elite` data)
+    into `GameLogic` first; the deterministic motion split out of `space` goes
+    into `GameShared`.
+- **Deliverable:** single-player game still runs identically, but now on top of a
+  headless, de-globalized, `int64`-world ECS — with the **server authority
+  (`GameLogic`) cleanly separable from the shared prediction slice
+  (`GameShared`)**. **This is the keystone.**
 
-### Phase B — Server foundation
+### Phase B — Server foundation + headless BotClient
 - Flesh out **`Server/`**: a real host loop with a **fixed-tick scheduler**
   (e.g. 20–30 Hz sim), session manager, and a console/admin surface. Drop the
   placeholder 10-second timer.
 - Link `NeuronServer` → `GameLogic`; run one authoritative `Universe`.
 - Spawn NPCs/economy server-side using the existing deterministic generators.
+- **Stand up the `BotClient` exe** (`NeuronClient` + `GameShared`, **no
+  render/audio**): a null render sink plus a bot-input driver (scripted flight
+  first, simple AI later). Even before the network exists it runs against an
+  in-process loopback server — giving an automated, headless integration test of
+  the sim from day one, and the foundation for the Phase H load test.
 
 ### Phase C — Networking (raw winsock UDP + reliability)
-- **UDP socket wrapper** in NeuronCore over the existing winsock includes
-  (non-blocking, IPv4/IPv6).
+- **UDP datagram endpoint** in NeuronCore (non-blocking, IPv4/IPv6). Calls
+  `winsock` directly per *Native-First* — it earns its keep by owning the
+  non-blocking setup and feeding the reliability layer, not by thinly renaming
+  `sendto`/`recvfrom`.
 - **Custom reliability layer**: sequence numbers, ack/ack-bitfield, retransmit,
   ordered + unordered channels, fragmentation/reassembly for large snapshots,
   connection handshake, heartbeat/timeout, basic congestion pacing.
@@ -276,7 +320,8 @@ with no global singletons — without changing on-screen behavior.**
 - **Chat / social**, **docking with shared stations**, basic **PvP rules**.
 
 ### Phase H — Hardening & scale to 100
-- **Load test** with 100 simulated clients (bot harness driving input).
+- **Load test** with 100 `BotClient` instances (the Phase B headless bot harness)
+  driving input over the real UDP protocol.
 - Profile tick time, bandwidth/player, DB throughput; tune AOI radius, snapshot
   rate, and grid cell size.
 - **Anti-cheat**: input validation, rate limits, server-side bounds checks

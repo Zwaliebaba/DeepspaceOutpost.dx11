@@ -70,12 +70,21 @@ class Entity
 };
 ```
 
-### Functions and Local Variables
+### Functions and Methods
+
+Use `PascalCase`:
+
+```cpp
+void Update(Entity* entity);
+bool AddEntity(EntityId id);
+void Startup();
+```
+
+### Local Variables
 
 Use `camelCase`:
 
 ```cpp
-void update(Entity* entity);
 int itemCount = 0;
 bool isVisible = true;
 float elapsedTime = 0.0f;
@@ -177,7 +186,7 @@ Use C++ style comments for most documentation:
 /// Optional: documentation comments for public APIs
 /// @param item The item to process
 /// @return true if successful
-bool process(Item* item);
+bool Process(Item* item);
 ```
 
 - Comment the **why**, not the **what**.
@@ -248,7 +257,7 @@ Use `class` for types with behavior or invariants. Use `struct` for simple data 
 class Entity
 {
 public:
-  bool update(float deltaTime);
+  bool Update(float deltaTime);
 
 private:
   bool m_isActive = true;
@@ -293,12 +302,12 @@ Use modern C++ features where they improve clarity and safety:
 ```cpp
 for (const auto& item : items)
 {
-  process(item);
+  Process(item);
 }
 
 if (auto it = values.find(key); it != values.end())
 {
-  use(it->second);
+  Use(it->second);
 }
 ```
 
@@ -319,7 +328,7 @@ For standard containers, prefer range-based loops or algorithms. For indexed acc
 ```cpp
 for (std::size_t i = 0; i < items.size(); ++i)
 {
-  process(items[i]);
+  Process(items[i]);
 }
 ```
 
@@ -390,7 +399,7 @@ Use the project's logging and assertion facilities consistently:
 
 ```cpp
 assert(pointer != nullptr);
-logDebug("Starting update");
+LogDebug("Starting update");
 ```
 
 Guidelines:
