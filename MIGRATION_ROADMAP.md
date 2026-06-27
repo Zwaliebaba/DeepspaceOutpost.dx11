@@ -83,7 +83,7 @@ first milestone.
                        ▲                                              ▲
           ┌────────────┴───────────────┐                ┌─────────────┴──────────────┐
           │        NeuronClient        │                │        NeuronServer         │
-          │  net client · reliability  │                │  authoritative World sim    │
+          │  net client · reliability  │                │  authoritative Universe sim    │
           │  prediction/reconciliation │                │  AOI/replication · MS SQL   │
           │  snapshot interpolation    │                │  reliability · binary proto │
           └────────────┬───────────────┘                └─────────────┬──────────────┘
@@ -95,7 +95,7 @@ first milestone.
           └────────────────────────────┘                └─────────────────────────────┘
 ```
 
-The same headless **World sim** code links into both: the server runs it
+The same headless **Universe sim** code links into both: the server runs it
 authoritatively; the client runs a copy for **prediction** of the local ship.
 
 ---
@@ -121,15 +121,15 @@ with no global singletons — without changing on-screen behavior.**
   *emits* draw commands; the platform layer consumes them. Convert `space.cpp`,
   `threed.cpp`, `swat.cpp` so `update_universe()` does **move-only**, and a new
   `render_universe()` walks the entity list to emit draw commands.
-- **A2 — De-globalize into a `World` / `GameContext`.** Move `cmdr`, `myship`,
-  the flight globals, and the universe array into a `World` struct passed by
+- **A2 — De-globalize into a `Universe` object.** Move `cmdr`, `myship`,
+  the flight globals, and the universe array into a `Universe` struct passed by
   reference. (Mechanical but large; do it file-by-file behind the A1 seam.)
 - **A3 — Dynamic entity store + `int64³` coordinates.** Replace
   `univ_object universe[20]` with a growable entity container keyed by a stable
   `EntityId`. Add absolute `Vec3i64` position to each entity. Implement the
   **floating-origin** transform: render math stays 32-bit relative to the local
   ship; the world position is `int64`. Keep the deterministic integer physics.
-- **A4 — Extract `GameSim` into a library** that links into both
+- **A4 — Extract `GameLogic` into a library** that links into both
   `NeuronClient` and `NeuronServer`, compiles **headless** (no DX11/audio), and
   ticks via a fixed timestep. Move the already-pure files (`pilot`, `trade`,
   `planet` gen, `elite` data) in first; then the split `space`/`swat`.
@@ -140,7 +140,7 @@ with no global singletons — without changing on-screen behavior.**
 - Flesh out **`Server/`**: a real host loop with a **fixed-tick scheduler**
   (e.g. 20–30 Hz sim), session manager, and a console/admin surface. Drop the
   placeholder 10-second timer.
-- Link `NeuronServer` → `GameSim`; run one authoritative `World`.
+- Link `NeuronServer` → `GameLogic`; run one authoritative `Universe`.
 - Spawn NPCs/economy server-side using the existing deterministic generators.
 
 ### Phase C — Networking (raw winsock UDP + reliability)
@@ -162,7 +162,7 @@ with no global singletons — without changing on-screen behavior.**
 - **Priority/bandwidth budgeting** so 100 players stay within send limits.
 
 ### Phase E — Client prediction & reconciliation
-- Client runs the **same `GameSim`** for the **local ship only**: apply input
+- Client runs the **same `GameLogic`** for the **local ship only**: apply input
   immediately (prediction), then **reconcile** against authoritative snapshots
   (replay un-acked inputs on correction).
 - **Snapshot interpolation** for remote entities (render in the past by ~100ms).
