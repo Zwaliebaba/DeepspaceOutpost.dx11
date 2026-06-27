@@ -185,6 +185,80 @@ TEST(Station_ProcessBuyNeedsDockThenSucceeds)
   CHECK(w.Get<GameLogic::Wallet>(p).credits == 960);
 }
 
+TEST(Station_EquipGrantsItemAndChargesCredits)
+{
+  GameLogic::Wallet wallet{ 20000 };
+  GameLogic::Equipment eq;
+  GameLogic::CargoHold hold;   // capacity 20
+
+  GameLogic::EquipResult r = GameLogic::EquipPlayer(wallet, eq, hold, Net::EquipItem::LargeCargoBay);
+  CHECK(r.status == Net::StationStatus::Ok);
+  CHECK(wallet.credits == 16000);     // 20000 - 4000
+  CHECK(eq.largeCargoBay);
+  CHECK(hold.capacity == 35);          // 20 + 15
+}
+
+TEST(Station_EquipRejectsDuplicateAndBroke)
+{
+  GameLogic::CargoHold hold;
+  {
+    GameLogic::Wallet w{ 20000 };
+    GameLogic::Equipment eq;
+    eq.ecm = true;                     // already owned
+    GameLogic::EquipResult r = GameLogic::EquipPlayer(w, eq, hold, Net::EquipItem::Ecm);
+    CHECK(r.status == Net::StationStatus::AlreadyOwned);
+    CHECK(w.credits == 20000);
+  }
+  {
+    GameLogic::Wallet w{ 100 };        // can't afford a 6000 ECM
+    GameLogic::Equipment eq;
+    GameLogic::EquipResult r = GameLogic::EquipPlayer(w, eq, hold, Net::EquipItem::Ecm);
+    CHECK(r.status == Net::StationStatus::NotEnoughCredits);
+    CHECK(!eq.ecm);
+  }
+}
+
+TEST(Station_MissilesIncrementAndCapAtFour)
+{
+  GameLogic::Wallet wallet{ 100000 };
+  GameLogic::Equipment eq;             // starts with 3
+  GameLogic::CargoHold hold;
+
+  GameLogic::EquipResult r1 = GameLogic::EquipPlayer(wallet, eq, hold, Net::EquipItem::Missile);
+  CHECK(r1.status == Net::StationStatus::Ok);
+  CHECK(eq.missiles == 4);
+
+  GameLogic::EquipResult r2 = GameLogic::EquipPlayer(wallet, eq, hold, Net::EquipItem::Missile);
+  CHECK(r2.status == Net::StationStatus::AlreadyOwned);   // capped at 4
+  CHECK(eq.missiles == 4);
+}
+
+TEST(Station_ProcessEquipNeedsDocking)
+{
+  ECS::Registry w;
+  ECS::EntityId p = SpawnTrader(w, 0, /*credits*/ 20000);
+  w.Add<GameLogic::Equipment>(p, GameLogic::Equipment{});
+  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
+
+  Net::StationRequest equip;
+  equip.kind = Net::StationRequestKind::Equip;
+  equip.commodity = static_cast<uint16_t>(Net::EquipItem::FuelScoop);
+
+  // Not docked -> rejected.
+  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, equip);
+  CHECK(fail.status == Net::StationStatus::NotDocked);
+
+  // Dock, then equip.
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+
+  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, equip);
+  CHECK(ok.status == Net::StationStatus::Ok);
+  CHECK(ok.credits == 14750);          // 20000 - 5250
+  CHECK(w.Get<GameLogic::Equipment>(p).fuelScoop);
+}
+
 TEST(Station_ProcessUndock)
 {
   ECS::Registry w;

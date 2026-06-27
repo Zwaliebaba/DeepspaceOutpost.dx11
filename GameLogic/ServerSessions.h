@@ -133,10 +133,11 @@ namespace Neuron::GameLogic
       _world.Add<Flight>(e, Flight{});
       _world.Add<FlightIntent>(e, FlightIntent{});
       _world.Add<FlightCaps>(e, FlightCaps{});
-      // Commerce state so the player can dock and trade.
+      // Commerce state so the player can dock, trade and equip.
       _world.Add<Wallet>(e, Wallet{});
       _world.Add<CargoHold>(e, CargoHold{});
       _world.Add<DockState>(e, DockState{});
+      _world.Add<Equipment>(e, Equipment{});
       return e;
     }
 

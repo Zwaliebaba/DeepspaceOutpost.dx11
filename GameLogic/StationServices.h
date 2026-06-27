@@ -37,6 +37,17 @@ namespace Neuron::GameLogic
     uint32_t stationId = 0;
   };
 
+  // The player's owned equipment.
+  struct Equipment
+  {
+    int missiles = 3;
+    bool largeCargoBay = false;
+    bool ecm = false;
+    bool fuelScoop = false;
+    bool energyBomb = false;
+    bool escapePod = false;
+  };
+
   // Only commodities 0..12 are measured in tonnes and count against hold capacity
   // (Gold/Platinum/Gem-Stones/Alien Items are kg/g/special - legacy units != TONNES).
   [[nodiscard]] inline bool CountsAsTonnage(int _commodity)
@@ -147,6 +158,85 @@ namespace Neuron::GameLogic
     return r;
   }
 
+  // Catalog price for an equipment item (legacy units: tenths of a credit).
+  [[nodiscard]] inline int EquipPrice(Net::EquipItem _item)
+  {
+    switch (_item)
+    {
+      case Net::EquipItem::Missile:       return 300;     // 30.0 Cr
+      case Net::EquipItem::LargeCargoBay:  return 4000;
+      case Net::EquipItem::Ecm:            return 6000;
+      case Net::EquipItem::FuelScoop:      return 5250;
+      case Net::EquipItem::EnergyBomb:     return 9000;
+      case Net::EquipItem::EscapePod:      return 10000;
+      default:                             return 0;      // unknown item
+    }
+  }
+
+  // Whether the player already has the item (so a one-shot purchase is rejected;
+  // missiles cap at 4).
+  [[nodiscard]] inline bool AlreadyHas(const Equipment& _eq, Net::EquipItem _item)
+  {
+    switch (_item)
+    {
+      case Net::EquipItem::Missile:        return _eq.missiles >= 4;
+      case Net::EquipItem::LargeCargoBay:  return _eq.largeCargoBay;
+      case Net::EquipItem::Ecm:            return _eq.ecm;
+      case Net::EquipItem::FuelScoop:      return _eq.fuelScoop;
+      case Net::EquipItem::EnergyBomb:     return _eq.energyBomb;
+      case Net::EquipItem::EscapePod:      return _eq.escapePod;
+      default:                             return false;
+    }
+  }
+
+  struct EquipResult
+  {
+    Net::StationStatus status = Net::StationStatus::Ok;
+    int credits = 0;
+  };
+
+  // Buy one equipment item (server-authoritative). Validates the catalog,
+  // duplicate ownership and credits, then grants it - the large cargo bay also
+  // enlarges the hold.
+  [[nodiscard]] inline EquipResult EquipPlayer(Wallet& _wallet, Equipment& _eq, CargoHold& _hold, Net::EquipItem _item)
+  {
+    EquipResult r;
+    r.credits = _wallet.credits;
+
+    const int price = EquipPrice(_item);
+    if (price <= 0)
+    {
+      r.status = Net::StationStatus::BadCommodity;
+      return r;
+    }
+    if (AlreadyHas(_eq, _item))
+    {
+      r.status = Net::StationStatus::AlreadyOwned;
+      return r;
+    }
+    if (_wallet.credits < price)
+    {
+      r.status = Net::StationStatus::NotEnoughCredits;
+      return r;
+    }
+
+    _wallet.credits -= price;
+    switch (_item)
+    {
+      case Net::EquipItem::Missile:        _eq.missiles++; break;
+      case Net::EquipItem::LargeCargoBay:  _eq.largeCargoBay = true; _hold.capacity += 15; break;
+      case Net::EquipItem::Ecm:            _eq.ecm = true; break;
+      case Net::EquipItem::FuelScoop:      _eq.fuelScoop = true; break;
+      case Net::EquipItem::EnergyBomb:     _eq.energyBomb = true; break;
+      case Net::EquipItem::EscapePod:      _eq.escapePod = true; break;
+      default: break;
+    }
+
+    r.status = Net::StationStatus::Ok;
+    r.credits = _wallet.credits;
+    return r;
+  }
+
   // Can the player dock? Proximity check to the station (Chebyshev, overflow-safe
   // on absolute coordinates).
   [[nodiscard]] inline bool CanDock(const Math::Vector3i64& _player, const Math::Vector3i64& _station, int64_t _range)
@@ -222,6 +312,20 @@ namespace Neuron::GameLogic
         resp.status = tr.status;
         resp.credits = tr.credits;
         resp.cargo = static_cast<uint16_t>(tr.cargo);
+        break;
+      }
+
+      case Net::StationRequestKind::Equip:
+      {
+        Equipment* eq = _world.TryGet<Equipment>(_player);
+        if (eq == nullptr || !dock->docked)
+        {
+          resp.status = eq == nullptr ? Net::StationStatus::BadCommodity : Net::StationStatus::NotDocked;
+          break;
+        }
+        const EquipResult er = EquipPlayer(*wallet, *eq, *hold, static_cast<Net::EquipItem>(_req.commodity));
+        resp.status = er.status;
+        resp.credits = er.credits;
         break;
       }
     }

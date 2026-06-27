@@ -25,9 +25,22 @@ namespace Neuron::Net
     Undock = 2,
     Buy = 3,
     Sell = 4,
+    Equip = 5,    // buy equipment; the item id travels in StationRequest::commodity
   };
 
-  // Result of a station request (also returned by the server-side trade service).
+  // Equipment the player can buy at a station (id carried in a request's
+  // `commodity` field). Shared so client and server agree on the catalog.
+  enum class EquipItem : uint16_t
+  {
+    Missile = 1,
+    LargeCargoBay = 2,
+    Ecm = 3,
+    FuelScoop = 4,
+    EnergyBomb = 5,
+    EscapePod = 6,
+  };
+
+  // Result of a station request (also returned by the server-side services).
   enum class StationStatus : uint8_t
   {
     Ok = 0,
@@ -38,6 +51,7 @@ namespace Neuron::Net
     NoCargo = 5,
     BadCommodity = 6,
     CantDock = 7,
+    AlreadyOwned = 8,
   };
 
   struct StationRequest
