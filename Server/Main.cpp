@@ -2,6 +2,7 @@
 
 #include "GameLogic.h"
 #include "NetLib.h"
+#include "SnapshotPacketizer.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -38,14 +39,18 @@ int main()
 		GameLogic::Tick(world);   // advance the authoritative simulation one tick
 		++ticks;
 
-		// Serialize the world state and publish it to the client.
+		// Serialize the world state and publish it to the client. The snapshot is
+		// split into MTU-bounded datagrams, each carrying whole entities and sent
+		// fire-and-forget: loss self-heals on the next tick, so there is no
+		// reliability layer on this hot path.
 		if (netReady)
 		{
 			const Net::WorldSnapshot snap = GameLogic::BuildWorldSnapshot(world, ticks);
-			Net::DataWriter writer;
-			Net::WriteSnapshot(writer, snap);
-			if (socket.SendTo(client, writer.Data(), writer.Size()) > 0)
-				++datagrams;
+			for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+			{
+				if (socket.SendTo(client, datagram.data(), datagram.size()) > 0)
+					++datagrams;
+			}
 		}
 
 		if (Timer::Core::GetTotalSeconds() > 10)

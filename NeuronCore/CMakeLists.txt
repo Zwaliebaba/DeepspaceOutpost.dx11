@@ -23,6 +23,8 @@ set(NEURONCORE_HEADERS
     DataWriter.h
     DataReader.h
     Replication.h
+    SnapshotPacketizer.h
+    SnapshotReceiver.h
     NetLib.h
     Debug.h
     FileSys.h

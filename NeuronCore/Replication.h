@@ -26,6 +26,18 @@ namespace Neuron::Net
   inline constexpr uint32_t SNAPSHOT_MAGIC = 0x4E534E50;   // 'NSNP'
   inline constexpr uint16_t SNAPSHOT_VERSION = 1;
 
+  // Exact serialized sizes, so a packetizer can split a snapshot into datagrams
+  // that hold only WHOLE entities and never exceed a target MTU. Must stay in
+  // lock-step with WriteSnapshot/ReadSnapshot below.
+  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 2;   // magic+version+tick+count
+  inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (8 * 3) + (4 * 7);   // id + i64 pos + f32 orient/speed
+
+  // A conservative UDP payload that avoids IP fragmentation across the public
+  // internet (well under the 1500-byte Ethernet MTU minus IP+UDP headers, and at
+  // the QUIC/IPv6-min safe size). State datagrams are kept at or below this so
+  // each one travels and is applied independently - no reliability layer needed.
+  inline constexpr std::size_t SAFE_UDP_PAYLOAD = 1200;
+
   // One replicated entity's presentation state.
   struct EntitySnapshot
   {
