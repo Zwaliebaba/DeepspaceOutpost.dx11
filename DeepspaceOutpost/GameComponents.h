@@ -12,6 +12,7 @@
 // Plain data aggregates: PascalCase types, camelCase members, no behaviour.
 
 #include "ECS.h"
+#include "Vector3i64.h"
 #include "vector.h"
 
 namespace Neuron::Game
@@ -22,9 +23,13 @@ namespace Neuron::Game
     int type = 0;
   };
 
-  // local_object: location, rotmat, rotx, rotz, distance
+  // local_object: location, rotmat, rotx, rotz, distance.
+  // `worldPos` is the absolute int64 world position (A3); the server is
+  // authoritative on it and the client renders `location` relative to its
+  // floating origin. `location` stays the legacy player-relative vector for now.
   struct Transform
   {
+    Math::Vector3i64 worldPos{};
     Vector location{};
     Matrix rotmat{};
     int rotX = 0;

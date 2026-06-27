@@ -10,6 +10,7 @@ set(TEST_SOURCES
     EcsTests.cpp
     UniverseTests.cpp
     MathTests.cpp
+    SpatialTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)

@@ -17,6 +17,7 @@ set(NEURONCORE_HEADERS
     NeuronCore.h
     ECS.h
     Vector3i64.h
+    SpatialGrid.h
     Debug.h
     FileSys.h
     GameMath.h
