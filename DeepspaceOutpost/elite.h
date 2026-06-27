@@ -50,7 +50,7 @@
 #define FLG_POLICE			(8192)
 
 
-#define MAX_UNIV_OBJECTS	20
+#define MAX_LOCAL_OBJECTS	20
 
 
 struct commander

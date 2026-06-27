@@ -13,7 +13,7 @@ extern int in_battle;
 void reset_weapons (void);
 void tactics (int un);
 int in_target (int type, double x, double y, double z);
-void check_target (int un, struct univ_object *flip);
+void check_target (int un, struct local_object *flip);
 void check_missiles (int un);
 void draw_laser_lines (void);
 int fire_laser (void);
@@ -27,7 +27,7 @@ void random_encounter (void);
 void explode_object (int un);
 void abandon_ship (void);
 void create_thargoid (void);
-void dock_it (struct univ_object *ship);
+void dock_it (struct local_object *ship);
 
 
 

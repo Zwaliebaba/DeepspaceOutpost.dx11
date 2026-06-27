@@ -139,19 +139,19 @@ void scoop_item (int un)
 	int type;
 	int trade;
 
-	if (universe[un].flags & FLG_DEAD)
+	if (local_objects[un].flags & FLG_DEAD)
 		return;
 	
-	type = universe[un].type;
+	type = local_objects[un].type;
 	
 	if (type == SHIP_MISSILE)
 		return;
 
-	if ((cmdr.fuel_scoop == 0) || (universe[un].location.y >= 0) ||
+	if ((cmdr.fuel_scoop == 0) || (local_objects[un].location.y >= 0) ||
 		(total_cargo() == cmdr.cargo_capacity))
 	{
 		explode_object (un);
-		damage_ship (128 + (universe[un].energy / 2), universe[un].location.z > 0);
+		damage_ship (128 + (local_objects[un].energy / 2), local_objects[un].location.z > 0);
 		return;
 	}
 
@@ -174,6 +174,6 @@ void scoop_item (int un)
 	}
 	
 	explode_object (un);
-	damage_ship (universe[un].energy / 2, universe[un].location.z > 0);
+	damage_ship (local_objects[un].energy / 2, local_objects[un].location.z > 0);
 }
 

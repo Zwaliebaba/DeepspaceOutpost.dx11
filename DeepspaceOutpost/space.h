@@ -16,7 +16,7 @@ struct point
 };
 
 
-struct univ_object
+struct local_object
 {
 	int type;
 	Vector location;
@@ -35,19 +35,19 @@ struct univ_object
 	int distance;
 };
 
-#define MAX_UNIV_OBJECTS	20
+#define MAX_LOCAL_OBJECTS	20
 
-extern struct univ_object universe[MAX_UNIV_OBJECTS];
+extern struct local_object local_objects[MAX_LOCAL_OBJECTS];
 extern int ship_count[NO_OF_SHIPS + 1];  /* many */
 
 
 
-void clear_universe (void);
+void clear_local_objects (void);
 int add_new_ship (int ship_type, int x, int y, int z, struct vector *rotmat, int rotx, int rotz);
 void add_new_station (double sx, double sy, double sz, Matrix rotmat);
 void remove_ship (int un);
-void move_univ_object (struct univ_object *obj);
-void update_universe (void);
+void move_local_object (struct local_object *obj);
+void update_local_objects (void);
 
 void update_console (void);
 

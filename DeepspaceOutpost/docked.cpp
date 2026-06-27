@@ -529,9 +529,9 @@ void display_commander_status (void)
 	{
 		condition = 1;
 
-		for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+		for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 		{
-			type = universe[i].type;
+			type = local_objects[i].type;
 		
 			if ((type == SHIP_MISSILE) ||
 				((type > SHIP_ROCK) && (type < SHIP_DODEC)))

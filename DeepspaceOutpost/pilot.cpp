@@ -30,7 +30,7 @@
  * Fly to a given point in space.
  */
 
-void fly_to_vector (struct univ_object *ship, Vector vec)
+void fly_to_vector (struct local_object *ship, Vector vec)
 {
 	Vector nvec;
 	double direction;
@@ -99,13 +99,13 @@ void fly_to_vector (struct univ_object *ship, Vector vec)
  * Fly towards the planet.
  */
 
-void fly_to_planet (struct univ_object *ship)
+void fly_to_planet (struct local_object *ship)
 {
 	Vector vec;
 
-	vec.x = universe[0].location.x - ship->location.x;
-	vec.y = universe[0].location.y - ship->location.y;
-	vec.z = universe[0].location.z - ship->location.z;
+	vec.x = local_objects[0].location.x - ship->location.x;
+	vec.y = local_objects[0].location.y - ship->location.y;
+	vec.z = local_objects[0].location.z - ship->location.z;
 
 	fly_to_vector (ship, vec);	
 }
@@ -117,17 +117,17 @@ void fly_to_planet (struct univ_object *ship)
  */
 
 
-void fly_to_station_front (struct univ_object *ship)
+void fly_to_station_front (struct local_object *ship)
 {
 	Vector vec;
 
-	vec.x = universe[1].location.x - ship->location.x;
-	vec.y = universe[1].location.y - ship->location.y;
-	vec.z = universe[1].location.z - ship->location.z;
+	vec.x = local_objects[1].location.x - ship->location.x;
+	vec.y = local_objects[1].location.y - ship->location.y;
+	vec.z = local_objects[1].location.z - ship->location.z;
 
-	vec.x += universe[1].rotmat[2].x * 768;
-	vec.y += universe[1].rotmat[2].y * 768;
-	vec.z += universe[1].rotmat[2].z * 768;
+	vec.x += local_objects[1].rotmat[2].x * 768;
+	vec.y += local_objects[1].rotmat[2].y * 768;
+	vec.z += local_objects[1].rotmat[2].z * 768;
 
 	fly_to_vector (ship, vec);	
 }
@@ -137,13 +137,13 @@ void fly_to_station_front (struct univ_object *ship)
  * Fly towards the space station.
  */
 
-void fly_to_station (struct univ_object *ship)
+void fly_to_station (struct local_object *ship)
 {
 	Vector vec;
 
-	vec.x = universe[1].location.x - ship->location.x;
-	vec.y = universe[1].location.y - ship->location.y;
-	vec.z = universe[1].location.z - ship->location.z;
+	vec.x = local_objects[1].location.x - ship->location.x;
+	vec.y = local_objects[1].location.y - ship->location.y;
+	vec.z = local_objects[1].location.z - ship->location.z;
 
 	fly_to_vector (ship, vec);	
 }
@@ -154,15 +154,15 @@ void fly_to_station (struct univ_object *ship)
  * Fly into the docking bay.
  */
  
-void fly_to_docking_bay (struct univ_object *ship)
+void fly_to_docking_bay (struct local_object *ship)
 {
 	Vector diff;
 	Vector vec;
 	double dir;
 
-	diff.x = ship->location.x - universe[1].location.x;
-	diff.y = ship->location.y - universe[1].location.y;
-	diff.z = ship->location.z - universe[1].location.z;
+	diff.x = ship->location.x - local_objects[1].location.x;
+	diff.y = ship->location.y - local_objects[1].location.y;
+	diff.z = ship->location.z - local_objects[1].location.z;
 
 	vec = unit_vector (&diff);	
 
@@ -197,7 +197,7 @@ void fly_to_docking_bay (struct univ_object *ship)
 
 	ship->rotz = 0;
 
-	dir = vector_dot_product (&ship->rotmat[0], &universe[1].rotmat[1]);
+	dir = vector_dot_product (&ship->rotmat[0], &local_objects[1].rotmat[1]);
 
 	if (fabs(dir) >= 0.9166)
 	{
@@ -215,7 +215,7 @@ void fly_to_docking_bay (struct univ_object *ship)
  * Fly a ship to the planet or to the space station and dock it.
  */
 
-void auto_pilot_ship (struct univ_object *ship)
+void auto_pilot_ship (struct local_object *ship)
 {
 	Vector diff;
 	Vector vec;
@@ -229,9 +229,9 @@ void auto_pilot_ship (struct univ_object *ship)
 		return;
 	}
 
-	diff.x = ship->location.x - universe[1].location.x;	
-	diff.y = ship->location.y - universe[1].location.y;	
-	diff.z = ship->location.z - universe[1].location.z;	
+	diff.x = ship->location.x - local_objects[1].location.x;	
+	diff.y = ship->location.y - local_objects[1].location.y;	
+	diff.z = ship->location.z - local_objects[1].location.z;	
 
 	dist = sqrt (diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
 
@@ -242,7 +242,7 @@ void auto_pilot_ship (struct univ_object *ship)
 	}	
 	
 	vec = unit_vector (&diff);	
-	dir = vector_dot_product (&universe[1].rotmat[2], &vec);
+	dir = vector_dot_product (&local_objects[1].rotmat[2], &vec);
 
 	if (dir < 0.9722)
 	{

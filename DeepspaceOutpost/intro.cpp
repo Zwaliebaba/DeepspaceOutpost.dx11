@@ -39,7 +39,7 @@ static Matrix intro_ship_matrix;
 
 void initialise_intro1 (void)
 {
-	clear_universe();
+	clear_local_objects();
 	set_init_matrix (intro_ship_matrix);
 	add_new_ship (SHIP_COBRA3, 0, 0, 4500, intro_ship_matrix, -127, -127);
 }
@@ -51,7 +51,7 @@ void initialise_intro2 (void)
 	show_time = 0;
 	direction = 100;
 
-	clear_universe();
+	clear_local_objects();
 	create_new_stars();
 	set_init_matrix (intro_ship_matrix);
 	add_new_ship (1, 0, 0, 5000, intro_ship_matrix, -127, -127);
@@ -61,15 +61,15 @@ void initialise_intro2 (void)
 
 void update_intro1 (void)
 {
-	universe[0].location.z -= 100;
+	local_objects[0].location.z -= 100;
 
-	if (universe[0].location.z < 384)
-		universe[0].location.z = 384;
+	if (local_objects[0].location.z < 384)
+		local_objects[0].location.z = 384;
 
 	gfx_clear_display();
 
 	flight_roll = 1;
-	update_universe();
+	update_local_objects();
 	
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
 
@@ -85,12 +85,12 @@ void update_intro2 (void)
 	if ((show_time >= 140) && (direction < 0))
 		direction = -direction;
 
-	universe[0].location.z += direction;
+	local_objects[0].location.z += direction;
 
-	if (universe[0].location.z < min_dist[ship_no])
-		universe[0].location.z = min_dist[ship_no];
+	if (local_objects[0].location.z < min_dist[ship_no])
+		local_objects[0].location.z = min_dist[ship_no];
 
-	if (universe[0].location.z > 4500)
+	if (local_objects[0].location.z > 4500)
 	{
 		do
 		{
@@ -102,8 +102,8 @@ void update_intro2 (void)
 		show_time = 0;
 		direction = -100;
 
-		ship_count[universe[0].type] = 0;
-		universe[0].type = 0;		
+		ship_count[local_objects[0].type] = 0;
+		local_objects[0].type = 0;		
 
 		add_new_ship (ship_no, 0, 0, 4500, intro_ship_matrix, -127, -127);
 	}
@@ -111,7 +111,7 @@ void update_intro2 (void)
 
 	gfx_clear_display();
 	update_starfield();
-	update_universe();
+	update_local_objects();
 
 	gfx_draw_sprite (IMG_ELITE_TXT, -1, 10);
 

@@ -1,7 +1,7 @@
 /*
  * space.c
  *
- * This module handles all the flight system and management of the space universe.
+ * This module handles all the flight system and management of the local space objects.
  */
 
 #include "pch.h"
@@ -88,10 +88,10 @@ void rotate_vec (struct vector *vec, double alpha, double beta)
 
 
 /*
- * Update an objects location in the universe.
+ * Update an object's location in local space.
  */
 
-void move_univ_object (struct univ_object *obj)
+void move_local_object (struct local_object *obj)
 {
 	double x,y,z;
 	double k2;
@@ -222,17 +222,17 @@ int is_docking (int sn)
 	if (auto_pilot)		// Don't want it to kill anyone!
 		return 1;
 	
-	fz = universe[sn].rotmat[2].z;
+	fz = local_objects[sn].rotmat[2].z;
 
 	if (fz > -0.90)
 		return 0;
 	
-	vec = unit_vector (&universe[sn].location);
+	vec = unit_vector (&local_objects[sn].location);
 
 	if (vec.z < 0.927)
 		return 0;
 	
-	ux = universe[sn].rotmat[1].x;
+	ux = local_objects[sn].rotmat[1].x;
 	if (ux < 0)
 		ux = -ux;
 	
@@ -264,9 +264,9 @@ void update_altitude (void)
 	if (witchspace)
 		return;
 	
-	x = fabs(universe[0].location.x);
-	y = fabs(universe[0].location.y);
-	z = fabs(universe[0].location.z);
+	x = fabs(local_objects[0].location.x);
+	y = fabs(local_objects[0].location.y);
+	z = fabs(local_objects[0].location.z);
 	
 	if ((x > 65535) || (y > 65535) || (z > 65535))
 		return;
@@ -313,9 +313,9 @@ void update_cabin_temp (void)
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		return;
 	
-	x = abs((int)universe[1].location.x);
-	y = abs((int)universe[1].location.y);
-	z = abs((int)universe[1].location.z);
+	x = abs((int)local_objects[1].location.x);
+	y = abs((int)local_objects[1].location.y);
+	z = abs((int)local_objects[1].location.z);
 	
 	if ((x > 65535) || (y > 65535) || (z > 65535))
 		return;
@@ -425,9 +425,9 @@ void make_station_appear (void)
 	Vector vec;
 	Matrix rotmat;
 	
-	px = universe[0].location.x;
-	py = universe[0].location.y;
-	pz = universe[0].location.z;
+	px = local_objects[0].location.x;
+	py = local_objects[0].location.y;
+	pz = local_objects[0].location.z;
 	
 	vec.x = (rand() & 32767) - 16384;	
 	vec.y = (rand() & 32767) - 16384;	
@@ -477,12 +477,12 @@ void check_docking (int i)
 	}
 
 	flight_speed = 1;
-	damage_ship (5, universe[i].location.z > 0);
+	damage_ship (5, local_objects[i].location.z > 0);
 	snd_play_sample (SND_CRASH);
 }
 
 
-void switch_to_view (struct univ_object *flip)
+void switch_to_view (struct local_object *flip)
 {
 	double tmp;
 	
@@ -553,27 +553,27 @@ void switch_to_view (struct univ_object *flip)
 
 
 /*
- * Update all the objects in the universe and render them.
+ * Update all the local objects and render them.
  */
 
-void update_universe (void)
+void update_local_objects (void)
 {
 	int i;
 	int type;
 	int bounty;
 	char str[80];
-	struct univ_object flip;
+	struct local_object flip;
 	
 	
 	gfx_start_render();
 				 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		type = universe[i].type;
+		type = local_objects[i].type;
 		
 		if (type != 0)
 		{
-			if (universe[i].flags & FLG_REMOVE)
+			if (local_objects[i].flags & FLG_REMOVE)
 			{
 				if (type == SHIP_VIPER)
 					cmdr.legal_status |= 64;
@@ -591,13 +591,13 @@ void update_universe (void)
 				continue;
 			}
 
-			if ((detonate_bomb) && ((universe[i].flags & FLG_DEAD) == 0) &&
+			if ((detonate_bomb) && ((local_objects[i].flags & FLG_DEAD) == 0) &&
 				(type != SHIP_PLANET) && (type != SHIP_SUN) &&
 				(type != SHIP_CONSTRICTOR) && (type != SHIP_COUGAR) &&
 				(type != SHIP_CORIOLIS) && (type != SHIP_DODEC))
 			{
 				snd_play_sample (SND_EXPLODE);
-				universe[i].flags |= FLG_DEAD;		
+				local_objects[i].flags |= FLG_DEAD;		
 			}
 
 			if ((current_screen != SCR_INTRO_ONE) &&
@@ -608,16 +608,16 @@ void update_universe (void)
 				tactics (i);
 			} 
 		
-			move_univ_object (&universe[i]);
+			move_local_object (&local_objects[i]);
 
-			flip = universe[i];
+			flip = local_objects[i];
 			switch_to_view (&flip);
 			
 			if (type == SHIP_PLANET)
 			{
 				if ((ship_count[SHIP_CORIOLIS] == 0) &&
 					(ship_count[SHIP_DODEC] == 0) &&
-					(universe[i].distance < 65792)) // was 49152
+					(local_objects[i].distance < 65792)) // was 49152
 				{
 					make_station_appear();
 				}				
@@ -633,7 +633,7 @@ void update_universe (void)
 			}
 			
 			
-			if (universe[i].distance < 170)
+			if (local_objects[i].distance < 170)
 			{
 				if ((type == SHIP_CORIOLIS) || (type == SHIP_DODEC))
 					check_docking (i);
@@ -643,7 +643,7 @@ void update_universe (void)
 				continue;
 			}
 
-			if (universe[i].distance > 57344)
+			if (local_objects[i].distance > 57344)
 			{
 				remove_ship (i);
 				continue;
@@ -651,13 +651,13 @@ void update_universe (void)
 
 			draw_ship (&flip);
 
-			universe[i].flags = flip.flags;
-			universe[i].exp_seed = flip.exp_seed;
-			universe[i].exp_delta = flip.exp_delta;
+			local_objects[i].flags = flip.flags;
+			local_objects[i].exp_seed = flip.exp_seed;
+			local_objects[i].exp_delta = flip.exp_delta;
 			
-			universe[i].flags &= ~FLG_FIRING;
+			local_objects[i].flags &= ~FLG_FIRING;
 			
-			if (universe[i].flags & FLG_DEAD)
+			if (local_objects[i].flags & FLG_DEAD)
 				continue;
 
 			check_target (i, &flip);
@@ -682,16 +682,16 @@ void update_scanner (void)
 	int x1,y1,y2;
 	int colour;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		if ((universe[i].type <= 0) ||
-			(universe[i].flags & FLG_DEAD) ||
-			(universe[i].flags & FLG_CLOAKED))
+		if ((local_objects[i].type <= 0) ||
+			(local_objects[i].flags & FLG_DEAD) ||
+			(local_objects[i].flags & FLG_CLOAKED))
 			continue;
 	
-		x = universe[i].location.x / 256;
-		y = universe[i].location.y / 256;
-		z = universe[i].location.z / 256;
+		x = local_objects[i].location.x / 256;
+		y = local_objects[i].location.y / 256;
+		z = local_objects[i].location.z / 256;
 
 		x1 = x;
 		y1 = -z / 4;
@@ -705,9 +705,9 @@ void update_scanner (void)
 		y1 += scanner_cy;
 		y2 += scanner_cy;
 
-		colour = (universe[i].flags & FLG_HOSTILE) ? GFX_COL_YELLOW_5 : GFX_COL_WHITE;
+		colour = (local_objects[i].flags & FLG_HOSTILE) ? GFX_COL_YELLOW_5 : GFX_COL_WHITE;
 			
-		switch (universe[i].type)
+		switch (local_objects[i].type)
 		{
 			case SHIP_MISSILE:
 				colour = 137;
@@ -753,7 +753,7 @@ void update_compass (void)
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		un = 1;
 	
-	dest = unit_vector (&universe[un].location);
+	dest = unit_vector (&local_objects[un].location);
 	
 	compass_x = compass_centre_x + (dest.x * 16);
 	compass_y = compass_centre_y + (dest.y * -16);
@@ -1109,7 +1109,7 @@ void enter_witchspace (void)
 	flight_roll = 0;
 	flight_climb = 0;
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 
 	nthg = (randint() & 3) + 1;
 	
@@ -1157,7 +1157,7 @@ void complete_hyperspace (void)
 	flight_roll = 0;
 	flight_climb = 0;
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
@@ -1208,9 +1208,9 @@ void jump_warp (void)
 	int type;
 	int jump;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		type = universe[i].type;
+		type = local_objects[i].type;
 		
 		if ((type > 0) && (type != SHIP_ASTEROID) && (type != SHIP_CARGO) &&
 			(type != SHIP_ALLOY) && (type != SHIP_ROCK) &&
@@ -1221,25 +1221,25 @@ void jump_warp (void)
 		}
 	}
 
-	if ((universe[0].distance < 75001) || (universe[1].distance < 75001))
+	if ((local_objects[0].distance < 75001) || (local_objects[1].distance < 75001))
 	{
 		info_message ("Mass Locked");
 		return;
 	}
 
 
-	if (universe[0].distance < universe[1].distance)
-		jump = universe[0].distance - 75000;
+	if (local_objects[0].distance < local_objects[1].distance)
+		jump = local_objects[0].distance - 75000;
 	else
-		jump = universe[1].distance - 75000;	
+		jump = local_objects[1].distance - 75000;	
 
 	if (jump > 1024)
 		jump = 1024;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		if (universe[i].type != 0)
-			universe[i].location.z -= jump;
+		if (local_objects[i].type != 0)
+			local_objects[i].location.z -= jump;
 	}
 
 	warp_stars = 1;
@@ -1258,7 +1258,7 @@ void launch_player (void)
 	flight_climb = 0;
 	cmdr.legal_status |= carrying_contraband();
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
 	add_new_ship (SHIP_PLANET, 0, 0, 65536, rotmat, 0, 0);

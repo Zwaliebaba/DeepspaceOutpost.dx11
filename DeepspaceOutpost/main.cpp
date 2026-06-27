@@ -63,7 +63,7 @@ char find_name[20];
  * Flight-control responsiveness.
  *
  * flight_roll / flight_climb hold the ship's current turn rate (consumed by
- * move_univ_object as alpha/beta). While a control key is held the rate ramps
+ * move_local_object as alpha/beta). While a control key is held the rate ramps
  * toward full deflection; when released it auto-centres back to zero. These
  * steps set how many rate units we add/remove per frame - i.e. how snappily
  * the ship reacts - without changing the top turn rate (myship.max_roll /
@@ -165,7 +165,7 @@ void initialise_game(void)
 	auto_pilot = 0;
 	
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 	
 	cross_x = -1;
 	cross_y = -1;
@@ -595,7 +595,7 @@ void o_pressed()
 
 void auto_dock (void)
 {
-	struct univ_object ship;
+	struct local_object ship;
 
 	ship.location.x = 0;
 	ship.location.y = 0;
@@ -693,25 +693,25 @@ void run_escape_sequence (void)
 	rotmat[2].z = 1.0;
 	
 	newship = add_new_ship (SHIP_COBRA3, 0, 0, 200, rotmat, -127, -127);
-	universe[newship].velocity = 7;
+	local_objects[newship].velocity = 7;
 	snd_play_sample (SND_LAUNCH);
 
 	for (i = 0; i < 90; i++)
 	{
 		if (i == 40)
 		{
-			universe[newship].flags |= FLG_DEAD;
+			local_objects[newship].flags |= FLG_DEAD;
 			snd_play_sample (SND_EXPLODE);
 		}
 
 		gfx_set_clip_region (1, 1, 510, 383);
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 
-		universe[newship].location.x = 0;
-		universe[newship].location.y = 0;
-		universe[newship].location.z += 2;
+		local_objects[newship].location.x = 0;
+		local_objects[newship].location.y = 0;
+		local_objects[newship].location.z += 2;
 
 		gfx_display_centre_text (358, "Escape pod launched - Ship auto-destuct initiated.", 120, GFX_COL_WHITE);
 		
@@ -727,10 +727,10 @@ void run_escape_sequence (void)
 
 		if ((abs(flight_roll) < 3) && (abs(flight_climb) < 3))
 		{
-			for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+			for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 			{
-				if (universe[i].type != 0)
-					universe[i].location.z -= 1500;
+				if (local_objects[i].type != 0)
+					local_objects[i].location.z -= 1500;
 			}
 
 		}
@@ -739,7 +739,7 @@ void run_escape_sequence (void)
 		gfx_set_clip_region (1, 1, 510, 383);
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 		update_console();
 		gfx_update_screen();
 	}
@@ -1199,21 +1199,21 @@ void run_game_over_screen()
 	flight_speed = 6;
 	flight_roll = 0;
 	flight_climb = 0;
-	clear_universe();
+	clear_local_objects();
 
 	set_init_matrix (rotmat);
 
 	newship = add_new_ship (SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
-	universe[newship].flags |= FLG_DEAD;
+	local_objects[newship].flags |= FLG_DEAD;
 
 	for (i = 0; i < 5; i++)
 	{
 		type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
 		newship = add_new_ship (type, (rand255() & 63) - 32,
 								(rand255() & 63) - 32, -400, rotmat, 0, 0);
-		universe[newship].rotz = ((rand255() * 2) & 255) - 128;
-		universe[newship].rotx = ((rand255() * 2) & 255) - 128;
-		universe[newship].velocity = rand255() & 15;
+		local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
+		local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
+		local_objects[newship].velocity = rand255() & 15;
 	}
 	
 	
@@ -1221,7 +1221,7 @@ void run_game_over_screen()
 	{
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 		gfx_display_centre_text (190, "GAME OVER", 140, GFX_COL_GOLD);
 		gfx_update_screen();
 	}
@@ -1357,7 +1357,7 @@ int game_main (void)
 						info_message ("Docking Computers On");
 				}
 
-				update_universe ();
+				update_local_objects ();
 
 				if (docked)
 				{
