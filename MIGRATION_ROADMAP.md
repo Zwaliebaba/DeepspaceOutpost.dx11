@@ -98,6 +98,31 @@ first milestone.
 The same headless **Universe sim** code links into both: the server runs it
 authoritatively; the client runs a copy for **prediction** of the local ship.
 
+### 2.1 Naming conventions
+
+New engine code must follow the convention of the layer it lands in — the repo
+already has three:
+
+| Layer | Types | Methods / functions | Params | Members | Constants |
+|---|---|---|---|---|---|
+| **Neuron engine** (`NeuronCore/Client/Server`, incl. new `GameLogic`) | `PascalCase` | **`PascalCase`** (`Startup`, `Normalize`) | `_camelCase` (`_value`) | `m_` (`m_running`) | `UPPER_CASE` (`ENGINE_VERSION`) |
+| **Platform layer** (`DeepspaceOutpost/platform/`) | `PascalCase` | **`camelCase`** (`init`, `clearCanvas`) | `camelCase` | trailing `_` (`palette_`) | `kPascalCase` (`kCanvasWidth`) |
+| **Ported Elite logic** (`space.cpp`, …) | `snake_case` / `struct vector` | **`snake_case`** (`update_universe`) | `snake_case` | file globals | `UPPER_CASE` macros |
+
+**Rules for the migration:**
+- All new MMO subsystems — `GameLogic`, `Universe`, networking, AOI,
+  replication, persistence — are **Neuron engine** code → use the **PascalCase**
+  method style, `_camelCase` params, `m_` members, `UPPER_CASE` constants, and
+  live under the `Neuron::` namespace (e.g. `Neuron::GameLogic`).
+- New types use `PascalCase` everywhere (`Universe`, `RenderQueue`, `EntityId`,
+  `Vector3i64`). The 64-bit integer world vector is named **`Vector3i64`** to
+  match `Neuron::Math::Vector3`, *not* `Vec3i64`.
+- Functions added **inside ported `.cpp` files** keep that file's local
+  `snake_case` (e.g. the new `render_universe()` sits next to `update_universe()`
+  in `space.cpp`) until the file is fully modernized into the engine layer.
+- New code added **inside `platform/`** matches the platform `camelCase` /
+  `kPascalCase` style (e.g. the `RenderQueue` consumer on the platform side).
+
 ---
 
 ## 3. Phase plan
@@ -126,7 +151,7 @@ with no global singletons — without changing on-screen behavior.**
   reference. (Mechanical but large; do it file-by-file behind the A1 seam.)
 - **A3 — Dynamic entity store + `int64³` coordinates.** Replace
   `univ_object universe[20]` with a growable entity container keyed by a stable
-  `EntityId`. Add absolute `Vec3i64` position to each entity. Implement the
+  `EntityId`. Add absolute `Vector3i64` position to each entity. Implement the
   **floating-origin** transform: render math stays 32-bit relative to the local
   ship; the world position is `int64`. Keep the deterministic integer physics.
 - **A4 — Extract `GameLogic` into a library** that links into both
