@@ -33,6 +33,7 @@ set(PLATFORM_SOURCES
     RenderQueue.cpp
     RenderContext.cpp
     GameUniverse.cpp
+    Camera.cpp
     platform/GfxRenderSink.cpp
     platform/platform_win.cpp
     platform/Renderer.cpp

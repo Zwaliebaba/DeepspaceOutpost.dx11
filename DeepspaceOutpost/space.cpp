@@ -33,6 +33,7 @@
 #include "trade.h"
 #include "stars.h"
 #include "pilot.h"
+#include "Camera.h"
 
 
 struct galaxy_seed destination_planet;
@@ -481,73 +482,18 @@ void check_docking (int i)
 }
 
 
+/*
+ * Transform an object from ship-space into the current view's camera-space.
+ *
+ * The camera is now an explicit object (Neuron::Client::Camera) instead of the
+ * implicit "eye fused to the ship at the origin". This still reproduces the old
+ * four fixed views bit for bit - the eye sits on the ship - but the seam now
+ * exists for a detached / third-person camera (a non-zero Camera::position).
+ */
+
 void switch_to_view (struct local_object *flip)
 {
-	double tmp;
-	
-	if ((current_screen == SCR_REAR_VIEW) ||
-		(current_screen == SCR_GAME_OVER))
-	{
-		flip->location.x = -flip->location.x;
-		flip->location.z = -flip->location.z;
-
-		flip->rotmat[0].x = -flip->rotmat[0].x;
-		flip->rotmat[0].z = -flip->rotmat[0].z;
-
-		flip->rotmat[1].x = -flip->rotmat[1].x;
-		flip->rotmat[1].z = -flip->rotmat[1].z;
-
-		flip->rotmat[2].x = -flip->rotmat[2].x;
-		flip->rotmat[2].z = -flip->rotmat[2].z;
-		return;
-	}
-
-
-	if (current_screen == SCR_LEFT_VIEW)
-	{
-		tmp = flip->location.x;
-		flip->location.x = flip->location.z;
-		flip->location.z = -tmp;
-
-		if (flip->type < 0)
-			return;
-		
-		tmp = flip->rotmat[0].x;
-		flip->rotmat[0].x = flip->rotmat[0].z;
-		flip->rotmat[0].z = -tmp;		
-
-		tmp = flip->rotmat[1].x;
-		flip->rotmat[1].x = flip->rotmat[1].z;
-		flip->rotmat[1].z = -tmp;		
-
-		tmp = flip->rotmat[2].x;
-		flip->rotmat[2].x = flip->rotmat[2].z;
-		flip->rotmat[2].z = -tmp;		
-		return;
-	}
-
-	if (current_screen == SCR_RIGHT_VIEW)
-	{
-		tmp = flip->location.x;
-		flip->location.x = -flip->location.z;
-		flip->location.z = tmp;
-
-		if (flip->type < 0)
-			return;
-		
-		tmp = flip->rotmat[0].x;
-		flip->rotmat[0].x = -flip->rotmat[0].z;
-		flip->rotmat[0].z = tmp;		
-
-		tmp = flip->rotmat[1].x;
-		flip->rotmat[1].x = -flip->rotmat[1].z;
-		flip->rotmat[1].z = tmp;		
-
-		tmp = flip->rotmat[2].x;
-		flip->rotmat[2].x = -flip->rotmat[2].z;
-		flip->rotmat[2].z = tmp;		
-
-	}
+	Neuron::Client::ApplyCamera (Neuron::Client::CurrentCamera(), flip);
 }
 
 
