@@ -14,6 +14,7 @@ set(GAMELOGIC_HEADERS
     GameLogic.h
     SimComponents.h
     MotionSystem.h
+    Economy.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})
