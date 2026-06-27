@@ -4,8 +4,9 @@
 #include <math.h>
 
 #include "config.h"
-#include "elite.h" 
+#include "elite.h"
 #include "gfx.h"
+#include "RenderContext.h"
 #include "vector.h"
 #include "stars.h"
 #include "random.h"
@@ -79,15 +80,15 @@ void front_starfield (void)
 			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
 			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
 		{
-			gfx_plot_pixel (sx, sy, GFX_COL_WHITE);
+			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
 			if (zz < 0xC0)
-				gfx_plot_pixel (sx+1, sy, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
 
 			if (zz < 0x90)
 			{
-				gfx_plot_pixel (sx, sy+1, GFX_COL_WHITE);
-				gfx_plot_pixel (sx+1, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
 			}
 		}
 
@@ -115,7 +116,7 @@ void front_starfield (void)
 
 		
 		if (warp_stars)
-			gfx_draw_line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
+			ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
 		
 		sx = xx;
 		sy = yy;
@@ -175,15 +176,15 @@ void rear_starfield (void)
 			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
 			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
 		{
-			gfx_plot_pixel (sx, sy, GFX_COL_WHITE);
+			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
 			if (zz < 0xC0)
-				gfx_plot_pixel (sx+1, sy, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
 
 			if (zz < 0x90)
 			{
-				gfx_plot_pixel (sx, sy+1, GFX_COL_WHITE);
-				gfx_plot_pixel (sx+1, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
 			}
 		}
 
@@ -217,7 +218,7 @@ void rear_starfield (void)
 			   (sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY) &&
 			   (ex >= GFX_VIEW_TX) && (ex <= GFX_VIEW_BX) &&
 			   (ey >= GFX_VIEW_TY) && (ey <= GFX_VIEW_BY))
-				gfx_draw_line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
+				ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
 		}
 		
 		stars[i].y = yy;
@@ -286,15 +287,15 @@ void side_starfield (void)
 			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
 			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
 		{
-			gfx_plot_pixel (sx, sy, GFX_COL_WHITE);
+			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
 			if (zz < 0xC0)
-				gfx_plot_pixel (sx+1, sy, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
 
 			if (zz < 0x90)
 			{
-				gfx_plot_pixel (sx, sy+1, GFX_COL_WHITE);
-				gfx_plot_pixel (sx+1, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
 			}
 		}
 
@@ -317,7 +318,7 @@ void side_starfield (void)
 		stars[i].x = xx;
 
 		if (warp_stars)
-			gfx_draw_line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
+			ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
 
 		
 		if (abs((int)stars[i].x) >= 116)
@@ -382,4 +383,8 @@ void update_starfield (void)
 			side_starfield();
 			break;
 	}
+
+	/* Replay the recorded starfield into the gfx backend at this same point,
+	   so the on-screen result is identical to the old direct gfx_ calls. */
+	FlushRenderQueue();
 }

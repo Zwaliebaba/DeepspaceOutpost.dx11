@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "gfx.h"
+#include "RenderContext.h"
 #include "elite.h"
 #include "vector.h"
 #include "swat.h"
@@ -868,16 +869,19 @@ void draw_laser_lines (void)
 {
 	if (wireframe)
 	{
-		gfx_draw_colour_line (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (48 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (224 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (48 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (224 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
 	}
 	else
 	{
-		gfx_draw_triangle (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y,  48 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
-		gfx_draw_triangle (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, 224 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
-	}		 
+		ActiveRenderQueue().Triangle (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y,  48 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
+		ActiveRenderQueue().Triangle (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, 224 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
+	}
+
+	/* Replay the recorded laser lines at this same point (identical output). */
+	FlushRenderQueue();
 }
 
 
