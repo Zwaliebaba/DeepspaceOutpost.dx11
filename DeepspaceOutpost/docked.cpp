@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "gfx.h"
+#include "GameUniverse.h"
 #include "elite.h"
 #include "planet.h"
 #include "shipdata.h"
@@ -1226,7 +1227,7 @@ void buy_equip (void)
 	switch (equip_stock[hilite_item].type)
 	{
 		case EQ_FUEL:
-			cmdr.fuel = myship.max_fuel;
+			cmdr.fuel = PlayerCaps().maxFuel;
 			update_console();
 			break;
 

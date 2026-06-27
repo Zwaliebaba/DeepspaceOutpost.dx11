@@ -22,6 +22,8 @@
 
 #include "config.h"
 #include "gfx.h"
+#include "GameUniverse.h"
+#include "GameComponents.h"
 #include "main.h"
 #include "vector.h"
 #include "alg_data.h"
@@ -66,7 +68,7 @@ char find_name[20];
  * move_local_object as alpha/beta). While a control key is held the rate ramps
  * toward full deflection; when released it auto-centres back to zero. These
  * steps set how many rate units we add/remove per frame - i.e. how snappily
- * the ship reacts - without changing the top turn rate (myship.max_roll /
+ * the ship reacts - without changing the top turn rate (PlayerCaps().maxRoll /
  * max_climb), so handling and turn radius stay balanced. Higher = snappier.
  * This is frame-rate independent of game speed (speed_cap): it changes how
  * many frames the ramp takes, not how fast the game runs.
@@ -146,6 +148,21 @@ void initialise_game(void)
 	set_rand_seed (time(NULL));
 	current_screen = SCR_INTRO_ONE;
 
+	/*
+	 * A2 flip: stand up the de-globalised world and the player's ship entity.
+	 * Seeded here but not yet read - legacy globals (myship, flight state,
+	 * local_objects[]) still drive the game and migrate onto this world cluster
+	 * by cluster. Created before anything else so the player entity always exists.
+	 */
+	GameUniverse().Reset();
+	{
+		Neuron::ECS::EntityId player = GameUniverse().Reg().Create();
+		GameUniverse().Reg().Add<Neuron::Game::PlayerTag>(player, Neuron::Game::PlayerTag{});
+		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
+		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{});
+		GameUniverse().SetPlayer(player);
+	}
+
 	restore_saved_commander();
 
 	flight_speed = 1;
@@ -172,10 +189,10 @@ void initialise_game(void)
 	cross_timer = 0;
 
 	
-	myship.max_speed = 40;		/* 0.27 Light Mach */
-	myship.max_roll = 31;
-	myship.max_climb = 8;		/* CF 8 */
-	myship.max_fuel = 70;		/* 7.0 Light Years */
+	PlayerCaps().maxSpeed = 40;		/* 0.27 Light Mach */
+	PlayerCaps().maxRoll = 31;
+	PlayerCaps().maxClimb = 8;		/* CF 8 */
+	PlayerCaps().maxFuel = 70;		/* 7.0 Light Years */
 }
 
 
@@ -973,7 +990,7 @@ void handle_flight_keys (void)
 	{
 		if (!docked)
 		{
-			if (flight_speed < myship.max_speed)
+			if (flight_speed < PlayerCaps().maxSpeed)
 				flight_speed++;
 		}
 	}

@@ -19,6 +19,7 @@
 #include "elite.h"
 #include "gfx.h"
 #include "RenderContext.h"
+#include "GameUniverse.h"
 #include "docked.h"
 #include "intro.h"
 #include "shipdata.h"
@@ -204,8 +205,8 @@ void dock_player (void)
 	front_shield = 255;
 	aft_shield = 255;
 	energy = 255;
-	myship.altitude = 255;
-	myship.cabtemp = 30;
+	PlayerCaps().altitude = 255;
+	PlayerCaps().cabTemp = 30;
 	reset_weapons();
 }
 
@@ -260,7 +261,7 @@ void update_altitude (void)
 	double x,y,z;
 	double dist;
 	
-	myship.altitude = 255;
+	PlayerCaps().altitude = 255;
 
 	if (witchspace)
 		return;
@@ -284,7 +285,7 @@ void update_altitude (void)
 	dist -= 9472;
 	if (dist < 1)
 	{
-		myship.altitude = 0;
+		PlayerCaps().altitude = 0;
 		do_game_over ();
 		return;
 	}
@@ -292,12 +293,12 @@ void update_altitude (void)
 	dist = sqrt (dist);
 	if (dist < 1)
 	{
-		myship.altitude = 0;
+		PlayerCaps().altitude = 0;
 		do_game_over ();
 		return;
 	}
 
-	myship.altitude = dist;	
+	PlayerCaps().altitude = dist;	
 }
 
 
@@ -306,7 +307,7 @@ void update_cabin_temp (void)
 	int x,y,z;
 	int dist;
 	
-	myship.cabtemp = 30;
+	PlayerCaps().cabTemp = 30;
 
 	if (witchspace)
 		return;
@@ -332,21 +333,21 @@ void update_cabin_temp (void)
 
   	dist ^=  255;
 
-	myship.cabtemp = dist + 30;
+	PlayerCaps().cabTemp = dist + 30;
 
-	if (myship.cabtemp > 255)
+	if (PlayerCaps().cabTemp > 255)
 	{
-		myship.cabtemp = 255;
+		PlayerCaps().cabTemp = 255;
 		do_game_over ();
 		return;
 	}
 	
-	if ((myship.cabtemp < 224) || (cmdr.fuel_scoop == 0))
+	if ((PlayerCaps().cabTemp < 224) || (cmdr.fuel_scoop == 0))
 		return;
 
 	cmdr.fuel += flight_speed / 2;
-	if (cmdr.fuel > myship.max_fuel)
-		cmdr.fuel = myship.max_fuel;
+	if (cmdr.fuel > PlayerCaps().maxFuel)
+		cmdr.fuel = PlayerCaps().maxFuel;
 
 	info_message ("Fuel Scoop On");	
 }
@@ -791,9 +792,9 @@ void display_speed (void)
 	sx = 417;
 	sy = 384 + 9;
 
-	len = ((flight_speed * 64) / myship.max_speed) - 1;
+	len = ((flight_speed * 64) / PlayerCaps().maxSpeed) - 1;
 
-	colour = (flight_speed > (myship.max_speed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
+	colour = (flight_speed > (PlayerCaps().maxSpeed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
 
 	for (i = 0; i < 6; i++)
 	{
@@ -838,14 +839,14 @@ void display_shields (void)
 
 void display_altitude (void)
 {
-	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 31, 92);
+	if (PlayerCaps().altitude > 3)
+		display_dial_bar (PlayerCaps().altitude / 4, 31, 92);
 }
 
 void display_cabin_temp (void)
 {
-	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 31, 60);
+	if (PlayerCaps().cabTemp > 3)
+		display_dial_bar (PlayerCaps().cabTemp / 4, 31, 60);
 }
 
 
@@ -893,7 +894,7 @@ void display_flight_roll (void)
 	sx = 416;
 	sy = 384 + 9 + 14;
 
-	pos = sx - ((flight_roll * 28) / myship.max_roll);
+	pos = sx - ((flight_roll * 28) / PlayerCaps().maxRoll);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -911,7 +912,7 @@ void display_flight_climb (void)
 	sx = 416;
 	sy = 384 + 9 + 14 + 16;
 
-	pos = sx + ((flight_climb * 28) / myship.max_climb);
+	pos = sx + ((flight_climb * 28) / PlayerCaps().maxClimb);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -924,7 +925,7 @@ void display_flight_climb (void)
 void display_fuel (void)
 {
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 31, 44);
+		display_dial_bar ((cmdr.fuel * 64) / PlayerCaps().maxFuel, 31, 44);
 }
 
 
@@ -988,27 +989,27 @@ void update_console (void)
 
 void increase_flight_roll (void)
 {
-	if (flight_roll < myship.max_roll)
+	if (flight_roll < PlayerCaps().maxRoll)
 		flight_roll++;
 }
 
 
 void decrease_flight_roll (void)
 {
-	if (flight_roll > -myship.max_roll)
+	if (flight_roll > -PlayerCaps().maxRoll)
 		flight_roll--;
 }
 
 
 void increase_flight_climb (void)
 {
-	if (flight_climb < myship.max_climb)
+	if (flight_climb < PlayerCaps().maxClimb)
 		flight_climb++;
 }
 
 void decrease_flight_climb (void)
 {
-	if (flight_climb > -myship.max_climb)
+	if (flight_climb > -PlayerCaps().maxClimb)
 		flight_climb--;
 }
 
@@ -1147,7 +1148,7 @@ void complete_hyperspace (void)
 		cmdr.fuel -= hyper_distance;
 		cmdr.legal_status /= 2;
 
-		if ((rand255() > 253) || (flight_climb == myship.max_climb))
+		if ((rand255() > 253) || (flight_climb == PlayerCaps().maxClimb))
 		{
 			enter_witchspace();
 			return;

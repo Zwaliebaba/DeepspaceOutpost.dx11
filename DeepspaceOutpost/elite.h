@@ -91,17 +91,11 @@ struct commander
 	int saved;
 };
 
-struct player_ship
-{
-	int max_speed;
-	int max_roll;
-	int max_climb;
-	int max_fuel;
-	int altitude;
-	int cabtemp;
-};
-
-extern struct player_ship myship;
+/*
+ * The player ship's capabilities formerly lived in the `myship` global
+ * (struct player_ship). They are now the Neuron::Game::ShipCaps component on
+ * the player entity, reached via PlayerCaps() (GameUniverse.h).
+ */
 
 
 extern struct commander cmdr;
