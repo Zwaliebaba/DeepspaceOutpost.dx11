@@ -30,47 +30,48 @@ architecture work.
 
 | Project | Type | Role |
 |---|---|---|
-| **NeuronCore** | Static lib | Engine foundation: **in-house ECS**, math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib` — raw-winsock **UDP** sockets, the custom reliability layer, packets, connections), filesystem (`FileSys`, `FilePaths`), tasks/threads (`TasksCore`), timers, events (`EventManager`), debug, data serialization (`DataReader`/`DataWriter` — the hand-rolled binary protocol; `Json` for cold-path config). Pulls in C++/WinRT projections via `NeuronCore.h`. |
-| **GameShared** | Static lib | **Deterministic, headless** simulation shared by client *and* server: ECS component definitions (`Transform`, `Motion`, `ShipDef`, …), the motion/physics integration system, ship-data tables. The only sim slice the client links (for prediction). Depends on NeuronCore. |
-| **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compat layer (legacy), audio, input, GUI/window manager, **plus client networking** (session, prediction/reconciliation, snapshot interpolation). Depends on GameShared, NeuronCore. |
+| **NeuronCore** | Static lib | Engine foundation **+ the only client/server *shared data***: the **in-house ECS** container, the component & wire-protocol **schemas** (`Transform`, `Motion`, `ShipDef`, …), static ship-data tables, math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib` — raw-winsock **UDP** sockets, custom reliability layer, packets, connections), filesystem (`FileSys`), tasks/threads (`TasksCore`), timers, events, debug, serialization (`DataReader`/`DataWriter` hand-rolled binary; `Json` cold path). **No game behavior.** C++/WinRT via `NeuronCore.h`. |
+| **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compat layer (legacy), audio, input, GUI/window manager, **plus client networking** (session, **snapshot interpolation + dead-reckoning** — presentation only, *no game rules*). Depends on NeuronCore. |
 | **NeuronServer** | Static lib | Server engine: authoritative session management, **AOI/replication**, and **persistence (Microsoft SQL Server)**. Depends on GameLogic, NeuronCore. |
-| **GameLogic** | Static lib | **Server-only authority**: world simulation rules — AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **GameShared**. **The client never links it.** |
-| **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient, GameShared. |
-| **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init) + GameShared. |
+| **GameLogic** | Static lib | **SERVER-ONLY — the single home of ALL game behavior**: motion/physics integration, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **NeuronCore**. **The client never links it; there is no shared game-logic library.** |
+| **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient. |
+| **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init). |
 | **Server** | Console executable | Dedicated-server host: main loop, sessions, fixed-tick scheduler. Entry point `main`. Links NeuronServer, GameLogic. |
 
 **Target dependency graph** (each project depends on its parent; arrows omitted for clarity):
 
 ```
-NeuronCore
-└─ GameShared              deterministic shared sim: ECS components + motion (headless)
-   ├─ NeuronClient         D3D11 · audio · input · GUI · client net + prediction
-   │  ├─ DeepspaceOutpost  Win32 client exe (game rendering, UI, input)
-   │  └─ BotClient         headless test exe (bots, no render/audio)
-   └─ GameLogic            SERVER-ONLY authority: AI · economy · combat · missions
-      └─ NeuronServer      sessions · AOI/replication · MS SQL persistence
-         └─ Server         dedicated-server host exe
+NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/protocol schemas, ship-data, math, NetLib
+├─ NeuronClient            D3D11 · audio · input · GUI · client net (interpolation + dead-reckoning, NO game rules)
+│  ├─ DeepspaceOutpost     Win32 client exe (game rendering, UI, input)
+│  └─ BotClient            headless test exe (bots, no render/audio)
+└─ GameLogic               SERVER-ONLY: ALL game behaviour (motion/physics, AI, economy, combat, missions)
+   └─ NeuronServer         sessions · AOI/replication · MS SQL persistence
+      └─ Server            dedicated-server host exe
 ```
 
-> **Note (server-authoritative MMO target).** `GameLogic` is the **authority and is
-> server-only** — the client links only `GameShared` (the deterministic slice it needs for
-> prediction). This is a deliberate change from the older client-linked-`GameLogic` design.
-> Today the game still builds as the single-player client (see the status note above); the
-> phased path to this target is in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+> **Note (server-authoritative MMO target).** `GameLogic` is the **only game-logic library and
+> is server-only** — there is **no shared game-logic library**. The client is a **thin
+> presentation layer** that runs no game rules: it forwards input and renders interpolated +
+> dead-reckoned authoritative snapshots. Client and server share only **data** (the ECS/protocol
+> schemas in `NeuronCore`), never behavior. This is a deliberate change from the older
+> client-linked-`GameLogic` design. Today the game still builds as the single-player client (see
+> the status note above); the phased path is in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
 
 ## Key Architecture Decisions
 
 - **Server-authoritative MMO (in migration)**: target is an open-world, server-authoritative
-  MMO (up to 100 players) on an `int64³` coordinate field with client prediction and
-  Area-of-Interest replication. The simulation is an **in-house ECS** in `NeuronCore`; the
-  de-globalized `Universe` *is* the ECS world. `GameShared` holds the deterministic slice both
-  sides run; `GameLogic` holds the **server-only** authority. Transport is **raw-winsock UDP** +
-  a custom reliability layer; the wire format is a **hand-rolled binary** protocol
-  (`DataReader`/`DataWriter`). See [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+  MMO (up to 100 players) on an `int64³` coordinate field with Area-of-Interest replication.
+  **All game behavior is server-only** in `GameLogic`; the client runs **no game logic** — it is
+  a thin presentation layer (snapshot interpolation + dead-reckoning). **No shared game-logic
+  library**: client and server share only *data* (the in-house **ECS** container + component/
+  protocol schemas in `NeuronCore`). The de-globalized `Universe` *is* the ECS world, simulated
+  by the server. Transport is **raw-winsock UDP** + a custom reliability layer; the wire format
+  is a **hand-rolled binary** protocol (`DataReader`/`DataWriter`). See
+  [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
 - **Modular engine split**: Game/engine code organized into `Neuron*` engine
-  libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameShared` (shared deterministic
-  sim), `GameLogic` (server-only authority), and the executables (`DeepspaceOutpost`,
-  `BotClient`, `Server`).
+  libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameLogic` (the **server-only** home
+  of all game behavior), and the executables (`DeepspaceOutpost`, `BotClient`, `Server`).
 - **Direct3D 11 rendering**: `Neuron::Graphics::Core` owns the D3D11 device, swap chain, and
   views (`ID3D11Device`, `ID3D11DeviceContext`, render/depth views).
 - **OpenGL compatibility layer**: `OpenglDirectx` emulates the original game's OpenGL calls on

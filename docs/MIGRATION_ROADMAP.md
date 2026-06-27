@@ -23,7 +23,7 @@ first milestone.
 | Persistence | **Microsoft SQL Server** (accounts, ships, inventory, market, world state) |
 | Wire format | **Hand-rolled binary** for the hot path (snapshots/input); JSON (NeuronCore::Json) for cold path (handshake/config) |
 | Entity model | **ECS** — an **in-house** Entity Component System in NeuronCore; the de-globalized `Universe` *is* the ECS world (introduced ECS-first at A2, not bolted on later) |
-| Logic boundary | **`GameLogic` is server-only authority** (AI, economy, combat, spawning). Client links only **`GameShared`** — the deterministic motion/component slice it needs for prediction. |
+| Logic boundary | **`GameLogic` is the only game-logic library — server-only** (motion/physics + AI, economy, combat, spawning). **No shared game-logic library.** The client is a **thin presentation layer** (interpolation + dead-reckoning) and shares only **data/protocol schemas** (in `NeuronCore`), never behavior. |
 | Test harness | A **headless `BotClient`** (no render/audio) drives scripted/AI bots over the real net stack for load/soak testing (esp. the 100-player test). |
 | Code standards | Follow the repo's **`.github/coding-standards.md`** as the single source of truth (see §2.1). |
 | Docs location | All project docs live in **`docs/`** (matches the standards' layout). |
@@ -85,38 +85,44 @@ first milestone.
 Modules and their dependency direction (lower layers never depend on higher
 ones — per the standards' *Layers and Dependencies* rule):
 
+**No shared game-logic library.** All game *behavior* lives in one place —
+`GameLogic`, **server-only**. The client shares only **data** with the server
+(ECS component layouts, the wire-protocol structs, static ship-data tables),
+which live in `NeuronCore`. The client runs **no game rules** at all.
+
 | Module | Kind | Role | Depends on |
 |---|---|---|---|
-| `NeuronCore` | lib | Engine foundation: **ECS**, math/fixed-point, `Vector3i64`, tasks, timers, JSON, raw-UDP socket, binary serialize. No gameplay. | — |
-| `GameShared` | lib | **Deterministic, headless** gameplay shared by client *and* server: ECS component definitions (`Transform`, `Motion`, `ShipDef`…), the **motion/physics integration** system, ship-data tables. The *only* sim code the client needs (for prediction). | `NeuronCore` |
-| `GameLogic` | lib | **SERVER-ONLY authority**: AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no `gfx`. | `GameShared` |
-| `NeuronClient` | lib | Client engine: D3D11 graphics, audio, input, GUI **plus** client networking (reliability, prediction/reconciliation, snapshot interpolation). **Does not link `GameLogic`.** | `GameShared` |
+| `NeuronCore` | lib | Engine foundation + **shared data only**: the **ECS** container, the component & wire-protocol **schemas** (`Transform`, `Motion`, `ShipDef`…), static ship-data tables, math/`Vector3i64`, tasks, timers, raw-UDP `NetLib`, `DataReader`/`DataWriter`. **No behavior.** | — |
+| `GameLogic` | lib | **SERVER-ONLY — all game behavior**: the motion/physics integration *system*, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no `gfx`. | `NeuronCore` |
+| `NeuronClient` | lib | Client engine: D3D11 graphics, audio, input, GUI **plus** client networking (reliability, **snapshot interpolation + dead-reckoning** — presentation only, no game rules). **Does not link `GameLogic`.** | `NeuronCore` |
 | `NeuronServer` | lib | Server net + AOI/replication + persistence (MS SQL). | `GameLogic` |
-| `DeepspaceOutpost` | **exe** | Game client: main loop, game-specific rendering (wireframe/HUD via render queue), input, UI. | `NeuronClient`, `GameShared` |
-| `BotClient` | **exe** | **Headless test client** — scripted/AI bots, **no render/audio**, for heavy load & soak testing. Same net stack as the real client. | `NeuronClient`, `GameShared` |
+| `DeepspaceOutpost` | **exe** | Game client: main loop, game-specific rendering (wireframe/HUD via render queue), input, UI. | `NeuronClient` |
+| `BotClient` | **exe** | **Headless test client** — scripted/AI bots, **no render/audio**, for heavy load & soak testing. Same net stack as the real client. | `NeuronClient` |
 | `Server` | **exe** | Dedicated server host: loop, sessions, fixed-tick scheduler. | `NeuronServer`, `GameLogic` |
 
 ```
   client input  ──UDP──▶   Server   ──UDP snapshots──▶  client / BotClient
-   (DeepspaceOutpost or BotClient)   (authoritative sim: GameLogic over GameShared/ECS)
+   (DeepspaceOutpost or BotClient)    (the ONLY game logic: GameLogic over the ECS)
+   client renders interpolated + dead-reckoned snapshots — it runs no game rules
 ```
 
-**Why the split (answers "shouldn't GameLogic be server-only?"):** yes — the
-*authority* (AI, economy, combat resolution, spawning) lives in `GameLogic`,
-**server-side only**. The client never runs it. But server-authoritative play
-**with client prediction** (Phase E) needs the client to integrate *its own
-ship's* motion locally; that small **deterministic** slice lives in `GameShared`,
-which both sides link. If you ever drop prediction in favour of pure
-interpolation, `GameShared` shrinks to just the ECS component definitions and the
-client becomes effectively logic-free.
+**Thin presentation client (answers "no shared game-logic library, please"):**
+the client is **fully server-authoritative and runs no game logic**. It forwards
+input and renders **interpolated authoritative snapshots**, smoothed by
+**dead-reckoning** (extrapolate last position along last velocity — pure
+presentation, not a game rule). The *only* thing client and server share is
+**data**: the component/protocol schemas needed to (de)serialize snapshots, in
+`NeuronCore`. This is the EVE-Online-style model. The trade-off is ~RTT input
+latency, softened by dead-reckoning, immediate *cosmetic* view response, and
+**server-side lag compensation** for weapons (Phase E / G).
 
 **Headless BotClient (answers "can I have a headless client for bot testing?"):**
 yes — and it falls out almost for free once A1 makes the sim headless. `BotClient`
-links the *same* `NeuronClient` + `GameShared` net/prediction stack as the real
-game but swaps the DX11/audio/UI front-end for a **null render sink** and a
-**bot-input driver** (scripted flight paths or simple AI). It connects over the
-real UDP protocol, so N bot processes (or N bots per process) drive genuine
-server load — this is the harness used for the 100-player load test in Phase H.
+links the *same* `NeuronClient` net stack as the real game but swaps the
+DX11/audio/UI front-end for a **null render sink** and a **bot-input driver**
+(scripted flight paths or simple AI that reads the incoming snapshots). It
+connects over the real UDP protocol, so N bot processes (or N bots per process)
+drive genuine server load — the harness used for the 100-player test in Phase H.
 
 ### 2.1 House style (single, project-wide)
 
@@ -188,10 +194,13 @@ NeuronCore (no third-party dependency), introduced **ECS-first at A2**.
   and **components map 1:1 onto replication** — AOI picks entities, the snapshot
   serializes their *replicated* components as deltas.
 - **Design:** sparse-set (or archetype) storage; stable `EntityId` (generational
-  handle); systems run in a **fixed, deterministic order** each tick (required
-  for client prediction/reconciliation). Components are plain `PascalCase`
-  structs (`Transform`, `Motion`, `Combat`, `Ai`, `ShipDef`, `Renderable`,
-  `NetReplicated`); systems are `PascalCase` (`MotionSystem`, `TacticsSystem`).
+  handle); **systems run only on the server** in a fixed order each tick.
+  Components are plain `PascalCase` structs (`Transform`, `Motion`, `Combat`,
+  `Ai`, `ShipDef`, `Renderable`, `NetReplicated`); systems are `PascalCase`
+  (`MotionSystem`, `TacticsSystem`) and live in `GameLogic`. **The ECS container
+  and the component/schema definitions live in `NeuronCore` (data); the client
+  uses the ECS only as a read-only mirror of replicated snapshot state for
+  rendering — it runs no systems.**
 - **Migration is faithful, not a rewrite:** at A2 each `local_object` becomes one
   entity with *fat* components mirroring the existing fields; the existing loops
   become systems one at a time, each verified against the Phase 0 golden runs.
@@ -243,22 +252,19 @@ with no global singletons — without changing on-screen behavior.**
   **floating-origin** transform: render/physics math stays 32-bit relative to
   the local ship while the authoritative world position is `int64`. Keep the
   deterministic integer physics. (Smaller now that A2 already built the ECS.)
-- **A4 — Split into `GameShared` + `GameLogic` libraries** (both **headless** —
-  no DX11/audio, fixed-timestep tick):
-  - **`GameShared`** (links both client and server): the ECS component
-    definitions and the **deterministic motion/physics integration** — the only
-    sim slice the client needs for prediction — plus the ship-data tables.
-  - **`GameLogic`** (**server-only**): the authority systems — AI/tactics
-    (`pilot`, `swat` resolution), economy (`trade`), spawning/encounters,
-    missions, damage/legal status. Links `GameShared`; **the client never links
-    it.**
-  - Move the already-pure files (`pilot`, `trade`, `planet` gen, `elite` data)
-    into `GameLogic` first; the deterministic motion split out of `space` goes
-    into `GameShared`.
+- **A4 — Extract `GameLogic` (server-only, *all* game behavior).** One headless
+  library (no DX11/audio, fixed-timestep tick) holding **every game rule**: the
+  motion/physics integration *system*, AI/tactics (`pilot`, `swat` resolution),
+  economy (`trade`), spawning/encounters, missions, damage/legal status. Move the
+  already-pure files (`pilot`, `trade`, `planet` gen, `elite` data) in first,
+  then the systems split out of `space`/`swat`. The **ECS container + the
+  component/protocol schemas + ship-data tables stay in `NeuronCore`** as shared
+  *data*; **the client links none of `GameLogic`.** There is **no `GameShared`
+  library** — no game behavior is shared.
 - **Deliverable:** single-player game still runs identically, but now on top of a
-  headless, de-globalized, `int64`-world ECS — with the **server authority
-  (`GameLogic`) cleanly separable from the shared prediction slice
-  (`GameShared`)**. **This is the keystone.**
+  headless, de-globalized, `int64`-world ECS — with **all behavior isolated in
+  the server-only `GameLogic`** and the client reduced to data + rendering.
+  **This is the keystone.**
 
 ### Phase B — Server foundation + headless BotClient
 - Flesh out **`Server/`**: a real host loop with a **fixed-tick scheduler**
@@ -266,11 +272,11 @@ with no global singletons — without changing on-screen behavior.**
   placeholder 10-second timer.
 - Link `NeuronServer` → `GameLogic`; run one authoritative `Universe`.
 - Spawn NPCs/economy server-side using the existing deterministic generators.
-- **Stand up the `BotClient` exe** (`NeuronClient` + `GameShared`, **no
-  render/audio**): a null render sink plus a bot-input driver (scripted flight
-  first, simple AI later). Even before the network exists it runs against an
-  in-process loopback server — giving an automated, headless integration test of
-  the sim from day one, and the foundation for the Phase H load test.
+- **Stand up the `BotClient` exe** (`NeuronClient`, **no render/audio**): a null
+  render sink plus a bot-input driver (scripted flight first, simple AI reading
+  the incoming snapshots later). Even before the network exists it runs against
+  an in-process loopback server — giving an automated, headless integration test
+  from day one, and the foundation for the Phase H load test.
 
 ### Phase C — Networking (raw winsock UDP + reliability)
 - **UDP datagram endpoint** in NeuronCore (non-blocking, IPv4/IPv6). Calls
@@ -292,13 +298,18 @@ with no global singletons — without changing on-screen behavior.**
 - **Entity lifecycle events**: enter-AOI (full state) / leave-AOI (despawn).
 - **Priority/bandwidth budgeting** so 100 players stay within send limits.
 
-### Phase E — Client prediction & reconciliation
-- Client runs the **same `GameLogic`** for the **local ship only**: apply input
-  immediately (prediction), then **reconcile** against authoritative snapshots
-  (replay un-acked inputs on correction).
-- **Snapshot interpolation** for remote entities (render in the past by ~100ms).
+### Phase E — Client smoothing (interpolation + dead-reckoning, *no* prediction)
+- The client runs **no game logic**. It renders **interpolated** authoritative
+  snapshots (in the past by ~100 ms) for all entities, including the local ship.
+- **Dead-reckoning** extrapolates an entity's rendered transform along its last
+  known velocity between snapshots — pure presentation smoothing, not a game
+  rule; it never simulates handling, thrust, or collision.
+- **Immediate cosmetic input feedback** (e.g. nudging the view) to mask the
+  ~RTT control latency without claiming authority.
 - **Floating origin on the client** so the camera/render stay in 32-bit space
   while the world is `int64`.
+- *(Weapons fairness — hit detection under latency — is handled by server-side
+  lag compensation in Phase G, not by client prediction.)*
 
 ### Phase F — Persistence (Microsoft SQL Server)
 - **Data-access layer** in `NeuronServer` (ODBC / SQL Server Native Client),
@@ -340,14 +351,15 @@ with no global singletons — without changing on-screen behavior.**
   huge field without precision loss. Each client (and the sim's render pass)
   rebases to a local origin near the player so existing 32-bit/fixed-point math
   is reused unchanged. Rebase when the player crosses a cell boundary.
-- **Determinism.** Keep the integer/fixed-point physics; it makes prediction,
-  reconciliation, and reproducible bug reports tractable. Avoid float
-  nondeterminism in shared sim paths.
+- **Determinism.** Keep the integer/fixed-point physics; it keeps the
+  authoritative server sim reproducible (replays, golden tests, bug reports) and
+  AOI snapshots stable. Avoid float nondeterminism in the server sim paths.
 - **From 20 objects to thousands.** `MAX_LOCAL_OBJECTS=20` is replaced by the
   ECS world (§2.3); AOI keeps the *per-client* working set small even though the
   world total is large.
 - **Tick model.** Fixed timestep server tick (20–30 Hz); snapshots at the tick
-  rate or a fraction; clients interpolate between snapshots and predict locally.
+  rate or a fraction; clients **interpolate** between snapshots (and dead-reckon
+  for smoothness) — they never simulate game rules locally.
 - **Reuse what's already clean.** `pilot/trade/planet/elite` (0 `gfx_` calls)
   move to the sim core almost verbatim — start there to build momentum.
 
