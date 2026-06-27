@@ -1,0 +1,160 @@
+#pragma once
+
+// StationServices - authoritative docking & trading (GameLogic, server-side).
+//
+// The server owns the player's wallet and cargo, and the station's market. These
+// are the rules behind the docked request/response protocol: a faithful port of
+// the legacy buy_stock/sell_stock/total_cargo, generalized from one-unit-at-a-time
+// to a quantity, and validated so a client can never conjure credits or cargo.
+// Pure (mutates only the structs passed in), so every rule is unit-tested headless.
+
+#include <cstdint>
+
+#include "Vector3i64.h"
+#include "StationProtocol.h"   // Net::StationStatus
+
+#include "Economy.h"           // COMMODITY_COUNT, MarketEntry
+
+namespace Neuron::GameLogic
+{
+  // The player's authoritative commerce state.
+  struct Wallet
+  {
+    int credits = 1000;        // tenths of a credit (legacy units)
+  };
+
+  struct CargoHold
+  {
+    int units[COMMODITY_COUNT] = {};
+    int capacity = 20;         // hold size in tonnes
+  };
+
+  struct DockState
+  {
+    bool docked = false;
+    uint32_t stationId = 0;
+  };
+
+  // Only commodities 0..12 are measured in tonnes and count against hold capacity
+  // (Gold/Platinum/Gem-Stones/Alien Items are kg/g/special - legacy units != TONNES).
+  [[nodiscard]] inline bool CountsAsTonnage(int _commodity)
+  {
+    return _commodity >= 0 && _commodity <= 12;
+  }
+
+  [[nodiscard]] inline int TotalTonnage(const CargoHold& _hold)
+  {
+    int tonnes = 0;
+    for (int i = 0; i < COMMODITY_COUNT; ++i)
+      if (CountsAsTonnage(i))
+        tonnes += _hold.units[i];
+    return tonnes;
+  }
+
+  struct TradeResult
+  {
+    Net::StationStatus status = Net::StationStatus::Ok;
+    int credits = 0;           // resulting wallet
+    int cargo = 0;             // resulting held quantity of the commodity
+  };
+
+  // Buy `_qty` units of `_commodity` (legacy buy_stock, per-quantity). Validates
+  // docked state, stock, credits, and (for tonnage goods) hold space; on success
+  // moves credits/cargo/stock atomically.
+  [[nodiscard]] inline TradeResult BuyCommodity(Wallet& _wallet, CargoHold& _hold,
+      MarketEntry* _market, bool _docked, int _commodity, int _qty)
+  {
+    TradeResult r;
+    r.credits = _wallet.credits;
+
+    if (!_docked)
+    {
+      r.status = Net::StationStatus::NotDocked;
+      return r;
+    }
+    if (_commodity < 0 || _commodity >= COMMODITY_COUNT || _qty <= 0)
+    {
+      r.status = Net::StationStatus::BadCommodity;
+      return r;
+    }
+
+    r.cargo = _hold.units[_commodity];
+
+    if (_market[_commodity].quantity < _qty)
+    {
+      r.status = Net::StationStatus::NoStock;
+      return r;
+    }
+
+    const int cost = _market[_commodity].price * _qty;
+    if (_wallet.credits < cost)
+    {
+      r.status = Net::StationStatus::NotEnoughCredits;
+      return r;
+    }
+
+    if (CountsAsTonnage(_commodity) && TotalTonnage(_hold) + _qty > _hold.capacity)
+    {
+      r.status = Net::StationStatus::HoldFull;
+      return r;
+    }
+
+    _wallet.credits -= cost;
+    _hold.units[_commodity] += _qty;
+    _market[_commodity].quantity -= _qty;
+
+    r.status = Net::StationStatus::Ok;
+    r.credits = _wallet.credits;
+    r.cargo = _hold.units[_commodity];
+    return r;
+  }
+
+  // Sell `_qty` units of `_commodity` (legacy sell_stock, per-quantity).
+  [[nodiscard]] inline TradeResult SellCommodity(Wallet& _wallet, CargoHold& _hold,
+      MarketEntry* _market, bool _docked, int _commodity, int _qty)
+  {
+    TradeResult r;
+    r.credits = _wallet.credits;
+
+    if (!_docked)
+    {
+      r.status = Net::StationStatus::NotDocked;
+      return r;
+    }
+    if (_commodity < 0 || _commodity >= COMMODITY_COUNT || _qty <= 0)
+    {
+      r.status = Net::StationStatus::BadCommodity;
+      return r;
+    }
+
+    r.cargo = _hold.units[_commodity];
+
+    if (_hold.units[_commodity] < _qty)
+    {
+      r.status = Net::StationStatus::NoCargo;
+      return r;
+    }
+
+    _wallet.credits += _market[_commodity].price * _qty;
+    _hold.units[_commodity] -= _qty;
+    _market[_commodity].quantity += _qty;
+
+    r.status = Net::StationStatus::Ok;
+    r.credits = _wallet.credits;
+    r.cargo = _hold.units[_commodity];
+    return r;
+  }
+
+  // Can the player dock? Proximity check to the station (Chebyshev, overflow-safe
+  // on absolute coordinates).
+  [[nodiscard]] inline bool CanDock(const Math::Vector3i64& _player, const Math::Vector3i64& _station, int64_t _range)
+  {
+    const int64_t dx = _player.x - _station.x;
+    const int64_t dy = _player.y - _station.y;
+    const int64_t dz = _player.z - _station.z;
+    const int64_t ax = dx < 0 ? -dx : dx;
+    const int64_t ay = dy < 0 ? -dy : dy;
+    const int64_t az = dz < 0 ? -dz : dz;
+    return ax <= _range && ay <= _range && az <= _range;
+  }
+}

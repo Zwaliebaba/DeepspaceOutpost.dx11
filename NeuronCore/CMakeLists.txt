@@ -29,6 +29,7 @@ set(NEURONCORE_HEADERS
     ReliableChannel.h
     GameEvents.h
     ClientInput.h
+    StationProtocol.h
     NetLib.h
     Debug.h
     FileSys.h

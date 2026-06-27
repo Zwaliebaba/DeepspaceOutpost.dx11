@@ -24,6 +24,7 @@
 #include "DespawnTracker.h"
 #include "ServerSessions.h"
 #include "CombatSystem.h"
+#include "StationServices.h"
 
 namespace Neuron::GameLogic
 {

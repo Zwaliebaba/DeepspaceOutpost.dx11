@@ -24,6 +24,8 @@ namespace Neuron::Net
     EntityDeath = 2,     // a kill: victim + killer
     Chat = 3,            // a chat line: sender + text
     AssignPlayer = 4,    // "you control entity N" - the connect handshake reply
+    StationRequest = 5,  // client -> server: dock/undock/buy/sell
+    StationResponse = 6, // server -> client: the authoritative result
   };
 
   // --- Assign player (connect handshake) ------------------------------------
