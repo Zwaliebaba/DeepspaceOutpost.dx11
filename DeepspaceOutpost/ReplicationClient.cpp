@@ -52,7 +52,19 @@ namespace Neuron::Client
       if (got <= 0)
         break;   // 0 = nothing pending, <0 = error: stop draining this frame
 
-      m_interp.Apply(buffer, static_cast<std::size_t>(got));
+      // One socket carries both streams; route each datagram by its magic.
+      const std::size_t size = static_cast<std::size_t>(got);
+      switch (Net::PeekMagic(buffer, size))
+      {
+        case Net::SNAPSHOT_MAGIC:
+          m_interp.Apply(buffer, size);     // unreliable bulk state
+          break;
+        case Net::EVENT_MAGIC:
+          m_events.ReadPacket(buffer, size);   // reliable ordered events
+          break;
+        default:
+          break;   // unknown/foreign datagram: ignore
+      }
     }
   }
 

@@ -26,6 +26,17 @@ namespace Neuron::Net
   inline constexpr uint32_t SNAPSHOT_MAGIC = 0x4E534E50;   // 'NSNP'
   inline constexpr uint16_t SNAPSHOT_VERSION = 1;
 
+  // Read the leading little-endian u32 (the packet magic) without consuming a
+  // reader, so a receiver can route a datagram to the right channel (snapshot vs
+  // reliable event). Returns 0 for a too-short buffer.
+  [[nodiscard]] inline uint32_t PeekMagic(const uint8_t* _data, std::size_t _size)
+  {
+    if (_size < 4)
+      return 0;
+    return static_cast<uint32_t>(_data[0]) | (static_cast<uint32_t>(_data[1]) << 8) |
+           (static_cast<uint32_t>(_data[2]) << 16) | (static_cast<uint32_t>(_data[3]) << 24);
+  }
+
   // Exact serialized sizes, so a packetizer can split a snapshot into datagrams
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.

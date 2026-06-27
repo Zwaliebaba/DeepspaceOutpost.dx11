@@ -26,6 +26,8 @@ set(NEURONCORE_HEADERS
     SnapshotPacketizer.h
     SnapshotReceiver.h
     SnapshotInterpolator.h
+    ReliableChannel.h
+    GameEvents.h
     NetLib.h
     Debug.h
     FileSys.h

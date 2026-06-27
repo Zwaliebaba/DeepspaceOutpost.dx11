@@ -18,6 +18,7 @@
 
 #include "NetLib.h"
 #include "SnapshotInterpolator.h"
+#include "ReliableChannel.h"
 
 namespace Neuron::Client
 {
@@ -49,9 +50,14 @@ namespace Neuron::Client
     [[nodiscard]] std::size_t Count() const { return m_interp.Count(); }
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 
+    // Pop the next reliably-delivered event (despawn/death/chat), in order, or
+    // false if none are ready. Decode with the GameEvents.h helpers.
+    bool PollEvent(Net::ReliableMessage& _out) { return m_events.Receive(_out); }
+
   private:
     Net::UdpSocket m_socket;
-    Net::SnapshotInterpolator m_interp;
+    Net::SnapshotInterpolator m_interp;   // unreliable bulk state
+    Net::ReliableChannel m_events;        // reliable ordered events
     bool m_open = false;
   };
 
