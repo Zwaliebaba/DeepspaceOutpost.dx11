@@ -22,6 +22,7 @@
 #include "SnapshotBuilder.h"
 #include "AreaOfInterest.h"
 #include "DespawnTracker.h"
+#include "ServerSessions.h"
 
 namespace Neuron::GameLogic
 {

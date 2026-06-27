@@ -22,6 +22,7 @@ set(GAMELOGIC_HEADERS
     SnapshotBuilder.h
     AreaOfInterest.h
     DespawnTracker.h
+    ServerSessions.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

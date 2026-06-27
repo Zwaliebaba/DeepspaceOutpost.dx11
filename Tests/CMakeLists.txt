@@ -25,6 +25,7 @@ set(TEST_SOURCES
     AreaOfInterestTests.cpp
     ReplicatedSceneTests.cpp
     ClientInputTests.cpp
+    SessionTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)

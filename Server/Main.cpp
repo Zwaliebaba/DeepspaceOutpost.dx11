@@ -11,11 +11,12 @@ using namespace Neuron;
 
 namespace
 {
-  constexpr uint16_t kServerPort = 40000;                 // we bind here to receive acks
+  constexpr uint16_t kServerPort = 40000;                 // clients send input here
   constexpr int64_t kAoiCellSize = 100000;                // interest-management cell size
   constexpr int kAoiRadiusCells = 1;                      // viewers see +/- 1 cell
+  constexpr uint32_t kSessionTimeoutTicks = 300;          // reap a client idle this long
 
-  // Gather the indices of every entity currently in the world (for despawn diff).
+  // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
   {
     std::vector<uint32_t> ids;
@@ -29,122 +30,95 @@ namespace
 
 int main()
 {
-  printf("Starting DSOServer (GameLogic v%u)...\n", GameLogic::Version());
+  printf("Starting DSOServer (GameLogic v%u) on UDP %u...\n",
+         GameLogic::Version(), static_cast<unsigned>(kServerPort));
   CoreEngine::Startup();
 
-  // Bind a UDP socket so we can both publish snapshots AND receive client acks.
   Net::NetStartup();
   Net::UdpSocket socket;
-  const bool netReady = socket.Open(kServerPort);
-  const Net::Endpoint client = Net::MakeEndpoint(127, 0, 0, 1, 50000);
+  if (!socket.Open(kServerPort))
+  {
+    printf("Failed to bind UDP %u\n", static_cast<unsigned>(kServerPort));
+    return 1;
+  }
 
-  // Authoritative world: a steerable player plus a couple of static props.
+  // The authoritative world. A couple of static props so a lone player still sees
+  // something; players are spawned on demand as clients connect.
   ECS::Registry world;
-  const ECS::EntityId player = world.Create();
-  world.Add<GameLogic::WorldTransform>(player, GameLogic::WorldTransform{ { 0, 0, 0 } });
-  world.Add<GameLogic::Flight>(player, GameLogic::Flight{});
-  world.Add<GameLogic::FlightIntent>(player, GameLogic::FlightIntent{ 0.0, 0.02, 1.0 });
-
   const ECS::EntityId propA = world.Create();
-  world.Add<GameLogic::WorldTransform>(propA, GameLogic::WorldTransform{ { 5000, 0, 0 } });
+  world.Add<GameLogic::WorldTransform>(propA, GameLogic::WorldTransform{ { 3000, 0, 0 } });
   ECS::EntityId propB = world.Create();
-  world.Add<GameLogic::WorldTransform>(propB, GameLogic::WorldTransform{ { 0, 5000, 0 } });
+  world.Add<GameLogic::WorldTransform>(propB, GameLogic::WorldTransform{ { 0, 3000, 0 } });
 
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
+  GameLogic::ServerSessions sessions;
   GameLogic::DespawnTracker despawns;
-  Net::ReliableChannel events;        // reliable event stream to the client
 
-  // Connect handshake: tell the client which entity it controls (resent until
-  // acked over the reliable channel).
-  Net::SendAssignPlayer(events, player.index);
-
-  uint32_t lastInputSeq = 0;          // latest client input applied (drops stale)
-  uint32_t ticks = 0;
-  uint64_t datagrams = 0;
-  bool stop = false;
-  uint8_t recvBuffer[2048];
-  while (!stop)
+  uint8_t recv[2048];
+  uint32_t tick = 0;
+  for (;;)
   {
     Timer::Core::Update();
 
-    GameLogic::Tick(world);
-    ++ticks;
-
-    // Demonstrate a despawn mid-run: destroy a prop, which the tracker will pick
-    // up and turn into a reliable EntityDespawn event.
-    if (ticks == 300 && world.IsValid(propB))
-      world.Destroy(propB);
-
-    // Reliable events: any entity that vanished this tick despawns.
-    for (uint32_t goneId : despawns.Update(CurrentIds(world)))
-      Net::SendDespawn(events, goneId);
-
-    if (netReady)
+    // 1. Receive client input and acks; new endpoints connect on their first input.
+    Net::Endpoint from;
+    for (int i = 0; i < 256; ++i)
     {
-      // Per-viewer area-of-interest snapshot (here: the one player), split into
-      // MTU-bounded fire-and-forget datagrams.
-      const Math::Vector3i64 viewerPos = world.Get<GameLogic::WorldTransform>(player).position;
-      aoi.Rebuild(world);
-      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, ticks, viewerPos, kAoiRadiusCells);
-      for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+      const int got = socket.RecvFrom(recv, sizeof(recv), from);
+      if (got <= 0)
+        break;
+
+      const std::size_t size = static_cast<std::size_t>(got);
+      switch (Net::PeekMagic(recv, size))
       {
-        if (socket.SendTo(client, datagram.data(), datagram.size()) > 0)
-          ++datagrams;
-      }
-
-      // Reliable event packet (resent until the client acks it).
-      const std::vector<uint8_t> eventPacket = events.WritePacket();
-      socket.SendTo(client, eventPacket.data(), eventPacket.size());
-
-      // Drain inbound datagrams: route client acks into the reliable channel.
-      Net::Endpoint from;
-      for (int i = 0; i < 64; ++i)
-      {
-        const int got = socket.RecvFrom(recvBuffer, sizeof(recvBuffer), from);
-        if (got <= 0)
-          break;
-
-        const std::size_t size = static_cast<std::size_t>(got);
-        switch (Net::PeekMagic(recvBuffer, size))
+        case Net::INPUT_MAGIC:
         {
-          case Net::EVENT_MAGIC:
-            events.ReadPacket(recvBuffer, size);   // client acks
-            break;
-
-          case Net::INPUT_MAGIC:
-          {
-            // Client intent: apply the latest to the player's authoritative
-            // FlightIntent (stale/duplicate sequences are dropped).
-            Net::DataReader reader(recvBuffer, size);
-            Net::ClientInput in;
-            if (Net::ReadInput(reader, in) && in.sequence > lastInputSeq && world.IsValid(player))
-            {
-              lastInputSeq = in.sequence;
-              GameLogic::FlightIntent& fi = world.Get<GameLogic::FlightIntent>(player);
-              fi.rollAxis = in.rollAxis;
-              fi.pitchAxis = in.pitchAxis;
-              fi.throttle = in.throttle;
-            }
-            break;
-          }
-
-          default:
-            break;
+          Net::DataReader reader(recv, size);
+          Net::ClientInput in;
+          if (Net::ReadInput(reader, in))
+            sessions.OnInput(world, from, in, tick);
+          break;
         }
+        case Net::EVENT_MAGIC:
+          sessions.OnReliable(from, recv, size);
+          break;
+        default:
+          break;
       }
     }
 
-    if (Timer::Core::GetTotalSeconds() > 10)
-      stop = true;
+    // 2. Advance the authoritative simulation one tick.
+    GameLogic::Tick(world);
+    ++tick;
+
+    // Demonstrate a despawn mid-run.
+    if (tick == 300 && world.IsValid(propB))
+      world.Destroy(propB);
+
+    // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
+    //    as a reliable event to all remaining clients.
+    sessions.Reap(world, tick, kSessionTimeoutTicks);
+    for (uint32_t goneId : despawns.Update(CurrentIds(world)))
+      sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(goneId));
+
+    // 4. Send each client its own area-of-interest snapshot + reliable event packet.
+    aoi.Rebuild(world);
+    for (auto& entry : sessions.All())
+    {
+      GameLogic::Session& s = entry.second;
+
+      Math::Vector3i64 viewerPos{ 0, 0, 0 };
+      if (world.IsValid(s.entity))
+        viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
+
+      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, kAoiRadiusCells);
+      for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+        socket.SendTo(s.endpoint, datagram.data(), datagram.size());
+
+      const std::vector<uint8_t> eventPacket = s.events.WritePacket();
+      socket.SendTo(s.endpoint, eventPacket.data(), eventPacket.size());
+    }
+
+    Sleep(33);   // ~30 Hz tick
   }
-
-  const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(player);
-  printf("Ran %u ticks; sent %llu snapshot datagrams; %zu events still unacked; player x=%lld\n",
-         ticks,
-         static_cast<unsigned long long>(datagrams),
-         events.PendingOutgoing(),
-         static_cast<long long>(t.position.x));
-
-  socket.Close();
-  Net::NetShutdown();
 }
