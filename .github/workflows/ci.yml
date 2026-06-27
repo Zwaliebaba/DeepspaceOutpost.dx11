@@ -42,8 +42,15 @@ jobs:
         with:
           arch: amd64
 
+      # The presets pull in VS's SegmentHeap.cmake (a local VS CMake component
+      # under $VSINSTALLDIR) that isn't installed on hosted runners. It's only a
+      # Segment-Heap opt-in and isn't needed to verify the build, so override it
+      # to empty here. bash gives unambiguous empty-assignment parsing; the MSVC
+      # env from the previous step is exported to the whole job.
       - name: Configure (${{ matrix.preset }})
-        run: cmake --preset ${{ matrix.preset }}
+        shell: bash
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=
 
       - name: Build (${{ matrix.preset }})
+        shell: bash
         run: cmake --build --preset ${{ matrix.preset }}
