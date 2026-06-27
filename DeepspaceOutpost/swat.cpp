@@ -13,6 +13,7 @@
 #include "config.h"
 #include "gfx.h"
 #include "RenderContext.h"
+#include "GameUniverse.h"
 #include "elite.h"
 #include "vector.h"
 #include "swat.h"
@@ -1221,7 +1222,7 @@ void abandon_ship (void)
 
 	cmdr.escape_pod = 0;
 	cmdr.legal_status = 0;
-	cmdr.fuel = myship.max_fuel;
+	cmdr.fuel = PlayerCaps().maxFuel;
 	
 	for (i = 0; i < NO_OF_STOCK_ITEMS; i++)
 		cmdr.current_cargo[i] = 0;

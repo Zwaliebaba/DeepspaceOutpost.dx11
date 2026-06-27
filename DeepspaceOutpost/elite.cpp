@@ -87,8 +87,6 @@ struct commander saved_cmdr =
 
 struct commander cmdr;
 
-struct player_ship myship;
-
 
 struct ship_data *ship_list[NO_OF_SHIPS + 1] =
 {

@@ -12,3 +12,10 @@
 #include "Universe.h"
 
 Neuron::Universe& GameUniverse();
+
+// The player ship's capability component (replaces the legacy `myship` global).
+// Valid once initialise_game has created the player entity.
+inline Neuron::Game::ShipCaps& PlayerCaps()
+{
+  return GameUniverse().Reg().Get<Neuron::Game::ShipCaps>(GameUniverse().Player());
+}
