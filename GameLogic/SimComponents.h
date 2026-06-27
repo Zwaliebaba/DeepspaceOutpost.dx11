@@ -24,6 +24,23 @@ namespace Neuron::GameLogic
     Math::Vector3i64 perTick{};
   };
 
+  // Renderable ship-type ids, matching the client's legacy SHIP_* values so the
+  // replicated type maps straight onto a model.
+  namespace ShipType
+  {
+    inline constexpr int Sun = -2;
+    inline constexpr int Planet = -1;
+    inline constexpr int Coriolis = 2;
+    inline constexpr int Viper = 16;
+  }
+
+  // The model an entity is drawn as (replicated to the client). Absent => 0,
+  // which the client draws as a default ship.
+  struct NetType
+  {
+    int type = 0;
+  };
+
   // Authoritative flight state of a steerable craft, in absolute world space.
   //
   // This is the server-side inverse of the legacy player-relative model: instead

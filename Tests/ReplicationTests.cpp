@@ -50,9 +50,9 @@ TEST(Replication_SnapshotRoundTrips)
   snap.tick = 42;
   snap.entities.push_back(Net::EntitySnapshot{
     /*id*/ 3, /*x*/ 1000, /*y*/ -2000, /*z*/ 9000,
-    /*nose*/ 0.0f, 0.0f, 1.0f, /*roof*/ 0.0f, 1.0f, 0.0f, /*speed*/ 12.5f });
+    /*nose*/ 0.0f, 0.0f, 1.0f, /*roof*/ 0.0f, 1.0f, 0.0f, /*speed*/ 12.5f, /*type*/ -1 });
   snap.entities.push_back(Net::EntitySnapshot{
-    7, -5, 5, 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f });
+    7, -5, 5, 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, /*type*/ 2 });
 
   Net::DataWriter w;
   Net::WriteSnapshot(w, snap);
@@ -105,6 +105,7 @@ TEST(Replication_BuildSnapshotReadsAuthoritativeComponents)
   f.nose = Math::Vector3d{ 1.0, 0.0, 0.0 };
   f.speed = 9.0;
   world.Add<GameLogic::Flight>(a, f);
+  world.Add<GameLogic::NetType>(a, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
 
   ECS::EntityId b = world.Create();
   world.Add<GameLogic::WorldTransform>(b, GameLogic::WorldTransform{ { -7, 0, 0 } });
@@ -133,8 +134,10 @@ TEST(Replication_BuildSnapshotReadsAuthoritativeComponents)
   CHECK(ea->noseX == 1.0f);
   CHECK(ea->noseZ == 0.0f);
   CHECK(ea->speed == 9.0f);
+  CHECK(ea->type == 2);          // Coriolis
 
   CHECK(eb->x == -7);
   CHECK(eb->noseZ == 1.0f);   // default forward
   CHECK(eb->speed == 0.0f);
+  CHECK(eb->type == 0);          // no NetType -> default
 }

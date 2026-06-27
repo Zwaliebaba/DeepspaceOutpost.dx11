@@ -32,8 +32,8 @@ namespace
 
 TEST(Transport_EntitiesPerDatagramFitsTheMtu)
 {
-  // (1200 - 12 header) / 56 per-entity = 21 whole entities.
-  CHECK(Net::EntitiesPerDatagram(1200) == 21);
+  // (1200 - 12 header) / 58 per-entity = 20 whole entities.
+  CHECK(Net::EntitiesPerDatagram(1200) == 20);
   // Never returns zero, even for a payload smaller than one entity/header.
   CHECK(Net::EntitiesPerDatagram(10) == 1);
   CHECK(Net::EntitiesPerDatagram(Net::SNAPSHOT_HEADER_SIZE + Net::SNAPSHOT_ENTITY_SIZE) == 1);

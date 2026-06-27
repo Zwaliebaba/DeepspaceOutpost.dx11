@@ -49,18 +49,19 @@ int main()
   // The authoritative world. A couple of static props so a lone player still sees
   // something; players are spawned on demand as clients connect.
   ECS::Registry world;
-  const ECS::EntityId propA = world.Create();
-  world.Add<GameLogic::WorldTransform>(propA, GameLogic::WorldTransform{ { 3000, 0, 0 } });
-  ECS::EntityId propB = world.Create();
-  world.Add<GameLogic::WorldTransform>(propB, GameLogic::WorldTransform{ { 0, 3000, 0 } });
 
-  // Two opposing NPC combatants so the authoritative combat system is live.
-  const ECS::EntityId red = world.Create();
-  world.Add<GameLogic::WorldTransform>(red, GameLogic::WorldTransform{ { 1000, 0, 0 } });
-  world.Add<GameLogic::Combatant>(red, GameLogic::Combatant{ /*team*/ 0, /*energy*/ 100, /*laser*/ 2, /*range*/ 8000 });
-  const ECS::EntityId blue = world.Create();
-  world.Add<GameLogic::WorldTransform>(blue, GameLogic::WorldTransform{ { 2000, 0, 0 } });
-  world.Add<GameLogic::Combatant>(blue, GameLogic::Combatant{ /*team*/ 1, /*energy*/ 100, /*laser*/ 2, /*range*/ 8000 });
+  // The home system's celestial bodies, ahead of the spawn so a launching player
+  // sees them (typed so the client draws the planet/station models, not a ship).
+  const ECS::EntityId planet = world.Create();
+  world.Add<GameLogic::WorldTransform>(planet, GameLogic::WorldTransform{ { 0, 0, 65536 } });
+  world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
+
+  // One pirate so there is something to fight near the lane to the station.
+  const ECS::EntityId pirate = world.Create();
+  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 6000, 1000, 10000 } });
+  world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
+  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 8000, /*autoEngage*/ true });
+  world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
 
   // The ported galaxy/economy systems, live on the server: the home system, its
   // market, and a dockable station entity at the origin.
@@ -74,7 +75,8 @@ int main()
   }
 
   const ECS::EntityId station = world.Create();
-  world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 0 } });
+  world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 3000 } });
+  world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
   // The station is a (near-indestructible) combat target so firing on it is a
   // detectable crime; it never initiates fire (autoEngage = false).
   world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
@@ -168,10 +170,6 @@ int main()
     GameLogic::Tick(world);
     ++tick;
     spawner.Step(world, tick);
-
-    // Demonstrate a despawn mid-run.
-    if (tick == 300 && world.IsValid(propB))
-      world.Destroy(propB);
 
     // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
     //     destroy the wrecks (their removal also rides the despawn diff below).

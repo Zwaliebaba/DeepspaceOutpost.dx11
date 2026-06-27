@@ -662,11 +662,11 @@ void render_replicated_objects (void)
 		if (drawn >= MAX_LOCAL_OBJECTS)
 			break;
 
-		// Replicated entities don't carry a model type yet, so draw each as a
-		// generic ship; type replication is a clean follow-on.
+		// Draw each entity as its replicated model (planet, station, ships);
+		// entities with no type fall back to a generic ship.
 		struct local_object obj;
 		memset (&obj, 0, sizeof(obj));
-		obj.type = SHIP_VIPER;
+		obj.type = (rec.type != 0) ? rec.type : SHIP_VIPER;
 		obj.location = rec.location;
 		obj.rotmat[0] = rec.rotmat[0];
 		obj.rotmat[1] = rec.rotmat[1];

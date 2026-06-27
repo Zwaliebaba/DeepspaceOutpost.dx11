@@ -41,7 +41,7 @@ namespace Neuron::Net
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.
   inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 2;   // magic+version+tick+count
-  inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (8 * 3) + (4 * 7);   // id + i64 pos + f32 orient/speed
+  inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (8 * 3) + (4 * 7) + 2;   // id + i64 pos + f32 orient/speed + i16 type
 
   // A conservative UDP payload that avoids IP fragmentation across the public
   // internet (well under the 1500-byte Ethernet MTU minus IP+UDP headers, and at
@@ -66,6 +66,8 @@ namespace Neuron::Net
     float roofZ = 0.0f;
 
     float speed = 0.0f;              // world units/tick along the nose (dead-reckoning)
+
+    int16_t type = 0;                // renderable ship type (legacy SHIP_*; 0 = default)
 
     [[nodiscard]] friend bool operator==(const EntitySnapshot&, const EntitySnapshot&) = default;
   };
@@ -97,6 +99,7 @@ namespace Neuron::Net
       _w.WriteF32(e.roofY);
       _w.WriteF32(e.roofZ);
       _w.WriteF32(e.speed);
+      _w.WriteU16(static_cast<uint16_t>(e.type));
     }
   }
 
@@ -128,6 +131,7 @@ namespace Neuron::Net
       e.roofY = _r.ReadF32();
       e.roofZ = _r.ReadF32();
       e.speed = _r.ReadF32();
+      e.type = static_cast<int16_t>(_r.ReadU16());
       _out.entities.push_back(e);
     }
 

@@ -26,6 +26,7 @@ namespace Neuron::Client
   struct RenderRecord
   {
     uint32_t id = 0;
+    int type = 0;                       // replicated ship type (legacy SHIP_*)
     Vector location{ 0.0, 0.0, 0.0 };   // relative to the floating origin
     Matrix rotmat{};                    // [0]=side, [1]=roof, [2]=nose
     double distance = 0.0;
@@ -56,6 +57,7 @@ namespace Neuron::Client
 
       RenderRecord r;
       r.id = e.id;
+      r.type = e.type;
       r.location.x = static_cast<double>(e.x - origin.x);
       r.location.y = static_cast<double>(e.y - origin.y);
       r.location.z = static_cast<double>(e.z - origin.z);

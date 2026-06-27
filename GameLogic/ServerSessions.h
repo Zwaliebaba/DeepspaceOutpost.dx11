@@ -144,6 +144,7 @@ namespace Neuron::GameLogic
       _world.Add<PlayerTag>(e, PlayerTag{});
       _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ 255, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
       _world.Add<Wanted>(e, Wanted{});
+      _world.Add<NetType>(e, NetType{ ShipType::Viper });
       return e;
     }
 

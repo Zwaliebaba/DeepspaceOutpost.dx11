@@ -38,6 +38,9 @@ namespace Neuron::GameLogic
       e.speed = static_cast<float>(f->speed);
     }
 
+    if (const NetType* nt = _world.TryGet<NetType>(_id))
+      e.type = static_cast<int16_t>(nt->type);
+
     return e;
   }
 
