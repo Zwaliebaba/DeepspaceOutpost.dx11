@@ -26,7 +26,10 @@ set(GAME_SOURCES
 )
 
 # ---- Platform layer (Win32 / Direct3D 11 / XAudio2) - idiomatic modern C++23 ----
+# RenderQueue is the new A1 "render seam" (house-style C++23). It is held to the
+# same higher warning bar as the platform layer, not the legacy /permissive tier.
 set(PLATFORM_SOURCES
+    RenderQueue.cpp
     platform/platform_win.cpp
     platform/Renderer.cpp
     platform/gfx_dx11.cpp
