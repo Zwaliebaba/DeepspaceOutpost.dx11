@@ -54,10 +54,16 @@ namespace Neuron::Client
     // false if none are ready. Decode with the GameEvents.h helpers.
     bool PollEvent(Net::ReliableMessage& _out) { return m_events.Receive(_out); }
 
+    // The entity id the local player controls. Its replicated position is used as
+    // the floating origin for rendering, and it is not drawn as a separate ship.
+    void SetLocalPlayer(uint32_t _id) { m_localPlayer = _id; }
+    [[nodiscard]] uint32_t LocalPlayer() const { return m_localPlayer; }
+
   private:
     Net::UdpSocket m_socket;
     Net::SnapshotInterpolator m_interp;   // unreliable bulk state
     Net::ReliableChannel m_events;        // reliable ordered events
+    uint32_t m_localPlayer = 0;
     bool m_open = false;
   };
 

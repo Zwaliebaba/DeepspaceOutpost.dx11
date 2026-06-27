@@ -65,6 +65,7 @@ void add_new_station (double sx, double sy, double sz, Matrix rotmat);
 void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
+void render_replicated_objects (void);
 
 void update_console (void);
 

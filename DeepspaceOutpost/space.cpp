@@ -34,6 +34,8 @@
 #include "stars.h"
 #include "pilot.h"
 #include "Camera.h"
+#include "ReplicationClient.h"
+#include "ReplicatedScene.h"
 
 
 struct galaxy_seed destination_planet;
@@ -617,6 +619,58 @@ void update_local_objects (void)
 	FlushRenderQueue();
 
 	detonate_bomb = 0;
+}
+
+
+/*
+ * Render the replicated world instead of the locally-simulated one.
+ *
+ * The thin-client path: the server is authoritative, so rather than moving and
+ * fighting local_objects we sample the interpolated snapshots from the
+ * ReplicationClient, rebase them around the local player (the floating origin)
+ * into the legacy render frame, and draw them through the same pipeline. No game
+ * logic runs here - the client only displays. Enabled via Open() on the client
+ * (see game_main); otherwise update_local_objects() runs as before.
+ */
+
+void render_replicated_objects (void)
+{
+	ActiveRenderQueue().StartRender();
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+
+	// Sample at alpha 1.0 (the latest tick) for now; a render-time-based alpha for
+	// smoother interpolation is a later refinement.
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords(ents, rc.LocalPlayer());
+
+	const Neuron::Client::Camera cam = Neuron::Client::CurrentCamera();
+
+	int drawn = 0;
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		if (drawn >= MAX_LOCAL_OBJECTS)
+			break;
+
+		// Replicated entities don't carry a model type yet, so draw each as a
+		// generic ship; type replication is a clean follow-on.
+		struct local_object obj;
+		memset (&obj, 0, sizeof(obj));
+		obj.type = SHIP_VIPER;
+		obj.location = rec.location;
+		obj.rotmat[0] = rec.rotmat[0];
+		obj.rotmat[1] = rec.rotmat[1];
+		obj.rotmat[2] = rec.rotmat[2];
+		obj.distance = (int) rec.distance;
+
+		Neuron::Client::ApplyCamera (cam, &obj);
+		draw_ship (&obj);
+		++drawn;
+	}
+
+	ActiveRenderQueue().FinishRender();
+	FlushRenderQueue();
 }
 
 

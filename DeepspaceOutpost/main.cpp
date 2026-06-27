@@ -1335,7 +1335,17 @@ int game_main (void)
 
 	/* Do any setup necessary for the keyboard... */
 	kbd_keyboard_startup();
-	
+
+	// Optional thin-client mode (off by default): if DSO_REPLICATION is set in
+	// the environment, bind the replication client and render the server's
+	// authoritative world instead of the local simulation. Requires a running
+	// Server. No env var => the single-player game runs exactly as before.
+	if (getenv("DSO_REPLICATION"))
+	{
+		Neuron::Client::ReplicationClientInstance().Open(50000);
+		Neuron::Client::ReplicationClientInstance().SetLocalPlayer(0);
+	}
+
 	finish = 0;
 	auto_pilot = 0;
 	
@@ -1405,7 +1415,12 @@ int game_main (void)
 						info_message ("Docking Computers On");
 				}
 
-				update_local_objects ();
+				// In thin-client mode the server owns the world: render the
+				// replicated, interpolated state instead of simulating locally.
+				if (Neuron::Client::ReplicationClientInstance().IsOpen())
+					render_replicated_objects ();
+				else
+					update_local_objects ();
 
 				if (docked)
 				{
