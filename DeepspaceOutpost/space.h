@@ -37,8 +37,25 @@ struct local_object
 
 #define MAX_LOCAL_OBJECTS	20
 
-extern struct local_object local_objects[MAX_LOCAL_OBJECTS];
+/*
+ * local_objects[i] is backed by the ECS (A2 flip): the Universe owns
+ * MAX_LOCAL_OBJECTS permanent per-slot entities, each carrying a `local_object`
+ * component. This proxy maps the legacy slot-index syntax onto them so the game
+ * logic is unchanged (operator[] defined in LocalObjects.cpp). The slot pool is
+ * pre-created and never grown, so element references and &local_objects[i]
+ * pointers stay stable across a frame, exactly like the old array.
+ */
+class LocalObjectArray
+{
+public:
+	struct local_object& operator[] (int slot);
+};
+
+extern LocalObjectArray local_objects;
 extern int ship_count[NO_OF_SHIPS + 1];  /* many */
+
+/* (Re)create the MAX_LOCAL_OBJECTS slot entities in the Universe. */
+void create_local_object_slots (void);
 
 
 

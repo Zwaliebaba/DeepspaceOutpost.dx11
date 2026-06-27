@@ -165,6 +165,10 @@ void initialise_game(void)
 		GameUniverse().SetPlayer(player);
 	}
 
+	/* Create the ECS slot entities that back local_objects[] (must exist before
+	   clear_local_objects / any local_objects[i] access below). */
+	create_local_object_slots();
+
 	restore_saved_commander();
 
 	PlayerFlight().speed = 1;

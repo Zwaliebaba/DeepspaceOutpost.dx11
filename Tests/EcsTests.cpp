@@ -146,6 +146,36 @@ TEST(Ecs_EachIteratesMatchingEntities)
   CHECK(velocityCount == 1);
 }
 
+TEST(Ecs_ComponentReferencesStableWithoutAddRemove)
+{
+  // The local_objects[] proxy relies on this: as long as no component of a type
+  // is added/removed, references (and pointers like &local_objects[un]) stay
+  // valid across arbitrarily many Get calls and mutations.
+  Registry r;
+  EntityId ids[20];
+  for (int i = 0; i < 20; ++i)
+  {
+    ids[i] = r.Create();
+    r.Add<Position>(ids[i], Position{ i, 0 });
+  }
+
+  Position* p5 = &r.Get<Position>(ids[5]);
+  Position* p17 = &r.Get<Position>(ids[17]);
+
+  // Lots of reads/mutations - no add/remove, so nothing reallocates.
+  for (int k = 0; k < 200; ++k)
+    r.Get<Position>(ids[k % 20]).y = k;
+
+  CHECK(&r.Get<Position>(ids[5]) == p5);     // same address
+  CHECK(&r.Get<Position>(ids[17]) == p17);
+  CHECK(p5->x == 5);
+  CHECK(p17->x == 17);
+
+  // Mutating through the cached pointer is visible through the registry.
+  p5->x = 999;
+  CHECK(r.Get<Position>(ids[5]).x == 999);
+}
+
 TEST(Ecs_EachTwoComponentsIntersects)
 {
   Registry r;

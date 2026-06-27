@@ -36,7 +36,7 @@ int missile_target;
 int ecm_ours;
 int in_battle;
 
-struct local_object local_objects[MAX_LOCAL_OBJECTS];
+/* local_objects is now the ECS-backed proxy (defined in LocalObjects.cpp). */
 int ship_count[NO_OF_SHIPS + 1];  /* many */
 
 

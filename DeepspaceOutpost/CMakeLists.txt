@@ -6,6 +6,7 @@
 # ---- Portable game logic (formerly C, now compiled as C++23) ----
 set(GAME_SOURCES
     main.cpp
+    LocalObjects.cpp
     elite.cpp
     space.cpp
     threed.cpp
