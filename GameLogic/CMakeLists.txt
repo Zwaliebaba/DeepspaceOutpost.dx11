@@ -16,6 +16,7 @@ set(GAMELOGIC_HEADERS
     MotionSystem.h
     Economy.h
     Galaxy.h
+    Combat.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

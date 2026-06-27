@@ -14,6 +14,7 @@ set(TEST_SOURCES
     MotionTests.cpp
     EconomyTests.cpp
     GalaxyTests.cpp
+    CombatTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)

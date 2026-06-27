@@ -16,6 +16,7 @@
 #include "MotionSystem.h"
 #include "Economy.h"
 #include "Galaxy.h"
+#include "Combat.h"
 
 namespace Neuron::GameLogic
 {
