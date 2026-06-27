@@ -40,10 +40,7 @@ int game_over;
 int docked;
 int finish;
 /* PlayerFlight().speed/roll/climb migrated to the FlightRates component (PlayerFlight()). */
-int front_shield;
-int aft_shield;
-int energy;
-int laser_temp;
+int energy;	/* PlayerDefense().frontShield/PlayerDefense().aftShield/PlayerDefense().laserHeat migrated to Defense (PlayerDefense()) */
 int detonate_bomb;
 int auto_pilot;
 

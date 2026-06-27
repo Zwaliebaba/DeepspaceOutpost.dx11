@@ -206,7 +206,7 @@ void add_new_station (double sx, double sy, double sz, Matrix rotmat)
 	
 void reset_weapons (void)
 {
-	laser_temp = 0;
+	PlayerDefense().laserHeat = 0;
 	laser_counter = 0;
 	laser = 0;
 	ecm_active = 0;
@@ -779,8 +779,8 @@ void tactics (int un)
 		{
 			damage_ship (ship_list[type]->laser_strength, ship->location.z >= 0.0);
 			ship->acceleration--;
-			if (((ship->location.z >= 0.0) && (front_shield == 0)) ||
-				((ship->location.z < 0.0) && (aft_shield == 0)))
+			if (((ship->location.z >= 0.0) && (PlayerDefense().frontShield == 0)) ||
+				((ship->location.z < 0.0) && (PlayerDefense().aftShield == 0)))
 				snd_play_sample (SND_INCOMMING_FIRE_2);
 			else
 				snd_play_sample (SND_INCOMMING_FIRE_1);
@@ -888,7 +888,7 @@ void draw_laser_lines (void)
 
 int fire_laser (void)
 {
-	if ((laser_counter == 0) && (laser_temp < 242))
+	if ((laser_counter == 0) && (PlayerDefense().laserHeat < 242))
 	{
 		switch (current_screen)
 		{
@@ -919,7 +919,7 @@ int fire_laser (void)
 			laser2 = laser;
 
 			snd_play_sample (SND_PULSE);
-			laser_temp += 8;
+			PlayerDefense().laserHeat += 8;
 			if (energy > 1)
 				energy--;
 			
@@ -938,8 +938,8 @@ void cool_laser (void)
 {
 	laser = 0;
 
-	if (laser_temp > 0)
-		laser_temp--;
+	if (PlayerDefense().laserHeat > 0)
+		PlayerDefense().laserHeat--;
 					
 	if (laser_counter > 0)
 		laser_counter--;

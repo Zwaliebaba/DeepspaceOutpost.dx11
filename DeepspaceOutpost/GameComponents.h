@@ -82,6 +82,16 @@ namespace Neuron::Game
     int climb = 0;
   };
 
+  // The player's defensive / power state (legacy globals front_shield,
+  // aft_shield, energy, laser_temp). `energy` is migrated in a later pass.
+  struct Defense
+  {
+    int frontShield = 0;
+    int aftShield = 0;
+    int energy = 0;
+    int laserHeat = 0;
+  };
+
   // Tag marking the player's own ship entity.
   struct PlayerTag {};
 }

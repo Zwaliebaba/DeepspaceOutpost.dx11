@@ -161,6 +161,7 @@ void initialise_game(void)
 		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
 		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{});
 		GameUniverse().Reg().Add<Neuron::Game::FlightRates>(player, Neuron::Game::FlightRates{});
+		GameUniverse().Reg().Add<Neuron::Game::Defense>(player, Neuron::Game::Defense{});
 		GameUniverse().SetPlayer(player);
 	}
 
@@ -170,8 +171,8 @@ void initialise_game(void)
 	PlayerFlight().roll = 0;
 	PlayerFlight().climb = 0;
 	docked = 1;
-	front_shield = 255;
-	aft_shield = 255;
+	PlayerDefense().frontShield = 255;
+	PlayerDefense().aftShield = 255;
 	energy = 255;
 	draw_lasers = 0;
 	mcount = 0;

@@ -199,8 +199,8 @@ void dock_player (void)
 	PlayerFlight().speed = 0;
 	PlayerFlight().roll = 0;
 	PlayerFlight().climb = 0;
-	front_shield = 255;
-	aft_shield = 255;
+	PlayerDefense().frontShield = 255;
+	PlayerDefense().aftShield = 255;
 	energy = 255;
 	PlayerCaps().altitude = 255;
 	PlayerCaps().cabTemp = 30;
@@ -359,15 +359,15 @@ void regenerate_shields (void)
 {
 	if (energy > 127)
 	{
-		if (front_shield < 255)
+		if (PlayerDefense().frontShield < 255)
 		{
-			front_shield++;
+			PlayerDefense().frontShield++;
 			energy--;
 		}
 	
-		if (aft_shield < 255)
+		if (PlayerDefense().aftShield < 255)
 		{
-			aft_shield++;
+			PlayerDefense().aftShield++;
 			energy--;
 		}
 	}
@@ -399,7 +399,7 @@ void damage_ship (int damage, int front)
 	if (damage <= 0)	/* sanity check */
 		return;
 	
-	shield = front ? front_shield : aft_shield;
+	shield = front ? PlayerDefense().frontShield : PlayerDefense().aftShield;
 	
 	shield -= damage;
 	if (shield < 0)
@@ -409,9 +409,9 @@ void damage_ship (int damage, int front)
 	}
 	
 	if (front)
-		front_shield = shield;
+		PlayerDefense().frontShield = shield;
 	else
-		aft_shield = shield;
+		PlayerDefense().aftShield = shield;
 }
 
 
@@ -826,11 +826,11 @@ void display_dial_bar (int len, int x, int y)
 
 void display_shields (void)
 {
-	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 31, 7);
+	if (PlayerDefense().frontShield > 3)
+		display_dial_bar (PlayerDefense().frontShield / 4, 31, 7);
 
-	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 31, 23);
+	if (PlayerDefense().aftShield > 3)
+		display_dial_bar (PlayerDefense().aftShield / 4, 31, 23);
 }
 
 
@@ -849,8 +849,8 @@ void display_cabin_temp (void)
 
 void display_laser_temp (void)
 {
-	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 31, 76);
+	if (PlayerDefense().laserHeat > 0)
+		display_dial_bar (PlayerDefense().laserHeat / 4, 31, 76);
 }
 
 

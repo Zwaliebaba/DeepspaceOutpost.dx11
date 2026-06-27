@@ -25,3 +25,10 @@ inline Neuron::Game::FlightRates& PlayerFlight()
 {
   return GameUniverse().Reg().Get<Neuron::Game::FlightRates>(GameUniverse().Player());
 }
+
+// The player ship's defensive/power state (replaces front_shield/aft_shield/
+// energy/laser_temp).
+inline Neuron::Game::Defense& PlayerDefense()
+{
+  return GameUniverse().Reg().Get<Neuron::Game::Defense>(GameUniverse().Player());
+}
