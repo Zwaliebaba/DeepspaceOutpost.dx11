@@ -34,6 +34,7 @@ set(PLATFORM_SOURCES
     RenderContext.cpp
     GameUniverse.cpp
     Camera.cpp
+    ReplicationClient.cpp
     platform/GfxRenderSink.cpp
     platform/platform_win.cpp
     platform/Renderer.cpp

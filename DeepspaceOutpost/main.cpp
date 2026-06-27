@@ -44,6 +44,7 @@
 #include "file.h"
 #include "keyboard.h"
 #include "Camera.h"
+#include "ReplicationClient.h"
 
 
 
@@ -1358,6 +1359,12 @@ int game_main (void)
 		
 		while (!game_over)
 		{
+			// Drain any replicated world state that arrived since last frame. This
+			// is a no-op until ReplicationClientInstance().Open() is called, so the
+			// single-player path is unchanged; once open, the client consumes the
+			// server's authoritative snapshots here instead of simulating locally.
+			Neuron::Client::ReplicationClientInstance().Pump();
+
 			snd_update_sound();
 			gfx_update_screen();
 			gfx_set_clip_region (1, 1, 510, 383);

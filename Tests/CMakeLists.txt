@@ -20,6 +20,7 @@ set(TEST_SOURCES
     CameraFollowTests.cpp
     ReplicationTests.cpp
     SnapshotTransportTests.cpp
+    InterpolationTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)
