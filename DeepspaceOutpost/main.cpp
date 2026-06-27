@@ -1381,15 +1381,24 @@ int game_main (void)
 	/* Do any setup necessary for the keyboard... */
 	kbd_keyboard_startup();
 
-	// Optional thin-client mode (off by default): if DSO_REPLICATION is set in
-	// the environment, bind the replication client and render the server's
-	// authoritative world instead of the local simulation. Requires a running
-	// Server. No env var => the single-player game runs exactly as before.
-	if (getenv("DSO_REPLICATION"))
+	// Server-only client: single-player has been retired, so we always connect to
+	// the authoritative server and render its world. The bind port and server
+	// address can be overridden with DSO_BIND / DSO_SERVER (dotted-quad host);
+	// they default to loopback for local play. The local-simulation path remains
+	// only as a degraded fallback if networking fails to initialise.
 	{
 		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-		rc.Open(50000);
-		rc.SetServerEndpoint(Neuron::Net::MakeEndpoint(127, 0, 0, 1, 40000));
+
+		uint16_t bindPort = 50000;
+		if (const char* b = getenv("DSO_BIND"))
+			bindPort = (uint16_t) atoi(b);
+
+		int a = 127, c = 0, d = 0, e = 1;
+		if (const char* host = getenv("DSO_SERVER"))
+			sscanf(host, "%d.%d.%d.%d", &a, &c, &d, &e);
+
+		rc.Open(bindPort);
+		rc.SetServerEndpoint(Neuron::Net::MakeEndpoint((uint8_t)a, (uint8_t)c, (uint8_t)d, (uint8_t)e, 40000));
 		// LocalPlayer is set by the server's AssignPlayer handshake; default 0.
 	}
 
