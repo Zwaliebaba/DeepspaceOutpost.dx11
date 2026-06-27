@@ -23,6 +23,18 @@ namespace
     _w.Add<GameLogic::DockState>(e, GameLogic::DockState{});
     return e;
   }
+
+  // A station entity with a market (food at index 0).
+  ECS::EntityId SpawnStation(ECS::Registry& _w, int64_t _x, int _foodPrice, int _foodQty)
+  {
+    ECS::EntityId e = _w.Create();
+    _w.Add<GameLogic::WorldTransform>(e, GameLogic::WorldTransform{ { _x, 0, 0 } });
+    GameLogic::ServerStation st;
+    st.market[0].price = _foodPrice;
+    st.market[0].quantity = _foodQty;
+    _w.Add<GameLogic::ServerStation>(e, st);
+    return e;
+  }
 }
 
 TEST(Station_BuyMovesCreditsCargoAndStock)
@@ -138,31 +150,44 @@ TEST(Station_CanDockOnlyWithinRange)
 
 TEST(Station_ProcessDockSucceedsInRangeFailsOutOfRange)
 {
-  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
-
   ECS::Registry w1;
+  ECS::EntityId stn = SpawnStation(w1, /*x*/ 0, 10, 50);
   ECS::EntityId near = SpawnTrader(w1, /*x*/ 100, 1000);
   Net::StationRequest dock;
   dock.kind = Net::StationRequestKind::Dock;
-  dock.stationId = 9;
-  Net::StationResponse r1 = GameLogic::ProcessStationRequest(w1, near, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  Net::StationResponse r1 = GameLogic::ProcessStationRequest(w1, near, 5000, dock);
   CHECK(r1.status == Net::StationStatus::Ok);
   CHECK(w1.Get<GameLogic::DockState>(near).docked);
-  CHECK(w1.Get<GameLogic::DockState>(near).stationId == 9);
+  CHECK(w1.Get<GameLogic::DockState>(near).stationId == stn.index);   // attached to the nearest station
 
   ECS::Registry w2;
+  SpawnStation(w2, 0, 10, 50);
   ECS::EntityId farAway = SpawnTrader(w2, /*x*/ 100000, 1000);
-  Net::StationResponse r2 = GameLogic::ProcessStationRequest(w2, farAway, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  Net::StationResponse r2 = GameLogic::ProcessStationRequest(w2, farAway, 5000, dock);
   CHECK(r2.status == Net::StationStatus::CantDock);
   CHECK(!w2.Get<GameLogic::DockState>(farAway).docked);
+}
+
+TEST(Station_DockAttachesToTheNearestStation)
+{
+  ECS::Registry w;
+  ECS::EntityId nearStn = SpawnStation(w, /*x*/ 100, 5, 5);
+  SpawnStation(w, /*x*/ 4000, 5, 5);            // farther, also in range
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, dock);
+
+  CHECK(r.status == Net::StationStatus::Ok);
+  CHECK(w.Get<GameLogic::DockState>(p).stationId == nearStn.index);   // the closer one
 }
 
 TEST(Station_ProcessBuyNeedsDockThenSucceeds)
 {
   ECS::Registry w;
+  SpawnStation(w, /*x*/ 0, /*price*/ 10, /*qty*/ 50);
   ECS::EntityId p = SpawnTrader(w, 0, /*credits*/ 1000);
-  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
-  SetItem(market, 0, /*price*/ 10, /*qty*/ 50);
 
   Net::StationRequest buy;
   buy.kind = Net::StationRequestKind::Buy;
@@ -170,15 +195,15 @@ TEST(Station_ProcessBuyNeedsDockThenSucceeds)
   buy.quantity = 4;
 
   // Not docked yet.
-  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, buy);
+  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, 5000, buy);
   CHECK(fail.status == Net::StationStatus::NotDocked);
 
-  // Dock, then buy.
+  // Dock, then buy against the station's own market.
   Net::StationRequest dock;
   dock.kind = Net::StationRequestKind::Dock;
-  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
 
-  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, buy);
+  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, 5000, buy);
   CHECK(ok.status == Net::StationStatus::Ok);
   CHECK(ok.credits == 960);
   CHECK(ok.cargo == 4);
@@ -236,24 +261,24 @@ TEST(Station_MissilesIncrementAndCapAtFour)
 TEST(Station_ProcessEquipNeedsDocking)
 {
   ECS::Registry w;
+  SpawnStation(w, 0, 0, 0);
   ECS::EntityId p = SpawnTrader(w, 0, /*credits*/ 20000);
   w.Add<GameLogic::Equipment>(p, GameLogic::Equipment{});
-  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
 
   Net::StationRequest equip;
   equip.kind = Net::StationRequestKind::Equip;
   equip.commodity = static_cast<uint16_t>(Net::EquipItem::FuelScoop);
 
   // Not docked -> rejected.
-  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, equip);
+  Net::StationResponse fail = GameLogic::ProcessStationRequest(w, p, 5000, equip);
   CHECK(fail.status == Net::StationStatus::NotDocked);
 
   // Dock, then equip.
   Net::StationRequest dock;
   dock.kind = Net::StationRequestKind::Dock;
-  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
 
-  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, equip);
+  Net::StationResponse ok = GameLogic::ProcessStationRequest(w, p, 5000, equip);
   CHECK(ok.status == Net::StationStatus::Ok);
   CHECK(ok.credits == 14750);          // 20000 - 5250
   CHECK(w.Get<GameLogic::Equipment>(p).fuelScoop);
@@ -262,17 +287,17 @@ TEST(Station_ProcessEquipNeedsDocking)
 TEST(Station_ProcessUndock)
 {
   ECS::Registry w;
+  SpawnStation(w, 0, 0, 0);
   ECS::EntityId p = SpawnTrader(w, 0, 1000);
-  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT] = {};
 
   Net::StationRequest dock;
   dock.kind = Net::StationRequestKind::Dock;
-  (void)GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, dock);
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
   CHECK(w.Get<GameLogic::DockState>(p).docked);
 
   Net::StationRequest undock;
   undock.kind = Net::StationRequestKind::Undock;
-  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, market, Math::Vector3i64{ 0, 0, 0 }, 5000, undock);
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, undock);
   CHECK(r.status == Net::StationStatus::Ok);
   CHECK(!w.Get<GameLogic::DockState>(p).docked);
 }

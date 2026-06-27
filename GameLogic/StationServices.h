@@ -48,6 +48,15 @@ namespace Neuron::GameLogic
     bool escapePod = false;
   };
 
+  // A station's authoritative market, stored on the station entity so every
+  // player docked there trades against the same shared stock. `systemId` links
+  // it back to its galaxy system.
+  struct ServerStation
+  {
+    int systemId = 0;
+    MarketEntry market[COMMODITY_COUNT] = {};
+  };
+
   // Only commodities 0..12 are measured in tonnes and count against hold capacity
   // (Gold/Platinum/Gem-Stones/Alien Items are kg/g/special - legacy units != TONNES).
   [[nodiscard]] inline bool CountsAsTonnage(int _commodity)
@@ -250,13 +259,40 @@ namespace Neuron::GameLogic
     return ax <= _range && ay <= _range && az <= _range;
   }
 
-  // Apply a station request to `_player`'s authoritative components and the
-  // station market, returning the response to send back. The single place the
-  // request kinds dispatch; pure apart from the world/market it mutates, so it is
-  // unit-tested directly.
+  // Find the nearest station entity to `_pos` within `_range` (Chebyshev gate,
+  // nearest by Manhattan distance). Returns an invalid id when none is in range.
+  [[nodiscard]] inline ECS::EntityId NearestStation(ECS::Registry& _world, const Math::Vector3i64& _pos, int64_t _range)
+  {
+    ECS::EntityId best;
+    bool found = false;
+    int64_t bestDist = 0;
+    _world.Each<ServerStation, WorldTransform>([&](ECS::EntityId _id, ServerStation&, WorldTransform& _t)
+    {
+      const int64_t dx = _t.position.x - _pos.x;
+      const int64_t dy = _t.position.y - _pos.y;
+      const int64_t dz = _t.position.z - _pos.z;
+      const int64_t ax = dx < 0 ? -dx : dx;
+      const int64_t ay = dy < 0 ? -dy : dy;
+      const int64_t az = dz < 0 ? -dz : dz;
+      if (ax > _range || ay > _range || az > _range)
+        return;
+      const int64_t d = ax + ay + az;
+      if (!found || d < bestDist)
+      {
+        found = true;
+        bestDist = d;
+        best = _id;
+      }
+    });
+    return found ? best : ECS::EntityId{};
+  }
+
+  // Apply a station request to `_player`'s authoritative components and the market
+  // of the station they are docked at, returning the response to send back. Dock
+  // attaches to the nearest in-range station; trades hit THAT station's market.
+  // Pure apart from the world/market it mutates, so it is unit-tested directly.
   [[nodiscard]] inline Net::StationResponse ProcessStationRequest(
-      ECS::Registry& _world, ECS::EntityId _player, MarketEntry* _market,
-      const Math::Vector3i64& _stationPos, int64_t _dockRange, const Net::StationRequest& _req)
+      ECS::Registry& _world, ECS::EntityId _player, int64_t _dockRange, const Net::StationRequest& _req)
   {
     Net::StationResponse resp;
     resp.kind = _req.kind;
@@ -279,10 +315,12 @@ namespace Neuron::GameLogic
       case Net::StationRequestKind::Dock:
       {
         const WorldTransform* t = _world.TryGet<WorldTransform>(_player);
-        if (t != nullptr && CanDock(t->position, _stationPos, _dockRange))
+        const ECS::EntityId station = (t != nullptr)
+          ? NearestStation(_world, t->position, _dockRange) : ECS::EntityId{};
+        if (station.index != ECS::INVALID_INDEX)
         {
           dock->docked = true;
-          dock->stationId = _req.stationId;
+          dock->stationId = station.index;
           resp.status = Net::StationStatus::Ok;
         }
         else
@@ -298,17 +336,22 @@ namespace Neuron::GameLogic
         break;
 
       case Net::StationRequestKind::Buy:
-      {
-        const TradeResult tr = BuyCommodity(*wallet, *hold, _market, dock->docked, _req.commodity, _req.quantity);
-        resp.status = tr.status;
-        resp.credits = tr.credits;
-        resp.cargo = static_cast<uint16_t>(tr.cargo);
-        break;
-      }
-
       case Net::StationRequestKind::Sell:
       {
-        const TradeResult tr = SellCommodity(*wallet, *hold, _market, dock->docked, _req.commodity, _req.quantity);
+        if (!dock->docked)
+        {
+          resp.status = Net::StationStatus::NotDocked;
+          break;
+        }
+        ServerStation* st = _world.TryGet<ServerStation>(ECS::EntityId{ dock->stationId, 0 });
+        if (st == nullptr)
+        {
+          resp.status = Net::StationStatus::CantDock;   // docked station no longer exists
+          break;
+        }
+        const TradeResult tr = (_req.kind == Net::StationRequestKind::Buy)
+          ? BuyCommodity(*wallet, *hold, st->market, true, _req.commodity, _req.quantity)
+          : SellCommodity(*wallet, *hold, st->market, true, _req.commodity, _req.quantity);
         resp.status = tr.status;
         resp.credits = tr.credits;
         resp.cargo = static_cast<uint16_t>(tr.cargo);

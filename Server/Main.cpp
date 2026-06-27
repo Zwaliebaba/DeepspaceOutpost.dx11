@@ -63,26 +63,43 @@ int main()
   world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 8000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
 
-  // The ported galaxy/economy systems, live on the server: the home system, its
-  // market, and a dockable station entity at the origin.
-  GameLogic::MarketEntry market[GameLogic::COMMODITY_COUNT];
-  {
-    const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
-    const std::string homeName = GameLogic::NamePlanet(GameLogic::BASE_GALAXY_SEED);
-    GameLogic::GenerateMarket(home.economy, GameLogic::BASE_GALAXY_SEED.f, market);
-    printf("Home system %s: economy %d, tech %d, gov %d; food price %d\n",
-           homeName.c_str(), home.economy, home.techLevel, home.government, market[0].price);
-  }
-
-  // The station sits BEHIND the spawn (negative z) and the planet far ahead
-  // (positive z), so a launching player faces the planet with the station at
-  // their back - the classic Elite launch. Still within docking range of spawn.
+  // Home system station, BEHIND the spawn (negative z) so a launching player
+  // faces the planet with the station at their back (classic Elite launch);
+  // within docking range of spawn, and carrying its own market.
   const ECS::EntityId station = world.Create();
   world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, -3000 } });
   world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
   // The station is a (near-indestructible) combat target so firing on it is a
   // detectable crime; it never initiates fire (autoEngage = false).
   world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
+  {
+    const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
+    GameLogic::ServerStation ss;
+    ss.systemId = -1;   // the hand-placed home system
+    GameLogic::GenerateMarket(home.economy, GameLogic::BASE_GALAXY_SEED.f, ss.market);
+    world.Add<GameLogic::ServerStation>(station, ss);
+  }
+
+  // The procedural galaxy: every system's planet + station, scattered far across
+  // the int64 field (reachable by teleport, or a long flight). AOI keeps them off
+  // the wire until a player is near one. Each station carries its own market.
+  const GameLogic::GalaxyConfig galaxyCfg{};
+  for (const GameLogic::GalaxySystem& sys : GameLogic::GenerateGalaxy(galaxyCfg))
+  {
+    const ECS::EntityId pl = world.Create();
+    world.Add<GameLogic::WorldTransform>(pl, GameLogic::WorldTransform{ sys.planetPos });
+    world.Add<GameLogic::NetType>(pl, GameLogic::NetType{ GameLogic::ShipType::Planet });
+
+    const ECS::EntityId stn = world.Create();
+    world.Add<GameLogic::WorldTransform>(stn, GameLogic::WorldTransform{ sys.stationPos });
+    world.Add<GameLogic::NetType>(stn, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
+    world.Add<GameLogic::Combatant>(stn, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
+    GameLogic::ServerStation ss;
+    ss.systemId = static_cast<int>(sys.id);
+    GameLogic::GenerateMarket(sys.planet.economy, sys.marketSeed, ss.market);
+    world.Add<GameLogic::ServerStation>(stn, ss);
+  }
+  printf("Galaxy: %d systems generated.\n", galaxyCfg.planetCount);
 
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
   GameLogic::ServerSessions sessions;
@@ -148,10 +165,9 @@ int main()
       }
     }
 
-    // 1b. Process station requests (dock/buy/sell) delivered on each session's
-    //     reliable channel, replying with the authoritative result.
-    const Math::Vector3i64 stationPos =
-        world.IsValid(station) ? world.Get<GameLogic::WorldTransform>(station).position : Math::Vector3i64{};
+    // 1b. Process station requests (dock/buy/sell/equip) delivered on each
+    //     session's reliable channel; dock attaches to the nearest station and
+    //     trades hit that station's own market.
     for (auto& entry : sessions.All())
     {
       GameLogic::Session& s = entry.second;
@@ -162,7 +178,7 @@ int main()
         if (Net::DecodeStationRequest(msg, req))
         {
           const Net::StationResponse resp =
-              GameLogic::ProcessStationRequest(world, s.entity, market, stationPos, kDockRange, req);
+              GameLogic::ProcessStationRequest(world, s.entity, kDockRange, req);
           Net::SendStationResponse(s.events, resp);
         }
       }
