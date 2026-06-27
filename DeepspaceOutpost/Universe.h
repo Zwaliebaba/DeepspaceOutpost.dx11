@@ -37,6 +37,13 @@ namespace Neuron
 
     void Destroy(ECS::EntityId _entity) { m_reg.Destroy(_entity); }
 
+    // Tear down all entities (called when a new game starts).
+    void Reset()
+    {
+      m_reg = ECS::Registry{};
+      m_player = ECS::EntityId{};
+    }
+
     [[nodiscard]] std::size_t ObjectCount() const { return m_reg.AliveCount(); }
 
   private:

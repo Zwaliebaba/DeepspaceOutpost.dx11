@@ -22,6 +22,8 @@
 
 #include "config.h"
 #include "gfx.h"
+#include "GameUniverse.h"
+#include "GameComponents.h"
 #include "main.h"
 #include "vector.h"
 #include "alg_data.h"
@@ -145,6 +147,21 @@ void initialise_game(void)
 {
 	set_rand_seed (time(NULL));
 	current_screen = SCR_INTRO_ONE;
+
+	/*
+	 * A2 flip: stand up the de-globalised world and the player's ship entity.
+	 * Seeded here but not yet read - legacy globals (myship, flight state,
+	 * local_objects[]) still drive the game and migrate onto this world cluster
+	 * by cluster. Created before anything else so the player entity always exists.
+	 */
+	GameUniverse().Reset();
+	{
+		Neuron::ECS::EntityId player = GameUniverse().Reg().Create();
+		GameUniverse().Reg().Add<Neuron::Game::PlayerTag>(player, Neuron::Game::PlayerTag{});
+		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
+		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{ 40, 31, 8, 70, 0, 0 });
+		GameUniverse().SetPlayer(player);
+	}
 
 	restore_saved_commander();
 
