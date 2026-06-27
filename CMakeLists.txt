@@ -14,6 +14,8 @@ project ("DeepspaceOutpost" LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+enable_testing()
+
 # Include sub-projects.
 #
 # Engine modules for the MMO migration. NeuronCore is the shared foundation;
@@ -25,3 +27,6 @@ add_subdirectory ("NeuronServer")
 
 add_subdirectory ("DeepspaceOutpost")
 add_subdirectory ("Server")
+
+# Headless unit / golden-run tests (run by CTest in CI).
+add_subdirectory ("Tests")

@@ -54,3 +54,8 @@ jobs:
       - name: Build (${{ matrix.preset }})
         shell: bash
         run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test (${{ matrix.preset }})
+        shell: bash
+        working-directory: out/build/${{ matrix.preset }}
+        run: ctest --output-on-failure
