@@ -90,9 +90,9 @@ ones — per the standards' *Layers and Dependencies* rule):
 | `NeuronCore` | lib | Engine foundation: **ECS**, math/fixed-point, `Vector3i64`, tasks, timers, JSON, raw-UDP socket, binary serialize. No gameplay. | — |
 | `GameShared` | lib | **Deterministic, headless** gameplay shared by client *and* server: ECS component definitions (`Transform`, `Motion`, `ShipDef`…), the **motion/physics integration** system, ship-data tables. The *only* sim code the client needs (for prediction). | `NeuronCore` |
 | `GameLogic` | lib | **SERVER-ONLY authority**: AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no `gfx`. | `GameShared` |
-| `NeuronClient` | lib | Client net + reliability, prediction/reconciliation, snapshot interpolation. **Does not link `GameLogic`.** | `GameShared` |
+| `NeuronClient` | lib | Client engine: D3D11 graphics, audio, input, GUI **plus** client networking (reliability, prediction/reconciliation, snapshot interpolation). **Does not link `GameLogic`.** | `GameShared` |
 | `NeuronServer` | lib | Server net + AOI/replication + persistence (MS SQL). | `GameLogic` |
-| `DeepspaceOutpost` | **exe** | Game client: DX11 render, input, UI/HUD, audio. | `NeuronClient`, `GameShared`, platform |
+| `DeepspaceOutpost` | **exe** | Game client: main loop, game-specific rendering (wireframe/HUD via render queue), input, UI. | `NeuronClient`, `GameShared` |
 | `BotClient` | **exe** | **Headless test client** — scripted/AI bots, **no render/audio**, for heavy load & soak testing. Same net stack as the real client. | `NeuronClient`, `GameShared` |
 | `Server` | **exe** | Dedicated server host: loop, sessions, fixed-tick scheduler. | `NeuronServer`, `GameLogic` |
 
