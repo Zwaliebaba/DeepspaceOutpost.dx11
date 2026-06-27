@@ -33,27 +33,45 @@ namespace Neuron::Client
   };
 
   // Build render records for every replicated entity except the local player.
-  // The floating origin is the local player's snapshot position. Until that entity
-  // is present in the snapshot, render nothing rather than rebase against a bogus
-  // origin (which would push the whole world behind the camera).
+  // Build render records relative to the local player's ship. The camera IS the
+  // ship: the world is rebased to the ship's position (floating origin) AND rotated
+  // into the ship's basis (side/roof/nose), so rolling/pitching the ship rotates
+  // the view. Until the local ship is present in the snapshot we render nothing
+  // (rather than rebase against a bogus origin). With a default ship orientation
+  // (nose +z, roof +y) the rotation is the identity, so the legacy front view is
+  // reproduced exactly.
   [[nodiscard]] inline std::vector<RenderRecord> BuildRenderRecords(
       const std::vector<Net::EntitySnapshot>& _entities, uint32_t _localPlayerId)
   {
-    Math::Vector3i64 origin{ 0, 0, 0 };
-    bool found = false;
+    const Net::EntitySnapshot* me = nullptr;
     for (const Net::EntitySnapshot& e : _entities)
     {
       if (e.id == _localPlayerId)
       {
-        origin = Math::Vector3i64{ e.x, e.y, e.z };
-        found = true;
+        me = &e;
         break;
       }
     }
 
     std::vector<RenderRecord> records;
-    if (!found)
+    if (me == nullptr)
       return records;   // we don't know where we are yet
+
+    const Math::Vector3i64 origin{ me->x, me->y, me->z };
+
+    const Vector pNose{ me->noseX, me->noseY, me->noseZ };
+    const Vector pRoof{ me->roofX, me->roofY, me->roofZ };
+    const Vector pSide{ pRoof.y * pNose.z - pRoof.z * pNose.y,
+                        pRoof.z * pNose.x - pRoof.x * pNose.z,
+                        pRoof.x * pNose.y - pRoof.y * pNose.x };
+
+    // Rotate a world-frame vector into the ship's camera frame.
+    const auto toCamera = [&](double _x, double _y, double _z) -> Vector
+    {
+      return Vector{ _x * pSide.x + _y * pSide.y + _z * pSide.z,
+                     _x * pRoof.x + _y * pRoof.y + _z * pRoof.z,
+                     _x * pNose.x + _y * pNose.y + _z * pNose.z };
+    };
 
     records.reserve(_entities.size());
     for (const Net::EntitySnapshot& e : _entities)
@@ -61,25 +79,26 @@ namespace Neuron::Client
       if (e.id == _localPlayerId)
         continue;
 
+      const double wx = static_cast<double>(e.x - origin.x);
+      const double wy = static_cast<double>(e.y - origin.y);
+      const double wz = static_cast<double>(e.z - origin.z);
+
       RenderRecord r;
       r.id = e.id;
       r.type = e.type;
-      r.location.x = static_cast<double>(e.x - origin.x);
-      r.location.y = static_cast<double>(e.y - origin.y);
-      r.location.z = static_cast<double>(e.z - origin.z);
-      r.distance = std::sqrt(r.location.x * r.location.x +
-                             r.location.y * r.location.y +
-                             r.location.z * r.location.z);
+      r.location = toCamera(wx, wy, wz);
+      r.distance = std::sqrt(wx * wx + wy * wy + wz * wz);
 
-      const Vector nose{ e.noseX, e.noseY, e.noseZ };
-      const Vector roof{ e.roofX, e.roofY, e.roofZ };
-      const Vector side{ roof.y * nose.z - roof.z * nose.y,
-                         roof.z * nose.x - roof.x * nose.z,
-                         roof.x * nose.y - roof.y * nose.x };   // side = roof x nose
+      // The entity's own orientation, also expressed in the camera frame.
+      const Vector eNose{ e.noseX, e.noseY, e.noseZ };
+      const Vector eRoof{ e.roofX, e.roofY, e.roofZ };
+      const Vector eSide{ eRoof.y * eNose.z - eRoof.z * eNose.y,
+                          eRoof.z * eNose.x - eRoof.x * eNose.z,
+                          eRoof.x * eNose.y - eRoof.y * eNose.x };
 
-      r.rotmat[0] = side;
-      r.rotmat[1] = roof;
-      r.rotmat[2] = nose;
+      r.rotmat[0] = toCamera(eSide.x, eSide.y, eSide.z);
+      r.rotmat[1] = toCamera(eRoof.x, eRoof.y, eRoof.z);
+      r.rotmat[2] = toCamera(eNose.x, eNose.y, eNose.z);
 
       records.push_back(r);
     }

@@ -65,6 +65,26 @@ TEST(Scene_OnlyTheLocalPlayerIsSkipped)
     CHECK(r.id != 2);
 }
 
+TEST(Scene_CameraRotatesWithTheLocalShipRoll)
+{
+  // The local ship is rolled 90 degrees: nose still +z, but roof points +x.
+  // A prop directly "above" in the world (+y) must therefore appear to the
+  // camera-LEFT (negative side axis), proving the view rotates with the ship.
+  std::vector<Net::EntitySnapshot> ents;
+  Net::EntitySnapshot me = At(1, 0, 0, 0);
+  me.noseX = 0.0f; me.noseY = 0.0f; me.noseZ = 1.0f;   // nose +z
+  me.roofX = 1.0f; me.roofY = 0.0f; me.roofZ = 0.0f;   // roof +x (rolled)
+  ents.push_back(me);
+  ents.push_back(At(2, 0, 100, 0));                    // 100 "up" in the world
+
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
+  CHECK(recs.size() == 1);
+  CHECK(recs[0].location.x == -100.0);   // world-up -> camera-left
+  CHECK(recs[0].location.y == 0.0);
+  CHECK(recs[0].location.z == 0.0);
+  CHECK(recs[0].distance == 100.0);      // distance is frame-independent
+}
+
 TEST(Scene_RotmatIsBuiltFromTheOrientationBasis)
 {
   std::vector<Net::EntitySnapshot> ents;

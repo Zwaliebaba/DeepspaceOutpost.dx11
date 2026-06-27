@@ -197,6 +197,22 @@ int main()
     ++tick;
     spawner.Step(world, tick);
 
+    // 2a. Heartbeat: roughly every two seconds, log the first player's position
+    //     and flight so a launching client can be confirmed to actually move
+    //     through the world (and steer) server-side.
+    if (tick % 60 == 0 && !sessions.All().empty())
+    {
+      const GameLogic::Session& s = sessions.All().begin()->second;
+      if (world.IsValid(s.entity))
+      {
+        const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(s.entity);
+        const GameLogic::Flight& f = world.Get<GameLogic::Flight>(s.entity);
+        printf("Player @ (%lld, %lld, %lld)  speed=%.2f roll=%.3f pitch=%.3f\n",
+               static_cast<long long>(t.position.x), static_cast<long long>(t.position.y),
+               static_cast<long long>(t.position.z), f.speed, f.roll, f.pitch);
+      }
+    }
+
     // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
     //     destroy the wrecks (their removal also rides the despawn diff below).
     for (const GameLogic::Kill& kill : GameLogic::StepCombat(world))
