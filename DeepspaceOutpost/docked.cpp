@@ -13,6 +13,7 @@
 #include "planet.h"
 #include "shipdata.h"
 #include "space.h"
+#include "sound.h"
 #include "ReplicationClient.h"
 
 
@@ -44,6 +45,13 @@ char *government_type[] = {	"Anarchy",
 
 int cross_x = 0;
 int cross_y = 0;
+
+
+// Thin-client galactic chart helpers (defined further down, used by the legacy
+// chart entry points above their definition).
+int chart_nearest_to_cursor (void);
+bool display_replicated_galactic_chart (void);
+bool display_replicated_system_data (void);
 
 
 
@@ -118,6 +126,25 @@ void show_distance_to_planet (void)
 	int px,py;
 	char planet_name[16];
 	char str[32];
+
+	// Thin-client chart: report the manifest system nearest the crosshair (this is
+	// what the hyperspace key will teleport to), instead of the legacy lookup.
+	{
+		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+		if (rc.IsOpen() && rc.HasGalaxy() && current_screen == SCR_GALACTIC_CHART)
+		{
+			const int sel = chart_nearest_to_cursor();
+			if (sel >= 0)
+			{
+				strncpy (planet_name, rc.Galaxy()[sel].name, sizeof(planet_name) - 1);
+				planet_name[sizeof(planet_name) - 1] = '\0';
+				gfx_clear_text_area();
+				sprintf (str, "%-18s", planet_name);
+				gfx_display_text (16, 340, str);
+			}
+			return;
+		}
+	}
 
 	if (current_screen == SCR_GALACTIC_CHART)
 	{
@@ -324,13 +351,173 @@ void display_short_range_chart (void)
 
 
 
+// ===== Thin-client galactic chart (driven by the server's galaxy manifest) =====
+//
+// The legacy chart walks the procedural galaxy_seed locally; in MMO mode the
+// galaxy is the server's, delivered once as a manifest. We plot those systems,
+// let the existing chart crosshair roam over them, and teleport (while docked) to
+// whichever system is nearest the crosshair. No generation happens client-side.
+
+static int g_chart_selected = -1;   // manifest index last picked (for the data screen)
+
+// Project the manifest's planet positions (world x,z) into chart pixels, scaling
+// to the manifest's own bounds so the whole galaxy fits whatever its extent is.
+static void chart_project_all (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
+							   std::vector<int>& _px, std::vector<int>& _py)
+{
+	const int L = 12, R = 499, T = 48, B = 285;   // chart area in actual pixels
+	long long minX = _g[0].x, maxX = _g[0].x, minZ = _g[0].z, maxZ = _g[0].z;
+	for (size_t i = 0; i < _g.size(); i++)
+	{
+		if (_g[i].x < minX) minX = _g[i].x;
+		if (_g[i].x > maxX) maxX = _g[i].x;
+		if (_g[i].z < minZ) minZ = _g[i].z;
+		if (_g[i].z > maxZ) maxZ = _g[i].z;
+	}
+	_px.resize (_g.size());
+	_py.resize (_g.size());
+	for (size_t i = 0; i < _g.size(); i++)
+	{
+		double nx = (maxX > minX) ? (double)(_g[i].x - minX) / (double)(maxX - minX) : 0.5;
+		double nz = (maxZ > minZ) ? (double)(_g[i].z - minZ) / (double)(maxZ - minZ) : 0.5;
+		_px[i] = L + (int)(nx * (R - L));
+		_py[i] = T + (int)(nz * (B - T));
+	}
+}
+
+// Index of the manifest system whose plotted dot is nearest the crosshair, or -1
+// when there is no replicated galaxy.
+int chart_nearest_to_cursor (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return -1;
+
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+	std::vector<int> px, py;
+	chart_project_all (g, px, py);
+
+	int best = 0;
+	long long bestD = 1LL << 62;
+	for (size_t i = 0; i < g.size(); i++)
+	{
+		long long dx = px[i] - cross_x;
+		long long dy = py[i] - cross_y;
+		long long d = dx * dx + dy * dy;
+		if (d < bestD)
+		{
+			bestD = d;
+			best = (int)i;
+		}
+	}
+	return best;
+}
+
+// Draw the chart from the manifest. Returns false (so the legacy chart runs) when
+// not in thin-client mode or the manifest has not arrived yet.
+bool display_replicated_galactic_chart (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return false;
+
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+
+	current_screen = SCR_GALACTIC_CHART;
+	gfx_clear_display();
+	gfx_display_centre_text (10, "GALACTIC CHART", 140, GFX_COL_GOLD);
+	gfx_draw_line (0, 36, 511, 36);
+	gfx_draw_line (0, 36 + 258, 511, 36 + 258);
+
+	std::vector<int> px, py;
+	chart_project_all (g, px, py);
+	for (size_t i = 0; i < g.size(); i++)
+	{
+		gfx_plot_pixel (px[i], py[i], GFX_COL_WHITE);
+		gfx_plot_pixel (px[i] + 1, py[i], GFX_COL_WHITE);
+	}
+
+	// Park the crosshair in the chart centre when first opening the screen.
+	if (cross_x < 1 || cross_x > 510 || cross_y < 37 || cross_y > 293)
+	{
+		cross_x = 256;
+		cross_y = 165;
+	}
+
+	gfx_display_text (16, 304, "Arrows: move crosshair   D: system data");
+	gfx_display_text (16, 326, "Hyperspace key: teleport to nearest system");
+	return true;
+}
+
+// Show data on the manifest system nearest the crosshair (the F7 "data" screen in
+// thin-client mode). Returns false when there is no replicated galaxy.
+bool display_replicated_system_data (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return false;
+
+	const int sel = chart_nearest_to_cursor();
+	if (sel < 0)
+		return false;
+	g_chart_selected = sel;
+	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[sel];
+
+	char str[100];
+	char name[16];
+	strncpy (name, s.name, sizeof(name) - 1);
+	name[sizeof(name) - 1] = '\0';
+
+	current_screen = SCR_PLANET_DATA;
+	gfx_clear_display();
+	sprintf (str, "DATA ON %s", name);
+	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
+	gfx_draw_line (0, 36, 511, 36);
+
+	sprintf (str, "Economy:%s", economy_type[s.economy & 7]);
+	gfx_display_text (16, 74, str);
+	sprintf (str, "Government:%s", government_type[s.government & 7]);
+	gfx_display_text (16, 106, str);
+	sprintf (str, "Tech.Level:%3d", s.techLevel + 1);
+	gfx_display_text (16, 138, str);
+	sprintf (str, "Population:%d.%d Billion", s.population / 10, s.population % 10);
+	gfx_display_text (16, 170, str);
+	sprintf (str, "Gross Productivity:%5d M CR", s.productivity);
+	gfx_display_text (16, 202, str);
+	return true;
+}
+
+// Teleport (while docked) to the manifest system nearest the crosshair. The
+// server validates and performs the jump; we just request it and play the break
+// pattern. No-op when not on a replicated chart.
+void teleport_to_cursor (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return;
+
+	const int sel = chart_nearest_to_cursor();
+	if (sel < 0)
+		return;
+
+	Neuron::Net::StationRequest req;
+	req.kind = Neuron::Net::StationRequestKind::Teleport;
+	req.stationId = rc.Galaxy()[sel].id;   // server resolves the destination station
+	rc.SendStationRequest (req);
+
+	snd_play_sample (SND_HYPERSPACE);
+	current_screen = SCR_BREAK_PATTERN;
+}
+
 void display_galactic_chart (void)
 {
     int i;
 	struct galaxy_seed glx;
 	char str[64];
 	int px,py;
-	
+
+	if (display_replicated_galactic_chart())
+		return;
 
 	current_screen = SCR_GALACTIC_CHART;
 
@@ -384,6 +571,9 @@ void display_data_on_planet (void)
 	char str[100];
 	char *description;
 	struct planet_data hyper_planet_data;
+
+	if (display_replicated_system_data())
+		return;
 
 	current_screen = SCR_PLANET_DATA;
 

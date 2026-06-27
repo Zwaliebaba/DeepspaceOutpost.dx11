@@ -5,6 +5,7 @@ void display_short_range_chart (void);
 void display_galactic_chart (void);
 void display_data_on_planet (void);
 void show_distance_to_planet (void);
+void teleport_to_cursor (void);   // thin-client: teleport to the system at the chart crosshair
 void move_cursor_to_origin (void);
 void find_planet_by_name (char *find_name);
 void display_market_prices (void);
