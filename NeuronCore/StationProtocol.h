@@ -25,7 +25,8 @@ namespace Neuron::Net
     Undock = 2,
     Buy = 3,
     Sell = 4,
-    Equip = 5,    // buy equipment; the item id travels in StationRequest::commodity
+    Equip = 5,      // buy equipment; the item id travels in StationRequest::commodity
+    Teleport = 6,   // jump to another system; the target system id is StationRequest::stationId
   };
 
   // Equipment the player can buy at a station (id carried in a request's

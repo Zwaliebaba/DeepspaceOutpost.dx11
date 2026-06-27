@@ -287,6 +287,23 @@ namespace Neuron::GameLogic
     return found ? best : ECS::EntityId{};
   }
 
+  // Find the station entity belonging to galaxy system `_systemId` (invalid id if
+  // none). Used by teleport to locate the destination.
+  [[nodiscard]] inline ECS::EntityId FindStationBySystem(ECS::Registry& _world, int _systemId)
+  {
+    ECS::EntityId result;
+    bool found = false;
+    _world.Each<ServerStation, WorldTransform>([&](ECS::EntityId _id, ServerStation& _st, WorldTransform&)
+    {
+      if (!found && _st.systemId == _systemId)
+      {
+        found = true;
+        result = _id;
+      }
+    });
+    return found ? result : ECS::EntityId{};
+  }
+
   // Apply a station request to `_player`'s authoritative components and the market
   // of the station they are docked at, returning the response to send back. Dock
   // attaches to the nearest in-range station; trades hit THAT station's market.
@@ -369,6 +386,33 @@ namespace Neuron::GameLogic
         const EquipResult er = EquipPlayer(*wallet, *eq, *hold, static_cast<Net::EquipItem>(_req.commodity));
         resp.status = er.status;
         resp.credits = er.credits;
+        break;
+      }
+
+      case Net::StationRequestKind::Teleport:
+      {
+        // Jump from this station to the destination system's station (the
+        // "teleport building" - only available while docked). Arrive docked at
+        // the destination.
+        if (!dock->docked)
+        {
+          resp.status = Net::StationStatus::NotDocked;
+          break;
+        }
+        const ECS::EntityId dest = FindStationBySystem(_world, static_cast<int>(_req.stationId));
+        WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+        WorldTransform* dt = (dest.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(dest) : nullptr;
+        if (pt != nullptr && dt != nullptr)
+        {
+          pt->position = dt->position;
+          dock->docked = true;
+          dock->stationId = dest.index;
+          resp.status = Net::StationStatus::Ok;
+        }
+        else
+        {
+          resp.status = Net::StationStatus::CantDock;   // unknown destination
+        }
         break;
       }
     }

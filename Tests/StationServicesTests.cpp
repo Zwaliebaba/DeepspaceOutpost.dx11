@@ -35,6 +35,17 @@ namespace
     _w.Add<GameLogic::ServerStation>(e, st);
     return e;
   }
+
+  // A station belonging to a galaxy system at an arbitrary position.
+  ECS::EntityId SpawnSystemStation(ECS::Registry& _w, int _systemId, int64_t _x, int64_t _y, int64_t _z)
+  {
+    ECS::EntityId e = _w.Create();
+    _w.Add<GameLogic::WorldTransform>(e, GameLogic::WorldTransform{ { _x, _y, _z } });
+    GameLogic::ServerStation st;
+    st.systemId = _systemId;
+    _w.Add<GameLogic::ServerStation>(e, st);
+    return e;
+  }
 }
 
 TEST(Station_BuyMovesCreditsCargoAndStock)
@@ -282,6 +293,61 @@ TEST(Station_ProcessEquipNeedsDocking)
   CHECK(ok.status == Net::StationStatus::Ok);
   CHECK(ok.credits == 14750);          // 20000 - 5250
   CHECK(w.Get<GameLogic::Equipment>(p).fuelScoop);
+}
+
+TEST(Station_TeleportJumpsToTheDestinationStation)
+{
+  ECS::Registry w;
+  ECS::EntityId s0 = SpawnSystemStation(w, /*system*/ 0, 0, 0, 0);
+  ECS::EntityId s1 = SpawnSystemStation(w, /*system*/ 1, 5'000'000, 0, 0);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
+  CHECK(w.Get<GameLogic::DockState>(p).docked);
+  CHECK(w.Get<GameLogic::DockState>(p).stationId == s0.index);
+
+  Net::StationRequest tp;
+  tp.kind = Net::StationRequestKind::Teleport;
+  tp.stationId = 1;   // target system id
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
+
+  CHECK(r.status == Net::StationStatus::Ok);
+  CHECK((w.Get<GameLogic::WorldTransform>(p).position == Math::Vector3i64{ 5'000'000, 0, 0 }));
+  CHECK(w.Get<GameLogic::DockState>(p).stationId == s1.index);   // now docked at the destination
+}
+
+TEST(Station_TeleportRequiresBeingDocked)
+{
+  ECS::Registry w;
+  SpawnSystemStation(w, 0, 0, 0, 0);
+  SpawnSystemStation(w, 1, 5'000'000, 0, 0);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);   // not docked
+
+  Net::StationRequest tp;
+  tp.kind = Net::StationRequestKind::Teleport;
+  tp.stationId = 1;
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
+  CHECK(r.status == Net::StationStatus::NotDocked);
+  CHECK((w.Get<GameLogic::WorldTransform>(p).position == Math::Vector3i64{ 0, 0, 0 }));   // did not move
+}
+
+TEST(Station_TeleportToUnknownSystemFails)
+{
+  ECS::Registry w;
+  SpawnSystemStation(w, 0, 0, 0, 0);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
+
+  Net::StationRequest tp;
+  tp.kind = Net::StationRequestKind::Teleport;
+  tp.stationId = 999;   // no such system
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
+  CHECK(r.status == Net::StationStatus::CantDock);
 }
 
 TEST(Station_ProcessUndock)
