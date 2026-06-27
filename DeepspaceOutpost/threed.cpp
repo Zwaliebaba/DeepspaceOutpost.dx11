@@ -9,6 +9,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "RenderContext.h"
 #include "planet.h"
 #include "vector.h"
 #include "shipdata.h"
@@ -132,7 +133,7 @@ void draw_wireframe_ship (struct local_object *obj)
 			ex = point_list[ship->lines[i].end_point].x;
 			ey = point_list[ship->lines[i].end_point].y;
 
-			gfx_draw_line (sx, sy, ex, ey);
+			ActiveRenderQueue().Line (sx, sy, ex, ey);
 		}
 	}
 
@@ -140,7 +141,7 @@ void draw_wireframe_ship (struct local_object *obj)
 	if (obj->flags & FLG_FIRING)
 	{
 		lasv = ship_list[obj->type]->front_laser;
-		gfx_draw_line (point_list[lasv].x, point_list[lasv].y,
+		ActiveRenderQueue().Line (point_list[lasv].x, point_list[lasv].y,
 					   obj->location.x > 0 ? 0 : 511, rand255() * 2);
 	}
 }
@@ -306,7 +307,8 @@ void draw_solid_ship (struct local_object *obj)
 			}
 			
 
-			gfx_render_polygon (face_data[i].points, poly_list, face_data[i].colour, zavg);
+			/* poly_list holds 2 ints (x,y) per point. */
+			ActiveRenderQueue().RenderPolygon (face_data[i].points, poly_list, 2 * face_data[i].points, face_data[i].colour, zavg);
 			
 		}
 	}
@@ -316,7 +318,7 @@ void draw_solid_ship (struct local_object *obj)
 		lasv = ship_list[obj->type]->front_laser;
 		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE; 
 		
-		gfx_render_line (point_list[lasv].x, point_list[lasv].y,
+		ActiveRenderQueue().RenderLine (point_list[lasv].x, point_list[lasv].y,
 						 obj->location.x > 0 ? 0 : 511, rand255() * 2,
 						 point_list[lasv].z, col);
 	}
@@ -557,7 +559,7 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 			ly = ry / div;
 			colour = landscape[lx][ly];
  
-			gfx_fast_plot_pixel (sx, sy, colour);
+			ActiveRenderQueue().FastPixel (sx, sy, colour);
 		}
 		rx += vx;
 		ry += vy;
@@ -612,7 +614,7 @@ void render_planet (int xo, int yo, int radius, struct vector *vec)
 
 void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
 {
-	gfx_draw_circle (xo, yo, radius, GFX_COL_WHITE);
+	ActiveRenderQueue().Circle (xo, yo, radius, GFX_COL_WHITE);
 }
 
 
@@ -658,7 +660,7 @@ void draw_planet (struct local_object *planet)
 			break;
 		
 		case 1:
-			gfx_draw_filled_circle (x, y, radius, GFX_COL_GREEN_1);
+			ActiveRenderQueue().FilledCircle (x, y, radius, GFX_COL_GREEN_1);
 			break;
 
 		case 2:
@@ -726,7 +728,7 @@ void render_sun_line (int xo, int yo, int x, int y, int radius)
 		else
 			colour = mix ? GFX_ORANGE_1 : GFX_ORANGE_2;
 		
-		gfx_fast_plot_pixel (sx, sy, colour);
+		ActiveRenderQueue().FastPixel (sx, sy, colour);
 	} 	
 }
 
@@ -939,7 +941,7 @@ void draw_explosion (struct local_object *obj)
 
 			for (psy = 0; psy < sizey; psy++)
 				for (psx = 0; psx < sizex; psx++)		
-					gfx_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
+					ActiveRenderQueue().Pixel (px+psx, py+psy, GFX_COL_WHITE);
 		}
 	}
 
