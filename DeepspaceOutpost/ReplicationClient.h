@@ -24,6 +24,7 @@
 #include "ReliableChannel.h"
 #include "ClientInput.h"
 #include "StationProtocol.h"
+#include "GalaxyManifest.h"
 
 namespace Neuron::Client
 {
@@ -74,8 +75,14 @@ namespace Neuron::Client
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 
     // Pop the next reliably-delivered application event (despawn/death/chat), in
-    // order, or false if none are ready. (AssignPlayer is consumed internally.)
+    // order, or false if none are ready. (AssignPlayer and the galaxy manifest are
+    // consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
+
+    // The galaxy's system list, as delivered by the server's manifest (empty until
+    // it arrives). The galactic chart renders and teleports from this.
+    [[nodiscard]] const std::vector<Net::GalaxySystemInfo>& Galaxy() const { return m_galaxy; }
+    [[nodiscard]] bool HasGalaxy() const { return !m_galaxy.empty(); }
 
     // The entity id the local player controls - its replicated position is the
     // floating origin and it is not drawn. Learned primarily from the snapshot
@@ -93,6 +100,7 @@ namespace Neuron::Client
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
     Net::ReliableChannel m_events;                 // reliable ordered events
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
+    std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart manifest (filled on connect)
     Net::Endpoint m_server;
     uint32_t m_localPlayer = 0xFFFFFFFFu;   // sentinel until assigned (never entity 0)
     bool m_haveServer = false;

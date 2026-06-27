@@ -3,6 +3,7 @@
 #include "ReplicationClient.h"
 
 #include "GameEvents.h"
+#include "GalaxyManifest.h"
 
 namespace Neuron::Client
 {
@@ -73,14 +74,19 @@ namespace Neuron::Client
       }
     }
 
-    // Drain reliable events: AssignPlayer is the handshake (consumed here); the
-    // rest are queued for the application via PollEvent().
+    // Drain reliable events: AssignPlayer is the handshake and GalaxyManifest is
+    // the chart data (both consumed here); the rest are queued for the application
+    // via PollEvent().
     Net::ReliableMessage msg;
     while (m_events.Receive(msg))
     {
       uint32_t playerId = 0;
+      uint32_t total = 0;
+      uint32_t base = 0;
       if (Net::DecodeAssignPlayer(msg, playerId))
         m_localPlayer = playerId;
+      else if (Net::DecodeManifestChunk(msg, total, base, m_galaxy))
+        m_galaxy.reserve(total);   // chunks arrive in order; just accumulate
       else
         m_appEvents.push_back(std::move(msg));
     }

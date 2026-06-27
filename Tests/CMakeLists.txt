@@ -31,6 +31,7 @@ set(TEST_SOURCES
     StationProtocolTests.cpp
     SpawnDirectorTests.cpp
     GalaxyGenTests.cpp
+    GalaxyManifestTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)

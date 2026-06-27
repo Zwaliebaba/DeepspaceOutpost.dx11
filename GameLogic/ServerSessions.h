@@ -21,6 +21,7 @@
 #include "ClientInput.h"
 #include "ReliableChannel.h"
 #include "GameEvents.h"
+#include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
 
 #include "SimComponents.h"
 #include "StationServices.h"
@@ -61,6 +62,7 @@ namespace Neuron::GameLogic
         s.endpoint = _ep;
         s.entity = SpawnPlayer(_world);
         Net::SendAssignPlayer(s.events, s.entity.index);
+        Net::SendManifest(s.events, m_manifest);   // the galaxy chart data, once on connect
         it = m_sessions.emplace(key, std::move(s)).first;
       }
 
@@ -117,6 +119,10 @@ namespace Neuron::GameLogic
         entry.second.events.Send(_type, _payload);
     }
 
+    // Set the galaxy manifest sent to every client when it connects (static for
+    // the world's lifetime; built once at startup from the generated galaxy).
+    void SetManifest(std::vector<Net::GalaxySystemInfo> _manifest) { m_manifest = std::move(_manifest); }
+
     [[nodiscard]] std::unordered_map<uint64_t, Session>& All() { return m_sessions; }
     [[nodiscard]] std::size_t Count() const { return m_sessions.size(); }
     [[nodiscard]] bool Has(const Net::Endpoint& _ep) const
@@ -149,6 +155,7 @@ namespace Neuron::GameLogic
     }
 
     std::unordered_map<uint64_t, Session> m_sessions;
+    std::vector<Net::GalaxySystemInfo> m_manifest;   // galaxy chart data for new clients
     uint32_t m_spawnCount = 0;
   };
 }

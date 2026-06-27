@@ -84,7 +84,8 @@ int main()
   // the int64 field (reachable by teleport, or a long flight). AOI keeps them off
   // the wire until a player is near one. Each station carries its own market.
   const GameLogic::GalaxyConfig galaxyCfg{};
-  for (const GameLogic::GalaxySystem& sys : GameLogic::GenerateGalaxy(galaxyCfg))
+  const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(galaxyCfg);
+  for (const GameLogic::GalaxySystem& sys : systems)
   {
     const ECS::EntityId pl = world.Create();
     world.Add<GameLogic::WorldTransform>(pl, GameLogic::WorldTransform{ sys.planetPos });
@@ -101,8 +102,28 @@ int main()
   }
   printf("Galaxy: %d systems generated.\n", galaxyCfg.planetCount);
 
+  // The chart manifest shipped to every client on connect: the procedural systems
+  // plus the hand-placed home system (id -1) so players can always teleport back.
+  std::vector<Net::GalaxySystemInfo> manifest = GameLogic::BuildManifest(systems);
+  {
+    const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
+    Net::GalaxySystemInfo h;
+    h.id = static_cast<uint32_t>(-1);   // matches the home station's systemId (-1)
+    h.x = 0; h.y = 0; h.z = 65536;      // the home planet
+    const char* kHomeName = "HOME";
+    for (std::size_t i = 0; kHomeName[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
+      h.name[i] = kHomeName[i];
+    h.government = static_cast<uint8_t>(home.government);
+    h.economy = static_cast<uint8_t>(home.economy);
+    h.techLevel = static_cast<uint8_t>(home.techLevel);
+    h.population = static_cast<uint16_t>(home.population);
+    h.productivity = static_cast<uint16_t>(home.productivity);
+    manifest.push_back(h);
+  }
+
   GameLogic::AreaOfInterest aoi(kAoiCellSize);
   GameLogic::ServerSessions sessions;
+  sessions.SetManifest(std::move(manifest));   // every client gets the chart on connect
   GameLogic::DespawnTracker despawns;
   GameLogic::SpawnDirector spawner(/*seed*/ 0x51EEDu, /*intervalTicks*/ 600, /*maxNpcs*/ 12);
 

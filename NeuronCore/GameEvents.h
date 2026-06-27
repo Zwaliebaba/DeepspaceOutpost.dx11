@@ -26,6 +26,7 @@ namespace Neuron::Net
     AssignPlayer = 4,    // "you control entity N" - the connect handshake reply
     StationRequest = 5,  // client -> server: dock/undock/buy/sell
     StationResponse = 6, // server -> client: the authoritative result
+    GalaxyManifest = 7,  // server -> client: a chunk of the galaxy's system list
   };
 
   // --- Assign player (connect handshake) ------------------------------------

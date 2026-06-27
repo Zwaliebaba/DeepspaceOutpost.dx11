@@ -11,11 +11,13 @@
 // by synthesizing a 48-bit GalaxySeed per planet and feeding the ported
 // GeneratePlanet()/NamePlanet().
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "Vector3i64.h"
+#include "GalaxyManifest.h"   // Net::GalaxySystemInfo (the wire form)
 
 #include "Galaxy.h"   // GalaxySeed, PlanetData, GeneratePlanet, NamePlanet
 
@@ -102,5 +104,36 @@ namespace Neuron::GameLogic
     for (int i = 0; i < _cfg.planetCount; ++i)
       systems.push_back(GenerateSystem(_cfg, static_cast<uint32_t>(i)));
     return systems;
+  }
+
+  // Convert one generated system to the flat wire form the client charts from.
+  // The position carried is the planet's (the chart plots planets; teleport
+  // resolves the station by system id server-side).
+  [[nodiscard]] inline Net::GalaxySystemInfo ToManifestEntry(const GalaxySystem& _s)
+  {
+    Net::GalaxySystemInfo e;
+    e.id = _s.id;
+    e.x = _s.planetPos.x;
+    e.y = _s.planetPos.y;
+    e.z = _s.planetPos.z;
+    const std::size_t n = std::min(_s.name.size(), Net::GALAXY_NAME_MAX - 1);
+    for (std::size_t i = 0; i < n; ++i)
+      e.name[i] = _s.name[i];
+    e.government = static_cast<uint8_t>(_s.planet.government);
+    e.economy = static_cast<uint8_t>(_s.planet.economy);
+    e.techLevel = static_cast<uint8_t>(_s.planet.techLevel);
+    e.population = static_cast<uint16_t>(_s.planet.population);
+    e.productivity = static_cast<uint16_t>(_s.planet.productivity);
+    return e;
+  }
+
+  // Build the client-facing manifest for a whole generated galaxy.
+  [[nodiscard]] inline std::vector<Net::GalaxySystemInfo> BuildManifest(const std::vector<GalaxySystem>& _systems)
+  {
+    std::vector<Net::GalaxySystemInfo> manifest;
+    manifest.reserve(_systems.size());
+    for (const GalaxySystem& s : _systems)
+      manifest.push_back(ToManifestEntry(s));
+    return manifest;
   }
 }
