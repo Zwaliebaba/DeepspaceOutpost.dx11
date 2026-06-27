@@ -15,14 +15,18 @@ first milestone.
 | Topic | Decision |
 |---|---|
 | Platform | **Windows** client **and** Windows server |
-| Authority | **Server-authoritative** (clients send input, render replicated state) |
-| World | **Single open 3D world**, **absolute `int64` X/Y/Z** coordinate field |
-| Coordinates | Server stores absolute `int64³`; client uses a **floating origin** for its 32-bit render math |
-| Streaming | **Area-of-Interest (AOI)** — server only sends each client the entities near it |
+| Authority | **Server-authoritative** (clients send intent commands, render replicated state) |
+| Game trajectory | Logic evolves over time from space-flight toward a **4X / RTS** style (less twitch). The architecture deliberately generalizes the single-avatar, single-tick, single-interest-radius assumptions now so the pivot is an extension, not a rewrite (see §2.4). |
+| World | **Massive *seamless* open world** — no visible segments or loading screens. One continuous **absolute `int64³`** coordinate space, with an **invisible internal spatial partition** (cells) underneath for interest management and future multi-process sharding (seamless cross-boundary hand-off). |
+| Coordinates | Server stores absolute `int64³`; client uses a **floating origin** (per active region) for its 32-bit render math. |
+| Identity | **Account → Empire/Faction → owns N entities.** A player is *not* bound to one avatar/ship (4X-ready); the current single ship is just one owned entity. Camera & interest are **view-driven**, not avatar-driven. |
+| Input | **Command/intent protocol** (validated orders with costs/preconditions), reusing the game's existing intent state (`flight_roll`/`flight_climb`/`flight_speed`/fire). Covers today's flight and tomorrow's unit orders; natural anti-cheat boundary. |
+| Streaming | **Multi-resolution Area-of-Interest** — a high-detail *tactical* tier (entities near the view) plus a low-detail *strategic* tier (territory/fleet summaries across the known galaxy). |
 | Transport | **Raw winsock UDP** + a custom reliability/ordering layer (built on NeuronCore's existing winsock) |
 | Persistence | **Microsoft SQL Server** (accounts, ships, inventory, market, world state) |
 | Wire format | **Hand-rolled binary** for the hot path (snapshots/input); JSON (NeuronCore::Json) for cold path (handshake/config) |
-| Entity model | **ECS** — an **in-house** Entity Component System in NeuronCore; the de-globalized `Universe` *is* the ECS world (introduced ECS-first at A2, not bolted on later) |
+| Entity model | **ECS** — an **in-house** Entity Component System in NeuronCore; the de-globalized `Universe` *is* the ECS world (introduced ECS-first at A2, not bolted on later). Indexed **spatially *and* relationally** (ownership/faction/group/tag) for RTS-style queries. |
+| Sim cadence | **Decoupled rates**: simulation tick, command intake, and replication are separate clocks (sim can run slow/RTS-friendly; tactical replicates faster than strategic). |
 | Logic boundary | **`GameLogic` is the only game-logic library — server-only** (motion/physics + AI, economy, combat, spawning). **No shared game-logic library.** The client is a **thin presentation layer** (interpolation + dead-reckoning) and shares only **data/protocol schemas** (in `NeuronCore`), never behavior. |
 | Test harness | A **headless `BotClient`** (no render/audio) drives scripted/AI bots over the real net stack for load/soak testing (esp. the 100-player test). |
 | Code standards | Follow the repo's **`.github/coding-standards.md`** as the single source of truth (see §2.1). |
@@ -209,6 +213,40 @@ NeuronCore (no third-party dependency), introduced **ECS-first at A2**.
   `NetReplicated` is automatically eligible for AOI snapshots (Phase D), so the
   netcode never reaches into game structs directly.
 
+### 2.4 Designed for the 4X / RTS trajectory
+
+The game logic will drift from single-ship space-flight toward a **4X / RTS**
+style (many units per player, empire/economy/territory, less twitch). These
+principles keep that pivot an *extension* rather than a rewrite — they cost
+little now and a lot later:
+
+- **Player ≠ avatar.** Identity is **Account → Empire/Faction → owns N entities**.
+  The current ship is just one owned entity. Camera and interest are
+  **view-driven** (where the camera looks + what you own), never "the player *is*
+  this ship." Avoids the deepest retrofit.
+- **Seamless world, partitioned underneath.** One continuous `int64³` space with
+  **no visible boundaries**; an invisible cell partition drives interest and
+  becomes the **shard boundary** for multi-process scaling, with seamless
+  hand-off. Floating-origin is a per-region *render* detail, not world structure.
+- **Command/intent input, not per-frame control.** Validated orders (with
+  costs/preconditions) — today `flight_roll/climb/speed/fire`; later
+  `move/build/attack`. Same server-side intent state either way.
+- **Multi-resolution interest.** Tactical (detailed, local) + strategic
+  (coarse, galaxy-wide territory/fleet summaries). A single AOI radius cannot
+  express "show my whole empire at low detail."
+- **Relational ECS indexing.** Index entities by **owner/faction/group/tag** as
+  well as space, so "all my units", "enemies in sector 7", "this fleet" are cheap.
+- **Decoupled clocks.** Separate sim-tick, command-intake, and replication rates;
+  RTS sims can run slow while UI stays responsive via interpolation.
+- **Persistent, always-on world.** The world keeps simulating (economy, AI
+  empires, territory) while players are offline — persist **world/empire state +
+  a command log**, not just per-player rows.
+- **Bandwidth is the scaling wall** (units ≫ players): field **quantization +
+  delta compression** and per-channel budgets are first-class, not an afterthought.
+- **Replication, not lockstep.** Determinism is kept for replays/debugging, but
+  100-player scale uses interest-managed **state replication** (classic RTS
+  lockstep caps at ~8 players and shatters on one desync).
+
 ---
 
 ## 3. Phase plan
@@ -285,18 +323,29 @@ with no global singletons — without changing on-screen behavior.**
   `sendto`/`recvfrom`.
 - **Custom reliability layer**: sequence numbers, ack/ack-bitfield, retransmit,
   ordered + unordered channels, fragmentation/reassembly for large snapshots,
-  connection handshake, heartbeat/timeout, basic congestion pacing.
-- **Hand-rolled binary protocol**: fixed-layout, versioned message structs
-  (login, input command, snapshot, event, chat). JSON only for handshake/config.
+  connection handshake, heartbeat/timeout, basic congestion pacing. *RTS-leaning
+  scope:* the workhorse is a **reliable-ordered command channel** + periodic
+  state — the latency-tolerant traffic doesn't need full twitch-FPS unreliable-
+  state machinery, which keeps this layer's scope contained.
+- **Command/intent protocol** (not per-frame control): validated order messages
+  (today `flight_roll/climb/speed/fire`; later `move/build/attack`) the server
+  applies to the sender's intent components. **Versioned** message structs
+  (login, command, snapshot, event, chat) so schemas can evolve as the game does.
+  Hand-rolled binary hot path; JSON only for handshake/config.
 - **Loopback harness** first (client+server in one process) before going to wire.
 
-### Phase D — Replication & Area-of-Interest (for the `int64` field)
-- **Spatial index** over the `int64³` world (uniform grid / hashed cells, or a
-  loose octree) so neighbor queries are O(local).
-- **AOI per client**: each tick, compute the entities within the player's
-  interest radius; send **delta snapshots** (baseline + changes) only for those.
+### Phase D — Replication & Area-of-Interest (for the seamless `int64` world)
+- **Invisible cell partition** over the `int64³` world (uniform grid / hashed
+  cells, or a loose octree) — the player never sees boundaries; cells drive
+  neighbor queries (O(local)) and are the future **shard** unit with seamless
+  cross-cell hand-off.
+- **Multi-resolution AOI**: a **tactical** tier (full entity state near the view)
+  *and* a **strategic** tier (coarse territory/fleet summaries across the known
+  galaxy). Send **delta snapshots** per tier; strategic replicates slower.
 - **Entity lifecycle events**: enter-AOI (full state) / leave-AOI (despawn).
-- **Priority/bandwidth budgeting** so 100 players stay within send limits.
+- **Wire efficiency**: **quantize** fields (positions/angles) and **delta-compress**
+  against the last acked baseline — bandwidth (units ≫ players) is the scaling wall.
+- **Priority/bandwidth budgeting** per channel so 100 players stay within limits.
 
 ### Phase E — Client smoothing (interpolation + dead-reckoning, *no* prediction)
 - The client runs **no game logic**. It renders **interpolated** authoritative
@@ -311,16 +360,21 @@ with no global singletons — without changing on-screen behavior.**
 - *(Weapons fairness — hit detection under latency — is handled by server-side
   lag compensation in Phase G, not by client prediction.)*
 
-### Phase F — Persistence (Microsoft SQL Server)
+### Phase F — Persistence (Microsoft SQL Server) — *persistent, always-on world*
 - **Data-access layer** in `NeuronServer` (ODBC / SQL Server Native Client),
   kept behind an interface so it's mockable and swappable.
-- **Schema**: accounts/auth, characters/commanders (migrate the 256-byte
-  `commander` block into normalized tables), ship loadout, inventory/cargo,
-  per-system market state, world persistence, audit/anti-cheat log.
+- **Schema**: accounts/auth, **empire/faction** state, owned entities (migrate the
+  256-byte `commander` block into normalized tables), ship/unit loadouts,
+  inventory/cargo, **territory & economy/market** state, **command log** (for
+  replay/audit), audit/anti-cheat log.
+- **The world simulates while players are offline** (economy, AI empires,
+  territory) — persistence captures **world/empire state**, not just per-player
+  rows. The server is an always-on world sim, not a session host.
 - **Async, batched writes** off the sim thread (snapshot the dirty set, flush on
-  a worker) so DB latency never stalls the tick.
-- **Login flow**: authenticate → load character → spawn into world; periodic +
-  on-logout save.
+  a worker) so DB latency never stalls the tick. **Never** write transient
+  per-tick entity positions to SQL — hot state stays in memory + periodic snapshots.
+- **Login flow**: authenticate → load empire → attach to owned entities; periodic
+  + on-logout save.
 
 ### Phase G — Multiplayer gameplay
 - **Shared combat** (server resolves hits/damage/kills authoritatively;
@@ -347,19 +401,23 @@ with no global singletons — without changing on-screen behavior.**
 
 ## 4. Key technical design notes
 
-- **`int64³` world + floating origin.** Absolute positions are `int64` to span a
-  huge field without precision loss. Each client (and the sim's render pass)
-  rebases to a local origin near the player so existing 32-bit/fixed-point math
-  is reused unchanged. Rebase when the player crosses a cell boundary.
+- **Seamless `int64³` world + floating origin.** Absolute positions are `int64`
+  to span a huge field without precision loss. The world is **seamless** — no
+  visible boundaries — but an **invisible cell partition** underneath drives
+  interest and future sharding. Each client (and the sim's render pass) rebases
+  to a local origin near the view so existing 32-bit/fixed-point math is reused
+  unchanged. Rebase when the view crosses a cell boundary.
 - **Determinism.** Keep the integer/fixed-point physics; it keeps the
   authoritative server sim reproducible (replays, golden tests, bug reports) and
   AOI snapshots stable. Avoid float nondeterminism in the server sim paths.
 - **From 20 objects to thousands.** `MAX_LOCAL_OBJECTS=20` is replaced by the
   ECS world (§2.3); AOI keeps the *per-client* working set small even though the
   world total is large.
-- **Tick model.** Fixed timestep server tick (20–30 Hz); snapshots at the tick
-  rate or a fraction; clients **interpolate** between snapshots (and dead-reckon
-  for smoothness) — they never simulate game rules locally.
+- **Decoupled clocks.** Separate **sim-tick**, **command-intake**, and
+  **replication** rates rather than one number. Flight starts ~20–30 Hz sim; an
+  RTS-leaning sim can run slower while the UI stays responsive via interpolation.
+  Tactical replication is faster than strategic. Clients **interpolate** between
+  snapshots (and dead-reckon for smoothness) — they never simulate game rules.
 - **Reuse what's already clean.** `pilot/trade/planet/elite` (0 `gfx_` calls)
   move to the sim core almost verbatim — start there to build momentum.
 
@@ -373,10 +431,16 @@ with no global singletons — without changing on-screen behavior.**
   golden-run tests guarding behavior.
 - **Reliability layer over raw UDP is non-trivial** — budget real time for
   retransmit/ordering/fragmentation and fuzz/packet-loss testing.
+- **4X-readiness is designed-in, not built-out.** §2.4 generalizes the
+  single-avatar / single-tick / single-interest assumptions so the RTS pivot is
+  an extension — but the *flight game ships first*. Don't gold-plate empire/RTS
+  systems before the single-player decouple (Phase A) lands.
+- **World partition is invisible but real.** The seamless world hides cell
+  boundaries; the hand-off logic (and eventual cross-process meshing) is genuine
+  engineering — budget for it when sharding becomes necessary, not on day one.
 - **Open balance/design questions** to resolve before Phase G: PvP rules &
-  safe zones, death/insurance handling, how the open `int64` field maps onto
-  Elite's discrete star systems (one continuous space, or systems as regions
-  within the field?), and starting interest radius / max entities per AOI.
+  safe zones, death/insurance, empire/faction ownership rules, and the starting
+  cell size / interest radii / max entities per AOI tier.
 
 ---
 

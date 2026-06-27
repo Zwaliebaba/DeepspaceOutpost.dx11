@@ -60,15 +60,24 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
 
 ## Key Architecture Decisions
 
-- **Server-authoritative MMO (in migration)**: target is an open-world, server-authoritative
-  MMO (up to 100 players) on an `int64³` coordinate field with Area-of-Interest replication.
-  **All game behavior is server-only** in `GameLogic`; the client runs **no game logic** — it is
-  a thin presentation layer (snapshot interpolation + dead-reckoning). **No shared game-logic
-  library**: client and server share only *data* (the in-house **ECS** container + component/
-  protocol schemas in `NeuronCore`). The de-globalized `Universe` *is* the ECS world, simulated
-  by the server. Transport is **raw-winsock UDP** + a custom reliability layer; the wire format
-  is a **hand-rolled binary** protocol (`DataReader`/`DataWriter`). See
-  [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+- **Server-authoritative MMO (in migration)**: target is a **massive seamless** open-world,
+  server-authoritative MMO (up to 100 players) on one continuous **`int64³`** coordinate space
+  (no visible boundaries; an invisible cell partition drives interest and future sharding) with
+  **multi-resolution Area-of-Interest** replication. **All game behavior is server-only** in
+  `GameLogic`; the client runs **no game logic** — it is a thin presentation layer (snapshot
+  interpolation + dead-reckoning). **No shared game-logic library**: client and server share only
+  *data* (the in-house **ECS** container + component/protocol schemas in `NeuronCore`). The
+  de-globalized `Universe` *is* the ECS world, simulated by the server. Transport is **raw-winsock
+  UDP** + a custom reliability layer; the wire format is a **hand-rolled binary** protocol
+  (`DataReader`/`DataWriter`). See [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+- **Built for a 4X / RTS drift**: the game logic will move over time from single-ship space-flight
+  toward a **4X / RTS** style (many units per player, empire/economy/territory, less twitch). The
+  architecture generalizes three single-player assumptions up front so that pivot is an extension,
+  not a rewrite: **player ≠ avatar** (identity is Account → Empire/Faction → owns N entities;
+  camera/interest are view-driven), **command/intent input** (validated orders, reusing the
+  existing `flight_roll/climb/speed/fire` intent state), and **decoupled sim/command/replication
+  clocks**. The ECS is indexed **relationally** (owner/faction/group/tag) as well as spatially.
+  See §2.4 of the roadmap.
 - **Modular engine split**: Game/engine code organized into `Neuron*` engine
   libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameLogic` (the **server-only** home
   of all game behavior), and the executables (`DeepspaceOutpost`, `BotClient`, `Server`).
