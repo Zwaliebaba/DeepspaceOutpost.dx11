@@ -91,6 +91,31 @@ namespace Neuron::Render
     virtual void FinishRender() = 0;
   };
 
+  // A sink that discards everything - for the headless dedicated server, the
+  // BotClient, and golden-run tests, where the simulation still "renders" into a
+  // queue but nothing is drawn.
+  class NullRenderSink final : public RenderSink
+  {
+  public:
+    void Pixel(int, int, int) override {}
+    void FastPixel(int, int, int) override {}
+    void Line(int, int, int, int) override {}
+    void ColourLine(int, int, int, int, int) override {}
+    void Circle(int, int, int, int) override {}
+    void FilledCircle(int, int, int, int) override {}
+    void Triangle(int, int, int, int, int, int, int) override {}
+    void RenderPolygon(int, const int*, int, int) override {}
+    void RenderLine(int, int, int, int, int, int) override {}
+    void Sprite(int, int, int) override {}
+    void Text(int, int, const char*) override {}
+    void CentreText(int, const char*, int, int) override {}
+    void SetClipRegion(int, int, int, int) override {}
+    void ClearArea(int, int, int, int) override {}
+    void DrawScanner() override {}
+    void StartRender() override {}
+    void FinishRender() override {}
+  };
+
   // Records draw commands during the sim's render pass, then replays them in
   // record order into a RenderSink. Owns the deferral and the variable-length
   // payload arenas; reused across frames via Clear().

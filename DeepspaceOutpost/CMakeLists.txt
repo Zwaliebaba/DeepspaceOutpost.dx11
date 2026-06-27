@@ -30,6 +30,7 @@ set(GAME_SOURCES
 # same higher warning bar as the platform layer, not the legacy /permissive tier.
 set(PLATFORM_SOURCES
     RenderQueue.cpp
+    platform/GfxRenderSink.cpp
     platform/platform_win.cpp
     platform/Renderer.cpp
     platform/gfx_dx11.cpp
