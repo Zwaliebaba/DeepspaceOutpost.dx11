@@ -14,6 +14,7 @@ set(GAMELOGIC_HEADERS
     GameLogic.h
     SimComponents.h
     MotionSystem.h
+    FlightInput.h
     FlightSystem.h
     Economy.h
     Galaxy.h

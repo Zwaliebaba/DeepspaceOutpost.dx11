@@ -14,6 +14,7 @@
 
 #include "SimComponents.h"
 #include "MotionSystem.h"
+#include "FlightInput.h"
 #include "FlightSystem.h"
 #include "Economy.h"
 #include "Galaxy.h"
@@ -29,7 +30,8 @@ namespace Neuron::GameLogic
   // a fixed, deterministic order; more are appended here as behaviour moves in.
   inline void Tick(ECS::Registry& _world)
   {
-    StepFlight(_world);
-    StepMotion(_world);
+    StepFlightInput(_world);   // intent -> flight controls (clamped to caps)
+    StepFlight(_world);        // integrate orientation + position
+    StepMotion(_world);        // simple velocity movers (non-steered entities)
   }
 }

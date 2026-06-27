@@ -16,6 +16,7 @@ set(TEST_SOURCES
     GalaxyTests.cpp
     CombatTests.cpp
     FlightTests.cpp
+    FlightInputTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)
