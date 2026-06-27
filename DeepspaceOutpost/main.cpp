@@ -43,6 +43,7 @@
 #include "pilot.h"
 #include "file.h"
 #include "keyboard.h"
+#include "Camera.h"
 
 
 
@@ -894,6 +895,25 @@ void handle_flight_keys (void)
 	{
 		find_input = 0;
 		display_options();
+	}
+
+	// F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
+	// triggered so holding the key flips the view exactly once.
+	static int f12_was_down = 0;
+	if (kbd_F12_pressed)
+	{
+		if (!f12_was_down)
+		{
+			Neuron::Client::SetCameraMode(
+				Neuron::Client::GetCameraMode() == Neuron::Client::CameraMode::Cockpit
+					? Neuron::Client::CameraMode::Chase
+					: Neuron::Client::CameraMode::Cockpit);
+		}
+		f12_was_down = 1;
+	}
+	else
+	{
+		f12_was_down = 0;
 	}
 
 	if (find_input)
