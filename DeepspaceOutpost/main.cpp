@@ -1341,25 +1341,23 @@ static void apply_station_responses (void)
 }
 
 
-// Gather the player's flight intent from the keyboard and send it to the server.
-// Used only in thin-client mode; the server maps it onto the authoritative ship.
+// Gather the player's flight intent and send it to the server. Driven from the
+// legacy flight state (PlayerFlight roll/climb/speed) that the flight keys and
+// the cockpit HUD already maintain, normalized to axes, so the server moves the
+// ship at exactly the speed shown on the dashboard. Used only in thin-client mode.
 static void send_player_input (void)
 {
 	static uint32_t seq = 0;
-	static double throttle = 0.0;
 
-	if (kbd_inc_speed_pressed)
-		throttle += 0.04;
-	if (kbd_dec_speed_pressed)
-		throttle -= 0.04;
-	if (throttle < 0.0) throttle = 0.0;
-	if (throttle > 1.0) throttle = 1.0;
+	const int maxRoll  = (PlayerCaps().maxRoll  > 0) ? PlayerCaps().maxRoll  : 1;
+	const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
+	const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
 
 	Neuron::Net::ClientInput in;
 	in.sequence = ++seq;
-	in.rollAxis = (float)((kbd_right_pressed ? 1 : 0) - (kbd_left_pressed ? 1 : 0));
-	in.pitchAxis = (float)((kbd_up_pressed ? 1 : 0) - (kbd_down_pressed ? 1 : 0));
-	in.throttle = (float)throttle;
+	in.rollAxis  = (float)PlayerFlight().roll  / (float)maxRoll;
+	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
+	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
 
 	Neuron::Client::ReplicationClientInstance().SendInput(in);

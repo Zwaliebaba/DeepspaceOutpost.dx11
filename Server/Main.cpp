@@ -56,9 +56,9 @@ int main()
   world.Add<GameLogic::WorldTransform>(planet, GameLogic::WorldTransform{ { 0, 0, 65536 } });
   world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
 
-  // One pirate so there is something to fight near the lane to the station.
+  // One pirate ahead-right of the spawn, close enough to be clearly visible.
   const ECS::EntityId pirate = world.Create();
-  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 6000, 1000, 10000 } });
+  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1000, 300, 4000 } });
   world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
   world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 8000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
