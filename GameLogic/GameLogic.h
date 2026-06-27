@@ -20,6 +20,8 @@
 #include "Galaxy.h"
 #include "Combat.h"
 #include "SnapshotBuilder.h"
+#include "AreaOfInterest.h"
+#include "DespawnTracker.h"
 
 namespace Neuron::GameLogic
 {

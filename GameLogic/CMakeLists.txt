@@ -20,6 +20,8 @@ set(GAMELOGIC_HEADERS
     Galaxy.h
     Combat.h
     SnapshotBuilder.h
+    AreaOfInterest.h
+    DespawnTracker.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

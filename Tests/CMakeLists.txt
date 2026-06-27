@@ -22,6 +22,7 @@ set(TEST_SOURCES
     SnapshotTransportTests.cpp
     InterpolationTests.cpp
     ReliableChannelTests.cpp
+    AreaOfInterestTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)
