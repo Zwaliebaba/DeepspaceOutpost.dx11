@@ -16,6 +16,7 @@ set(NEURONCORE_SOURCES
 set(NEURONCORE_HEADERS
     NeuronCore.h
     ECS.h
+    Vector3i64.h
     Debug.h
     FileSys.h
     GameMath.h
