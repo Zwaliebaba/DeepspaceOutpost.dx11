@@ -17,6 +17,8 @@
 
 #include "vector.h"
 
+#include "CameraFollow.h"
+
 struct local_object;
 
 namespace Neuron::Client
@@ -29,6 +31,21 @@ namespace Neuron::Client
     Left,
     Right,
   };
+
+  // Where the eye sits relative to the followed ship. Cockpit is the legacy
+  // fused view (eye on the ship); Chase floats the eye behind/above it via a
+  // ViewOffset. Default is Cockpit, so behaviour is unchanged until toggled.
+  enum class CameraMode
+  {
+    Cockpit,
+    Chase,
+  };
+
+  // Select the active camera mode and the offset used by Chase (in the ship's
+  // local frame). These are client-only presentation state.
+  void SetCameraMode(CameraMode _mode);
+  [[nodiscard]] CameraMode GetCameraMode();
+  void SetChaseOffset(const ViewOffset& _offset);
 
   struct Camera
   {
