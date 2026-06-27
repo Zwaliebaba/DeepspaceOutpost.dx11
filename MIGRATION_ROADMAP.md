@@ -22,7 +22,8 @@ first milestone.
 | Transport | **Raw winsock UDP** + a custom reliability/ordering layer (built on NeuronCore's existing winsock) |
 | Persistence | **Microsoft SQL Server** (accounts, ships, inventory, market, world state) |
 | Wire format | **Hand-rolled binary** for the hot path (snapshots/input); JSON (NeuronCore::Json) for cold path (handshake/config) |
-| "Modernize client" scope | **Decouple simulation from rendering + de-globalize state**; keep the faithful wireframe look |
+| Entity model | **ECS** — an **in-house** Entity Component System in NeuronCore; the de-globalized `Universe` *is* the ECS world (introduced ECS-first at A2, not bolted on later) |
+| "Modernize client" scope | **Decouple simulation from rendering + de-globalize state into the ECS**; keep the faithful wireframe look |
 
 ---
 
@@ -48,7 +49,7 @@ first milestone.
    "player N" — the whole program *is* one player.
 2. **`MAX_LOCAL_OBJECTS == 20`, local-system-only.** The `local_objects` array
    is a tiny fixed set of the objects around one player. An open `int64³` world needs a
-   **dynamic entity store** with spatial indexing.
+   **dynamic, ECS-backed entity store** with spatial indexing (§2.3).
 3. **Simulation and rendering are fused.** Measured `gfx_*` call counts:
 
    | File | Role | `gfx_` calls | Disposition |
@@ -79,7 +80,7 @@ first milestone.
 
 ```
             ┌──────────────────────────── NeuronCore (shared) ────────────────────────────┐
-            │  math · fixed-point · int64 vec3 · tasks · timers · JSON · UDP socket wrap    │
+            │  math · fixed-point · int64 vec3 · ECS · tasks · timers · JSON · UDP socket   │
             └──────────────────────────────────────────────────────────────────────────────┘
                        ▲                                              ▲
           ┌────────────┴───────────────┐                ┌─────────────┴──────────────┐
@@ -148,6 +149,30 @@ So the **new** `Neuron::Universe` is clean and never confused with the old
 The name **`Universe`** is now reserved exclusively for the new clean,
 house-style global world container introduced in A2/A3.
 
+### 2.3 Entity model — in-house ECS (`Neuron::ECS`)
+
+The de-globalized `Universe` **is** an Entity Component System, built in-house in
+NeuronCore (no third-party dependency), introduced **ECS-first at A2**.
+
+- **Why ECS:** the open `int64³` world holds thousands of heterogeneous entities
+  (players, NPC ships, missiles, cargo, asteroids, stations, sun/planet). Data-
+  oriented component storage gives cache-friendly iteration for the server tick,
+  composition replaces the current `if (type == …)` branching in `swat`/`pilot`,
+  and **components map 1:1 onto replication** — AOI picks entities, the snapshot
+  serializes their *replicated* components as deltas.
+- **Design:** sparse-set (or archetype) storage; stable `EntityId` (generational
+  handle); systems run in a **fixed, deterministic order** each tick (required
+  for client prediction/reconciliation). Components are plain `PascalCase`
+  structs (`Transform`, `Motion`, `Combat`, `Ai`, `ShipDef`, `Renderable`,
+  `NetReplicated`); systems are `PascalCase` (`MotionSystem`, `TacticsSystem`).
+- **Migration is faithful, not a rewrite:** at A2 each `local_object` becomes one
+  entity with *fat* components mirroring the existing fields; the existing loops
+  become systems one at a time, each verified against the Phase 0 golden runs.
+  Components are split/refined only after behavior is locked.
+- **Replication hooks** are part of the ECS from the start: a component marked
+  `NetReplicated` is automatically eligible for AOI snapshots (Phase D), so the
+  netcode never reaches into game structs directly.
+
 ---
 
 ## 3. Phase plan
@@ -175,15 +200,22 @@ with no global singletons — without changing on-screen behavior.**
   *emits* draw commands; the platform layer consumes them. Convert `space.cpp`,
   `threed.cpp`, `swat.cpp` so `update_local_objects()` does **move-only**, and a
   new `render_local_objects()` walks the entity list to emit draw commands.
-- **A2 — De-globalize into a `Universe` object.** Move `cmdr`, `myship`,
-  the flight globals, and the `local_objects` array into the new house-style
-  `Neuron::Universe` passed by reference. (Mechanical but large; do it
-  file-by-file behind the A1 seam.)
-- **A3 — Dynamic entity store + `int64³` coordinates.** Replace
-  `local_object local_objects[20]` with a growable entity container keyed by a stable
-  `EntityId`. Add absolute `Vector3i64` position to each entity. Implement the
-  **floating-origin** transform: render math stays 32-bit relative to the local
-  ship; the world position is `int64`. Keep the deterministic integer physics.
+- **A2 — De-globalize into `Neuron::Universe`, which *is* an ECS world.**
+  Instead of a plain container that gets replaced later, the de-globalized
+  `Universe` is the **in-house ECS registry from the start** (see §2.3). Each
+  legacy `local_objects[i]` becomes **one entity**; the `local_object` fields
+  migrate into a few *fat* components first (`Transform`, `Motion`, `Combat`,
+  `Ai`, `ShipDef`, `Renderable`) so the data layout is faithful before it is
+  refined. `cmdr`/`myship`/flight globals become components on a **player
+  entity**. The loops (`update_local_objects`, `tactics`, AI from `pilot.cpp`)
+  are converted into **systems**, one at a time, each guarded by the Phase 0
+  golden-run tests. Mechanical and large; do it file-by-file behind the A1 seam.
+- **A3 — `int64³` coordinates + floating origin.** Make `Transform.position`
+  an absolute **`Vector3i64`** component; add a uniform-grid/loose-octree
+  **spatial index** over the ECS world (reused later for AOI). Implement the
+  **floating-origin** transform: render/physics math stays 32-bit relative to
+  the local ship while the authoritative world position is `int64`. Keep the
+  deterministic integer physics. (Smaller now that A2 already built the ECS.)
 - **A4 — Extract `GameLogic` into a library** that links into both
   `NeuronClient` and `NeuronServer`, compiles **headless** (no DX11/audio), and
   ticks via a fixed timestep. Move the already-pure files (`pilot`, `trade`,
@@ -266,8 +298,8 @@ with no global singletons — without changing on-screen behavior.**
 - **Determinism.** Keep the integer/fixed-point physics; it makes prediction,
   reconciliation, and reproducible bug reports tractable. Avoid float
   nondeterminism in shared sim paths.
-- **From 20 objects to thousands.** `MAX_LOCAL_OBJECTS=20` is replaced by a
-  dynamic store; AOI keeps the *per-client* working set small even though the
+- **From 20 objects to thousands.** `MAX_LOCAL_OBJECTS=20` is replaced by the
+  ECS world (§2.3); AOI keeps the *per-client* working set small even though the
   world total is large.
 - **Tick model.** Fixed timestep server tick (20–30 Hz); snapshots at the tick
   rate or a fraction; clients interpolate between snapshots and predict locally.
