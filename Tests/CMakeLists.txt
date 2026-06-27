@@ -8,14 +8,20 @@
 set(TEST_SOURCES
     TestMain.cpp
     EcsTests.cpp
+    UniverseTests.cpp
 )
 
 add_executable(Tests ${TEST_SOURCES} TestFramework.h)
 
 target_compile_features(Tests PRIVATE cxx_std_23)
 
-# Header-only access to the engine code under test (ECS.h lives in NeuronCore).
-target_include_directories(Tests PRIVATE ${CMAKE_SOURCE_DIR}/NeuronCore)
+# Header-only access to the engine code under test: ECS.h lives in NeuronCore;
+# the game components / Universe + vector.h live in the DeepspaceOutpost project
+# (they relocate to GameLogic at A4). All are header-only, so no linking needed.
+target_include_directories(Tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/NeuronCore
+    ${CMAKE_SOURCE_DIR}/DeepspaceOutpost
+)
 
 if(MSVC)
     target_compile_options(Tests PRIVATE /W4)
