@@ -10,6 +10,57 @@ first milestone.
 
 ---
 
+## Implementation status — last updated 2026-06-27
+
+The client decouple **and** the server split are both done: the game now runs
+**fully server-authoritative** over UDP. Single-player has been retired; the
+client `Open()`s a `ReplicationClient` against a dedicated `Server/` host and
+renders only replicated, interpolated state. All shared logic is headless and
+unit-tested (163 tests, CI-green on the Windows runner); the client builds are
+CI-verified and visually validated by the project owner.
+
+| Phase | Status | Notes |
+|---|---|---|
+| **0** Baseline & CI | ✅ Done | Windows CI (`ci.yml`), headless test suite (`Tests/`, 163 tests), golden runs. |
+| **A0** Legacy de-naming | ✅ Done | `universe`→`local_objects`, etc. |
+| **A1** Render seam | ✅ Done | `RenderQueue` / `ActiveRenderQueue`; sim emits draw commands. |
+| **A2** ECS de-globalization | ✅ Done | In-house `Neuron::ECS::Registry` (sparse-set, generational ids). |
+| **A3** `int64³` + floating origin | ✅ Done | `Vector3i64`, `Spatial::Grid`, camera-relative render. |
+| **A4** `GameLogic` (server-only) | ✅ Done | Flight, combat, economy, galaxy gen, spawning, stations — headless. |
+| **B** Server host + BotClient | 🟡 Partial | `Server/` runs a ~30 Hz authoritative loop with sessions/AOI. **BotClient exe not built yet.** |
+| **C** UDP + reliability + intent | ✅ Done | `NetLib` UDP, `ReliableChannel` (seq/ack/resend), `ClientInput` intent protocol. |
+| **D** Replication & AOI | 🟡 Partial | Tactical AOI (`AreaOfInterest`), MTU-bounded reliability-free snapshots (`SnapshotPacketizer`). **No strategic tier, delta-compression, or quantization yet.** |
+| **E** Client smoothing | 🟡 Partial | `SnapshotInterpolator` + floating origin done. **Dead-reckoning is minimal; local starfield drifts from the replicated world (no client-side prediction).** |
+| **F** Persistence (SQL Server) | 🔴 Not started | **The main remaining blocker — a server restart wipes all player state.** |
+| **G** Multiplayer gameplay | 🟡 Partial | Server-authoritative combat, trading, docking, multi-client sessions, police/wanted, **procedural galaxy + galactic chart + teleport** all done. **No player names / chat UI; minimal PvP rules.** |
+| **H** Hardening & scale to 100 | 🔴 Not started | Needs BotClient load harness. |
+| **I** Operations | 🔴 Minimal | Console logging only. |
+
+### What works end-to-end today
+- Connect → server spawns your ship, hands back your entity id (`AssignPlayer`)
+  and the **galaxy manifest**; client renders the replicated world in the ship's
+  camera frame (rolling/pitching rotate the view).
+- Server-authoritative **flight** (intent → caps clamp → `int64` integrate),
+  **combat** (forward fire, police response to crimes), **NPC spawning**.
+- **Docking** (proximity + facing), **trading/equipping** against each station's
+  own market, clean **undock** ejection.
+- **Procedural 256-system galaxy**, each with a planet + orbiting station/market;
+  **galactic chart** (F5) plots the server manifest; **teleport** (hyperspace key
+  while docked) jumps to the system at the crosshair, server-validated.
+
+### Top open items (see §5 for the full list)
+1. **Persistence (Phase F)** — nothing survives a server restart. Highest-value
+   next step for a real MMO.
+2. **BotClient + 100-player load test** (Phase B/H).
+3. **Strategic AOI tier + delta/quantization** (Phase D) — bandwidth scaling.
+4. **Client prediction / smoothing** — close the starfield-vs-replicated rotation
+   drift (Phase E).
+5. **Player identity & chat UI** (Phase G) — names/factions across players; the
+   `Chat` event type exists but has no UI.
+6. **Delete remaining dead single-player code** now the replicated path is proven.
+
+---
+
 ## 0. Locked design decisions
 
 | Topic | Decision |
@@ -445,7 +496,17 @@ with no global singletons — without changing on-screen behavior.**
 ---
 
 ## 6. Suggested immediate next step
-Begin **Phase 0 + Phase A1**: stand up the Windows CI build, add a headless
-golden-run test, and introduce the `RenderQueue` seam in `space.cpp` /
-`threed.cpp` so the simulation stops calling `gfx_*` directly. Everything else
-builds on that decoupling.
+Phases 0 and A are complete, and the server split (B–E) plus most of the
+multiplayer gameplay (G) are working end-to-end (see the **Implementation
+status** section at the top). The decoupling keystone is behind us.
+
+The highest-value next step is **Phase F — Persistence (Microsoft SQL Server)**:
+right now a server restart wipes every player's wallet, cargo, equipment,
+position and wanted level, so nothing is durable. Stand up the data-access layer
+in `NeuronServer`, normalize the `commander` block into account/empire/entity
+tables, and wire **load-on-connect / async save** around the session lifecycle
+(`ServerSessions`). Until state persists, no other gameplay is "real".
+
+Strong runners-up: stand up the **`BotClient`** (Phase B) so the 100-player load
+test (Phase H) becomes possible, and add the **strategic AOI tier + delta/
+quantization** (Phase D) once persistence lands.
