@@ -920,8 +920,8 @@ int fire_laser (void)
 
 			snd_play_sample (SND_PULSE);
 			PlayerDefense().laserHeat += 8;
-			if (energy > 1)
-				energy--;
+			if (PlayerDefense().energy > 1)
+				PlayerDefense().energy--;
 			
 			laser_x = ((rand() & 3) + 128 - 2) * GFX_SCALE;
 			laser_y = ((rand() & 3) + 96 - 2) * GFX_SCALE;
