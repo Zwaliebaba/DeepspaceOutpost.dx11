@@ -1321,6 +1321,26 @@ void info_message (const char *message)
  * window, Direct3D 11 device and XAudio2 engine have been created.
  */
 
+// Apply authoritative station responses (buy/sell/dock results) to the local
+// display state. Used only in thin-client mode.
+static void apply_station_responses (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	Neuron::Net::ReliableMessage msg;
+	while (rc.PollEvent(msg))
+	{
+		Neuron::Net::StationResponse resp;
+		if (Neuron::Net::DecodeStationResponse(msg, resp) &&
+			resp.status == Neuron::Net::StationStatus::Ok)
+		{
+			cmdr.credits = resp.credits;
+			if (resp.commodity < NO_OF_STOCK_ITEMS)
+				cmdr.current_cargo[resp.commodity] = resp.cargo;
+		}
+	}
+}
+
+
 // Gather the player's flight intent from the keyboard and send it to the server.
 // Used only in thin-client mode; the server maps it onto the authoritative ship.
 static void send_player_input (void)
@@ -1400,6 +1420,8 @@ int game_main (void)
 			// single-player path is unchanged; once open, the client consumes the
 			// server's authoritative snapshots here instead of simulating locally.
 			Neuron::Client::ReplicationClientInstance().Pump();
+			if (Neuron::Client::ReplicationClientInstance().IsOpen())
+				apply_station_responses();
 
 			snd_update_sound();
 			gfx_update_screen();

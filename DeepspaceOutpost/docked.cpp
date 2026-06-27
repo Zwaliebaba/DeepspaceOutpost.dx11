@@ -13,6 +13,7 @@
 #include "planet.h"
 #include "shipdata.h"
 #include "space.h"
+#include "ReplicationClient.h"
 
 
 
@@ -778,8 +779,20 @@ void buy_stock (void)
 	if (!docked)
 		return;
 
+	// Thin-client mode: trading is server-authoritative. Send a buy request and
+	// let the StationResponse update credits/cargo; skip the local mutation.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Buy;
+		req.commodity = (uint16_t) hilite_item;
+		req.quantity = 1;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+		return;
+	}
+
 	item = &stock_market[hilite_item];
-		
+
 	if ((item->current_quantity == 0) ||
 	    (cmdr.credits < item->current_price))
 		return;
@@ -804,6 +817,17 @@ void sell_stock (void)
 	
 	if ((!docked) || (cmdr.current_cargo[hilite_item] == 0))
 		return;
+
+	// Thin-client mode: ask the server to sell; the response updates our state.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Sell;
+		req.commodity = (uint16_t) hilite_item;
+		req.quantity = 1;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+		return;
+	}
 
 	item = &stock_market[hilite_item];
 

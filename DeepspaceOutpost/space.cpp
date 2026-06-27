@@ -199,6 +199,15 @@ void dock_player (void)
 {
 	disengage_auto_pilot();
 	docked = 1;
+
+	// Thin-client mode: tell the server we've docked so it permits station trade.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Dock;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+	}
+
 	PlayerFlight().speed = 0;
 	PlayerFlight().roll = 0;
 	PlayerFlight().climb = 0;
@@ -1258,6 +1267,15 @@ void launch_player (void)
 	Matrix rotmat;
 
 	docked = 0;
+
+	// Thin-client mode: tell the server we've undocked.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Undock;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+	}
+
 	PlayerFlight().speed = 12;
 	PlayerFlight().roll = -15;
 	PlayerFlight().climb = 0;
