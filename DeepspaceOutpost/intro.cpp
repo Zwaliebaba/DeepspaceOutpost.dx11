@@ -15,6 +15,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "GameUniverse.h"
 #include "vector.h"
 #include "shipdata.h"
 #include "shipface.h"
@@ -68,7 +69,7 @@ void update_intro1 (void)
 
 	gfx_clear_display();
 
-	flight_roll = 1;
+	PlayerFlight().roll = 1;
 	update_local_objects();
 	
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);

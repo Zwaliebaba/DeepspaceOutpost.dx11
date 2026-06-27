@@ -448,7 +448,7 @@ void fire_missile (void)
 
 	ns = &local_objects[newship];
 	
-	ns->velocity = flight_speed * 2;
+	ns->velocity = PlayerFlight().speed * 2;
 	ns->flags = FLG_ANGRY;
 	ns->target = missile_target;
 

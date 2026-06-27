@@ -64,7 +64,7 @@ char find_name[20];
 /*
  * Flight-control responsiveness.
  *
- * flight_roll / flight_climb hold the ship's current turn rate (consumed by
+ * PlayerFlight().roll / PlayerFlight().climb hold the ship's current turn rate (consumed by
  * move_local_object as alpha/beta). While a control key is held the rate ramps
  * toward full deflection; when released it auto-centres back to zero. These
  * steps set how many rate units we add/remove per frame - i.e. how snappily
@@ -114,9 +114,9 @@ static void centre_flight_roll (void)
 {
 	int i;
 
-	for (i = 0; i < ROLL_CENTRE_STEP && flight_roll != 0; i++)
+	for (i = 0; i < ROLL_CENTRE_STEP && PlayerFlight().roll != 0; i++)
 	{
-		if (flight_roll > 0)
+		if (PlayerFlight().roll > 0)
 			decrease_flight_roll();
 		else
 			increase_flight_roll();
@@ -128,9 +128,9 @@ static void centre_flight_climb (void)
 {
 	int i;
 
-	for (i = 0; i < CLIMB_CENTRE_STEP && flight_climb != 0; i++)
+	for (i = 0; i < CLIMB_CENTRE_STEP && PlayerFlight().climb != 0; i++)
 	{
-		if (flight_climb > 0)
+		if (PlayerFlight().climb > 0)
 			decrease_flight_climb();
 		else
 			increase_flight_climb();
@@ -160,14 +160,15 @@ void initialise_game(void)
 		GameUniverse().Reg().Add<Neuron::Game::PlayerTag>(player, Neuron::Game::PlayerTag{});
 		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
 		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{});
+		GameUniverse().Reg().Add<Neuron::Game::FlightRates>(player, Neuron::Game::FlightRates{});
 		GameUniverse().SetPlayer(player);
 	}
 
 	restore_saved_commander();
 
-	flight_speed = 1;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 1;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	docked = 1;
 	front_shield = 255;
 	aft_shield = 255;
@@ -359,8 +360,8 @@ void arrow_right (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_roll > 0)
-				flight_roll = 0;
+			if (PlayerFlight().roll > 0)
+				PlayerFlight().roll = 0;
 			else
 			{
 				ramp_flight_roll(-ROLL_RAMP_STEP);
@@ -392,8 +393,8 @@ void arrow_left (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_roll < 0)
-				flight_roll = 0;
+			if (PlayerFlight().roll < 0)
+				PlayerFlight().roll = 0;
 			else
 			{
 				ramp_flight_roll(ROLL_RAMP_STEP);
@@ -433,8 +434,8 @@ void arrow_up (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_climb > 0)
-				flight_climb = 0;
+			if (PlayerFlight().climb > 0)
+				PlayerFlight().climb = 0;
 			else
 			{
 				ramp_flight_climb(-CLIMB_RAMP_STEP);
@@ -475,8 +476,8 @@ void arrow_down (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_climb < 0)
-				flight_climb = 0;
+			if (PlayerFlight().climb < 0)
+				PlayerFlight().climb = 0;
 			else
 			{
 				ramp_flight_climb(CLIMB_RAMP_STEP);
@@ -622,7 +623,7 @@ void auto_dock (void)
 	ship.rotmat[2].z = 1;
 	ship.rotmat[0].x = -1;
 	ship.type = -96;
-	ship.velocity = flight_speed;
+	ship.velocity = PlayerFlight().speed;
 	ship.acceleration = 0;
 	ship.bravery = 0;
 	ship.rotz = 0;
@@ -631,26 +632,26 @@ void auto_dock (void)
 	auto_pilot_ship (&ship);
 
 	if (ship.velocity > 22)
-		flight_speed = 22;
+		PlayerFlight().speed = 22;
 	else
-		flight_speed = ship.velocity;
+		PlayerFlight().speed = ship.velocity;
 	
 	if (ship.acceleration > 0)
 	{
-		flight_speed++;
-		if (flight_speed > 22)
-			flight_speed = 22;
+		PlayerFlight().speed++;
+		if (PlayerFlight().speed > 22)
+			PlayerFlight().speed = 22;
 	}
 
 	if (ship.acceleration < 0)
 	{
-		flight_speed--;
-		if (flight_speed < 1)
-			flight_speed = 1;
+		PlayerFlight().speed--;
+		if (PlayerFlight().speed < 1)
+			PlayerFlight().speed = 1;
 	}	
 
 	if (ship.rotx == 0)
-		flight_climb = 0;
+		PlayerFlight().climb = 0;
 	
 	if (ship.rotx < 0)
 	{
@@ -669,11 +670,11 @@ void auto_dock (void)
 	}
 	
 	if (ship.rotz == 127)
-		flight_roll = -14;
+		PlayerFlight().roll = -14;
 	else
 	{
 		if (ship.rotz == 0)
-			flight_roll = 0;
+			PlayerFlight().roll = 0;
 
 		if (ship.rotz > 0)
 		{
@@ -702,9 +703,9 @@ void run_escape_sequence (void)
 	
 	current_screen = SCR_ESCAPE_POD;
 	
-	flight_speed = 1;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 1;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 
 	set_init_matrix (rotmat);
 	rotmat[2].z = 1.0;
@@ -742,7 +743,7 @@ void run_escape_sequence (void)
 	{
 		auto_dock();
 
-		if ((abs(flight_roll) < 3) && (abs(flight_climb) < 3))
+		if ((abs(PlayerFlight().roll) < 3) && (abs(PlayerFlight().climb) < 3))
 		{
 			for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 			{
@@ -990,8 +991,8 @@ void handle_flight_keys (void)
 	{
 		if (!docked)
 		{
-			if (flight_speed < PlayerCaps().maxSpeed)
-				flight_speed++;
+			if (PlayerFlight().speed < PlayerCaps().maxSpeed)
+				PlayerFlight().speed++;
 		}
 	}
 
@@ -999,8 +1000,8 @@ void handle_flight_keys (void)
 	{
 		if (!docked)
 		{
-			if (flight_speed > 1)
-				flight_speed--;
+			if (PlayerFlight().speed > 1)
+				PlayerFlight().speed--;
 		}
 	}
 
@@ -1178,9 +1179,9 @@ void run_second_intro_screen (void)
 		
 	initialise_intro2();
 
-	flight_speed = 3;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 3;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 
 	for (;;)
 	{
@@ -1213,9 +1214,9 @@ void run_game_over_screen()
 	current_screen = SCR_GAME_OVER;
 	gfx_set_clip_region (1, 1, 510, 383);
 	
-	flight_speed = 6;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 6;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	clear_local_objects();
 
 	set_init_matrix (rotmat);

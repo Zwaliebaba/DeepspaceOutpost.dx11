@@ -6,6 +6,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "GameUniverse.h"
 #include "RenderContext.h"
 #include "vector.h"
 #include "stars.h"
@@ -55,9 +56,9 @@ void front_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 
-	delta = warp_stars ? 50 : flight_speed;	
-	alpha = (double)flight_roll;
-	beta = (double)flight_climb;
+	delta = warp_stars ? 50 : PlayerFlight().speed;	
+	alpha = (double)PlayerFlight().roll;
+	beta = (double)PlayerFlight().climb;
 
 	alpha /= 256.0;
 	delta /= 2.0;
@@ -151,9 +152,9 @@ void rear_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 
-	delta = warp_stars ? 50 : flight_speed;	
-	alpha = -flight_roll;
-	beta = -flight_climb;
+	delta = warp_stars ? 50 : PlayerFlight().speed;	
+	alpha = -PlayerFlight().roll;
+	beta = -PlayerFlight().climb;
 
 	alpha /= 256.0;
 	delta /= 2.0;
@@ -260,9 +261,9 @@ void side_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 	
-	delta = warp_stars ? 50 : flight_speed;	
-	alpha = flight_roll;
-	beta = flight_climb;
+	delta = warp_stars ? 50 : PlayerFlight().speed;	
+	alpha = PlayerFlight().roll;
+	beta = PlayerFlight().climb;
 
 	if (current_screen == SCR_LEFT_VIEW)
 	{

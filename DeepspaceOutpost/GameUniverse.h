@@ -19,3 +19,9 @@ inline Neuron::Game::ShipCaps& PlayerCaps()
 {
   return GameUniverse().Reg().Get<Neuron::Game::ShipCaps>(GameUniverse().Player());
 }
+
+// The player ship's current flight rates (replaces flight_speed/roll/climb).
+inline Neuron::Game::FlightRates& PlayerFlight()
+{
+  return GameUniverse().Reg().Get<Neuron::Game::FlightRates>(GameUniverse().Player());
+}

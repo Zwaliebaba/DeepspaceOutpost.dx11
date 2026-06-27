@@ -72,6 +72,16 @@ namespace Neuron::Game
     int cabTemp = 0;
   };
 
+  // The player's current flight rates (legacy globals flight_speed/roll/climb).
+  // These are the player's flight intent each frame; the universe sim applies
+  // roll/climb/speed to the player-relative coordinate frame.
+  struct FlightRates
+  {
+    int speed = 0;
+    int roll = 0;
+    int climb = 0;
+  };
+
   // Tag marking the player's own ship entity.
   struct PlayerTag {};
 }

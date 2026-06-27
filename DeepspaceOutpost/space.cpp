@@ -34,9 +34,6 @@
 #include "stars.h"
 #include "pilot.h"
 
-extern int flight_climb;
-extern int flight_roll;
-extern int flight_speed;
 
 struct galaxy_seed destination_planet;
 int hyper_ready;
@@ -102,8 +99,8 @@ void move_local_object (struct local_object *obj)
 	int rotx,rotz;
 	double speed;
 	
-	alpha = flight_roll / 256.0;
-	beta = flight_climb / 256.0;
+	alpha = PlayerFlight().roll / 256.0;
+	beta = PlayerFlight().climb / 256.0;
 	
 	x = obj->location.x;
 	y = obj->location.y;
@@ -137,7 +134,7 @@ void move_local_object (struct local_object *obj)
 	y = k2 - z * beta;
 	x = x + alpha * y;
 
-	z = z - flight_speed;
+	z = z - PlayerFlight().speed;
 
 	obj->location.x = x;
 	obj->location.y = y;
@@ -199,9 +196,9 @@ void dock_player (void)
 {
 	disengage_auto_pilot();
 	docked = 1;
-	flight_speed = 0;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 0;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	front_shield = 255;
 	aft_shield = 255;
 	energy = 255;
@@ -345,7 +342,7 @@ void update_cabin_temp (void)
 	if ((PlayerCaps().cabTemp < 224) || (cmdr.fuel_scoop == 0))
 		return;
 
-	cmdr.fuel += flight_speed / 2;
+	cmdr.fuel += PlayerFlight().speed / 2;
 	if (cmdr.fuel > PlayerCaps().maxFuel)
 		cmdr.fuel = PlayerCaps().maxFuel;
 
@@ -472,13 +469,13 @@ void check_docking (int i)
 		return;
 	}
 					
-	if (flight_speed >= 5)
+	if (PlayerFlight().speed >= 5)
 	{
 		do_game_over();
 		return;
 	}
 
-	flight_speed = 1;
+	PlayerFlight().speed = 1;
 	damage_ship (5, local_objects[i].location.z > 0);
 	snd_play_sample (SND_CRASH);
 }
@@ -792,9 +789,9 @@ void display_speed (void)
 	sx = 417;
 	sy = 384 + 9;
 
-	len = ((flight_speed * 64) / PlayerCaps().maxSpeed) - 1;
+	len = ((PlayerFlight().speed * 64) / PlayerCaps().maxSpeed) - 1;
 
-	colour = (flight_speed > (PlayerCaps().maxSpeed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
+	colour = (PlayerFlight().speed > (PlayerCaps().maxSpeed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
 
 	for (i = 0; i < 6; i++)
 	{
@@ -894,7 +891,7 @@ void display_flight_roll (void)
 	sx = 416;
 	sy = 384 + 9 + 14;
 
-	pos = sx - ((flight_roll * 28) / PlayerCaps().maxRoll);
+	pos = sx - ((PlayerFlight().roll * 28) / PlayerCaps().maxRoll);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -912,7 +909,7 @@ void display_flight_climb (void)
 	sx = 416;
 	sy = 384 + 9 + 14 + 16;
 
-	pos = sx + ((flight_climb * 28) / PlayerCaps().maxClimb);
+	pos = sx + ((PlayerFlight().climb * 28) / PlayerCaps().maxClimb);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -989,28 +986,28 @@ void update_console (void)
 
 void increase_flight_roll (void)
 {
-	if (flight_roll < PlayerCaps().maxRoll)
-		flight_roll++;
+	if (PlayerFlight().roll < PlayerCaps().maxRoll)
+		PlayerFlight().roll++;
 }
 
 
 void decrease_flight_roll (void)
 {
-	if (flight_roll > -PlayerCaps().maxRoll)
-		flight_roll--;
+	if (PlayerFlight().roll > -PlayerCaps().maxRoll)
+		PlayerFlight().roll--;
 }
 
 
 void increase_flight_climb (void)
 {
-	if (flight_climb < PlayerCaps().maxClimb)
-		flight_climb++;
+	if (PlayerFlight().climb < PlayerCaps().maxClimb)
+		PlayerFlight().climb++;
 }
 
 void decrease_flight_climb (void)
 {
-	if (flight_climb > -PlayerCaps().maxClimb)
-		flight_climb--;
+	if (PlayerFlight().climb > -PlayerCaps().maxClimb)
+		PlayerFlight().climb--;
 }
 
 
@@ -1113,9 +1110,9 @@ void enter_witchspace (void)
 	docked_planet.b ^= 31;
 	in_battle = 1;  
 
-	flight_speed = 12;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	create_new_stars();
 	clear_local_objects();
 
@@ -1148,7 +1145,7 @@ void complete_hyperspace (void)
 		cmdr.fuel -= hyper_distance;
 		cmdr.legal_status /= 2;
 
-		if ((rand255() > 253) || (flight_climb == PlayerCaps().maxClimb))
+		if ((rand255() > 253) || (PlayerFlight().climb == PlayerCaps().maxClimb))
 		{
 			enter_witchspace();
 			return;
@@ -1161,9 +1158,9 @@ void complete_hyperspace (void)
 	generate_planet_data (&current_planet_data, docked_planet);
 	generate_stock_market ();
 	
-	flight_speed = 12;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	create_new_stars();
 	clear_local_objects();
 
@@ -1261,9 +1258,9 @@ void launch_player (void)
 	Matrix rotmat;
 
 	docked = 0;
-	flight_speed = 12;
-	flight_roll = -15;
-	flight_climb = 0;
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = -15;
+	PlayerFlight().climb = 0;
 	cmdr.legal_status |= carrying_contraband();
 	create_new_stars();
 	clear_local_objects();

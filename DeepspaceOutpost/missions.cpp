@@ -12,6 +12,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "GameUniverse.h"
 #include "vector.h"
 #include "space.h"
 #include "planet.h"
@@ -187,9 +188,9 @@ void constrictor_mission_brief (void)
 	clear_local_objects();
 	set_init_matrix (rotmat);
 	add_new_ship (SHIP_CONSTRICTOR, 200, 90, 600, rotmat, -127, -127);
-	flight_roll = 0;
-	flight_climb = 0;
-	flight_speed = 0;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
+	PlayerFlight().speed = 0;
 
 	do
 	{

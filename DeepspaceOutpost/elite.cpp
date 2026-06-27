@@ -39,9 +39,7 @@ int planet_render_style = 0;
 int game_over;
 int docked;
 int finish;
-int flight_speed;
-int flight_roll;
-int flight_climb;
+/* PlayerFlight().speed/roll/climb migrated to the FlightRates component (PlayerFlight()). */
 int front_shield;
 int aft_shield;
 int energy;
