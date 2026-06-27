@@ -108,6 +108,7 @@ int main()
 
   uint8_t recv[2048];
   uint32_t tick = 0;
+  std::size_t lastSessions = 0;
   for (;;)
   {
     Timer::Core::Update();
@@ -163,6 +164,12 @@ int main()
         default:
           break;
       }
+    }
+
+    if (sessions.Count() != lastSessions)
+    {
+      lastSessions = sessions.Count();
+      printf("Clients connected: %zu\n", lastSessions);
     }
 
     // 1b. Process station requests (dock/buy/sell/equip) delivered on each
@@ -226,7 +233,7 @@ int main()
       if (world.IsValid(s.entity))
         viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
 
-      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, kAoiRadiusCells);
+      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, kAoiRadiusCells, s.entity.index);
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 

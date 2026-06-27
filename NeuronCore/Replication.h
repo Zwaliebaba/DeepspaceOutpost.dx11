@@ -40,7 +40,7 @@ namespace Neuron::Net
   // Exact serialized sizes, so a packetizer can split a snapshot into datagrams
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.
-  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 2;   // magic+version+tick+count
+  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + 2;   // magic+version+tick+viewerId+count
   inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (8 * 3) + (4 * 7) + 2;   // id + i64 pos + f32 orient/speed + i16 type
 
   // A conservative UDP payload that avoids IP fragmentation across the public
@@ -72,10 +72,14 @@ namespace Neuron::Net
     [[nodiscard]] friend bool operator==(const EntitySnapshot&, const EntitySnapshot&) = default;
   };
 
-  // A server tick's worth of entity snapshots.
+  // A server tick's worth of entity snapshots, addressed to one viewer. `viewerId`
+  // is the recipient's own entity index, so the client can identify its own ship
+  // (and use it as the camera origin) straight from the snapshot - no separate
+  // handshake required. 0xFFFFFFFF means "not addressed to a specific viewer".
   struct WorldSnapshot
   {
     uint32_t tick = 0;
+    uint32_t viewerId = 0xFFFFFFFFu;
     std::vector<EntitySnapshot> entities;
   };
 
@@ -84,6 +88,7 @@ namespace Neuron::Net
     _w.WriteU32(SNAPSHOT_MAGIC);
     _w.WriteU16(SNAPSHOT_VERSION);
     _w.WriteU32(_snap.tick);
+    _w.WriteU32(_snap.viewerId);
     _w.WriteU16(static_cast<uint16_t>(_snap.entities.size()));
 
     for (const EntitySnapshot& e : _snap.entities)
@@ -113,6 +118,7 @@ namespace Neuron::Net
       return false;
 
     _out.tick = _r.ReadU32();
+    _out.viewerId = _r.ReadU32();
     const uint16_t count = _r.ReadU16();
 
     _out.entities.clear();

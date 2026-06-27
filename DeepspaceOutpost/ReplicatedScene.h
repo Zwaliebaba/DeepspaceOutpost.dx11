@@ -33,22 +33,28 @@ namespace Neuron::Client
   };
 
   // Build render records for every replicated entity except the local player.
-  // The floating origin is the local player's snapshot position (or the world
-  // origin if it is not in the set yet), so positions stay small and float-safe.
+  // The floating origin is the local player's snapshot position. Until that entity
+  // is present in the snapshot, render nothing rather than rebase against a bogus
+  // origin (which would push the whole world behind the camera).
   [[nodiscard]] inline std::vector<RenderRecord> BuildRenderRecords(
       const std::vector<Net::EntitySnapshot>& _entities, uint32_t _localPlayerId)
   {
     Math::Vector3i64 origin{ 0, 0, 0 };
+    bool found = false;
     for (const Net::EntitySnapshot& e : _entities)
     {
       if (e.id == _localPlayerId)
       {
         origin = Math::Vector3i64{ e.x, e.y, e.z };
+        found = true;
         break;
       }
     }
 
     std::vector<RenderRecord> records;
+    if (!found)
+      return records;   // we don't know where we are yet
+
     records.reserve(_entities.size());
     for (const Net::EntitySnapshot& e : _entities)
     {

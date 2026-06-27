@@ -50,10 +50,12 @@ namespace Neuron::GameLogic
     // Build a snapshot for a viewer at `_viewerPos` containing only the entities
     // within `_radiusCells` cells of it. Call Rebuild() first each tick.
     [[nodiscard]] Net::WorldSnapshot SnapshotFor(ECS::Registry& _world, uint32_t _tick,
-                                                 const Math::Vector3i64& _viewerPos, int _radiusCells) const
+                                                 const Math::Vector3i64& _viewerPos, int _radiusCells,
+                                                 uint32_t _viewerId = 0xFFFFFFFFu) const
     {
       Net::WorldSnapshot snap;
       snap.tick = _tick;
+      snap.viewerId = _viewerId;   // so the client can identify its own ship
 
       std::vector<uint64_t> nearby;
       m_grid.QueryNear(_viewerPos, _radiusCells, nearby);

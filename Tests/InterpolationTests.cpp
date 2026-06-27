@@ -121,6 +121,17 @@ TEST(Interp_EvictsStaleEntities)
   CHECK(interp.Sample(2, 0.0, s));
 }
 
+TEST(Interp_LearnsViewerIdFromSnapshots)
+{
+  Net::SnapshotInterpolator interp;
+  CHECK(interp.ViewerId() == 0xFFFFFFFFu);   // unknown until a snapshot arrives
+
+  Net::WorldSnapshot s = OneEntity(1, 5, 0, 0, 0);
+  s.viewerId = 5;                            // server tells us we are entity 5
+  interp.Ingest(s);
+  CHECK(interp.ViewerId() == 5);
+}
+
 TEST(Interp_LocalOffsetRebasesToFloatingOrigin)
 {
   Net::EntitySnapshot e;

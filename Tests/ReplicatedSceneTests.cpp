@@ -40,17 +40,15 @@ TEST(Scene_LocalPlayerIsTheOriginAndIsNotDrawn)
   CHECK(recs[0].distance == 100.0);
 }
 
-TEST(Scene_UnknownLocalPlayerFallsBackToWorldOrigin)
+TEST(Scene_UnknownLocalPlayerRendersNothing)
 {
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(2, 5, 6, 7));
 
+  // We are not in the snapshot yet (unknown local player) -> draw nothing, rather
+  // than rebase against a bogus origin.
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 999);
-
-  CHECK(recs.size() == 1);
-  CHECK(recs[0].location.x == 5.0);
-  CHECK(recs[0].location.y == 6.0);
-  CHECK(recs[0].location.z == 7.0);
+  CHECK(recs.empty());
 }
 
 TEST(Scene_OnlyTheLocalPlayerIsSkipped)
@@ -70,12 +68,13 @@ TEST(Scene_OnlyTheLocalPlayerIsSkipped)
 TEST(Scene_RotmatIsBuiltFromTheOrientationBasis)
 {
   std::vector<Net::EntitySnapshot> ents;
+  ents.push_back(At(99, 0, 0, 0));                  // the local player (origin)
   Net::EntitySnapshot e = At(5, 0, 0, 0);
   e.noseX = 1.0f; e.noseY = 0.0f; e.noseZ = 0.0f;   // nose +x
   e.roofX = 0.0f; e.roofY = 0.0f; e.roofZ = 1.0f;   // roof +z
   ents.push_back(e);
 
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 0);
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 99);
   CHECK(recs.size() == 1);
 
   // nose and roof preserved, side = roof x nose = (0,1,0).

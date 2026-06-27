@@ -48,6 +48,9 @@ namespace Neuron::Net
       if (_snap.tick > m_latestTick)
         m_latestTick = _snap.tick;
 
+      if (_snap.viewerId != 0xFFFFFFFFu)
+        m_viewerId = _snap.viewerId;   // the snapshot tells us our own entity id
+
       for (const EntitySnapshot& e : _snap.entities)
       {
         History& h = m_history[e.id];
@@ -126,6 +129,10 @@ namespace Neuron::Net
     [[nodiscard]] std::size_t Count() const { return m_history.size(); }
     [[nodiscard]] uint32_t LatestTick() const { return m_latestTick; }
 
+    // The local viewer's own entity id, learned from the snapshots (0xFFFFFFFF
+    // until the first snapshot arrives).
+    [[nodiscard]] uint32_t ViewerId() const { return m_viewerId; }
+
   private:
     struct History
     {
@@ -138,6 +145,7 @@ namespace Neuron::Net
 
     std::unordered_map<uint32_t, History> m_history;
     uint32_t m_latestTick = 0;
+    uint32_t m_viewerId = 0xFFFFFFFFu;
   };
 
   // Rebase an absolute snapshot into the local float render frame around

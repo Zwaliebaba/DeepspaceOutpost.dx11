@@ -48,6 +48,7 @@ TEST(Replication_SnapshotRoundTrips)
 {
   Net::WorldSnapshot snap;
   snap.tick = 42;
+  snap.viewerId = 7;
   snap.entities.push_back(Net::EntitySnapshot{
     /*id*/ 3, /*x*/ 1000, /*y*/ -2000, /*z*/ 9000,
     /*nose*/ 0.0f, 0.0f, 1.0f, /*roof*/ 0.0f, 1.0f, 0.0f, /*speed*/ 12.5f, /*type*/ -1 });
@@ -61,6 +62,7 @@ TEST(Replication_SnapshotRoundTrips)
   Net::DataReader r(w.Data(), w.Size());
   CHECK(Net::ReadSnapshot(r, out));
   CHECK(out.tick == 42);
+  CHECK(out.viewerId == 7);
   CHECK(out.entities.size() == 2);
   CHECK((out.entities[0] == snap.entities[0]));
   CHECK((out.entities[1] == snap.entities[1]));

@@ -77,10 +77,16 @@ namespace Neuron::Client
     // order, or false if none are ready. (AssignPlayer is consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
 
-    // The entity id the local player controls. Set by the AssignPlayer handshake;
-    // its replicated position is the floating origin and it is not drawn.
+    // The entity id the local player controls - its replicated position is the
+    // floating origin and it is not drawn. Learned primarily from the snapshot
+    // header (reliable via the working snapshot channel); the AssignPlayer
+    // handshake is a fallback.
     void SetLocalPlayer(uint32_t _id) { m_localPlayer = _id; }
-    [[nodiscard]] uint32_t LocalPlayer() const { return m_localPlayer; }
+    [[nodiscard]] uint32_t LocalPlayer() const
+    {
+      const uint32_t fromSnapshot = m_interp.ViewerId();
+      return (fromSnapshot != 0xFFFFFFFFu) ? fromSnapshot : m_localPlayer;
+    }
 
   private:
     Net::UdpSocket m_socket;
@@ -88,7 +94,7 @@ namespace Neuron::Client
     Net::ReliableChannel m_events;                 // reliable ordered events
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
     Net::Endpoint m_server;
-    uint32_t m_localPlayer = 0;
+    uint32_t m_localPlayer = 0xFFFFFFFFu;   // sentinel until assigned (never entity 0)
     bool m_haveServer = false;
     bool m_open = false;
   };

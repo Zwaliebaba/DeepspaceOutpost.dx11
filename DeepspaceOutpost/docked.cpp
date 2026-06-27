@@ -336,7 +336,7 @@ void display_galactic_chart (void)
 
 	gfx_clear_display();
 
-	sprintf (str, "GALACTIC CHART %d", cmdr.galaxy_number + 1);
+	sprintf (str, "GALACTIC CHART");   /* one continuous galaxy now - no numbering */
 
 	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
 
