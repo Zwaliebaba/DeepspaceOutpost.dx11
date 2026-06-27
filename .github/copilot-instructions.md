@@ -24,16 +24,29 @@ and two executables.
 > placeholders for the *planned* engine libraries below and are empty for now. `DemoShaders/`
 > holds HLSL ported from the engine's GLSL and is **reference only** — it is not part of the build.
 
+**Direction:** the project is migrating to an **open-world, server-authoritative MMO** (up to 100
+players, `int64³` world, in-house ECS, client prediction, AOI replication). Read
+[`docs/MIGRATION_ROADMAP.md`](../docs/MIGRATION_ROADMAP.md) before architecture work.
+
 Target structure once the engine split lands:
 
-- **NeuronCore** (static lib): math, networking, filesystem, tasks, timers, events, debug,
-  serialization. Includes C++/WinRT projections.
+- **NeuronCore** (static lib): engine foundation **+ the only client/server shared data** — the
+  **in-house ECS** container, component & wire-protocol **schemas** (`Transform`, `Motion`,
+  `ShipDef`, …), static ship-data tables, math, networking (`NetLib` — raw-winsock UDP +
+  reliability), filesystem, tasks, timers, events, debug, serialization (`DataReader`/`DataWriter`
+  hand-rolled binary; `Json` cold path). **No game behavior.** Includes C++/WinRT projections.
 - **NeuronClient** (static lib): Direct3D 11 graphics core, the `OpenglDirectx` GL-over-D3D
-  compatibility layer, audio, input, GUI. Depends on NeuronCore.
-- **NeuronServer** (static lib): server engine library (currently minimal). Depends on NeuronCore.
-- **GameLogic** (static lib): the Deepspace Outpost simulation **and** rendering. Depends on NeuronClient.
-- **DeepspaceOutpost** (Win32 GUI executable, `wWinMain`): the game client. Links GameLogic.
-- **Server** (console executable, `main`): dedicated-server stub. Links NeuronServer.
+  compatibility layer (legacy), audio, input, GUI, **plus client networking** (session, **snapshot
+  interpolation + dead-reckoning** — presentation only, *no game rules*). Depends on NeuronCore.
+- **NeuronServer** (static lib): server engine — sessions, AOI/replication, persistence (MS SQL).
+  Depends on GameLogic.
+- **GameLogic** (static lib): **SERVER-ONLY — the single home of ALL game behavior**: motion/
+  physics, AI/tactics, economy, combat resolution, missions, spawning. Headless, no rendering.
+  Depends on NeuronCore. **The client never links it; there is no shared game-logic library.**
+- **DeepspaceOutpost** (Win32 GUI executable, `wWinMain`): the game client. Links NeuronClient.
+- **BotClient** (console executable): **headless test client** — bots, no render/audio, for load
+  testing. Links NeuronClient (headless).
+- **Server** (console executable, `main`): dedicated-server host. Links NeuronServer, GameLogic.
 
 The renderer is **Direct3D 11** (not D3D12). Math is migrating from the legacy ported math types to
 **DirectXMath** via `Neuron::Math`. Several conventions below describe the *target* style for
@@ -55,8 +68,9 @@ Before generating code, scan the codebase to identify:
 
 Prioritize the following files (if they exist):
 
+- **AGENTS.md** (repo root): Project structure, dependency graph, and conventions — read first.
+- **docs/MIGRATION_ROADMAP.md**: Phased plan for the server-authoritative MMO migration.
 - **.github/coding-standards.md**: Code style, formatting standards, and the native-first rule.
-- **.github/agents.md**: Project structure, dependency graph, and conventions.
 
 If a `.github/copilot/` directory is added later (architecture.md, tech-stack.md, etc.),
 prioritize it. Otherwise use `.github/coding-standards.md` and the existing codebase.
@@ -108,13 +122,18 @@ When context files don't provide specific guidance:
 ## Project-Specific Guidance
 
 - Respect the solution boundaries and dependency graph:
-  - `DeepspaceOutpost` (client exe) → GameLogic → NeuronClient → NeuronCore.
-  - `Server` (server exe) → NeuronServer → NeuronCore.
-  - `GameLogic` depends on **NeuronClient** and is linked by the **client**, not the server.
+  - `DeepspaceOutpost` / `BotClient` (client exes) → NeuronClient → NeuronCore.
+  - `Server` (server exe) → NeuronServer → GameLogic → NeuronCore.
+  - `GameLogic` is the **server-only** home of ALL game behavior; **there is no shared game-logic
+    library**. The client runs no game rules — it shares only data (ECS/protocol schemas in
+    `NeuronCore`) and renders interpolated + dead-reckoned snapshots. (Change from the older
+    client-linked-`GameLogic` design.)
 - Use `ASSERT` / `ASSERT_TEXT` / `DEBUG_ASSERT` / `DEBUG_WARNING` for assertions.
 - Use `Neuron::DebugTrace` for debug logging and `Neuron::Fatal` for fatal errors (see `NeuronCore/Debug.h`).
-- Files are `PascalCase.cpp` / `PascalCase.h`; classes use `PascalCase`, members `m_` + `camelCase`,
-  globals `g_`, constants `UPPER_SNAKE_CASE` (some legacy `constexpr` use a `c_` prefix — match the file).
+- Files are `PascalCase.cpp` / `PascalCase.h`; classes use `PascalCase`, **functions/methods
+  `PascalCase`** (per `.github/coding-standards.md`), local variables `camelCase`, members `m_` +
+  `camelCase`, globals `g_`, constants `UPPER_SNAKE_CASE` (some legacy `constexpr` use a `c_`
+  prefix — match the file). Still-legacy `snake_case` ported files stay `snake_case` until modernized.
 - Do not add `#include` directives already covered by `pch.h`. All projects use `pch.h` / `pch.cpp`,
   and most `pch.h` files just include the project umbrella header (`NeuronCore.h` / `NeuronClient.h`).
 - Legacy ported game-logic code uses raw pointers, C-style strings, and custom containers

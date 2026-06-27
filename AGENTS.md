@@ -5,9 +5,15 @@
 Deepspace Outpost is a Windows-native C++ game built with CMake and the MSVC toolchain. It
 targets Windows (x64 and x86) and builds with the Ninja generator via CMake presets. The
 renderer is **Direct3D 11** and audio is **XAudio2**. The codebase is mid-restructure toward a
-modular engine split into reusable `Neuron*` static libraries plus the game logic and two
-executables (a Win32 GUI client and a console server stub). Vector/matrix math is being migrated
-to **DirectXMath** (SIMD) via `Neuron::Math`.
+modular engine split into reusable `Neuron*` static libraries plus the game logic and the
+executables (a Win32 GUI client, a headless bot test client, and a dedicated server). Vector/matrix
+math is being migrated to **DirectXMath** (SIMD) via `Neuron::Math`.
+
+**Direction:** the project is migrating from the single-player game to an **open-world,
+server-authoritative MMO** (first milestone: up to 100 players) on an `int64³` coordinate field,
+with an **in-house ECS**, client prediction, and Area-of-Interest replication. The detailed phased
+plan lives in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md) — read it before doing
+architecture work.
 
 > **Status note.** Today the whole game builds as a single Win32 GUI executable,
 > **DeepspaceOutpost**, with two source tiers: faithfully ported game logic (`*.cpp` in the
@@ -24,54 +30,57 @@ to **DirectXMath** (SIMD) via `Neuron::Math`.
 
 | Project | Type | Role |
 |---|---|---|
-| **NeuronCore** | Static lib | Engine foundation: math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib`, sockets, packets, connections), filesystem (`FileSys`, `FilePaths`), tasks/threads (`TasksCore`), timers, events (`EventManager`), debug, data serialization (`DataReader`/`DataWriter`, `BinaryStreamReaders`, `TextStreamReaders`, `Json`). Pulls in C++/WinRT projections via `NeuronCore.h`. |
-| **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compatibility layer, audio/sound system, input drivers, GUI/window manager, preferences. Depends on NeuronCore. |
-| **NeuronServer** | Static lib | Server engine library (currently minimal — `NeuronServer.h`). Depends on NeuronCore. |
-| **GameLogic** | Static lib | The Deepspace Outpost game simulation **and** its rendering: world entities, AI, particle systems, and the game-specific renderers. Depends on **NeuronClient** (so it is client-linked, not server-only). |
-| **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, camera, renderer, level/world loading, user input. Entry point `wWinMain`. Links GameLogic. |
-| **Server** | Console executable | Dedicated-server stub (`Main.cpp`, entry point `main`). Links NeuronServer. |
+| **NeuronCore** | Static lib | Engine foundation **+ the only client/server *shared data***: the **in-house ECS** container, the component & wire-protocol **schemas** (`Transform`, `Motion`, `ShipDef`, …), static ship-data tables, math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib` — raw-winsock **UDP** sockets, custom reliability layer, packets, connections), filesystem (`FileSys`), tasks/threads (`TasksCore`), timers, events, debug, serialization (`DataReader`/`DataWriter` hand-rolled binary; `Json` cold path). **No game behavior.** C++/WinRT via `NeuronCore.h`. |
+| **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compat layer (legacy), audio, input, GUI/window manager, **plus client networking** (session, **snapshot interpolation + dead-reckoning** — presentation only, *no game rules*). Depends on NeuronCore. |
+| **NeuronServer** | Static lib | Server engine: authoritative session management, **AOI/replication**, and **persistence (Microsoft SQL Server)**. Depends on GameLogic, NeuronCore. |
+| **GameLogic** | Static lib | **SERVER-ONLY — the single home of ALL game behavior**: motion/physics integration, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **NeuronCore**. **The client never links it; there is no shared game-logic library.** |
+| **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient. |
+| **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init). |
+| **Server** | Console executable | Dedicated-server host: main loop, sessions, fixed-tick scheduler. Entry point `main`. Links NeuronServer, GameLogic. |
 
-**Actual dependency graph:**
+**Target dependency graph** (each project depends on its parent; arrows omitted for clarity):
 
 ```
-                    ┌─────────────────────────┐
-                    │       NeuronCore         │
-                    │ (math, net, file, tasks, │
-                    │  timers, events, debug,  │
-                    │  serialization, WinRT)   │
-                    └────────────┬─────────────┘
-                 ┌───────────────┴───────────────┐
-                 │                               │
-        ┌────────▼───────┐              ┌────────▼────────┐
-        │  NeuronClient  │              │  NeuronServer   │
-        │ (D3D11 graphics│              │ (server engine  │
-        │  + OpenglDirectx│             │  library stub)  │
-        │  GL-compat,    │              └────────┬────────┘
-        │  audio, input, │                       │
-        │  GUI)          │                       │
-        └────────┬───────┘                       │
-                 │                               │
-        ┌────────▼───────┐              ┌────────▼────────┐
-        │   GameLogic    │              │     Server      │
-        │ (game sim      │              │ (console server │
-        │  + rendering)  │              │  executable)    │
-        └────────┬───────┘              └─────────────────┘
-                 │
-        ┌────────▼────────┐
-        │ DeepspaceOutpost│
-        │ (Win32 client   │
-        │  executable)    │
-        └─────────────────┘
+NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/protocol schemas, ship-data, math, NetLib
+├─ NeuronClient            D3D11 · audio · input · GUI · client net (interpolation + dead-reckoning, NO game rules)
+│  ├─ DeepspaceOutpost     Win32 client exe (game rendering, UI, input)
+│  └─ BotClient            headless test exe (bots, no render/audio)
+└─ GameLogic               SERVER-ONLY: ALL game behaviour (motion/physics, AI, economy, combat, missions)
+   └─ NeuronServer         sessions · AOI/replication · MS SQL persistence
+      └─ Server            dedicated-server host exe
 ```
 
-> Note: `GameLogic` is linked by the **client** (DeepspaceOutpost), not by the server. There is
-> currently no server-authoritative simulation split — the server target is a stub.
+> **Note (server-authoritative MMO target).** `GameLogic` is the **only game-logic library and
+> is server-only** — there is **no shared game-logic library**. The client is a **thin
+> presentation layer** that runs no game rules: it forwards input and renders interpolated +
+> dead-reckoned authoritative snapshots. Client and server share only **data** (the ECS/protocol
+> schemas in `NeuronCore`), never behavior. This is a deliberate change from the older
+> client-linked-`GameLogic` design. Today the game still builds as the single-player client (see
+> the status note above); the phased path is in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
 
 ## Key Architecture Decisions
 
+- **Server-authoritative MMO (in migration)**: target is a **massive seamless** open-world,
+  server-authoritative MMO (up to 100 players) on one continuous **`int64³`** coordinate space
+  (no visible boundaries; an invisible cell partition drives interest and future sharding) with
+  **multi-resolution Area-of-Interest** replication. **All game behavior is server-only** in
+  `GameLogic`; the client runs **no game logic** — it is a thin presentation layer (snapshot
+  interpolation + dead-reckoning). **No shared game-logic library**: client and server share only
+  *data* (the in-house **ECS** container + component/protocol schemas in `NeuronCore`). The
+  de-globalized `Universe` *is* the ECS world, simulated by the server. Transport is **raw-winsock
+  UDP** + a custom reliability layer; the wire format is a **hand-rolled binary** protocol
+  (`DataReader`/`DataWriter`). See [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+- **Built for a 4X / RTS drift**: the game logic will move over time from single-ship space-flight
+  toward a **4X / RTS** style (many units per player, empire/economy/territory, less twitch). The
+  architecture generalizes three single-player assumptions up front so that pivot is an extension,
+  not a rewrite: **player ≠ avatar** (identity is Account → Empire/Faction → owns N entities;
+  camera/interest are view-driven), **command/intent input** (validated orders, reusing the
+  existing `flight_roll/climb/speed/fire` intent state), and **decoupled sim/command/replication
+  clocks**. The ECS is indexed **relationally** (owner/faction/group/tag) as well as spatially.
+  See §2.4 of the roadmap.
 - **Modular engine split**: Game/engine code organized into `Neuron*` engine
-  libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameLogic` (the game), and two
-  executables (`DeepspaceOutpost`, `Server`).
+  libraries (`NeuronCore`/`NeuronClient`/`NeuronServer`), `GameLogic` (the **server-only** home
+  of all game behavior), and the executables (`DeepspaceOutpost`, `BotClient`, `Server`).
 - **Direct3D 11 rendering**: `Neuron::Graphics::Core` owns the D3D11 device, swap chain, and
   views (`ID3D11Device`, `ID3D11DeviceContext`, render/depth views).
 - **OpenGL compatibility layer**: `OpenglDirectx` emulates the original game's OpenGL calls on
@@ -87,9 +96,10 @@ to **DirectXMath** (SIMD) via `Neuron::Math`.
 
 | Document | Purpose |
 |---|---|
-| [coding-standards.md](coding-standards.md) | Naming, formatting, language conventions, native-first rule |
-| [copilot-instructions.md](copilot-instructions.md) | Code-generation guidance for this repository |
-| [../DemoShaders/PORTING.md](../DemoShaders/PORTING.md) | GLSL→HLSL porting guide for the reference shaders in `DemoShaders/` (reference only — not built) |
+| [docs/MIGRATION_ROADMAP.md](docs/MIGRATION_ROADMAP.md) | **Phased plan** to migrate the single-player client to the server-authoritative MMO (read first for architecture work) |
+| [coding-standards.md](.github/coding-standards.md) | Naming, formatting, language conventions, native-first rule |
+| [copilot-instructions.md](.github/copilot-instructions.md) | Code-generation guidance for this repository |
+| [DemoShaders/PORTING.md](DemoShaders/PORTING.md) | GLSL→HLSL porting guide for the reference shaders in `DemoShaders/` (reference only — not built) |
 
 ## Setup Commands
 
@@ -129,9 +139,11 @@ There is no vcpkg manifest — C++/WinRT and DirectX come from the Windows SDK.
 
 ## Code Style
 
-- Naming: files `PascalCase.cpp/.h`, classes/structs `PascalCase`, functions `PascalCase` or
-  `camelCase` (match the file), members `m_` + `camelCase`, globals `g_` prefix, constants
-  `UPPER_SNAKE_CASE` (some legacy `constexpr` use a `c_` prefix — match the surrounding file).
+- Naming: files `PascalCase.cpp/.h`, classes/structs `PascalCase`, **functions/methods
+  `PascalCase`** (per `coding-standards.md`), local variables `camelCase`, members `m_` +
+  `camelCase`, globals `g_` prefix, constants `UPPER_SNAKE_CASE` (some legacy `constexpr` use a
+  `c_` prefix — match the surrounding file). When editing a still-legacy ported file that is all
+  `snake_case`, match that file until it is modernized.
 - Indentation: 2 spaces in `Neuron*` engine code; the legacy ported game logic may use tabs.
   Match the file you are editing.
 - Include guards: `#pragma once`.
@@ -144,12 +156,12 @@ There is no vcpkg manifest — C++/WinRT and DirectX come from the Windows SDK.
   `Microsoft::WRL::ComPtr`, `.Get()`, `.Reset()`). Use `IID_GRAPHICS_PPV_ARGS` (in
   `DirectXHelper.h`) when the target is a `com_ptr`.
 - **Native-first**: do not write wrapper functions/classes that merely forward to an existing
-  API — call the native API directly. See [coding-standards.md](coding-standards.md).
-- Full standards in [coding-standards.md](coding-standards.md).
+  API — call the native API directly. See [coding-standards.md](.github/coding-standards.md).
+- Full standards in [coding-standards.md](.github/coding-standards.md).
 
 ## Native-First — No Wrapper Functions or Classes
 
-When developing, comply with [coding-standards.md](coding-standards.md). A core rule:
+When developing, comply with [coding-standards.md](.github/coding-standards.md). A core rule:
 **do not develop wrapper functions or wrapper classes.** Keep development as native as possible.
 
 - Use the native API directly rather than a thin pass-through wrapper that only renames or

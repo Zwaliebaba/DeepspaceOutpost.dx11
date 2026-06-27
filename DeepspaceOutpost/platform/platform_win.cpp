@@ -218,15 +218,6 @@ void gfx_update_screen(void)
 	QueryPerformanceCounter(&prev);
 }
 
-void gfx_acquire_screen(void)
-{
-	/* Was an Allegro bitmap lock; nothing to do with Direct3D. */
-}
-
-void gfx_release_screen(void)
-{
-}
-
 /* ---- Process entry point ---- */
 
 /* The game opens its assets and config (newkind.cfg, scanner.bmp, *.nkc
@@ -251,10 +242,16 @@ static void set_working_dir_to_exe(void)
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 {
+    CoreEngine::Startup();
+
 	/* Render at native resolution rather than letting Windows bitmap-stretch
 	 * a DPI-unaware window (crisper, correctly-sized canvas). */
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
 	set_working_dir_to_exe();
-	return game_main();
+	auto ret = game_main();
+
+    CoreEngine::Shutdown();
+
+    return ret;
 }

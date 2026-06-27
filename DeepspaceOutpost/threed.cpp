@@ -9,6 +9,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "RenderContext.h"
 #include "planet.h"
 #include "vector.h"
 #include "shipdata.h"
@@ -36,7 +37,7 @@ static struct point point_list[100];
  *
  */
 
-void draw_wireframe_ship (struct univ_object *univ)
+void draw_wireframe_ship (struct local_object *obj)
 {
 	Matrix trans_mat;
 	int i;
@@ -52,12 +53,12 @@ void draw_wireframe_ship (struct univ_object *univ)
 	struct ship_data *ship;
 	int lasv;
 
-	ship = ship_list[univ->type];
+	ship = ship_list[obj->type];
 	
 	for (i = 0; i < 3; i++)
-		trans_mat[i] = univ->rotmat[i];
+		trans_mat[i] = obj->rotmat[i];
 		
-	camera_vec = univ->location;
+	camera_vec = obj->location;
 	mult_vector (&camera_vec, trans_mat);
 	camera_vec = unit_vector (&camera_vec);
 	
@@ -101,9 +102,9 @@ void draw_wireframe_ship (struct univ_object *univ)
 
 		mult_vector (&vec, trans_mat);
 
-		rx = vec.x + univ->location.x;
-		ry = vec.y + univ->location.y;
-		rz = vec.z + univ->location.z;
+		rx = vec.x + obj->location.x;
+		ry = vec.y + obj->location.y;
+		rz = vec.z + obj->location.z;
 
 		sx = (rx * 256) / rz;
 		sy = (ry * 256) / rz;
@@ -132,16 +133,16 @@ void draw_wireframe_ship (struct univ_object *univ)
 			ex = point_list[ship->lines[i].end_point].x;
 			ey = point_list[ship->lines[i].end_point].y;
 
-			gfx_draw_line (sx, sy, ex, ey);
+			ActiveRenderQueue().Line (sx, sy, ex, ey);
 		}
 	}
 
 
-	if (univ->flags & FLG_FIRING)
+	if (obj->flags & FLG_FIRING)
 	{
-		lasv = ship_list[univ->type]->front_laser;
-		gfx_draw_line (point_list[lasv].x, point_list[lasv].y,
-					   univ->location.x > 0 ? 0 : 511, rand255() * 2);
+		lasv = ship_list[obj->type]->front_laser;
+		ActiveRenderQueue().Line (point_list[lasv].x, point_list[lasv].y,
+					   obj->location.x > 0 ? 0 : 511, rand255() * 2);
 	}
 }
 
@@ -155,7 +156,7 @@ void draw_wireframe_ship (struct univ_object *univ)
  * Check for hidden surface supplied by T.Harte.
  */
 
-void draw_solid_ship (struct univ_object *univ)
+void draw_solid_ship (struct local_object *obj)
 {
 	int i;
 	int sx,sy;
@@ -174,13 +175,13 @@ void draw_solid_ship (struct univ_object *univ)
 	int lasv;
 	int col;
 
-	solid_data = &ship_solids[univ->type];
-	ship = ship_list[univ->type];
+	solid_data = &ship_solids[obj->type];
+	ship = ship_list[obj->type];
 	
 	for (i = 0; i < 3; i++)
-		trans_mat[i] = univ->rotmat[i];
+		trans_mat[i] = obj->rotmat[i];
 		
-	camera_vec = univ->location;
+	camera_vec = obj->location;
 	mult_vector (&camera_vec, trans_mat);
 	camera_vec = unit_vector (&camera_vec);
 
@@ -222,9 +223,9 @@ void draw_solid_ship (struct univ_object *univ)
 
 		mult_vector (&vec, trans_mat);
 
-		rx = vec.x + univ->location.x;
-		ry = vec.y + univ->location.y;
-		rz = vec.z + univ->location.z;
+		rx = vec.x + obj->location.x;
+		ry = vec.y + obj->location.y;
+		rz = vec.z + obj->location.z;
 
 		if (rz <= 0)
 			rz = 1;
@@ -306,18 +307,19 @@ void draw_solid_ship (struct univ_object *univ)
 			}
 			
 
-			gfx_render_polygon (face_data[i].points, poly_list, face_data[i].colour, zavg);
+			/* poly_list holds 2 ints (x,y) per point. */
+			ActiveRenderQueue().RenderPolygon (face_data[i].points, poly_list, 2 * face_data[i].points, face_data[i].colour, zavg);
 			
 		}
 	}
 
-	if (univ->flags & FLG_FIRING)
+	if (obj->flags & FLG_FIRING)
 	{
-		lasv = ship_list[univ->type]->front_laser;
-		col = (univ->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE; 
+		lasv = ship_list[obj->type]->front_laser;
+		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE; 
 		
-		gfx_render_line (point_list[lasv].x, point_list[lasv].y,
-						 univ->location.x > 0 ? 0 : 511, rand255() * 2,
+		ActiveRenderQueue().RenderLine (point_list[lasv].x, point_list[lasv].y,
+						 obj->location.x > 0 ? 0 : 511, rand255() * 2,
 						 point_list[lasv].z, col);
 	}
 }
@@ -557,7 +559,7 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 			ly = ry / div;
 			colour = landscape[lx][ly];
  
-			gfx_fast_plot_pixel (sx, sy, colour);
+			ActiveRenderQueue().FastPixel (sx, sy, colour);
 		}
 		rx += vx;
 		ry += vy;
@@ -612,7 +614,7 @@ void render_planet (int xo, int yo, int radius, struct vector *vec)
 
 void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
 {
-	gfx_draw_circle (xo, yo, radius, GFX_COL_WHITE);
+	ActiveRenderQueue().Circle (xo, yo, radius, GFX_COL_WHITE);
 }
 
 
@@ -624,7 +626,7 @@ void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
  * - SNES-style.
  */
 
-void draw_planet (struct univ_object *planet)
+void draw_planet (struct local_object *planet)
 {
 	int x,y;
 	int radius;
@@ -658,7 +660,7 @@ void draw_planet (struct univ_object *planet)
 			break;
 		
 		case 1:
-			gfx_draw_filled_circle (x, y, radius, GFX_COL_GREEN_1);
+			ActiveRenderQueue().FilledCircle (x, y, radius, GFX_COL_GREEN_1);
 			break;
 
 		case 2:
@@ -726,7 +728,7 @@ void render_sun_line (int xo, int yo, int x, int y, int radius)
 		else
 			colour = mix ? GFX_ORANGE_1 : GFX_ORANGE_2;
 		
-		gfx_fast_plot_pixel (sx, sy, colour);
+		ActiveRenderQueue().FastPixel (sx, sy, colour);
 	} 	
 }
 
@@ -763,7 +765,7 @@ void render_sun (int xo, int yo, int radius)
 
 
 
-void draw_sun (struct univ_object *planet)
+void draw_sun (struct local_object *planet)
 {
 	int x,y;
 	int radius;
@@ -794,7 +796,7 @@ void draw_sun (struct univ_object *planet)
 
 
 
-void draw_explosion (struct univ_object *univ)
+void draw_explosion (struct local_object *obj)
 {
 	int i;
 	int z;
@@ -818,23 +820,23 @@ void draw_explosion (struct univ_object *univ)
 	int old_seed;
 	
 	
-	if (univ->exp_delta > 251)
+	if (obj->exp_delta > 251)
 	{
-		univ->flags |= FLG_REMOVE;
+		obj->flags |= FLG_REMOVE;
 		return;
 	}
 	
-	univ->exp_delta += 4;
+	obj->exp_delta += 4;
 
-	if (univ->location.z <= 0)
+	if (obj->location.z <= 0)
 		return;
 
-	ship = ship_list[univ->type];
+	ship = ship_list[obj->type];
 	
 	for (i = 0; i < 3; i++)
-		trans_mat[i] = univ->rotmat[i];
+		trans_mat[i] = obj->rotmat[i];
 		
-	camera_vec = univ->location;
+	camera_vec = obj->location;
 	mult_vector (&camera_vec, trans_mat);
 	camera_vec = unit_vector (&camera_vec);
 	
@@ -878,9 +880,9 @@ void draw_explosion (struct univ_object *univ)
 
 			mult_vector (&vec, trans_mat);
 
-			rx = vec.x + univ->location.x;
-			ry = vec.y + univ->location.y;
-			rz = vec.z + univ->location.z;
+			rx = vec.x + obj->location.x;
+			ry = vec.y + obj->location.y;
+			rz = vec.z + obj->location.z;
 
 			sx = (rx * 256) / rz;
 			sy = (ry * 256) / rz;
@@ -900,14 +902,14 @@ void draw_explosion (struct univ_object *univ)
 	}
 
 	
-	z = (int)univ->location.z;
+	z = (int)obj->location.z;
 	
 	if (z >= 0x2000)
 		q = 254;
 	else
 		q = (z / 32) | 1;
 
-	pr = (univ->exp_delta * 256) / q;
+	pr = (obj->exp_delta * 256) / q;
 	
 //	if (pr > 0x1C00)
 //		q = 254;
@@ -916,7 +918,7 @@ void draw_explosion (struct univ_object *univ)
 	q = pr / 32;	
 		
 	old_seed = get_rand_seed();
-	set_rand_seed (univ->exp_seed);
+	set_rand_seed (obj->exp_seed);
 
 	for (cnt = 0; cnt < np; cnt++)
 	{
@@ -939,7 +941,7 @@ void draw_explosion (struct univ_object *univ)
 
 			for (psy = 0; psy < sizey; psy++)
 				for (psx = 0; psx < sizex; psx++)		
-					gfx_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
+					ActiveRenderQueue().Pixel (px+psx, py+psy, GFX_COL_WHITE);
 		}
 	}
 
@@ -949,11 +951,11 @@ void draw_explosion (struct univ_object *univ)
 
 
 /*
- * Draws an object in the universe.
+ * Draws an object in local space.
  * (Ship, Planet, Sun etc).
  */
 
-void draw_ship (struct univ_object *ship)
+void draw_ship (struct local_object *ship)
 {
 
 	if ((current_screen != SCR_FRONT_VIEW) && (current_screen != SCR_REAR_VIEW) && 

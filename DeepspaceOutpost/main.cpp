@@ -22,6 +22,8 @@
 
 #include "config.h"
 #include "gfx.h"
+#include "GameUniverse.h"
+#include "GameComponents.h"
 #include "main.h"
 #include "vector.h"
 #include "alg_data.h"
@@ -41,6 +43,8 @@
 #include "pilot.h"
 #include "file.h"
 #include "keyboard.h"
+#include "Camera.h"
+#include "ReplicationClient.h"
 
 
 
@@ -62,11 +66,11 @@ char find_name[20];
 /*
  * Flight-control responsiveness.
  *
- * flight_roll / flight_climb hold the ship's current turn rate (consumed by
- * move_univ_object as alpha/beta). While a control key is held the rate ramps
+ * PlayerFlight().roll / PlayerFlight().climb hold the ship's current turn rate (consumed by
+ * move_local_object as alpha/beta). While a control key is held the rate ramps
  * toward full deflection; when released it auto-centres back to zero. These
  * steps set how many rate units we add/remove per frame - i.e. how snappily
- * the ship reacts - without changing the top turn rate (myship.max_roll /
+ * the ship reacts - without changing the top turn rate (PlayerCaps().maxRoll /
  * max_climb), so handling and turn radius stay balanced. Higher = snappier.
  * This is frame-rate independent of game speed (speed_cap): it changes how
  * many frames the ramp takes, not how fast the game runs.
@@ -112,9 +116,9 @@ static void centre_flight_roll (void)
 {
 	int i;
 
-	for (i = 0; i < ROLL_CENTRE_STEP && flight_roll != 0; i++)
+	for (i = 0; i < ROLL_CENTRE_STEP && PlayerFlight().roll != 0; i++)
 	{
-		if (flight_roll > 0)
+		if (PlayerFlight().roll > 0)
 			decrease_flight_roll();
 		else
 			increase_flight_roll();
@@ -126,9 +130,9 @@ static void centre_flight_climb (void)
 {
 	int i;
 
-	for (i = 0; i < CLIMB_CENTRE_STEP && flight_climb != 0; i++)
+	for (i = 0; i < CLIMB_CENTRE_STEP && PlayerFlight().climb != 0; i++)
 	{
-		if (flight_climb > 0)
+		if (PlayerFlight().climb > 0)
 			decrease_flight_climb();
 		else
 			increase_flight_climb();
@@ -146,15 +150,36 @@ void initialise_game(void)
 	set_rand_seed (time(NULL));
 	current_screen = SCR_INTRO_ONE;
 
+	/*
+	 * A2 flip: stand up the de-globalised world and the player's ship entity.
+	 * Seeded here but not yet read - legacy globals (myship, flight state,
+	 * local_objects[]) still drive the game and migrate onto this world cluster
+	 * by cluster. Created before anything else so the player entity always exists.
+	 */
+	GameUniverse().Reset();
+	{
+		Neuron::ECS::EntityId player = GameUniverse().Reg().Create();
+		GameUniverse().Reg().Add<Neuron::Game::PlayerTag>(player, Neuron::Game::PlayerTag{});
+		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
+		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{});
+		GameUniverse().Reg().Add<Neuron::Game::FlightRates>(player, Neuron::Game::FlightRates{});
+		GameUniverse().Reg().Add<Neuron::Game::Defense>(player, Neuron::Game::Defense{});
+		GameUniverse().SetPlayer(player);
+	}
+
+	/* Create the ECS slot entities that back local_objects[] (must exist before
+	   clear_local_objects / any local_objects[i] access below). */
+	create_local_object_slots();
+
 	restore_saved_commander();
 
-	flight_speed = 1;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 1;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	docked = 1;
-	front_shield = 255;
-	aft_shield = 255;
-	energy = 255;
+	PlayerDefense().frontShield = 255;
+	PlayerDefense().aftShield = 255;
+	PlayerDefense().energy = 255;
 	draw_lasers = 0;
 	mcount = 0;
 	hyper_ready = 0;
@@ -165,17 +190,17 @@ void initialise_game(void)
 	auto_pilot = 0;
 	
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 	
 	cross_x = -1;
 	cross_y = -1;
 	cross_timer = 0;
 
 	
-	myship.max_speed = 40;		/* 0.27 Light Mach */
-	myship.max_roll = 31;
-	myship.max_climb = 8;		/* CF 8 */
-	myship.max_fuel = 70;		/* 7.0 Light Years */
+	PlayerCaps().maxSpeed = 40;		/* 0.27 Light Mach */
+	PlayerCaps().maxRoll = 31;
+	PlayerCaps().maxClimb = 8;		/* CF 8 */
+	PlayerCaps().maxFuel = 70;		/* 7.0 Light Years */
 }
 
 
@@ -342,8 +367,8 @@ void arrow_right (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_roll > 0)
-				flight_roll = 0;
+			if (PlayerFlight().roll > 0)
+				PlayerFlight().roll = 0;
 			else
 			{
 				ramp_flight_roll(-ROLL_RAMP_STEP);
@@ -375,8 +400,8 @@ void arrow_left (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_roll < 0)
-				flight_roll = 0;
+			if (PlayerFlight().roll < 0)
+				PlayerFlight().roll = 0;
 			else
 			{
 				ramp_flight_roll(ROLL_RAMP_STEP);
@@ -416,8 +441,8 @@ void arrow_up (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_climb > 0)
-				flight_climb = 0;
+			if (PlayerFlight().climb > 0)
+				PlayerFlight().climb = 0;
 			else
 			{
 				ramp_flight_climb(-CLIMB_RAMP_STEP);
@@ -458,8 +483,8 @@ void arrow_down (void)
 		case SCR_REAR_VIEW:
 		case SCR_RIGHT_VIEW:
 		case SCR_LEFT_VIEW:
-			if (flight_climb < 0)
-				flight_climb = 0;
+			if (PlayerFlight().climb < 0)
+				PlayerFlight().climb = 0;
 			else
 			{
 				ramp_flight_climb(CLIMB_RAMP_STEP);
@@ -595,7 +620,7 @@ void o_pressed()
 
 void auto_dock (void)
 {
-	struct univ_object ship;
+	struct local_object ship;
 
 	ship.location.x = 0;
 	ship.location.y = 0;
@@ -605,7 +630,7 @@ void auto_dock (void)
 	ship.rotmat[2].z = 1;
 	ship.rotmat[0].x = -1;
 	ship.type = -96;
-	ship.velocity = flight_speed;
+	ship.velocity = PlayerFlight().speed;
 	ship.acceleration = 0;
 	ship.bravery = 0;
 	ship.rotz = 0;
@@ -614,26 +639,26 @@ void auto_dock (void)
 	auto_pilot_ship (&ship);
 
 	if (ship.velocity > 22)
-		flight_speed = 22;
+		PlayerFlight().speed = 22;
 	else
-		flight_speed = ship.velocity;
+		PlayerFlight().speed = ship.velocity;
 	
 	if (ship.acceleration > 0)
 	{
-		flight_speed++;
-		if (flight_speed > 22)
-			flight_speed = 22;
+		PlayerFlight().speed++;
+		if (PlayerFlight().speed > 22)
+			PlayerFlight().speed = 22;
 	}
 
 	if (ship.acceleration < 0)
 	{
-		flight_speed--;
-		if (flight_speed < 1)
-			flight_speed = 1;
+		PlayerFlight().speed--;
+		if (PlayerFlight().speed < 1)
+			PlayerFlight().speed = 1;
 	}	
 
 	if (ship.rotx == 0)
-		flight_climb = 0;
+		PlayerFlight().climb = 0;
 	
 	if (ship.rotx < 0)
 	{
@@ -652,11 +677,11 @@ void auto_dock (void)
 	}
 	
 	if (ship.rotz == 127)
-		flight_roll = -14;
+		PlayerFlight().roll = -14;
 	else
 	{
 		if (ship.rotz == 0)
-			flight_roll = 0;
+			PlayerFlight().roll = 0;
 
 		if (ship.rotz > 0)
 		{
@@ -685,33 +710,33 @@ void run_escape_sequence (void)
 	
 	current_screen = SCR_ESCAPE_POD;
 	
-	flight_speed = 1;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 1;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 
 	set_init_matrix (rotmat);
 	rotmat[2].z = 1.0;
 	
 	newship = add_new_ship (SHIP_COBRA3, 0, 0, 200, rotmat, -127, -127);
-	universe[newship].velocity = 7;
+	local_objects[newship].velocity = 7;
 	snd_play_sample (SND_LAUNCH);
 
 	for (i = 0; i < 90; i++)
 	{
 		if (i == 40)
 		{
-			universe[newship].flags |= FLG_DEAD;
+			local_objects[newship].flags |= FLG_DEAD;
 			snd_play_sample (SND_EXPLODE);
 		}
 
 		gfx_set_clip_region (1, 1, 510, 383);
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 
-		universe[newship].location.x = 0;
-		universe[newship].location.y = 0;
-		universe[newship].location.z += 2;
+		local_objects[newship].location.x = 0;
+		local_objects[newship].location.y = 0;
+		local_objects[newship].location.z += 2;
 
 		gfx_display_centre_text (358, "Escape pod launched - Ship auto-destuct initiated.", 120, GFX_COL_WHITE);
 		
@@ -725,12 +750,12 @@ void run_escape_sequence (void)
 	{
 		auto_dock();
 
-		if ((abs(flight_roll) < 3) && (abs(flight_climb) < 3))
+		if ((abs(PlayerFlight().roll) < 3) && (abs(PlayerFlight().climb) < 3))
 		{
-			for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+			for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 			{
-				if (universe[i].type != 0)
-					universe[i].location.z -= 1500;
+				if (local_objects[i].type != 0)
+					local_objects[i].location.z -= 1500;
 			}
 
 		}
@@ -739,7 +764,7 @@ void run_escape_sequence (void)
 		gfx_set_clip_region (1, 1, 510, 383);
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 		update_console();
 		gfx_update_screen();
 	}
@@ -873,6 +898,25 @@ void handle_flight_keys (void)
 		display_options();
 	}
 
+	// F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
+	// triggered so holding the key flips the view exactly once.
+	static int f12_was_down = 0;
+	if (kbd_F12_pressed)
+	{
+		if (!f12_was_down)
+		{
+			Neuron::Client::SetCameraMode(
+				Neuron::Client::GetCameraMode() == Neuron::Client::CameraMode::Cockpit
+					? Neuron::Client::CameraMode::Chase
+					: Neuron::Client::CameraMode::Cockpit);
+		}
+		f12_was_down = 1;
+	}
+	else
+	{
+		f12_was_down = 0;
+	}
+
 	if (find_input)
 	{
 		keyasc = kbd_read_key();
@@ -940,6 +984,12 @@ void handle_flight_keys (void)
 			start_hyperspace();
 	}
 
+	// Docked at a station's "teleport building": the hyperspace key on the galactic
+	// chart jumps to the system under the crosshair (server-validated). Thin-client
+	// only; teleport_to_cursor() is a no-op without a replicated galaxy.
+	if (kbd_hyperspace_pressed && docked && (current_screen == SCR_GALACTIC_CHART))
+		teleport_to_cursor();
+
 	if (kbd_jump_pressed && (!docked) && (!witchspace))
 	{
 		jump_warp();
@@ -973,8 +1023,8 @@ void handle_flight_keys (void)
 	{
 		if (!docked)
 		{
-			if (flight_speed < myship.max_speed)
-				flight_speed++;
+			if (PlayerFlight().speed < PlayerCaps().maxSpeed)
+				PlayerFlight().speed++;
 		}
 	}
 
@@ -982,8 +1032,8 @@ void handle_flight_keys (void)
 	{
 		if (!docked)
 		{
-			if (flight_speed > 1)
-				flight_speed--;
+			if (PlayerFlight().speed > 1)
+				PlayerFlight().speed--;
 		}
 	}
 
@@ -1161,9 +1211,9 @@ void run_second_intro_screen (void)
 		
 	initialise_intro2();
 
-	flight_speed = 3;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 3;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 
 	for (;;)
 	{
@@ -1196,24 +1246,24 @@ void run_game_over_screen()
 	current_screen = SCR_GAME_OVER;
 	gfx_set_clip_region (1, 1, 510, 383);
 	
-	flight_speed = 6;
-	flight_roll = 0;
-	flight_climb = 0;
-	clear_universe();
+	PlayerFlight().speed = 6;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
+	clear_local_objects();
 
 	set_init_matrix (rotmat);
 
 	newship = add_new_ship (SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
-	universe[newship].flags |= FLG_DEAD;
+	local_objects[newship].flags |= FLG_DEAD;
 
 	for (i = 0; i < 5; i++)
 	{
 		type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
 		newship = add_new_ship (type, (rand255() & 63) - 32,
 								(rand255() & 63) - 32, -400, rotmat, 0, 0);
-		universe[newship].rotz = ((rand255() * 2) & 255) - 128;
-		universe[newship].rotx = ((rand255() * 2) & 255) - 128;
-		universe[newship].velocity = rand255() & 15;
+		local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
+		local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
+		local_objects[newship].velocity = rand255() & 15;
 	}
 	
 	
@@ -1221,7 +1271,7 @@ void run_game_over_screen()
 	{
 		gfx_clear_display();
 		update_starfield();
-		update_universe();
+		update_local_objects();
 		gfx_display_centre_text (190, "GAME OVER", 140, GFX_COL_GOLD);
 		gfx_update_screen();
 	}
@@ -1277,6 +1327,49 @@ void info_message (const char *message)
  * window, Direct3D 11 device and XAudio2 engine have been created.
  */
 
+// Apply authoritative station responses (buy/sell/dock results) to the local
+// display state. Used only in thin-client mode.
+static void apply_station_responses (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	Neuron::Net::ReliableMessage msg;
+	while (rc.PollEvent(msg))
+	{
+		Neuron::Net::StationResponse resp;
+		if (Neuron::Net::DecodeStationResponse(msg, resp) &&
+			resp.status == Neuron::Net::StationStatus::Ok)
+		{
+			cmdr.credits = resp.credits;
+			if (resp.commodity < NO_OF_STOCK_ITEMS)
+				cmdr.current_cargo[resp.commodity] = resp.cargo;
+		}
+	}
+}
+
+
+// Gather the player's flight intent and send it to the server. Driven from the
+// legacy flight state (PlayerFlight roll/climb/speed) that the flight keys and
+// the cockpit HUD already maintain, normalized to axes, so the server moves the
+// ship at exactly the speed shown on the dashboard. Used only in thin-client mode.
+static void send_player_input (void)
+{
+	static uint32_t seq = 0;
+
+	const int maxRoll  = (PlayerCaps().maxRoll  > 0) ? PlayerCaps().maxRoll  : 1;
+	const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
+	const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
+
+	Neuron::Net::ClientInput in;
+	in.sequence = ++seq;
+	in.rollAxis  = (float)PlayerFlight().roll  / (float)maxRoll;
+	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
+	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
+	in.fire = (kbd_fire_pressed != 0);
+
+	Neuron::Client::ReplicationClientInstance().SendInput(in);
+}
+
+
 int game_main (void)
 {
 	read_config_file();
@@ -1291,7 +1384,28 @@ int game_main (void)
 
 	/* Do any setup necessary for the keyboard... */
 	kbd_keyboard_startup();
-	
+
+	// Server-only client: single-player has been retired, so we always connect to
+	// the authoritative server and render its world. The bind port and server
+	// address can be overridden with DSO_BIND / DSO_SERVER (dotted-quad host);
+	// they default to loopback for local play. The local-simulation path remains
+	// only as a degraded fallback if networking fails to initialise.
+	{
+		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+
+		uint16_t bindPort = 50000;
+		if (const char* b = getenv("DSO_BIND"))
+			bindPort = (uint16_t) atoi(b);
+
+		int a = 127, c = 0, d = 0, e = 1;
+		if (const char* host = getenv("DSO_SERVER"))
+			sscanf(host, "%d.%d.%d.%d", &a, &c, &d, &e);
+
+		rc.Open(bindPort);
+		rc.SetServerEndpoint(Neuron::Net::MakeEndpoint((uint8_t)a, (uint8_t)c, (uint8_t)d, (uint8_t)e, 40000));
+		// LocalPlayer is set by the server's AssignPlayer handshake; default 0.
+	}
+
 	finish = 0;
 	auto_pilot = 0;
 	
@@ -1315,6 +1429,14 @@ int game_main (void)
 		
 		while (!game_over)
 		{
+			// Drain any replicated world state that arrived since last frame. This
+			// is a no-op until ReplicationClientInstance().Open() is called, so the
+			// single-player path is unchanged; once open, the client consumes the
+			// server's authoritative snapshots here instead of simulating locally.
+			Neuron::Client::ReplicationClientInstance().Pump();
+			if (Neuron::Client::ReplicationClientInstance().IsOpen())
+				apply_station_responses();
+
 			snd_update_sound();
 			gfx_update_screen();
 			gfx_set_clip_region (1, 1, 510, 383);
@@ -1323,6 +1445,10 @@ int game_main (void)
 			climbing = 0;
 
 			handle_flight_keys ();
+
+			// In thin-client mode, the player's intent goes to the server.
+			if (Neuron::Client::ReplicationClientInstance().IsOpen())
+				send_player_input ();
 
 			if (game_paused)
 				continue;
@@ -1339,8 +1465,6 @@ int game_main (void)
 
 			if (!docked)
 			{
-				gfx_acquire_screen();
-					
 				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
 					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
 					(current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) ||
@@ -1357,12 +1481,16 @@ int game_main (void)
 						info_message ("Docking Computers On");
 				}
 
-				update_universe ();
+				// In thin-client mode the server owns the world: render the
+				// replicated, interpolated state instead of simulating locally.
+				if (Neuron::Client::ReplicationClientInstance().IsOpen())
+					render_replicated_objects ();
+				else
+					update_local_objects ();
 
 				if (docked)
 				{
 					update_console();
-					gfx_release_screen();
 					continue;
 				}
 
@@ -1390,8 +1518,6 @@ int game_main (void)
 					}
 				}
 
-				gfx_release_screen();
-			
 				mcount--;
 				if (mcount < 0)
 					mcount = 255;
@@ -1401,7 +1527,7 @@ int game_main (void)
 
 				if ((mcount & 31) == 10)
 				{
-					if (energy < 50)
+					if (PlayerDefense().energy < 50)
 					{
 						info_message ("ENERGY LOW");
 						snd_play_sample (SND_BEEP);

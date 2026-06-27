@@ -6,6 +6,7 @@
 # ---- Portable game logic (formerly C, now compiled as C++23) ----
 set(GAME_SOURCES
     main.cpp
+    LocalObjects.cpp
     elite.cpp
     space.cpp
     threed.cpp
@@ -26,7 +27,15 @@ set(GAME_SOURCES
 )
 
 # ---- Platform layer (Win32 / Direct3D 11 / XAudio2) - idiomatic modern C++23 ----
+# RenderQueue is the new A1 "render seam" (house-style C++23). It is held to the
+# same higher warning bar as the platform layer, not the legacy /permissive tier.
 set(PLATFORM_SOURCES
+    RenderQueue.cpp
+    RenderContext.cpp
+    GameUniverse.cpp
+    Camera.cpp
+    ReplicationClient.cpp
+    platform/GfxRenderSink.cpp
     platform/platform_win.cpp
     platform/Renderer.cpp
     platform/gfx_dx11.cpp

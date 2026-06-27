@@ -11,10 +11,26 @@ set(NEURONCORE_SOURCES
     FileSys.cpp
     Json.cpp
     TasksCore.cpp
+    NetLib.cpp
 )
 
 set(NEURONCORE_HEADERS
     NeuronCore.h
+    ECS.h
+    Vector3i64.h
+    Vector3d.h
+    SpatialGrid.h
+    DataWriter.h
+    DataReader.h
+    Replication.h
+    SnapshotPacketizer.h
+    SnapshotReceiver.h
+    SnapshotInterpolator.h
+    ReliableChannel.h
+    GameEvents.h
+    ClientInput.h
+    StationProtocol.h
+    NetLib.h
     Debug.h
     FileSys.h
     GameMath.h
@@ -32,6 +48,12 @@ target_compile_features(NeuronCore PUBLIC cxx_std_23)
 # PUBLIC: consumers include "NeuronCore.h", "Debug.h", "FileSys.h", ... directly
 # (e.g. via their own pch.h), so the include dir must propagate.
 target_include_directories(NeuronCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Raw winsock UDP (NetLib) needs the Windows sockets library; PUBLIC so the
+# linking executables (Server, client) pick it up transitively.
+if(WIN32)
+    target_link_libraries(NeuronCore PUBLIC ws2_32)
+endif()
 
 # Precompiled header (pch.h / pch.cpp). pch.h pulls in NeuronCore.h and the
 # heavy Windows / C++/WinRT / winsock includes shared across the module.

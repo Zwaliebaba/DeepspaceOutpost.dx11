@@ -39,13 +39,9 @@ int planet_render_style = 0;
 int game_over;
 int docked;
 int finish;
-int flight_speed;
-int flight_roll;
-int flight_climb;
-int front_shield;
-int aft_shield;
-int energy;
-int laser_temp;
+/* Player ship dynamic state (flight rates, shields, energy, laser heat) now
+   lives in ECS components on the player entity - see GameComponents.h and the
+   PlayerFlight()/PlayerDefense() accessors (GameUniverse.h). */
 int detonate_bomb;
 int auto_pilot;
 
@@ -86,8 +82,6 @@ struct commander saved_cmdr =
 };
 
 struct commander cmdr;
-
-struct player_ship myship;
 
 
 struct ship_data *ship_list[NO_OF_SHIPS + 1] =

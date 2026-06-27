@@ -12,6 +12,7 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "GameUniverse.h"
 #include "vector.h"
 #include "space.h"
 #include "planet.h"
@@ -184,18 +185,18 @@ void constrictor_mission_brief (void)
 		
 	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
 		
-	clear_universe();
+	clear_local_objects();
 	set_init_matrix (rotmat);
 	add_new_ship (SHIP_CONSTRICTOR, 200, 90, 600, rotmat, -127, -127);
-	flight_roll = 0;
-	flight_climb = 0;
-	flight_speed = 0;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
+	PlayerFlight().speed = 0;
 
 	do
 	{
 		gfx_clear_area (310, 50, 510, 180);
-		update_universe ();
-		universe[0].location.z = 600;
+		update_local_objects ();
+		local_objects[0].location.z = 600;
 		gfx_update_screen();
 		kbd_poll_keyboard();
 	} while (!kbd_space_pressed);

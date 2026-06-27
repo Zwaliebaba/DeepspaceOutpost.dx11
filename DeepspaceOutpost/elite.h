@@ -50,7 +50,7 @@
 #define FLG_POLICE			(8192)
 
 
-#define MAX_UNIV_OBJECTS	20
+#define MAX_LOCAL_OBJECTS	20
 
 
 struct commander
@@ -91,17 +91,11 @@ struct commander
 	int saved;
 };
 
-struct player_ship
-{
-	int max_speed;
-	int max_roll;
-	int max_climb;
-	int max_fuel;
-	int altitude;
-	int cabtemp;
-};
-
-extern struct player_ship myship;
+/*
+ * The player ship's capabilities formerly lived in the `myship` global
+ * (struct player_ship). They are now the Neuron::Game::ShipCaps component on
+ * the player entity, reached via PlayerCaps() (GameUniverse.h).
+ */
 
 
 extern struct commander cmdr;
@@ -134,13 +128,6 @@ extern int planet_render_style;
 extern int game_over;
 extern int docked;
 extern int finish;
-extern int flight_speed;
-extern int flight_roll;
-extern int flight_climb;
-extern int front_shield;
-extern int aft_shield;
-extern int energy;
-extern int laser_temp;
 extern int mcount;
 extern int detonate_bomb;
 extern int witchspace;

@@ -1,7 +1,7 @@
 /*
  * space.c
  *
- * This module handles all the flight system and management of the space universe.
+ * This module handles all the flight system and management of the local space objects.
  */
 
 #include "pch.h"
@@ -18,6 +18,8 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
+#include "RenderContext.h"
+#include "GameUniverse.h"
 #include "docked.h"
 #include "intro.h"
 #include "shipdata.h"
@@ -31,10 +33,10 @@
 #include "trade.h"
 #include "stars.h"
 #include "pilot.h"
+#include "Camera.h"
+#include "ReplicationClient.h"
+#include "ReplicatedScene.h"
 
-extern int flight_climb;
-extern int flight_roll;
-extern int flight_speed;
 
 struct galaxy_seed destination_planet;
 int hyper_ready;
@@ -88,10 +90,10 @@ void rotate_vec (struct vector *vec, double alpha, double beta)
 
 
 /*
- * Update an objects location in the universe.
+ * Update an object's location in local space.
  */
 
-void move_univ_object (struct univ_object *obj)
+void move_local_object (struct local_object *obj)
 {
 	double x,y,z;
 	double k2;
@@ -100,8 +102,8 @@ void move_univ_object (struct univ_object *obj)
 	int rotx,rotz;
 	double speed;
 	
-	alpha = flight_roll / 256.0;
-	beta = flight_climb / 256.0;
+	alpha = PlayerFlight().roll / 256.0;
+	beta = PlayerFlight().climb / 256.0;
 	
 	x = obj->location.x;
 	y = obj->location.y;
@@ -135,7 +137,7 @@ void move_univ_object (struct univ_object *obj)
 	y = k2 - z * beta;
 	x = x + alpha * y;
 
-	z = z - flight_speed;
+	z = z - PlayerFlight().speed;
 
 	obj->location.x = x;
 	obj->location.y = y;
@@ -197,14 +199,23 @@ void dock_player (void)
 {
 	disengage_auto_pilot();
 	docked = 1;
-	flight_speed = 0;
-	flight_roll = 0;
-	flight_climb = 0;
-	front_shield = 255;
-	aft_shield = 255;
-	energy = 255;
-	myship.altitude = 255;
-	myship.cabtemp = 30;
+
+	// Thin-client mode: tell the server we've docked so it permits station trade.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Dock;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+	}
+
+	PlayerFlight().speed = 0;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
+	PlayerDefense().frontShield = 255;
+	PlayerDefense().aftShield = 255;
+	PlayerDefense().energy = 255;
+	PlayerCaps().altitude = 255;
+	PlayerCaps().cabTemp = 30;
 	reset_weapons();
 }
 
@@ -213,7 +224,10 @@ void dock_player (void)
  * Check if we are correctly aligned to dock.
  */
 
-int is_docking (int sn)
+// Alignment test against a single object (the station) in camera space. Shared
+// by the legacy index-based path and the replicated render path, which has no
+// global local_objects[] table to index into.
+int is_docking_obj (struct local_object *obj)
 {
 	struct vector vec;
 	double fz;
@@ -221,25 +235,31 @@ int is_docking (int sn)
 
 	if (auto_pilot)		// Don't want it to kill anyone!
 		return 1;
-	
-	fz = universe[sn].rotmat[2].z;
+
+	fz = obj->rotmat[2].z;
 
 	if (fz > -0.90)
 		return 0;
-	
-	vec = unit_vector (&universe[sn].location);
+
+	vec = unit_vector (&obj->location);
 
 	if (vec.z < 0.927)
 		return 0;
-	
-	ux = universe[sn].rotmat[1].x;
+
+	ux = obj->rotmat[1].x;
 	if (ux < 0)
 		ux = -ux;
-	
+
 	if (ux < 0.84)
 		return 0;
-	 
+
 	return 1;
+}
+
+
+int is_docking (int sn)
+{
+	return is_docking_obj (&local_objects[sn]);
 }
 
 
@@ -259,14 +279,14 @@ void update_altitude (void)
 	double x,y,z;
 	double dist;
 	
-	myship.altitude = 255;
+	PlayerCaps().altitude = 255;
 
 	if (witchspace)
 		return;
 	
-	x = fabs(universe[0].location.x);
-	y = fabs(universe[0].location.y);
-	z = fabs(universe[0].location.z);
+	x = fabs(local_objects[0].location.x);
+	y = fabs(local_objects[0].location.y);
+	z = fabs(local_objects[0].location.z);
 	
 	if ((x > 65535) || (y > 65535) || (z > 65535))
 		return;
@@ -283,7 +303,7 @@ void update_altitude (void)
 	dist -= 9472;
 	if (dist < 1)
 	{
-		myship.altitude = 0;
+		PlayerCaps().altitude = 0;
 		do_game_over ();
 		return;
 	}
@@ -291,12 +311,12 @@ void update_altitude (void)
 	dist = sqrt (dist);
 	if (dist < 1)
 	{
-		myship.altitude = 0;
+		PlayerCaps().altitude = 0;
 		do_game_over ();
 		return;
 	}
 
-	myship.altitude = dist;	
+	PlayerCaps().altitude = dist;	
 }
 
 
@@ -305,7 +325,7 @@ void update_cabin_temp (void)
 	int x,y,z;
 	int dist;
 	
-	myship.cabtemp = 30;
+	PlayerCaps().cabTemp = 30;
 
 	if (witchspace)
 		return;
@@ -313,9 +333,9 @@ void update_cabin_temp (void)
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		return;
 	
-	x = abs((int)universe[1].location.x);
-	y = abs((int)universe[1].location.y);
-	z = abs((int)universe[1].location.z);
+	x = abs((int)local_objects[1].location.x);
+	y = abs((int)local_objects[1].location.y);
+	z = abs((int)local_objects[1].location.z);
 	
 	if ((x > 65535) || (y > 65535) || (z > 65535))
 		return;
@@ -331,21 +351,21 @@ void update_cabin_temp (void)
 
   	dist ^=  255;
 
-	myship.cabtemp = dist + 30;
+	PlayerCaps().cabTemp = dist + 30;
 
-	if (myship.cabtemp > 255)
+	if (PlayerCaps().cabTemp > 255)
 	{
-		myship.cabtemp = 255;
+		PlayerCaps().cabTemp = 255;
 		do_game_over ();
 		return;
 	}
 	
-	if ((myship.cabtemp < 224) || (cmdr.fuel_scoop == 0))
+	if ((PlayerCaps().cabTemp < 224) || (cmdr.fuel_scoop == 0))
 		return;
 
-	cmdr.fuel += flight_speed / 2;
-	if (cmdr.fuel > myship.max_fuel)
-		cmdr.fuel = myship.max_fuel;
+	cmdr.fuel += PlayerFlight().speed / 2;
+	if (cmdr.fuel > PlayerCaps().maxFuel)
+		cmdr.fuel = PlayerCaps().maxFuel;
 
 	info_message ("Fuel Scoop On");	
 }
@@ -358,33 +378,33 @@ void update_cabin_temp (void)
 
 void regenerate_shields (void)
 {
-	if (energy > 127)
+	if (PlayerDefense().energy > 127)
 	{
-		if (front_shield < 255)
+		if (PlayerDefense().frontShield < 255)
 		{
-			front_shield++;
-			energy--;
+			PlayerDefense().frontShield++;
+			PlayerDefense().energy--;
 		}
 	
-		if (aft_shield < 255)
+		if (PlayerDefense().aftShield < 255)
 		{
-			aft_shield++;
-			energy--;
+			PlayerDefense().aftShield++;
+			PlayerDefense().energy--;
 		}
 	}
 		
-	energy++;
-	energy += cmdr.energy_unit;
-	if (energy > 255)
-		energy = 255;
+	PlayerDefense().energy++;
+	PlayerDefense().energy += cmdr.energy_unit;
+	if (PlayerDefense().energy > 255)
+		PlayerDefense().energy = 255;
 }
 
 
 void decrease_energy (int amount)
 {
-	energy += amount;
+	PlayerDefense().energy += amount;
 
-	if (energy <= 0)
+	if (PlayerDefense().energy <= 0)
 		do_game_over();
 }
 
@@ -400,7 +420,7 @@ void damage_ship (int damage, int front)
 	if (damage <= 0)	/* sanity check */
 		return;
 	
-	shield = front ? front_shield : aft_shield;
+	shield = front ? PlayerDefense().frontShield : PlayerDefense().aftShield;
 	
 	shield -= damage;
 	if (shield < 0)
@@ -410,9 +430,9 @@ void damage_ship (int damage, int front)
 	}
 	
 	if (front)
-		front_shield = shield;
+		PlayerDefense().frontShield = shield;
 	else
-		aft_shield = shield;
+		PlayerDefense().aftShield = shield;
 }
 
 
@@ -425,9 +445,9 @@ void make_station_appear (void)
 	Vector vec;
 	Matrix rotmat;
 	
-	px = universe[0].location.x;
-	py = universe[0].location.y;
-	pz = universe[0].location.z;
+	px = local_objects[0].location.x;
+	py = local_objects[0].location.y;
+	pz = local_objects[0].location.z;
 	
 	vec.x = (rand() & 32767) - 16384;	
 	vec.y = (rand() & 32767) - 16384;	
@@ -470,110 +490,55 @@ void check_docking (int i)
 		return;
 	}
 					
-	if (flight_speed >= 5)
+	if (PlayerFlight().speed >= 5)
 	{
 		do_game_over();
 		return;
 	}
 
-	flight_speed = 1;
-	damage_ship (5, universe[i].location.z > 0);
+	PlayerFlight().speed = 1;
+	damage_ship (5, local_objects[i].location.z > 0);
 	snd_play_sample (SND_CRASH);
 }
 
 
-void switch_to_view (struct univ_object *flip)
+/*
+ * Transform an object from ship-space into the current view's camera-space.
+ *
+ * The camera is now an explicit object (Neuron::Client::Camera) instead of the
+ * implicit "eye fused to the ship at the origin". This still reproduces the old
+ * four fixed views bit for bit - the eye sits on the ship - but the seam now
+ * exists for a detached / third-person camera (a non-zero Camera::position).
+ */
+
+void switch_to_view (struct local_object *flip)
 {
-	double tmp;
-	
-	if ((current_screen == SCR_REAR_VIEW) ||
-		(current_screen == SCR_GAME_OVER))
-	{
-		flip->location.x = -flip->location.x;
-		flip->location.z = -flip->location.z;
-
-		flip->rotmat[0].x = -flip->rotmat[0].x;
-		flip->rotmat[0].z = -flip->rotmat[0].z;
-
-		flip->rotmat[1].x = -flip->rotmat[1].x;
-		flip->rotmat[1].z = -flip->rotmat[1].z;
-
-		flip->rotmat[2].x = -flip->rotmat[2].x;
-		flip->rotmat[2].z = -flip->rotmat[2].z;
-		return;
-	}
-
-
-	if (current_screen == SCR_LEFT_VIEW)
-	{
-		tmp = flip->location.x;
-		flip->location.x = flip->location.z;
-		flip->location.z = -tmp;
-
-		if (flip->type < 0)
-			return;
-		
-		tmp = flip->rotmat[0].x;
-		flip->rotmat[0].x = flip->rotmat[0].z;
-		flip->rotmat[0].z = -tmp;		
-
-		tmp = flip->rotmat[1].x;
-		flip->rotmat[1].x = flip->rotmat[1].z;
-		flip->rotmat[1].z = -tmp;		
-
-		tmp = flip->rotmat[2].x;
-		flip->rotmat[2].x = flip->rotmat[2].z;
-		flip->rotmat[2].z = -tmp;		
-		return;
-	}
-
-	if (current_screen == SCR_RIGHT_VIEW)
-	{
-		tmp = flip->location.x;
-		flip->location.x = -flip->location.z;
-		flip->location.z = tmp;
-
-		if (flip->type < 0)
-			return;
-		
-		tmp = flip->rotmat[0].x;
-		flip->rotmat[0].x = -flip->rotmat[0].z;
-		flip->rotmat[0].z = tmp;		
-
-		tmp = flip->rotmat[1].x;
-		flip->rotmat[1].x = -flip->rotmat[1].z;
-		flip->rotmat[1].z = tmp;		
-
-		tmp = flip->rotmat[2].x;
-		flip->rotmat[2].x = -flip->rotmat[2].z;
-		flip->rotmat[2].z = tmp;		
-
-	}
+	Neuron::Client::ApplyCamera (Neuron::Client::CurrentCamera(), flip);
 }
 
 
 /*
- * Update all the objects in the universe and render them.
+ * Update all the local objects and render them.
  */
 
-void update_universe (void)
+void update_local_objects (void)
 {
 	int i;
 	int type;
 	int bounty;
 	char str[80];
-	struct univ_object flip;
+	struct local_object flip;
 	
 	
-	gfx_start_render();
-				 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	ActiveRenderQueue().StartRender();
+
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		type = universe[i].type;
+		type = local_objects[i].type;
 		
 		if (type != 0)
 		{
-			if (universe[i].flags & FLG_REMOVE)
+			if (local_objects[i].flags & FLG_REMOVE)
 			{
 				if (type == SHIP_VIPER)
 					cmdr.legal_status |= 64;
@@ -591,13 +556,13 @@ void update_universe (void)
 				continue;
 			}
 
-			if ((detonate_bomb) && ((universe[i].flags & FLG_DEAD) == 0) &&
+			if ((detonate_bomb) && ((local_objects[i].flags & FLG_DEAD) == 0) &&
 				(type != SHIP_PLANET) && (type != SHIP_SUN) &&
 				(type != SHIP_CONSTRICTOR) && (type != SHIP_COUGAR) &&
 				(type != SHIP_CORIOLIS) && (type != SHIP_DODEC))
 			{
 				snd_play_sample (SND_EXPLODE);
-				universe[i].flags |= FLG_DEAD;		
+				local_objects[i].flags |= FLG_DEAD;		
 			}
 
 			if ((current_screen != SCR_INTRO_ONE) &&
@@ -608,16 +573,16 @@ void update_universe (void)
 				tactics (i);
 			} 
 		
-			move_univ_object (&universe[i]);
+			move_local_object (&local_objects[i]);
 
-			flip = universe[i];
+			flip = local_objects[i];
 			switch_to_view (&flip);
 			
 			if (type == SHIP_PLANET)
 			{
 				if ((ship_count[SHIP_CORIOLIS] == 0) &&
 					(ship_count[SHIP_DODEC] == 0) &&
-					(universe[i].distance < 65792)) // was 49152
+					(local_objects[i].distance < 65792)) // was 49152
 				{
 					make_station_appear();
 				}				
@@ -633,7 +598,7 @@ void update_universe (void)
 			}
 			
 			
-			if (universe[i].distance < 170)
+			if (local_objects[i].distance < 170)
 			{
 				if ((type == SHIP_CORIOLIS) || (type == SHIP_DODEC))
 					check_docking (i);
@@ -643,7 +608,7 @@ void update_universe (void)
 				continue;
 			}
 
-			if (universe[i].distance > 57344)
+			if (local_objects[i].distance > 57344)
 			{
 				remove_ship (i);
 				continue;
@@ -651,21 +616,114 @@ void update_universe (void)
 
 			draw_ship (&flip);
 
-			universe[i].flags = flip.flags;
-			universe[i].exp_seed = flip.exp_seed;
-			universe[i].exp_delta = flip.exp_delta;
+			local_objects[i].flags = flip.flags;
+			local_objects[i].exp_seed = flip.exp_seed;
+			local_objects[i].exp_delta = flip.exp_delta;
 			
-			universe[i].flags &= ~FLG_FIRING;
+			local_objects[i].flags &= ~FLG_FIRING;
 			
-			if (universe[i].flags & FLG_DEAD)
+			if (local_objects[i].flags & FLG_DEAD)
 				continue;
 
 			check_target (i, &flip);
 		}
 	}
 
-	gfx_finish_render();
+	ActiveRenderQueue().FinishRender();
+
+	/* Replay the whole recorded object-render stream (including the depth-sorted
+	   start/finish-render bracket) into the gfx backend here, where the 3D view
+	   used to draw directly - so the on-screen result is identical. */
+	FlushRenderQueue();
+
 	detonate_bomb = 0;
+}
+
+
+/*
+ * Render the replicated world instead of the locally-simulated one.
+ *
+ * The thin-client path: the server is authoritative, so rather than moving and
+ * fighting local_objects we sample the interpolated snapshots from the
+ * ReplicationClient, rebase them around the local player (the floating origin)
+ * into the legacy render frame, and draw them through the same pipeline. No game
+ * logic runs here - the client only displays. Enabled via Open() on the client
+ * (see game_main); otherwise update_local_objects() runs as before.
+ */
+
+// World-unit distance to the closest replicated station this frame (1e18 = none
+// in view). Lets the docking computer dock only when actually in range, matching
+// the server's proximity gate so it never optimistically docks from across AOI.
+static double s_nearest_station_dist = 1.0e18;
+
+void render_replicated_objects (void)
+{
+	ActiveRenderQueue().StartRender();
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+
+	// Sample at alpha 1.0 (the latest tick) for now; a render-time-based alpha for
+	// smoother interpolation is a later refinement.
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords(ents, rc.LocalPlayer());
+
+	const Neuron::Client::Camera cam = Neuron::Client::CurrentCamera();
+
+	// Rebuild ship_count[] from what the server actually replicated this tick, so
+	// the legacy "is a station nearby?" tests (safe zone, docking computer) work
+	// off the live world instead of the retired single-player spawner.
+	for (int t = 0; t <= NO_OF_SHIPS; t++)
+		ship_count[t] = 0;
+
+	s_nearest_station_dist = 1.0e18;   // recomputed below from the live stations
+
+	int drawn = 0;
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		if (drawn >= MAX_LOCAL_OBJECTS)
+			break;
+
+		// Draw each entity as its replicated model (planet, station, ships);
+		// entities with no type fall back to a generic ship.
+		struct local_object obj;
+		memset (&obj, 0, sizeof(obj));
+		obj.type = (rec.type != 0) ? rec.type : SHIP_VIPER;
+		if (obj.type > 0 && obj.type <= NO_OF_SHIPS)
+			ship_count[obj.type]++;
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && rec.distance < s_nearest_station_dist)
+			s_nearest_station_dist = rec.distance;
+		obj.location = rec.location;
+		obj.rotmat[0] = rec.rotmat[0];
+		obj.rotmat[1] = rec.rotmat[1];
+		obj.rotmat[2] = rec.rotmat[2];
+		obj.distance = (int) rec.distance;
+
+		Neuron::Client::ApplyCamera (cam, &obj);
+		draw_ship (&obj);
+		++drawn;
+
+		// Docking. Authentic Elite demands a precise slot alignment, but with a
+		// static (non-spinning) station and network lag that is punishing, and a
+		// fresh commander has no docking computer. So we dock forgivingly: fly up
+		// to the station (within ~600 units) with it ahead of you and you dock.
+		// The server still gates on its own proximity check (kDockRange), so this
+		// only ever completes when genuinely at a station.
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && obj.distance < 600)
+		{
+			struct vector approach = unit_vector (&obj.location);
+			if (approach.z > 0.5)   // station roughly ahead -> dock
+			{
+				snd_play_sample (SND_DOCK);
+				dock_player ();
+				current_screen = SCR_BREAK_PATTERN;
+				break;
+			}
+		}
+	}
+
+	ActiveRenderQueue().FinishRender();
+	FlushRenderQueue();
 }
 
 
@@ -682,16 +740,16 @@ void update_scanner (void)
 	int x1,y1,y2;
 	int colour;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		if ((universe[i].type <= 0) ||
-			(universe[i].flags & FLG_DEAD) ||
-			(universe[i].flags & FLG_CLOAKED))
+		if ((local_objects[i].type <= 0) ||
+			(local_objects[i].flags & FLG_DEAD) ||
+			(local_objects[i].flags & FLG_CLOAKED))
 			continue;
 	
-		x = universe[i].location.x / 256;
-		y = universe[i].location.y / 256;
-		z = universe[i].location.z / 256;
+		x = local_objects[i].location.x / 256;
+		y = local_objects[i].location.y / 256;
+		z = local_objects[i].location.z / 256;
 
 		x1 = x;
 		y1 = -z / 4;
@@ -705,9 +763,9 @@ void update_scanner (void)
 		y1 += scanner_cy;
 		y2 += scanner_cy;
 
-		colour = (universe[i].flags & FLG_HOSTILE) ? GFX_COL_YELLOW_5 : GFX_COL_WHITE;
+		colour = (local_objects[i].flags & FLG_HOSTILE) ? GFX_COL_YELLOW_5 : GFX_COL_WHITE;
 			
-		switch (universe[i].type)
+		switch (local_objects[i].type)
 		{
 			case SHIP_MISSILE:
 				colour = 137;
@@ -753,7 +811,7 @@ void update_compass (void)
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		un = 1;
 	
-	dest = unit_vector (&universe[un].location);
+	dest = unit_vector (&local_objects[un].location);
 	
 	compass_x = compass_centre_x + (dest.x * 16);
 	compass_y = compass_centre_y + (dest.y * -16);
@@ -784,9 +842,9 @@ void display_speed (void)
 	sx = 417;
 	sy = 384 + 9;
 
-	len = ((flight_speed * 64) / myship.max_speed) - 1;
+	len = ((PlayerFlight().speed * 64) / PlayerCaps().maxSpeed) - 1;
 
-	colour = (flight_speed > (myship.max_speed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
+	colour = (PlayerFlight().speed > (PlayerCaps().maxSpeed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
 
 	for (i = 0; i < 6; i++)
 	{
@@ -821,31 +879,31 @@ void display_dial_bar (int len, int x, int y)
 
 void display_shields (void)
 {
-	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 31, 7);
+	if (PlayerDefense().frontShield > 3)
+		display_dial_bar (PlayerDefense().frontShield / 4, 31, 7);
 
-	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 31, 23);
+	if (PlayerDefense().aftShield > 3)
+		display_dial_bar (PlayerDefense().aftShield / 4, 31, 23);
 }
 
 
 void display_altitude (void)
 {
-	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 31, 92);
+	if (PlayerCaps().altitude > 3)
+		display_dial_bar (PlayerCaps().altitude / 4, 31, 92);
 }
 
 void display_cabin_temp (void)
 {
-	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 31, 60);
+	if (PlayerCaps().cabTemp > 3)
+		display_dial_bar (PlayerCaps().cabTemp / 4, 31, 60);
 }
 
 
 void display_laser_temp (void)
 {
-	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 31, 76);
+	if (PlayerDefense().laserHeat > 0)
+		display_dial_bar (PlayerDefense().laserHeat / 4, 31, 76);
 }
 
 
@@ -857,10 +915,10 @@ void display_energy (void)
 {
 	int e1,e2,e3,e4;
 
-	e1 = energy > 64 ? 64 : energy;
-	e2 = energy > 128 ? 64 : energy - 64;
-	e3 = energy > 192 ? 64 : energy - 128;
-	e4 = energy - 192;  	
+	e1 = PlayerDefense().energy > 64 ? 64 : PlayerDefense().energy;
+	e2 = PlayerDefense().energy > 128 ? 64 : PlayerDefense().energy - 64;
+	e3 = PlayerDefense().energy > 192 ? 64 : PlayerDefense().energy - 128;
+	e4 = PlayerDefense().energy - 192;  	
 	
 	if (e4 > 0)
 		display_dial_bar (e4, 416, 61);
@@ -886,7 +944,7 @@ void display_flight_roll (void)
 	sx = 416;
 	sy = 384 + 9 + 14;
 
-	pos = sx - ((flight_roll * 28) / myship.max_roll);
+	pos = sx - ((PlayerFlight().roll * 28) / PlayerCaps().maxRoll);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -904,7 +962,7 @@ void display_flight_climb (void)
 	sx = 416;
 	sy = 384 + 9 + 14 + 16;
 
-	pos = sx + ((flight_climb * 28) / myship.max_climb);
+	pos = sx + ((PlayerFlight().climb * 28) / PlayerCaps().maxClimb);
 	pos += 32;
 
 	for (i = 0; i < 4; i++)
@@ -917,7 +975,7 @@ void display_flight_climb (void)
 void display_fuel (void)
 {
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 31, 44);
+		display_dial_bar ((cmdr.fuel * 64) / PlayerCaps().maxFuel, 31, 44);
 }
 
 
@@ -981,28 +1039,28 @@ void update_console (void)
 
 void increase_flight_roll (void)
 {
-	if (flight_roll < myship.max_roll)
-		flight_roll++;
+	if (PlayerFlight().roll < PlayerCaps().maxRoll)
+		PlayerFlight().roll++;
 }
 
 
 void decrease_flight_roll (void)
 {
-	if (flight_roll > -myship.max_roll)
-		flight_roll--;
+	if (PlayerFlight().roll > -PlayerCaps().maxRoll)
+		PlayerFlight().roll--;
 }
 
 
 void increase_flight_climb (void)
 {
-	if (flight_climb < myship.max_climb)
-		flight_climb++;
+	if (PlayerFlight().climb < PlayerCaps().maxClimb)
+		PlayerFlight().climb++;
 }
 
 void decrease_flight_climb (void)
 {
-	if (flight_climb > -myship.max_climb)
-		flight_climb--;
+	if (PlayerFlight().climb > -PlayerCaps().maxClimb)
+		PlayerFlight().climb--;
 }
 
 
@@ -1105,11 +1163,11 @@ void enter_witchspace (void)
 	docked_planet.b ^= 31;
 	in_battle = 1;  
 
-	flight_speed = 12;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 
 	nthg = (randint() & 3) + 1;
 	
@@ -1140,7 +1198,7 @@ void complete_hyperspace (void)
 		cmdr.fuel -= hyper_distance;
 		cmdr.legal_status /= 2;
 
-		if ((rand255() > 253) || (flight_climb == myship.max_climb))
+		if ((rand255() > 253) || (PlayerFlight().climb == PlayerCaps().maxClimb))
 		{
 			enter_witchspace();
 			return;
@@ -1153,11 +1211,11 @@ void complete_hyperspace (void)
 	generate_planet_data (&current_planet_data, docked_planet);
 	generate_stock_market ();
 	
-	flight_speed = 12;
-	flight_roll = 0;
-	flight_climb = 0;
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = 0;
+	PlayerFlight().climb = 0;
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
@@ -1208,9 +1266,9 @@ void jump_warp (void)
 	int type;
 	int jump;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		type = universe[i].type;
+		type = local_objects[i].type;
 		
 		if ((type > 0) && (type != SHIP_ASTEROID) && (type != SHIP_CARGO) &&
 			(type != SHIP_ALLOY) && (type != SHIP_ROCK) &&
@@ -1221,25 +1279,25 @@ void jump_warp (void)
 		}
 	}
 
-	if ((universe[0].distance < 75001) || (universe[1].distance < 75001))
+	if ((local_objects[0].distance < 75001) || (local_objects[1].distance < 75001))
 	{
 		info_message ("Mass Locked");
 		return;
 	}
 
 
-	if (universe[0].distance < universe[1].distance)
-		jump = universe[0].distance - 75000;
+	if (local_objects[0].distance < local_objects[1].distance)
+		jump = local_objects[0].distance - 75000;
 	else
-		jump = universe[1].distance - 75000;	
+		jump = local_objects[1].distance - 75000;	
 
 	if (jump > 1024)
 		jump = 1024;
 	
-	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
-		if (universe[i].type != 0)
-			universe[i].location.z -= jump;
+		if (local_objects[i].type != 0)
+			local_objects[i].location.z -= jump;
 	}
 
 	warp_stars = 1;
@@ -1253,12 +1311,21 @@ void launch_player (void)
 	Matrix rotmat;
 
 	docked = 0;
-	flight_speed = 12;
-	flight_roll = -15;
-	flight_climb = 0;
+
+	// Thin-client mode: tell the server we've undocked.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::Undock;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+	}
+
+	PlayerFlight().speed = 12;
+	PlayerFlight().roll = -15;
+	PlayerFlight().climb = 0;
 	cmdr.legal_status |= carrying_contraband();
 	create_new_stars();
-	clear_universe();
+	clear_local_objects();
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
 	add_new_ship (SHIP_PLANET, 0, 0, 65536, rotmat, 0, 0);
@@ -1281,9 +1348,12 @@ void launch_player (void)
 
 void engage_docking_computer (void)
 {
-	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
+	// Only dock when genuinely within the server's docking range (it will reject
+	// and strand us otherwise). 5000 world units matches the server's kDockRange.
+	if ((ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC]) &&
+		s_nearest_station_dist < 5000.0)
 	{
-		snd_play_sample (SND_DOCK);					
+		snd_play_sample (SND_DOCK);
 		dock_player();
 		current_screen = SCR_BREAK_PATTERN;
 	}
