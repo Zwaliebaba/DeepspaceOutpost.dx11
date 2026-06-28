@@ -144,3 +144,21 @@ TEST(Interp, LocalOffsetRebasesToFloatingOrigin)
   EXPECT_TRUE(local.y == 200.0);
   EXPECT_TRUE(local.z == 300.0);
 }
+
+TEST(Interp, ForgetDropsAnEntityImmediately)
+{
+  Net::SnapshotInterpolator interp;
+  interp.Ingest(OneEntity(1, 7, 0, 0, 0));
+  interp.Ingest(OneEntity(1, 8, 5, 0, 0));   // a second entity in the same tick
+  EXPECT_TRUE(interp.Count() == 2);
+
+  interp.Forget(7);                           // e.g. an authoritative despawn/death
+  EXPECT_TRUE(interp.Count() == 1);
+
+  Net::EntitySnapshot s;
+  EXPECT_TRUE(!interp.Sample(7, 1.0, s));     // gone: no longer sampled/rendered
+  EXPECT_TRUE(interp.Sample(8, 1.0, s));      // the other entity is unaffected
+
+  interp.Forget(123);                         // forgetting an unknown id is a no-op
+  EXPECT_TRUE(interp.Count() == 1);
+}

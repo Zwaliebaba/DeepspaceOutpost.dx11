@@ -703,16 +703,28 @@ void render_replicated_objects (void)
 		draw_ship (&obj);
 		++drawn;
 
-		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) centred
-		// on the missile-locked ship, projected to screen the same way draw_ship
-		// projects a vertex at the ship's centre.
+		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) on the
+		// missile-locked ship, centred and SIZED to the ship's on-screen extent so
+		// it sits just around the hull (not a fixed oversized box). The centre is
+		// projected the same way draw_ship projects a vertex at the ship's centre;
+		// the half-size is the ship's bounding radius (ship_data.size is r^2)
+		// projected the same way, with a small margin.
 		if (rec.id == g_missile_lock_target && obj.location.z > 0.0)
 		{
 			const double fx = (obj.location.x * 256.0) / obj.location.z + 128.0;
 			const double fy = -((obj.location.y * 256.0) / obj.location.z) + 96.0;
 			const int sx = (int)(fx * GFX_SCALE);
 			const int sy = (int)(fy * GFX_SCALE);
-			gfx_draw_sprite (IMG_TARGET_LOCK, sx - 32, sy - 32);   // 64x64 reticle, centred
+
+			const double radius =
+				(obj.type > 0 && obj.type <= NO_OF_SHIPS && ship_list[obj.type] != NULL)
+					? sqrt (ship_list[obj.type]->size) : 80.0;
+			double half = (radius * 256.0 / obj.location.z) * GFX_SCALE * 1.15;
+			if (half < 8.0)  half = 8.0;
+			if (half > 80.0) half = 80.0;
+
+			const int box = (int)(half * 2.0);
+			gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
 		}
 
 		// Docking. Authentic Elite demands a precise slot alignment, but with a

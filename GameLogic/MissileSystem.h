@@ -87,9 +87,10 @@ namespace Neuron::GameLogic
 
   // Advance every in-flight missile one tick: home toward its (still-living) target,
   // move along its nose, and detonate within MISSILE_DETONATE_RANGE - or self-
-  // destruct when its life runs out. Returns the kills (a target driven to zero
-  // energy) for the server to broadcast + destroy, exactly like StepCombat. Spent
-  // missiles are destroyed here; their removal rides the despawn diff.
+  // destruct when its life runs out. Returns kills for the server to broadcast +
+  // destroy (exactly like StepCombat): on detonation, both the target (if it died)
+  // AND the missile itself, so the missile's explosion shows on the client. A
+  // missile that simply times out is destroyed here and vanishes silently.
   [[nodiscard]] inline std::vector<Kill> StepMissiles(ECS::Registry& _world)
   {
     std::vector<Kill> kills;
@@ -133,7 +134,11 @@ namespace Neuron::GameLogic
             if (tc->energy <= 0)
               kills.push_back(Kill{ mc->target, mc->owner });
           }
-          _world.Destroy(mid);
+          // Report the missile itself as a "kill" so the server broadcasts its
+          // EntityDeath (the client plays the explosion + drops it) and destroys
+          // the projectile - rather than a silent despawn that just vanishes.
+          // (Don't Destroy() here; the server's kill loop does.)
+          kills.push_back(Kill{ mid, mc->owner });
           continue;
         }
 

@@ -523,6 +523,18 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 
+/* As gfx_draw_sprite but stretched to an explicit w x h (used for the missile
+ * target reticle, which is sized to the locked ship's on-screen extent). */
+void gfx_draw_sprite_scaled(int sprite_no, int x, int y, int w, int h)
+{
+	const char* fn = spriteFile(sprite_no);
+	if (!fn) return;
+	const Texture* t = getTexture(fn, true);
+	if (!t || !t->srv) return;
+	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + w), (float)(y + h),
+				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
 void gfx_draw_scanner(void)
 {
 	const char* fn = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";

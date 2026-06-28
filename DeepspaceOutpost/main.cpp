@@ -1401,21 +1401,43 @@ void info_message (const char *message)
  * window, Direct3D 11 device and XAudio2 engine have been created.
  */
 
-// Apply authoritative station responses (buy/sell/dock results) to the local
-// display state. Used only in thin-client mode.
-static void apply_station_responses (void)
+// Drain authoritative server events (thin-client mode): station buy/sell/dock
+// results, plus entity despawns and deaths. Removing the entity on despawn/death
+// is what stops destroyed things (a detonated missile, a killed ship) from
+// lingering as motionless ghosts; a death also plays the explosion sound.
+static void process_server_events (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 	Neuron::Net::ReliableMessage msg;
 	while (rc.PollEvent(msg))
 	{
 		Neuron::Net::StationResponse resp;
-		if (Neuron::Net::DecodeStationResponse(msg, resp) &&
-			resp.status == Neuron::Net::StationStatus::Ok)
+		uint32_t entityId = 0;
+		uint32_t killerId = 0;
+
+		if (Neuron::Net::DecodeStationResponse(msg, resp))
 		{
-			cmdr.credits = resp.credits;
-			if (resp.commodity < NO_OF_STOCK_ITEMS)
-				cmdr.current_cargo[resp.commodity] = resp.cargo;
+			if (resp.status == Neuron::Net::StationStatus::Ok)
+			{
+				cmdr.credits = resp.credits;
+				if (resp.commodity < NO_OF_STOCK_ITEMS)
+					cmdr.current_cargo[resp.commodity] = resp.cargo;
+			}
+		}
+		else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
+		{
+			// A kill/detonation: clear the lock if it was on the dead entity, drop
+			// it from the view, and play the explosion.
+			if (entityId == g_missile_lock_target)
+				g_missile_lock_target = 0xFFFFFFFFu;
+			rc.Forget(entityId);
+			snd_play_sample (SND_EXPLODE);
+		}
+		else if (Neuron::Net::DecodeDespawn(msg, entityId))
+		{
+			if (entityId == g_missile_lock_target)
+				g_missile_lock_target = 0xFFFFFFFFu;
+			rc.Forget(entityId);
 		}
 	}
 }
@@ -1513,7 +1535,13 @@ int game_main (void)
 			// server's authoritative snapshots here instead of simulating locally.
 			Neuron::Client::ReplicationClientInstance().Pump();
 			if (Neuron::Client::ReplicationClientInstance().IsOpen())
-				apply_station_responses();
+			{
+				process_server_events();
+				// Backstop: forget entities that silently left our area of interest
+				// (no despawn event is sent for those), so they don't pile up as
+				// ghosts. ~3s at the server's 30 Hz tick.
+				Neuron::Client::ReplicationClientInstance().EvictStale(90);
+			}
 
 			snd_update_sound();
 			gfx_update_screen();

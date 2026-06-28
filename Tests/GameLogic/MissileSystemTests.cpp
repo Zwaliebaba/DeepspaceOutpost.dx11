@@ -57,18 +57,21 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
   EXPECT_TRUE(w.Get<GameLogic::WorldTransform>(missile).position.z > zStart);
   EXPECT_TRUE(w.IsValid(missile));
 
-  // Run it to detonation; the pirate dies, credited to the shooter.
-  bool killed = false;
-  for (int i = 0; i < GameLogic::MISSILE_LIFE && !killed; ++i)
+  // Run it to detonation. On the detonation tick StepMissiles reports BOTH the
+  // pirate (it died) and the missile itself (it exploded); the caller (server kill
+  // loop) destroys the victims, which we mimic here.
+  bool killedPirate = false, killedMissile = false;
+  for (int i = 0; i < GameLogic::MISSILE_LIFE && !killedPirate; ++i)
     for (const GameLogic::Kill& k : GameLogic::StepMissiles(w))
-      if (k.victim == pirate)
-      {
-        killed = true;
-        EXPECT_TRUE(k.killer == shooter.index);
-      }
+    {
+      if (k.victim == pirate)  { killedPirate = true; EXPECT_TRUE(k.killer == shooter.index); }
+      if (k.victim == missile) { killedMissile = true; }
+      w.Destroy(k.victim);   // the server's kill loop destroys reported victims
+    }
 
-  EXPECT_TRUE(killed);
-  EXPECT_TRUE(!w.IsValid(missile));   // the projectile is spent on detonation
+  EXPECT_TRUE(killedPirate);
+  EXPECT_TRUE(killedMissile);         // the missile reports its own explosion
+  EXPECT_TRUE(!w.IsValid(missile));   // ...and is destroyed by the kill loop
 }
 
 TEST(MissileSys, DumbFiresAndSelfDestructsWithNoTarget)
@@ -96,12 +99,19 @@ TEST(MissileSys, DetonatesOnTheStationWithoutDestroyingIt)
   ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter, station.index);
   EXPECT_TRUE(w.Get<GameLogic::Missile>(missile).target == station);
 
-  bool anyKill = false;
+  // Run to detonation. The station is never reported as a victim (it survives),
+  // but the missile reports its own explosion; mimic the server destroying it.
+  bool stationKilled = false, missileExploded = false;
   for (int i = 0; i < GameLogic::MISSILE_LIFE && w.IsValid(missile); ++i)
-    if (!GameLogic::StepMissiles(w).empty())
-      anyKill = true;
+    for (const GameLogic::Kill& k : GameLogic::StepMissiles(w))
+    {
+      if (k.victim == station) stationKilled = true;
+      if (k.victim == missile) missileExploded = true;
+      w.Destroy(k.victim);
+    }
 
-  EXPECT_TRUE(!anyKill);                 // the station shrugs off the hit (no kill)
-  EXPECT_TRUE(!w.IsValid(missile));      // ...but the missile still detonated and is gone
+  EXPECT_TRUE(!stationKilled);           // the station shrugs off the hit
+  EXPECT_TRUE(missileExploded);          // ...but the missile still detonated
+  EXPECT_TRUE(!w.IsValid(missile));      // ...and is gone
   EXPECT_TRUE(w.Get<GameLogic::Combatant>(station).energy == 1000000 - GameLogic::MISSILE_HIT_DAMAGE);
 }
