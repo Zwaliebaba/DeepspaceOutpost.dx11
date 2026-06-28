@@ -46,6 +46,11 @@ char *government_type[] = {	"Anarchy",
 int cross_x = 0;
 int cross_y = 0;
 
+// Manifest index of the system the player last selected on a chart (the teleport
+// target / "hyperspace system"), or -1 before any selection. Updated as the chart
+// crosshair settles; read by the status screen so it agrees with the chart.
+static int g_chart_selected = -1;
+
 
 // Thin-client galactic chart helpers (defined further down, used by the legacy
 // chart entry points above their definition).
@@ -143,6 +148,7 @@ void show_distance_to_planet (void)
 			const int sel = chart_nearest_to_cursor();
 			if (sel >= 0)
 			{
+				g_chart_selected = sel;   // the teleport target the status screen reports
 				strncpy (planet_name, rc.Galaxy()[sel].name, sizeof(planet_name) - 1);
 				planet_name[sizeof(planet_name) - 1] = '\0';
 				gfx_clear_text_area();
@@ -283,6 +289,8 @@ void find_planet_by_name (char *find_name)
 				gfx_display_text (16, 340, "Unknown Planet");
 				return;
 			}
+
+			g_chart_selected = hit;   // the found system becomes the hyperspace target
 
 			std::vector<int> px, py;
 			chart_project_current (g, px, py);
@@ -456,8 +464,6 @@ void display_short_range_chart (void)
 // let the existing chart crosshair roam over them, and teleport (while docked) to
 // whichever system is nearest the crosshair. No generation happens client-side.
 
-static int g_chart_selected = -1;   // manifest index last picked (for the data screen)
-
 // Project the manifest's planet positions (world x,z) into chart pixels, scaling
 // to the manifest's own bounds so the whole galaxy fits whatever its extent is.
 static void chart_project_all (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
@@ -538,6 +544,30 @@ void current_system_name (char *_out)
 	}
 
 	name_planet (_out, docked_planet);
+}
+
+// Name of the player's selected hyperspace (teleport) target. In thin-client mode
+// this is the manifest name of the system last picked on a chart, defaulting to
+// the current system before any selection (mirroring the legacy start where the
+// hyperspace target equals the present system); otherwise the legacy procedural
+// name of hyperspace_planet. `_out` must hold at least 16 chars.
+void hyperspace_system_name (char *_out)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (rc.IsOpen() && rc.HasGalaxy())
+	{
+		if (g_chart_selected >= 0 && g_chart_selected < (int)rc.Galaxy().size())
+		{
+			strncpy (_out, rc.Galaxy()[g_chart_selected].name, 15);
+			_out[15] = '\0';
+			return;
+		}
+
+		current_system_name (_out);
+		return;
+	}
+
+	name_planet (_out, hyperspace_planet);
 }
 
 // Project the manifest into short-range chart pixels, centred on `_origin`
@@ -958,7 +988,7 @@ void display_commander_status (void)
 	}
 
 	gfx_display_colour_text (16, 74, "Hyperspace System:", GFX_COL_GREEN_1);
-	name_planet (planet_name, hyperspace_planet);
+	hyperspace_system_name (planet_name);
 	capitalise_name (planet_name);
 	sprintf (str, "%s", planet_name);
 	gfx_display_text (190, 74, str);
