@@ -440,11 +440,11 @@ layer later **without touching the catalog**. Revisit when accounts/persistence 
 
 ## 14. Phased rollout (each phase builds, tests green, game runnable)
 
-**Phase 0 — Foundations (NeuronCore, no behaviour change).**
+**Phase 0 — Foundations (NeuronCore, no behaviour change). ✅ DONE.**
 `MessageId` + reserved ranges, `MessageTraits`, `NetEntityId`, `Serialize` (concept + leaves
-+ caps), `Registry`/`REGISTER_MESSAGE`, `MessageBus` (generations + ordering key + overflow
-policy + metrics), `Framing` (length-prefixed records + lanes). Codec/bus/governance tests.
-Nothing wired into the game yet.
++ caps), `Registry`/`REGISTER_MESSAGE`, `MessageBus` (generations + overflow policy + metrics),
+`Framing` (length-prefixed records + lanes). Shipped under `NeuronCore/Messages/` with codec/
+bus/wire/governance suites in `Tests/NeuronCore/` (27 cases). Nothing wired into the game yet.
 
 **Phase 1 — In-process bus on the server.**
 Introduce `FireWeapon` (command) and `EntityDeath`/`Crime`/`DamageApplied` (facts). Refactor

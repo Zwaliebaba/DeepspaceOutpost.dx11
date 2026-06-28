@@ -39,6 +39,13 @@ set(NEURONCORE_HEADERS
     NeuronHelper.h
     TasksCore.h
     TimerCore.h
+    Messages/MessageId.h
+    Messages/MessageTraits.h
+    Messages/NetEntityId.h
+    Messages/Serialize.h
+    Messages/Registry.h
+    Messages/MessageBus.h
+    Messages/Framing.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})
