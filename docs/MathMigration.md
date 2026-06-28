@@ -196,17 +196,26 @@ ordering goes **leaf utilities → storage → hot loops → cleanup** so behavi
 locked before storage layout churns the ECS.
 
 ### Phase 0 — Scaffolding & golden tests *(no behavior change)*
-- Add characterization tests in [`Tests/MathTests.cpp`](../Tests/MathTests.cpp)
-  that capture the **current** double-precision outputs of `mult_vector`,
-  `mult_matrix`, `unit_vector`, `tidy_matrix`, `rotate_vec`, and a full
-  `move_local_object` step for representative inputs. These become the
-  float-tolerance oracle for every later phase.
-- **Snapshot whole matrices and whole transformed vertex sets, not just scalars,
-  and use a rotation about a skew axis** — a symmetric/identity case would hide
-  the §4 convention transpose and any handedness flip.
-- Decide the comparison tolerance for float32 vs. the old double path and record
-  it in the test file (relative epsilon scaled by magnitude — see
-  [§7](#7-precision--determinism-risk)).
+- **Done:** characterization tests for the pure leaf functions live in
+  [`Tests/LegacyMathGoldenTests.cpp`](../Tests/LegacyMathGoldenTests.cpp)
+  (registered in [`Tests/CMakeLists.txt`](../Tests/CMakeLists.txt)). They capture
+  the **current** double-precision outputs of `unit_vector`,
+  `vector_dot_product`, `mult_vector`, `mult_matrix`, `tidy_matrix`, and
+  `rotate_vec`, and become the float-tolerance oracle for every later phase.
+- The legacy `vector.cpp` `#include`s the heavy DeepspaceOutpost pch and can't
+  compile into the dependency-light test exe, so the tests embed a **verbatim
+  oracle** of those pure functions; keep it bit-identical to `vector.cpp` until
+  Phase 7 deletes the original.
+- **`mult_vector` uses a non-symmetric (cyclic-permutation) matrix** so the test
+  pins the `M·v` column convention and exposes the §4 transpose (a symmetric
+  matrix would hide it); `tidy_matrix` characterizes the left-handed `-Z`
+  start-basis (handedness). Drift-sensitive cases carry `TODO(windows)` markers
+  plus orthogonality invariants — fill the literals from the first MSVC run.
+- **`move_local_object` is a *manual integration check*, not a unit golden** — it
+  depends on `PlayerFlight()`, `ship_list`, and other `space.cpp` globals that
+  can't be isolated header-only. Validate it by the Phase-4 flight smoke test.
+- Comparison tolerance is a relative-with-absolute-floor epsilon
+  (`Near`/`NearVec` in the test, see [§7](#7-precision--determinism-risk)).
 
 ### Phase 1 — Reconcile the helper layer & docs *(no behavior change)*
 - Fix `AGENTS.md` / `coding-standards.md` to name the real legacy types

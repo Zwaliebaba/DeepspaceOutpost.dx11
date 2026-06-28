@@ -10,6 +10,7 @@ set(TEST_SOURCES
     EcsTests.cpp
     UniverseTests.cpp
     MathTests.cpp
+    LegacyMathGoldenTests.cpp
     SpatialTests.cpp
     MotionTests.cpp
     EconomyTests.cpp
