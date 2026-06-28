@@ -1,7 +1,8 @@
 # Coriolis Space Station
 # Exported from DeepspaceOutpost ship data (SHIP id 2).
-# Gameplay stats and the vertex/line indices the engine
-# derives are in the matching coriolis.json sidecar.
+# Modified: flat docking marker replaced with a recessed open docking bay.
+# Front +Z face rebuilt as a frame around a rectangular opening (verts 13-16),
+# extruded inward 90 units (back wall at z=70) with interior walls + back wall.
 mtllib elite.mtl
 o coriolis
 v 160 0 160
@@ -20,33 +21,37 @@ v 10 -30 160
 v 10 30 160
 v -10 30 160
 v -10 -30 160
+v 10 -30 70
+v 10 30 70
+v -10 30 70
+v -10 -30 70
 usemtl col_234
 f 5 1 4
-usemtl col_234
 f 1 6 2
-usemtl col_234
 f 2 7 3
-usemtl col_234
 f 3 8 4
 usemtl col_235
 f 5 4 8 12
-usemtl col_235
 f 9 6 1 5
-usemtl col_235
 f 11 8 3 7
-usemtl col_235
 f 2 6 10 7
 usemtl col_234
 f 12 8 11
-usemtl col_234
 f 12 9 5
-usemtl col_234
 f 10 6 9
-usemtl col_234
 f 11 7 10
 usemtl col_248
 f 12 11 10 9
-usemtl col_248
-f 1 2 3 4
+# --- front face rebuilt as a frame around the docking opening ---
+f 1 2 15 14
+f 2 3 16 15
+f 3 4 13 16
+f 4 1 14 13
+# --- docking bay: interior walls (inward normals) ---
 usemtl col_0
-f 16 13 14 15
+f 13 14 18 17
+f 14 15 19 18
+f 15 16 20 19
+f 16 13 17 20
+# --- docking bay: back wall (faces viewer looking in) ---
+f 17 18 19 20
