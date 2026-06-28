@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include <cmath>
 
@@ -18,7 +18,7 @@ namespace
   }
 }
 
-TEST(Flight_StraightAheadAdvancesAlongNose)
+TEST(Flight, StraightAheadAdvancesAlongNose)
 {
   ECS::Registry world;
   ECS::EntityId ship = world.Create();
@@ -29,10 +29,10 @@ TEST(Flight_StraightAheadAdvancesAlongNose)
     GameLogic::Tick(world);
 
   // No rotation: nose stays (0,0,1), so 5 ticks * 100 along z.
-  CHECK((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 500 }));
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 500 }));
 }
 
-TEST(Flight_RollDoesNotMoveTheNoseOrTranslate)
+TEST(Flight, RollDoesNotMoveTheNoseOrTranslate)
 {
   ECS::Registry world;
   ECS::EntityId ship = world.Create();
@@ -44,16 +44,16 @@ TEST(Flight_RollDoesNotMoveTheNoseOrTranslate)
 
   const GameLogic::Flight& f = world.Get<GameLogic::Flight>(ship);
   // Rolling spins the basis about the nose: the nose itself is unchanged...
-  CHECK(std::fabs(f.nose.x) < 1e-12);
-  CHECK(std::fabs(f.nose.y) < 1e-12);
-  CHECK(std::fabs(f.nose.z - 1.0) < 1e-12);
+  EXPECT_TRUE(std::fabs(f.nose.x) < 1e-12);
+  EXPECT_TRUE(std::fabs(f.nose.y) < 1e-12);
+  EXPECT_TRUE(std::fabs(f.nose.z - 1.0) < 1e-12);
   // ...the side vector has rotated off the +x axis (roll is doing something)...
-  CHECK(f.side.y < 0.0);
+  EXPECT_TRUE(f.side.y < 0.0);
   // ...and with zero speed the ship has not moved.
-  CHECK((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 0 }));
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 0 }));
 }
 
-TEST(Flight_PitchTiltsNoseAndCurvesPath)
+TEST(Flight, PitchTiltsNoseAndCurvesPath)
 {
   ECS::Registry world;
   ECS::EntityId ship = world.Create();
@@ -64,17 +64,17 @@ TEST(Flight_PitchTiltsNoseAndCurvesPath)
 
   // One pitch tick: nose = normalize(0,-0.1,0.99) ~ (0,-0.100504,0.995037).
   // *100 truncates toward zero to (0,-10,99).
-  CHECK((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, -10, 99 }));
-  CHECK(world.Get<GameLogic::Flight>(ship).nose.y < 0.0);
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, -10, 99 }));
+  EXPECT_TRUE(world.Get<GameLogic::Flight>(ship).nose.y < 0.0);
 
   // Keep pitching: the path bends further toward -y (y keeps decreasing).
   const int64_t yAfter1 = world.Get<GameLogic::WorldTransform>(ship).position.y;
   for (int i = 0; i < 49; ++i)
     GameLogic::Tick(world);
-  CHECK(world.Get<GameLogic::WorldTransform>(ship).position.y < yAfter1);
+  EXPECT_TRUE(world.Get<GameLogic::WorldTransform>(ship).position.y < yAfter1);
 }
 
-TEST(Flight_SubUnitSpeedAccumulatesViaCarry)
+TEST(Flight, SubUnitSpeedAccumulatesViaCarry)
 {
   ECS::Registry world;
   ECS::EntityId ship = world.Create();
@@ -86,10 +86,10 @@ TEST(Flight_SubUnitSpeedAccumulatesViaCarry)
     GameLogic::Tick(world);
 
   // 10 ticks * 0.5 = 5 whole units, none lost to truncation.
-  CHECK((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 5 }));
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(ship).position == Math::Vector3i64{ 0, 0, 5 }));
 }
 
-TEST(Flight_BasisStaysOrthonormalUnderCombinedRotation)
+TEST(Flight, BasisStaysOrthonormalUnderCombinedRotation)
 {
   ECS::Registry world;
   ECS::EntityId ship = world.Create();
@@ -102,15 +102,15 @@ TEST(Flight_BasisStaysOrthonormalUnderCombinedRotation)
   const GameLogic::Flight& f = world.Get<GameLogic::Flight>(ship);
   // Orthonormalize() must keep the basis unit-length and mutually perpendicular
   // despite 200 ticks of incremental (drift-prone) rotation.
-  CHECK(std::fabs(Math::Length(f.nose) - 1.0) < 1e-9);
-  CHECK(std::fabs(Math::Length(f.roof) - 1.0) < 1e-9);
-  CHECK(std::fabs(Math::Length(f.side) - 1.0) < 1e-9);
-  CHECK(std::fabs(Math::Dot(f.nose, f.roof)) < 1e-9);
-  CHECK(std::fabs(Math::Dot(f.nose, f.side)) < 1e-9);
-  CHECK(std::fabs(Math::Dot(f.roof, f.side)) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Length(f.nose) - 1.0) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Length(f.roof) - 1.0) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Length(f.side) - 1.0) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Dot(f.nose, f.roof)) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Dot(f.nose, f.side)) < 1e-9);
+  EXPECT_TRUE(std::fabs(Math::Dot(f.roof, f.side)) < 1e-9);
 }
 
-TEST(Flight_IsDeterministic)
+TEST(Flight, IsDeterministic)
 {
   auto run = [](Math::Vector3i64& _outPos, GameLogic::Flight& _outFlight)
   {
@@ -129,8 +129,8 @@ TEST(Flight_IsDeterministic)
   run(posA, fA);
   run(posB, fB);
 
-  CHECK((posA == posB));
-  CHECK(fA.nose.x == fB.nose.x);
-  CHECK(fA.nose.y == fB.nose.y);
-  CHECK(fA.nose.z == fB.nose.z);
+  EXPECT_TRUE((posA == posB));
+  EXPECT_TRUE(fA.nose.x == fB.nose.x);
+  EXPECT_TRUE(fA.nose.y == fB.nose.y);
+  EXPECT_TRUE(fA.nose.z == fB.nose.z);
 }

@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "DataWriter.h"
 #include "DataReader.h"
@@ -8,7 +8,7 @@
 
 using namespace Neuron;
 
-TEST(Input_RoundTrips)
+TEST(Input, RoundTrips)
 {
   Net::ClientInput in;
   in.sequence = 7;
@@ -22,15 +22,15 @@ TEST(Input_RoundTrips)
 
   Net::ClientInput out;
   Net::DataReader r(w.Data(), w.Size());
-  CHECK(Net::ReadInput(r, out));
-  CHECK(out.sequence == 7);
-  CHECK(out.rollAxis == -1.0f);
-  CHECK(out.pitchAxis == 0.5f);
-  CHECK(out.throttle == 0.25f);
-  CHECK(out.fire == true);
+  EXPECT_TRUE(Net::ReadInput(r, out));
+  EXPECT_TRUE(out.sequence == 7);
+  EXPECT_TRUE(out.rollAxis == -1.0f);
+  EXPECT_TRUE(out.pitchAxis == 0.5f);
+  EXPECT_TRUE(out.throttle == 0.25f);
+  EXPECT_TRUE(out.fire == true);
 }
 
-TEST(Input_RejectsForeignMagic)
+TEST(Input, RejectsForeignMagic)
 {
   Net::DataWriter w;
   w.WriteU32(0xDEADBEEF);
@@ -42,35 +42,35 @@ TEST(Input_RejectsForeignMagic)
 
   Net::ClientInput out;
   Net::DataReader r(w.Data(), w.Size());
-  CHECK(!Net::ReadInput(r, out));
+  EXPECT_TRUE(!Net::ReadInput(r, out));
 }
 
-TEST(Input_AssignPlayerHandshakeRoundTrips)
+TEST(Input, AssignPlayerHandshakeRoundTrips)
 {
   Net::ReliableMessage m{ static_cast<uint16_t>(Net::EventType::AssignPlayer),
                           Net::EncodeAssignPlayer(123) };
   uint32_t id = 0;
-  CHECK(Net::DecodeAssignPlayer(m, id));
-  CHECK(id == 123);
+  EXPECT_TRUE(Net::DecodeAssignPlayer(m, id));
+  EXPECT_TRUE(id == 123);
 
   // A non-assign message is not mistaken for one.
   Net::ReliableMessage despawn{ static_cast<uint16_t>(Net::EventType::EntityDespawn),
                                 Net::EncodeDespawn(5) };
-  CHECK(!Net::DecodeAssignPlayer(despawn, id));
+  EXPECT_TRUE(!Net::DecodeAssignPlayer(despawn, id));
 }
 
-TEST(Input_AssignPlayerDeliversOverTheReliableChannel)
+TEST(Input, AssignPlayerDeliversOverTheReliableChannel)
 {
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
   Net::SendAssignPlayer(server, 42);
   std::vector<uint8_t> pkt = server.WritePacket();
-  CHECK(client.ReadPacket(pkt.data(), pkt.size()));
+  EXPECT_TRUE(client.ReadPacket(pkt.data(), pkt.size()));
 
   Net::ReliableMessage m;
-  CHECK(client.Receive(m));
+  EXPECT_TRUE(client.Receive(m));
   uint32_t id = 0;
-  CHECK(Net::DecodeAssignPlayer(m, id));
-  CHECK(id == 42);
+  EXPECT_TRUE(Net::DecodeAssignPlayer(m, id));
+  EXPECT_TRUE(id == 42);
 }

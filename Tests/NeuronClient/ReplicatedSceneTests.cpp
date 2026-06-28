@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include <vector>
 
@@ -22,7 +22,7 @@ namespace
   }
 }
 
-TEST(Scene_LocalPlayerIsTheOriginAndIsNotDrawn)
+TEST(Scene, LocalPlayerIsTheOriginAndIsNotDrawn)
 {
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(1, 1000, 0, 0));   // local player
@@ -31,16 +31,16 @@ TEST(Scene_LocalPlayerIsTheOriginAndIsNotDrawn)
 
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
 
-  CHECK(recs.size() == 1);
-  CHECK(recs[0].id == 2);
-  CHECK(recs[0].type == 2);             // replicated type carried to the render record
-  CHECK(recs[0].location.x == 100.0);   // rebased relative to the local player
-  CHECK(recs[0].location.y == 0.0);
-  CHECK(recs[0].location.z == 0.0);
-  CHECK(recs[0].distance == 100.0);
+  EXPECT_TRUE(recs.size() == 1);
+  EXPECT_TRUE(recs[0].id == 2);
+  EXPECT_TRUE(recs[0].type == 2);             // replicated type carried to the render record
+  EXPECT_TRUE(recs[0].location.x == 100.0);   // rebased relative to the local player
+  EXPECT_TRUE(recs[0].location.y == 0.0);
+  EXPECT_TRUE(recs[0].location.z == 0.0);
+  EXPECT_TRUE(recs[0].distance == 100.0);
 }
 
-TEST(Scene_UnknownLocalPlayerRendersNothing)
+TEST(Scene, UnknownLocalPlayerRendersNothing)
 {
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(2, 5, 6, 7));
@@ -48,10 +48,10 @@ TEST(Scene_UnknownLocalPlayerRendersNothing)
   // We are not in the snapshot yet (unknown local player) -> draw nothing, rather
   // than rebase against a bogus origin.
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 999);
-  CHECK(recs.empty());
+  EXPECT_TRUE(recs.empty());
 }
 
-TEST(Scene_OnlyTheLocalPlayerIsSkipped)
+TEST(Scene, OnlyTheLocalPlayerIsSkipped)
 {
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(1, 0, 0, 0));
@@ -60,12 +60,12 @@ TEST(Scene_OnlyTheLocalPlayerIsSkipped)
 
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, 2);
 
-  CHECK(recs.size() == 2);
+  EXPECT_TRUE(recs.size() == 2);
   for (const Client::RenderRecord& r : recs)
-    CHECK(r.id != 2);
+    EXPECT_TRUE(r.id != 2);
 }
 
-TEST(Scene_CameraRotatesWithTheLocalShipRoll)
+TEST(Scene, CameraRotatesWithTheLocalShipRoll)
 {
   // The local ship is rolled 90 degrees: nose still +z, but roof points +x.
   // A prop directly "above" in the world (+y) must therefore appear to the
@@ -78,14 +78,14 @@ TEST(Scene_CameraRotatesWithTheLocalShipRoll)
   ents.push_back(At(2, 0, 100, 0));                    // 100 "up" in the world
 
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
-  CHECK(recs.size() == 1);
-  CHECK(recs[0].location.x == -100.0);   // world-up -> camera-left
-  CHECK(recs[0].location.y == 0.0);
-  CHECK(recs[0].location.z == 0.0);
-  CHECK(recs[0].distance == 100.0);      // distance is frame-independent
+  EXPECT_TRUE(recs.size() == 1);
+  EXPECT_TRUE(recs[0].location.x == -100.0);   // world-up -> camera-left
+  EXPECT_TRUE(recs[0].location.y == 0.0);
+  EXPECT_TRUE(recs[0].location.z == 0.0);
+  EXPECT_TRUE(recs[0].distance == 100.0);      // distance is frame-independent
 }
 
-TEST(Scene_RotmatIsBuiltFromTheOrientationBasis)
+TEST(Scene, RotmatIsBuiltFromTheOrientationBasis)
 {
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(99, 0, 0, 0));                  // the local player (origin)
@@ -95,12 +95,12 @@ TEST(Scene_RotmatIsBuiltFromTheOrientationBasis)
   ents.push_back(e);
 
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 99);
-  CHECK(recs.size() == 1);
+  EXPECT_TRUE(recs.size() == 1);
 
   // nose and roof preserved, side = roof x nose = (0,1,0).
-  CHECK(recs[0].rotmat[2].x == 1.0);   // nose
-  CHECK(recs[0].rotmat[1].z == 1.0);   // roof
-  CHECK(recs[0].rotmat[0].x == 0.0);   // side
-  CHECK(recs[0].rotmat[0].y == 1.0);
-  CHECK(recs[0].rotmat[0].z == 0.0);
+  EXPECT_TRUE(recs[0].rotmat[2].x == 1.0);   // nose
+  EXPECT_TRUE(recs[0].rotmat[1].z == 1.0);   // roof
+  EXPECT_TRUE(recs[0].rotmat[0].x == 0.0);   // side
+  EXPECT_TRUE(recs[0].rotmat[0].y == 1.0);
+  EXPECT_TRUE(recs[0].rotmat[0].z == 0.0);
 }

@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "Replication.h"
 #include "SnapshotInterpolator.h"
@@ -23,59 +23,59 @@ namespace
   }
 }
 
-TEST(Interp_LerpsPositionBetweenTwoTicks)
+TEST(Interp, LerpsPositionBetweenTwoTicks)
 {
   Net::SnapshotInterpolator interp;
   interp.Ingest(OneEntity(1, 7, 0, 0, 0));
   interp.Ingest(OneEntity(2, 7, 100, -40, 200));
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(7, 0.0, s));        // alpha 0 = the previous tick
-  CHECK((s.x == 0 && s.y == 0 && s.z == 0));
+  EXPECT_TRUE(interp.Sample(7, 0.0, s));        // alpha 0 = the previous tick
+  EXPECT_TRUE((s.x == 0 && s.y == 0 && s.z == 0));
 
-  CHECK(interp.Sample(7, 0.5, s));        // midpoint
-  CHECK((s.x == 50 && s.y == -20 && s.z == 100));
+  EXPECT_TRUE(interp.Sample(7, 0.5, s));        // midpoint
+  EXPECT_TRUE((s.x == 50 && s.y == -20 && s.z == 100));
 
-  CHECK(interp.Sample(7, 1.0, s));        // alpha 1 = the current tick
-  CHECK((s.x == 100 && s.y == -40 && s.z == 200));
+  EXPECT_TRUE(interp.Sample(7, 1.0, s));        // alpha 1 = the current tick
+  EXPECT_TRUE((s.x == 100 && s.y == -40 && s.z == 200));
 }
 
-TEST(Interp_AlphaIsClampedToUnitRange)
+TEST(Interp, AlphaIsClampedToUnitRange)
 {
   Net::SnapshotInterpolator interp;
   interp.Ingest(OneEntity(1, 1, 0, 0, 0));
   interp.Ingest(OneEntity(2, 1, 100, 0, 0));
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(1, 5.0, s));    // > 1 clamps to the current tick
-  CHECK(s.x == 100);
-  CHECK(interp.Sample(1, -3.0, s));   // < 0 clamps to the previous tick
-  CHECK(s.x == 0);
+  EXPECT_TRUE(interp.Sample(1, 5.0, s));    // > 1 clamps to the current tick
+  EXPECT_TRUE(s.x == 100);
+  EXPECT_TRUE(interp.Sample(1, -3.0, s));   // < 0 clamps to the previous tick
+  EXPECT_TRUE(s.x == 0);
 }
 
-TEST(Interp_SingleSnapshotReturnsItUnblended)
+TEST(Interp, SingleSnapshotReturnsItUnblended)
 {
   Net::SnapshotInterpolator interp;
   interp.Ingest(OneEntity(4, 9, 33, 0, 0));
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(9, 0.5, s));    // no previous yet -> just the one we have
-  CHECK(s.x == 33);
-  CHECK(interp.Count() == 1);
+  EXPECT_TRUE(interp.Sample(9, 0.5, s));    // no previous yet -> just the one we have
+  EXPECT_TRUE(s.x == 33);
+  EXPECT_TRUE(interp.Count() == 1);
 }
 
-TEST(Interp_StaleTickDoesNotAdvanceState)
+TEST(Interp, StaleTickDoesNotAdvanceState)
 {
   Net::SnapshotInterpolator interp;
   interp.Ingest(OneEntity(5, 2, 500, 0, 0));
   interp.Ingest(OneEntity(3, 2, 999, 0, 0));   // older -> ignored
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(2, 1.0, s));
-  CHECK(s.x == 500);
+  EXPECT_TRUE(interp.Sample(2, 1.0, s));
+  EXPECT_TRUE(s.x == 500);
 }
 
-TEST(Interp_FreshestOrientationIsUsedAcrossTheBlend)
+TEST(Interp, FreshestOrientationIsUsedAcrossTheBlend)
 {
   Net::SnapshotInterpolator interp;
   Net::WorldSnapshot a = OneEntity(1, 1, 0, 0, 0);   // nose +z
@@ -86,53 +86,53 @@ TEST(Interp_FreshestOrientationIsUsedAcrossTheBlend)
   interp.Ingest(b);
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(1, 0.25, s));
-  CHECK(s.noseX == 1.0f);   // orientation comes from the freshest state...
-  CHECK(s.noseZ == 0.0f);
-  CHECK(s.x == 25);         // ...while position is blended
+  EXPECT_TRUE(interp.Sample(1, 0.25, s));
+  EXPECT_TRUE(s.noseX == 1.0f);   // orientation comes from the freshest state...
+  EXPECT_TRUE(s.noseZ == 0.0f);
+  EXPECT_TRUE(s.x == 25);         // ...while position is blended
 }
 
-TEST(Interp_ApplyDecodesWireBytes)
+TEST(Interp, ApplyDecodesWireBytes)
 {
   Net::DataWriter w;
   Net::WriteSnapshot(w, OneEntity(8, 3, 70, 0, 0));
 
   Net::SnapshotInterpolator interp;
-  CHECK(interp.Apply(w.Data(), w.Size()));
-  CHECK(interp.Count() == 1);
-  CHECK(interp.LatestTick() == 8);
+  EXPECT_TRUE(interp.Apply(w.Data(), w.Size()));
+  EXPECT_TRUE(interp.Count() == 1);
+  EXPECT_TRUE(interp.LatestTick() == 8);
 
   Net::EntitySnapshot s;
-  CHECK(interp.Sample(3, 0.0, s));
-  CHECK(s.x == 70);
+  EXPECT_TRUE(interp.Sample(3, 0.0, s));
+  EXPECT_TRUE(s.x == 70);
 }
 
-TEST(Interp_EvictsStaleEntities)
+TEST(Interp, EvictsStaleEntities)
 {
   Net::SnapshotInterpolator interp;
   interp.Ingest(OneEntity(1, 1, 0, 0, 0));
   interp.Ingest(OneEntity(10, 2, 0, 0, 0));   // latest tick now 10
-  CHECK(interp.Count() == 2);
+  EXPECT_TRUE(interp.Count() == 2);
 
   interp.EvictStale(5);                         // entity 1 last at tick 1 -> gone
-  CHECK(interp.Count() == 1);
+  EXPECT_TRUE(interp.Count() == 1);
   Net::EntitySnapshot s;
-  CHECK(!interp.Sample(1, 0.0, s));
-  CHECK(interp.Sample(2, 0.0, s));
+  EXPECT_TRUE(!interp.Sample(1, 0.0, s));
+  EXPECT_TRUE(interp.Sample(2, 0.0, s));
 }
 
-TEST(Interp_LearnsViewerIdFromSnapshots)
+TEST(Interp, LearnsViewerIdFromSnapshots)
 {
   Net::SnapshotInterpolator interp;
-  CHECK(interp.ViewerId() == 0xFFFFFFFFu);   // unknown until a snapshot arrives
+  EXPECT_TRUE(interp.ViewerId() == 0xFFFFFFFFu);   // unknown until a snapshot arrives
 
   Net::WorldSnapshot s = OneEntity(1, 5, 0, 0, 0);
   s.viewerId = 5;                            // server tells us we are entity 5
   interp.Ingest(s);
-  CHECK(interp.ViewerId() == 5);
+  EXPECT_TRUE(interp.ViewerId() == 5);
 }
 
-TEST(Interp_LocalOffsetRebasesToFloatingOrigin)
+TEST(Interp, LocalOffsetRebasesToFloatingOrigin)
 {
   Net::EntitySnapshot e;
   e.x = 1000;
@@ -140,7 +140,7 @@ TEST(Interp_LocalOffsetRebasesToFloatingOrigin)
   e.z = 3000;
 
   Math::Vector3d local = Net::LocalOffset(e, Math::Vector3i64{ 900, 1800, 2700 });
-  CHECK(local.x == 100.0);
-  CHECK(local.y == 200.0);
-  CHECK(local.z == 300.0);
+  EXPECT_TRUE(local.x == 100.0);
+  EXPECT_TRUE(local.y == 200.0);
+  EXPECT_TRUE(local.z == 300.0);
 }

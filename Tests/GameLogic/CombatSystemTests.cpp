@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "GameLogic.h"
 
@@ -33,7 +33,7 @@ namespace
   }
 }
 
-TEST(CombatSys_EnemiesInRangeDamageEachOther)
+TEST(CombatSys, EnemiesInRangeDamageEachOther)
 {
   ECS::Registry world;
   ECS::EntityId a = Spawn(world, 0, /*team*/ 0, /*energy*/ 100, /*laser*/ 10);
@@ -42,13 +42,13 @@ TEST(CombatSys_EnemiesInRangeDamageEachOther)
   std::vector<GameLogic::Kill> kills = GameLogic::StepCombat(world);
 
   // A survives at 90; B drops to -5 and dies, credited to A.
-  CHECK(world.Get<GameLogic::Combatant>(a).energy == 90);
-  CHECK(kills.size() == 1);
-  CHECK(kills[0].victim == b);
-  CHECK(kills[0].killer == a.index);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(a).energy == 90);
+  EXPECT_TRUE(kills.size() == 1);
+  EXPECT_TRUE(kills[0].victim == b);
+  EXPECT_TRUE(kills[0].killer == a.index);
 }
 
-TEST(CombatSys_AlliesDoNotFire)
+TEST(CombatSys, AlliesDoNotFire)
 {
   ECS::Registry world;
   ECS::EntityId a = Spawn(world, 0, 0, 100, 10);
@@ -56,12 +56,12 @@ TEST(CombatSys_AlliesDoNotFire)
 
   std::vector<GameLogic::Kill> kills = GameLogic::StepCombat(world);
 
-  CHECK(kills.empty());
-  CHECK(world.Get<GameLogic::Combatant>(a).energy == 100);
-  CHECK(world.Get<GameLogic::Combatant>(b).energy == 100);
+  EXPECT_TRUE(kills.empty());
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(a).energy == 100);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 100);
 }
 
-TEST(CombatSys_OutOfRangeDoesNothing)
+TEST(CombatSys, OutOfRangeDoesNothing)
 {
   ECS::Registry world;
   ECS::EntityId a = Spawn(world, 0, 0, 100, 10, /*range*/ 5000);
@@ -69,12 +69,12 @@ TEST(CombatSys_OutOfRangeDoesNothing)
 
   std::vector<GameLogic::Kill> kills = GameLogic::StepCombat(world);
 
-  CHECK(kills.empty());
-  CHECK(world.Get<GameLogic::Combatant>(a).energy == 100);
-  CHECK(world.Get<GameLogic::Combatant>(b).energy == 100);
+  EXPECT_TRUE(kills.empty());
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(a).energy == 100);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 100);
 }
 
-TEST(CombatSys_FiresAtTheNearestEnemy)
+TEST(CombatSys, FiresAtTheNearestEnemy)
 {
   ECS::Registry world;
   ECS::EntityId a = Spawn(world, 0, 0, 100, 10, /*range*/ 9000);
@@ -84,11 +84,11 @@ TEST(CombatSys_FiresAtTheNearestEnemy)
   GameLogic::StepCombat(world);
 
   // A engages only the nearer enemy.
-  CHECK(world.Get<GameLogic::Combatant>(near).energy == 90);
-  CHECK(world.Get<GameLogic::Combatant>(far).energy == 100);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(near).energy == 90);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(far).energy == 100);
 }
 
-TEST(CombatSys_SimultaneousMutualKill)
+TEST(CombatSys, SimultaneousMutualKill)
 {
   ECS::Registry world;
   ECS::EntityId a = Spawn(world, 0, 0, /*energy*/ 5, /*laser*/ 10);
@@ -97,24 +97,24 @@ TEST(CombatSys_SimultaneousMutualKill)
   std::vector<GameLogic::Kill> kills = GameLogic::StepCombat(world);
 
   // Both die the same tick (damage is resolved simultaneously).
-  CHECK(kills.size() == 2);
+  EXPECT_TRUE(kills.size() == 2);
   bool aDead = false, bDead = false;
   for (const GameLogic::Kill& k : kills)
   {
-    if (k.victim == a) { aDead = true; CHECK(k.killer == b.index); }
-    if (k.victim == b) { bDead = true; CHECK(k.killer == a.index); }
+    if (k.victim == a) { aDead = true; EXPECT_TRUE(k.killer == b.index); }
+    if (k.victim == b) { bDead = true; EXPECT_TRUE(k.killer == a.index); }
   }
-  CHECK(aDead);
-  CHECK(bDead);
+  EXPECT_TRUE(aDead);
+  EXPECT_TRUE(bDead);
 }
 
-TEST(CombatSys_NoCombatantsIsEmpty)
+TEST(CombatSys, NoCombatantsIsEmpty)
 {
   ECS::Registry world;
-  CHECK(GameLogic::StepCombat(world).empty());
+  EXPECT_TRUE(GameLogic::StepCombat(world).empty());
 }
 
-TEST(CombatSys_PlayersDoNotAutoEngage)
+TEST(CombatSys, PlayersDoNotAutoEngage)
 {
   ECS::Registry world;
   // Player (autoEngage false) and an enemy pirate (autoEngage true) in range.
@@ -126,52 +126,52 @@ TEST(CombatSys_PlayersDoNotAutoEngage)
   GameLogic::StepCombat(world);
 
   // The pirate fired on the player; the player did NOT fire back automatically.
-  CHECK(world.Get<GameLogic::Combatant>(player).energy == 245);
-  CHECK(world.Get<GameLogic::Combatant>(pirate).energy == 50);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).energy == 245);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(pirate).energy == 50);
 }
 
-TEST(Fire_HitsTheEnemyAhead)
+TEST(Fire, HitsTheEnemyAhead)
 {
   ECS::Registry w;
   ECS::EntityId shooter = SpawnShooter(w, GameLogic::Team::Player, /*laser*/ 20);
   ECS::EntityId target = SpawnTargetAt(w, 0, 0, 1000, GameLogic::Team::Pirate, 100);  // straight ahead (+z)
 
   GameLogic::FireOutcome o = GameLogic::ResolvePlayerFire(w, shooter, 6000, 0.9);
-  CHECK(o.hit);
-  CHECK(o.target == target);
-  CHECK(o.targetTeam == GameLogic::Team::Pirate);
-  CHECK(!o.destroyed);
-  CHECK(w.Get<GameLogic::Combatant>(target).energy == 80);   // 100 - 20
+  EXPECT_TRUE(o.hit);
+  EXPECT_TRUE(o.target == target);
+  EXPECT_TRUE(o.targetTeam == GameLogic::Team::Pirate);
+  EXPECT_TRUE(!o.destroyed);
+  EXPECT_TRUE(w.Get<GameLogic::Combatant>(target).energy == 80);   // 100 - 20
 }
 
-TEST(Fire_MissesTargetsOutsideTheCone)
+TEST(Fire, MissesTargetsOutsideTheCone)
 {
   ECS::Registry w;
   ECS::EntityId shooter = SpawnShooter(w, GameLogic::Team::Player, 20);
   SpawnTargetAt(w, 0, 0, -1000, GameLogic::Team::Pirate, 100);   // directly behind
 
   GameLogic::FireOutcome o = GameLogic::ResolvePlayerFire(w, shooter, 6000, 0.9);
-  CHECK(!o.hit);
+  EXPECT_TRUE(!o.hit);
 }
 
-TEST(Fire_IgnoresAllies)
+TEST(Fire, IgnoresAllies)
 {
   ECS::Registry w;
   ECS::EntityId shooter = SpawnShooter(w, GameLogic::Team::Player, 20);
   SpawnTargetAt(w, 0, 0, 1000, GameLogic::Team::Player, 100);    // same team ahead
 
   GameLogic::FireOutcome o = GameLogic::ResolvePlayerFire(w, shooter, 6000, 0.9);
-  CHECK(!o.hit);
+  EXPECT_TRUE(!o.hit);
 }
 
-TEST(Fire_ReportsDestroyedTargets)
+TEST(Fire, ReportsDestroyedTargets)
 {
   ECS::Registry w;
   ECS::EntityId shooter = SpawnShooter(w, GameLogic::Team::Player, 20);
   ECS::EntityId target = SpawnTargetAt(w, 0, 0, 500, GameLogic::Team::Pirate, /*energy*/ 10);
 
   GameLogic::FireOutcome o = GameLogic::ResolvePlayerFire(w, shooter, 6000, 0.9);
-  CHECK(o.hit);
-  CHECK(o.destroyed);   // 10 - 20 <= 0
-  CHECK(o.target == target);
+  EXPECT_TRUE(o.hit);
+  EXPECT_TRUE(o.destroyed);   // 10 - 20 <= 0
+  EXPECT_TRUE(o.target == target);
 }

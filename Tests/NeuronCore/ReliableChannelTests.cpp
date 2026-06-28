@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
@@ -49,7 +49,7 @@ namespace
   }
 }
 
-TEST(Reliable_DeliversMessagesInOrder)
+TEST(Reliable, DeliversMessagesInOrder)
 {
   Net::ReliableChannel server;
   Net::ReliableChannel client;
@@ -58,34 +58,34 @@ TEST(Reliable_DeliversMessagesInOrder)
   Net::SendDespawn(server, 22);
 
   std::vector<uint8_t> pkt = server.WritePacket();
-  CHECK(client.ReadPacket(pkt.data(), pkt.size()));
+  EXPECT_TRUE(client.ReadPacket(pkt.data(), pkt.size()));
 
   uint32_t id = 0;
-  CHECK(ReceiveDespawn(client, id));
-  CHECK(id == 11);
-  CHECK(ReceiveDespawn(client, id));
-  CHECK(id == 22);
-  CHECK(!client.HasReady());
+  EXPECT_TRUE(ReceiveDespawn(client, id));
+  EXPECT_TRUE(id == 11);
+  EXPECT_TRUE(ReceiveDespawn(client, id));
+  EXPECT_TRUE(id == 22);
+  EXPECT_TRUE(!client.HasReady());
 }
 
-TEST(Reliable_AckClearsTheOutgoingQueue)
+TEST(Reliable, AckClearsTheOutgoingQueue)
 {
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
   Net::SendDeath(server, 5, 9);
-  CHECK(server.PendingOutgoing() == 1);
+  EXPECT_TRUE(server.PendingOutgoing() == 1);
 
   std::vector<uint8_t> toClient = server.WritePacket();
-  CHECK(client.ReadPacket(toClient.data(), toClient.size()));
+  EXPECT_TRUE(client.ReadPacket(toClient.data(), toClient.size()));
 
   // The client's reply carries its cumulative ack; the server then drops it.
   std::vector<uint8_t> ackPkt = client.WritePacket();
-  CHECK(server.ReadPacket(ackPkt.data(), ackPkt.size()));
-  CHECK(server.PendingOutgoing() == 0);
+  EXPECT_TRUE(server.ReadPacket(ackPkt.data(), ackPkt.size()));
+  EXPECT_TRUE(server.PendingOutgoing() == 0);
 }
 
-TEST(Reliable_ResendsUntilAcked)
+TEST(Reliable, ResendsUntilAcked)
 {
   Net::ReliableChannel server;
   Net::ReliableChannel client;
@@ -94,22 +94,22 @@ TEST(Reliable_ResendsUntilAcked)
 
   // First packet is "lost" (built but never delivered).
   (void)server.WritePacket();
-  CHECK(server.PendingOutgoing() == 1);   // still unacked
+  EXPECT_TRUE(server.PendingOutgoing() == 1);   // still unacked
 
   // The next packet re-includes the same message, so it still arrives.
   std::vector<uint8_t> retry = server.WritePacket();
-  CHECK(client.ReadPacket(retry.data(), retry.size()));
+  EXPECT_TRUE(client.ReadPacket(retry.data(), retry.size()));
 
   Net::ReliableMessage m;
-  CHECK(client.Receive(m));
+  EXPECT_TRUE(client.Receive(m));
   uint32_t sender = 0;
   std::string text;
-  CHECK(Net::DecodeChat(m, sender, text));
-  CHECK(sender == 1);
-  CHECK(text == "hello");
+  EXPECT_TRUE(Net::DecodeChat(m, sender, text));
+  EXPECT_TRUE(sender == 1);
+  EXPECT_TRUE(text == "hello");
 }
 
-TEST(Reliable_BuffersGapsAndFlushesWhenFilled)
+TEST(Reliable, BuffersGapsAndFlushesWhenFilled)
 {
   Net::ReliableChannel client;
 
@@ -117,75 +117,75 @@ TEST(Reliable_BuffersGapsAndFlushesWhenFilled)
 
   // Deliver sequence 2 before sequence 1 (a reordering): nothing is ready yet.
   std::vector<uint8_t> p2 = BuildPacket(0, { { 2, despawnType, Net::EncodeDespawn(222) } });
-  CHECK(client.ReadPacket(p2.data(), p2.size()));
-  CHECK(!client.HasReady());
-  CHECK(client.NextExpected() == 1);
+  EXPECT_TRUE(client.ReadPacket(p2.data(), p2.size()));
+  EXPECT_TRUE(!client.HasReady());
+  EXPECT_TRUE(client.NextExpected() == 1);
 
   // Now sequence 1 arrives: it is delivered, then the buffered 2 flushes behind it.
   std::vector<uint8_t> p1 = BuildPacket(0, { { 1, despawnType, Net::EncodeDespawn(111) } });
-  CHECK(client.ReadPacket(p1.data(), p1.size()));
+  EXPECT_TRUE(client.ReadPacket(p1.data(), p1.size()));
 
   uint32_t id = 0;
-  CHECK(ReceiveDespawn(client, id));
-  CHECK(id == 111);
-  CHECK(ReceiveDespawn(client, id));
-  CHECK(id == 222);
-  CHECK(client.NextExpected() == 3);
+  EXPECT_TRUE(ReceiveDespawn(client, id));
+  EXPECT_TRUE(id == 111);
+  EXPECT_TRUE(ReceiveDespawn(client, id));
+  EXPECT_TRUE(id == 222);
+  EXPECT_TRUE(client.NextExpected() == 3);
 }
 
-TEST(Reliable_IgnoresDuplicates)
+TEST(Reliable, IgnoresDuplicates)
 {
   Net::ReliableChannel client;
 
   std::vector<uint8_t> p =
     BuildPacket(0, { { 1, static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(7) } });
 
-  CHECK(client.ReadPacket(p.data(), p.size()));
-  CHECK(client.ReadPacket(p.data(), p.size()));   // same packet again
+  EXPECT_TRUE(client.ReadPacket(p.data(), p.size()));
+  EXPECT_TRUE(client.ReadPacket(p.data(), p.size()));   // same packet again
 
   uint32_t id = 0;
-  CHECK(ReceiveDespawn(client, id));
-  CHECK(id == 7);
-  CHECK(!client.HasReady());                       // not delivered twice
+  EXPECT_TRUE(ReceiveDespawn(client, id));
+  EXPECT_TRUE(id == 7);
+  EXPECT_TRUE(!client.HasReady());                       // not delivered twice
 }
 
-TEST(Reliable_PacketStaysWithinMtu)
+TEST(Reliable, PacketStaysWithinMtu)
 {
   Net::ReliableChannel server;
   for (int i = 0; i < 500; ++i)
     Net::SendChat(server, static_cast<uint32_t>(i), "a fairly chatty line of text for sizing");
 
   std::vector<uint8_t> pkt = server.WritePacket(Net::SAFE_UDP_PAYLOAD);
-  CHECK(pkt.size() <= Net::SAFE_UDP_PAYLOAD);
+  EXPECT_TRUE(pkt.size() <= Net::SAFE_UDP_PAYLOAD);
   // Not everything fit, so the rest remain queued for subsequent packets.
-  CHECK(server.PendingOutgoing() == 500);
+  EXPECT_TRUE(server.PendingOutgoing() == 500);
 }
 
-TEST(Reliable_EventEncodingsRoundTrip)
+TEST(Reliable, EventEncodingsRoundTrip)
 {
   Net::ReliableMessage despawn{ static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(99) };
   uint32_t id = 0;
-  CHECK(Net::DecodeDespawn(despawn, id));
-  CHECK(id == 99);
+  EXPECT_TRUE(Net::DecodeDespawn(despawn, id));
+  EXPECT_TRUE(id == 99);
 
   Net::ReliableMessage death{ static_cast<uint16_t>(Net::EventType::EntityDeath), Net::EncodeDeath(3, 8) };
   uint32_t victim = 0, killer = 0;
-  CHECK(Net::DecodeDeath(death, victim, killer));
-  CHECK(victim == 3);
-  CHECK(killer == 8);
+  EXPECT_TRUE(Net::DecodeDeath(death, victim, killer));
+  EXPECT_TRUE(victim == 3);
+  EXPECT_TRUE(killer == 8);
 
   Net::ReliableMessage chat{ static_cast<uint16_t>(Net::EventType::Chat), Net::EncodeChat(42, "gg wp") };
   uint32_t sender = 0;
   std::string text;
-  CHECK(Net::DecodeChat(chat, sender, text));
-  CHECK(sender == 42);
-  CHECK(text == "gg wp");
+  EXPECT_TRUE(Net::DecodeChat(chat, sender, text));
+  EXPECT_TRUE(sender == 42);
+  EXPECT_TRUE(text == "gg wp");
 
   // A decoder rejects a mismatched type.
-  CHECK(!Net::DecodeDeath(despawn, victim, killer));
+  EXPECT_TRUE(!Net::DecodeDeath(despawn, victim, killer));
 }
 
-TEST(Reliable_SurvivesLossyReorderingLink)
+TEST(Reliable, SurvivesLossyReorderingLink)
 {
   // Drive a full duplex loop where every other packet in each direction is
   // dropped and packets are applied with a one-step delay (reordering). Despite
@@ -206,26 +206,26 @@ TEST(Reliable_SurvivesLossyReorderingLink)
   {
     std::vector<uint8_t> s2c = server.WritePacket();
     if ((round % 3) == 2)   // server->client lands ~1/3 of the time
-      CHECK(client.ReadPacket(s2c.data(), s2c.size()));
+      EXPECT_TRUE(client.ReadPacket(s2c.data(), s2c.size()));
 
     Net::ReliableMessage m;
     while (client.Receive(m))
     {
       uint32_t id = 0;
-      CHECK(Net::DecodeDespawn(m, id));
+      EXPECT_TRUE(Net::DecodeDespawn(m, id));
       got.push_back(id);
     }
 
     std::vector<uint8_t> c2s = client.WritePacket();   // carries the ack back
     if ((round % 4) == 3)   // acks land ~1/4 of the time
-      CHECK(server.ReadPacket(c2s.data(), c2s.size()));
+      EXPECT_TRUE(server.ReadPacket(c2s.data(), c2s.size()));
   }
 
-  CHECK(got.size() == 20);
+  EXPECT_TRUE(got.size() == 20);
   bool ordered = true;
   for (int i = 0; i < 20; ++i)
     if (got[static_cast<std::size_t>(i)] != static_cast<uint32_t>(1000 + i))
       ordered = false;
-  CHECK(ordered);
-  CHECK(server.PendingOutgoing() == 0);   // everything eventually acked
+  EXPECT_TRUE(ordered);
+  EXPECT_TRUE(server.PendingOutgoing() == 0);   // everything eventually acked
 }

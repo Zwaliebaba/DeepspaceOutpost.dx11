@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "ECS.h"
 
@@ -10,38 +10,38 @@ namespace
   struct Velocity { int dx; int dy; };
 }
 
-TEST(Ecs_CreateAndValidate)
+TEST(Ecs, CreateAndValidate)
 {
   Registry r;
-  CHECK(r.AliveCount() == 0);
+  EXPECT_TRUE(r.AliveCount() == 0);
 
   EntityId a = r.Create();
   EntityId b = r.Create();
-  CHECK(r.IsValid(a));
-  CHECK(r.IsValid(b));
-  CHECK(a != b);
-  CHECK(r.AliveCount() == 2);
+  EXPECT_TRUE(r.IsValid(a));
+  EXPECT_TRUE(r.IsValid(b));
+  EXPECT_TRUE(a != b);
+  EXPECT_TRUE(r.AliveCount() == 2);
 
   EntityId none{};
-  CHECK(!r.IsValid(none));
+  EXPECT_TRUE(!r.IsValid(none));
 }
 
-TEST(Ecs_DestroyInvalidatesHandle)
+TEST(Ecs, DestroyInvalidatesHandle)
 {
   Registry r;
   EntityId a = r.Create();
-  CHECK(r.IsValid(a));
+  EXPECT_TRUE(r.IsValid(a));
 
   r.Destroy(a);
-  CHECK(!r.IsValid(a));
-  CHECK(r.AliveCount() == 0);
+  EXPECT_TRUE(!r.IsValid(a));
+  EXPECT_TRUE(r.AliveCount() == 0);
 
   // Destroying an already-dead handle is a no-op.
   r.Destroy(a);
-  CHECK(r.AliveCount() == 0);
+  EXPECT_TRUE(r.AliveCount() == 0);
 }
 
-TEST(Ecs_SlotRecycleBumpsGeneration)
+TEST(Ecs, SlotRecycleBumpsGeneration)
 {
   Registry r;
   EntityId a = r.Create();
@@ -49,39 +49,39 @@ TEST(Ecs_SlotRecycleBumpsGeneration)
   r.Destroy(a);
 
   EntityId b = r.Create();          // should reuse the freed slot
-  CHECK(b.index == index);
-  CHECK(b.generation != a.generation);
-  CHECK(r.IsValid(b));
-  CHECK(!r.IsValid(a));             // stale handle to the recycled slot
+  EXPECT_TRUE(b.index == index);
+  EXPECT_TRUE(b.generation != a.generation);
+  EXPECT_TRUE(r.IsValid(b));
+  EXPECT_TRUE(!r.IsValid(a));             // stale handle to the recycled slot
 }
 
-TEST(Ecs_AddGetHasRemove)
+TEST(Ecs, AddGetHasRemove)
 {
   Registry r;
   EntityId e = r.Create();
 
-  CHECK(!r.Has<Position>(e));
-  CHECK(r.TryGet<Position>(e) == nullptr);
+  EXPECT_TRUE(!r.Has<Position>(e));
+  EXPECT_TRUE(r.TryGet<Position>(e) == nullptr);
 
   r.Add<Position>(e, Position{ 3, 4 });
-  CHECK(r.Has<Position>(e));
-  CHECK(r.Get<Position>(e).x == 3);
-  CHECK(r.Get<Position>(e).y == 4);
+  EXPECT_TRUE(r.Has<Position>(e));
+  EXPECT_TRUE(r.Get<Position>(e).x == 3);
+  EXPECT_TRUE(r.Get<Position>(e).y == 4);
 
   // Re-adding overwrites in place.
   r.Add<Position>(e, Position{ 7, 8 });
-  CHECK(r.Get<Position>(e).x == 7);
+  EXPECT_TRUE(r.Get<Position>(e).x == 7);
 
   // Mutation through the reference is visible.
   r.Get<Position>(e).x = 9;
-  CHECK(r.Get<Position>(e).x == 9);
+  EXPECT_TRUE(r.Get<Position>(e).x == 9);
 
   r.Remove<Position>(e);
-  CHECK(!r.Has<Position>(e));
-  CHECK(r.TryGet<Position>(e) == nullptr);
+  EXPECT_TRUE(!r.Has<Position>(e));
+  EXPECT_TRUE(r.TryGet<Position>(e) == nullptr);
 }
 
-TEST(Ecs_MultipleComponentTypesAreIndependent)
+TEST(Ecs, MultipleComponentTypesAreIndependent)
 {
   Registry r;
   EntityId e = r.Create();
@@ -89,16 +89,16 @@ TEST(Ecs_MultipleComponentTypesAreIndependent)
   r.Add<Position>(e, Position{ 1, 2 });
   r.Add<Velocity>(e, Velocity{ 5, 6 });
 
-  CHECK(r.Has<Position>(e));
-  CHECK(r.Has<Velocity>(e));
-  CHECK(r.Get<Velocity>(e).dx == 5);
+  EXPECT_TRUE(r.Has<Position>(e));
+  EXPECT_TRUE(r.Has<Velocity>(e));
+  EXPECT_TRUE(r.Get<Velocity>(e).dx == 5);
 
   r.Remove<Position>(e);
-  CHECK(!r.Has<Position>(e));
-  CHECK(r.Has<Velocity>(e));        // removing one type leaves the other
+  EXPECT_TRUE(!r.Has<Position>(e));
+  EXPECT_TRUE(r.Has<Velocity>(e));        // removing one type leaves the other
 }
 
-TEST(Ecs_DestroyRemovesAllComponents)
+TEST(Ecs, DestroyRemovesAllComponents)
 {
   Registry r;
   EntityId e = r.Create();
@@ -106,16 +106,16 @@ TEST(Ecs_DestroyRemovesAllComponents)
   r.Add<Velocity>(e, Velocity{ 1, 1 });
 
   r.Destroy(e);
-  CHECK(!r.Has<Position>(e));
-  CHECK(!r.Has<Velocity>(e));
+  EXPECT_TRUE(!r.Has<Position>(e));
+  EXPECT_TRUE(!r.Has<Velocity>(e));
 
   // A new entity reusing the slot must not inherit stale components.
   EntityId e2 = r.Create();
-  CHECK(!r.Has<Position>(e2));
-  CHECK(!r.Has<Velocity>(e2));
+  EXPECT_TRUE(!r.Has<Position>(e2));
+  EXPECT_TRUE(!r.Has<Velocity>(e2));
 }
 
-TEST(Ecs_EachIteratesMatchingEntities)
+TEST(Ecs, EachIteratesMatchingEntities)
 {
   Registry r;
   EntityId a = r.Create();
@@ -134,19 +134,19 @@ TEST(Ecs_EachIteratesMatchingEntities)
     ++positionCount;
     positionSum += p.x;
   });
-  CHECK(positionCount == 3);
-  CHECK(positionSum == 60);
+  EXPECT_TRUE(positionCount == 3);
+  EXPECT_TRUE(positionSum == 60);
 
   int velocityCount = 0;
   r.Each<Velocity>([&](EntityId id, Velocity&)
   {
     ++velocityCount;
-    CHECK(id == b);
+    EXPECT_TRUE(id == b);
   });
-  CHECK(velocityCount == 1);
+  EXPECT_TRUE(velocityCount == 1);
 }
 
-TEST(Ecs_ComponentReferencesStableWithoutAddRemove)
+TEST(Ecs, ComponentReferencesStableWithoutAddRemove)
 {
   // The local_objects[] proxy relies on this: as long as no component of a type
   // is added/removed, references (and pointers like &local_objects[un]) stay
@@ -166,17 +166,17 @@ TEST(Ecs_ComponentReferencesStableWithoutAddRemove)
   for (int k = 0; k < 200; ++k)
     r.Get<Position>(ids[k % 20]).y = k;
 
-  CHECK(&r.Get<Position>(ids[5]) == p5);     // same address
-  CHECK(&r.Get<Position>(ids[17]) == p17);
-  CHECK(p5->x == 5);
-  CHECK(p17->x == 17);
+  EXPECT_TRUE(&r.Get<Position>(ids[5]) == p5);     // same address
+  EXPECT_TRUE(&r.Get<Position>(ids[17]) == p17);
+  EXPECT_TRUE(p5->x == 5);
+  EXPECT_TRUE(p17->x == 17);
 
   // Mutating through the cached pointer is visible through the registry.
   p5->x = 999;
-  CHECK(r.Get<Position>(ids[5]).x == 999);
+  EXPECT_TRUE(r.Get<Position>(ids[5]).x == 999);
 }
 
-TEST(Ecs_EachTwoComponentsIntersects)
+TEST(Ecs, EachTwoComponentsIntersects)
 {
   Registry r;
   EntityId a = r.Create();   // Position only
@@ -191,14 +191,14 @@ TEST(Ecs_EachTwoComponentsIntersects)
   r.Each<Position, Velocity>([&](EntityId id, Position& p, Velocity& v)
   {
     ++matched;
-    CHECK(id == b);          // only b has both
-    CHECK(p.x == 2);
-    CHECK(v.dx == 9);
+    EXPECT_TRUE(id == b);          // only b has both
+    EXPECT_TRUE(p.x == 2);
+    EXPECT_TRUE(v.dx == 9);
   });
-  CHECK(matched == 1);
+  EXPECT_TRUE(matched == 1);
 }
 
-TEST(Ecs_RemoveMiddleKeepsOthersIntact)
+TEST(Ecs, RemoveMiddleKeepsOthersIntact)
 {
   // Exercises the sparse-set swap-and-pop path.
   Registry r;
@@ -211,13 +211,13 @@ TEST(Ecs_RemoveMiddleKeepsOthersIntact)
 
   r.Remove<Position>(b);            // remove the middle element
 
-  CHECK(r.Has<Position>(a));
-  CHECK(!r.Has<Position>(b));
-  CHECK(r.Has<Position>(c));
-  CHECK(r.Get<Position>(a).x == 1);
-  CHECK(r.Get<Position>(c).x == 3);
+  EXPECT_TRUE(r.Has<Position>(a));
+  EXPECT_TRUE(!r.Has<Position>(b));
+  EXPECT_TRUE(r.Has<Position>(c));
+  EXPECT_TRUE(r.Get<Position>(a).x == 1);
+  EXPECT_TRUE(r.Get<Position>(c).x == 3);
 
   int count = 0;
   r.Each<Position>([&](EntityId, Position&) { ++count; });
-  CHECK(count == 2);
+  EXPECT_TRUE(count == 2);
 }

@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include <vector>
 
@@ -18,7 +18,7 @@ namespace
   }
 }
 
-TEST(Session_FirstInputConnectsAndSpawns)
+TEST(Session, FirstInputConnectsAndSpawns)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -26,16 +26,16 @@ TEST(Session_FirstInputConnectsAndSpawns)
   const Net::Endpoint a{ 0x7F000001, 1001 };
   ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.5f), /*tick*/ 1);
 
-  CHECK(sessions.Count() == 1);
-  CHECK(world.IsValid(e));
-  CHECK(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
+  EXPECT_TRUE(sessions.Count() == 1);
+  EXPECT_TRUE(world.IsValid(e));
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
 
   // The new session has an AssignPlayer handshake queued on its channel.
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
-  CHECK(s.events.PendingOutgoing() == 1);
+  EXPECT_TRUE(s.events.PendingOutgoing() == 1);
 }
 
-TEST(Session_DistinctEndpointsGetDistinctEntities)
+TEST(Session, DistinctEndpointsGetDistinctEntities)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -43,11 +43,11 @@ TEST(Session_DistinctEndpointsGetDistinctEntities)
   ECS::EntityId e1 = sessions.OnInput(world, Net::Endpoint{ 0x7F000001, 1001 }, Input(1, 0.0f), 1);
   ECS::EntityId e2 = sessions.OnInput(world, Net::Endpoint{ 0x7F000001, 1002 }, Input(1, 0.0f), 1);
 
-  CHECK(sessions.Count() == 2);
-  CHECK(e1 != e2);
+  EXPECT_TRUE(sessions.Count() == 2);
+  EXPECT_TRUE(e1 != e2);
 }
 
-TEST(Session_SameEndpointReusesSessionAndAppliesLatestInput)
+TEST(Session, SameEndpointReusesSessionAndAppliesLatestInput)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -56,14 +56,14 @@ TEST(Session_SameEndpointReusesSessionAndAppliesLatestInput)
   ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.2f), 1);
 
   sessions.OnInput(world, a, Input(5, 0.9f), 2);    // newer -> applied
-  CHECK(sessions.Count() == 1);
-  CHECK(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
+  EXPECT_TRUE(sessions.Count() == 1);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
 
   sessions.OnInput(world, a, Input(3, 0.1f), 3);    // stale seq -> ignored
-  CHECK(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
 }
 
-TEST(Session_IdleSessionsAreReapedAndEntitiesDestroyed)
+TEST(Session, IdleSessionsAreReapedAndEntitiesDestroyed)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -73,13 +73,13 @@ TEST(Session_IdleSessionsAreReapedAndEntitiesDestroyed)
 
   std::vector<uint32_t> gone = sessions.Reap(world, /*tick*/ 100, /*timeout*/ 5);
 
-  CHECK(sessions.Count() == 0);
-  CHECK(gone.size() == 2);
-  CHECK(!world.IsValid(e1));
-  CHECK(!world.IsValid(e2));
+  EXPECT_TRUE(sessions.Count() == 0);
+  EXPECT_TRUE(gone.size() == 2);
+  EXPECT_TRUE(!world.IsValid(e1));
+  EXPECT_TRUE(!world.IsValid(e2));
 }
 
-TEST(Session_RecentSessionsSurviveReaping)
+TEST(Session, RecentSessionsSurviveReaping)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -88,10 +88,10 @@ TEST(Session_RecentSessionsSurviveReaping)
   sessions.OnInput(world, a, Input(1, 0.0f), /*tick*/ 98);
   // tick 100, timeout 5: 100 - 98 = 2 <= 5, so it stays.
   sessions.Reap(world, 100, 5);
-  CHECK(sessions.Count() == 1);
+  EXPECT_TRUE(sessions.Count() == 1);
 }
 
-TEST(Session_ClientAckClearsTheReliableQueue)
+TEST(Session, ClientAckClearsTheReliableQueue)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -100,14 +100,14 @@ TEST(Session_ClientAckClearsTheReliableQueue)
   sessions.OnInput(world, a, Input(1, 0.0f), 1);
 
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
-  CHECK(s.events.PendingOutgoing() == 1);   // AssignPlayer pending
+  EXPECT_TRUE(s.events.PendingOutgoing() == 1);   // AssignPlayer pending
 
   // Client receives the handshake and acks it back.
   Net::ReliableChannel client;
   std::vector<uint8_t> toClient = s.events.WritePacket();
-  CHECK(client.ReadPacket(toClient.data(), toClient.size()));
+  EXPECT_TRUE(client.ReadPacket(toClient.data(), toClient.size()));
   std::vector<uint8_t> ack = client.WritePacket();
   sessions.OnReliable(a, ack.data(), ack.size());
 
-  CHECK(s.events.PendingOutgoing() == 0);   // handshake acknowledged
+  EXPECT_TRUE(s.events.PendingOutgoing() == 0);   // handshake acknowledged
 }
