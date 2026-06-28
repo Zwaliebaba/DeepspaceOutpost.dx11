@@ -4,6 +4,7 @@
 
 #include "GameEvents.h"
 #include "GalaxyManifest.h"
+#include "Messages/Framing.h"
 
 namespace Neuron::Client
 {
@@ -105,9 +106,11 @@ namespace Neuron::Client
     if (!m_open || !m_haveServer)
       return;
 
-    Net::DataWriter writer;
-    Net::WriteInput(writer, _input);
-    m_socket.SendTo(m_server, writer.Data(), writer.Size());
+    // The intent rides the unified 'NMSG' unreliable lane as one InputCommand
+    // record (replacing the old bespoke 'NCMD' packet).
+    Msg::PacketWriter writer(Msg::MessageLane::Unreliable);
+    writer.Add(_input);
+    m_socket.SendTo(m_server, writer.Bytes().data(), writer.Size());
   }
 
   bool ReplicationClient::PollEvent(Net::ReliableMessage& _out)

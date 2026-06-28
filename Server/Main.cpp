@@ -8,6 +8,7 @@
 #include "StationProtocol.h"
 #include "CombatMessages.h"
 #include "Messages/MessageBus.h"
+#include "Messages/Framing.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -224,18 +225,32 @@ int main()
       const std::size_t size = static_cast<std::size_t>(got);
       switch (Net::PeekMagic(recv, size))
       {
-        case Net::INPUT_MAGIC:
+        case Msg::MESSAGE_MAGIC:
         {
-          Net::DataReader reader(recv, size);
-          Net::ClientInput in;
-          if (Net::ReadInput(reader, in))
+          // Unified 'NMSG' framing. Today the client uses the UNRELIABLE lane for
+          // its InputCommand; other lanes fold in as later phases land.
+          Msg::PacketHeader hdr;
+          std::vector<Msg::Record> records;
+          if (!Msg::ReadPacket(recv, size, hdr, records) || hdr.lane != Msg::MessageLane::Unreliable)
+            break;
+
+          for (const Msg::Record& rec : records)
           {
+            // Inbound validation: only the expected command id on this lane, and
+            // only if it decodes (direction is guaranteed by the message type:
+            // InputCommand is ClientToServer). Malformed/unknown records are
+            // dropped; stale/duplicate inputs are rejected by OnInput's sequence.
+            static_assert(Net::ClientInput::Dir == Msg::Direction::ClientToServer);
+            if (rec.id != Net::ClientInput::Id)
+              continue;
+            Net::ClientInput in;
+            if (!Msg::DecodeRecord(rec, in))
+              continue;
+
             const ECS::EntityId player = sessions.OnInput(world, from, in, tick);
 
             // Player weapon intent becomes a FireWeapon command on the bus; the
-            // combat subscriber resolves it to facts after the receive loop. (Today
-            // the server synthesises FireWeapon from the client's input; later the
-            // client sends the command directly.)
+            // combat subscriber resolves it to facts after the receive loop.
             if (in.fire && world.IsValid(player))
               bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
             if (in.fireMissile && world.IsValid(player))

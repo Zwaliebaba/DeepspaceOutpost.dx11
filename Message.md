@@ -457,10 +457,18 @@ death broadcast/respawn and logging live in the `Server/Main.cpp` subscribers. T
 the laser-kill and tick-kill paths. **Combat math unchanged.** Covered by
 `Tests/GameLogic/CombatMessagesTests.cpp` (5 cases); verified locally on clang++ 18 / g++ 13.
 
-**Phase 2 — Unreliable lane (`InputCommand`).**
-Add `'NMSG'` unreliable framing alongside `'NCMD'`; byte-parity test vs `WriteInput`. Switch
-client send + server ingress through the validation pipeline; delete `ClientInput` encode once
-green.
+**Phase 2 — Unreliable lane (`InputCommand`). ✅ DONE.**
+`InputCommand` is now a catalog message (`NeuronCore/Messages/Defs/InputCommand.h`, Wire /
+Command / Unreliable / C→S, registered via `REGISTER_MESSAGE`), carried on the `'NMSG'`
+unreliable lane. `Net::ClientInput` is a thin alias of it, so the server `OnInput` and the
+client input builder are unchanged. `ReplicationClient::SendInput` uses `PacketWriter`; the
+server ingress decodes `InputCommand` on the Unreliable lane with id/decode/direction checks
+(stale/dup still dropped by `OnInput`'s sequence). The bespoke `WriteInput`/`ReadInput` and the
+`'NCMD'` magic/version are deleted — no transition window needed under lockstep. A golden
+test proves the `InputCommand` payload is **byte-identical to the legacy `'NCMD'` field
+layout**; `missileTarget` stays a bare index (NetEntityId promotion is a later step). Verified
+locally on clang++ 18 / g++ 13 (38 message/input/combat cases). *Note: per-peer rate-limiting
+and authority checks land with the reliable lane in Phase 3, when sessions carry more state.*
 
 **Phase 3 — Reliable lanes + fold reliable schemas.**
 Stand up Control/Gameplay/Bulk `ReliableChannel`s. Move `AssignPlayer`(Control),
