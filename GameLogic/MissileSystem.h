@@ -31,16 +31,16 @@ namespace Neuron::GameLogic
   inline constexpr int MISSILE_LIFE = 240;                 // ticks before self-destruct (~8s at 30 Hz)
   inline constexpr int MISSILE_HIT_DAMAGE = 250;           // detonation damage (one-shots typical NPCs)
   inline constexpr int64_t MISSILE_DETONATE_RANGE = 400;   // contact radius around the target
-  inline constexpr int64_t MISSILE_LOCK_RANGE = 20000;     // how far a target can be acquired
-  inline constexpr double MISSILE_LOCK_CONE = 0.85;        // ~32deg forward lock cone
   inline constexpr int64_t MISSILE_SPAWN_OFFSET = 250;     // launch this far ahead of the shooter
 
-  // Launch a homing missile from `_shooter` toward the nearest enemy in its forward
-  // lock cone. The missile is a real entity (drawn as SHIP_MISSILE) that chases the
-  // target over several ticks; with no enemy locked it still flies straight ahead
-  // and self-destructs, so the launch is always visible. Returns the missile entity
-  // (invalid only if the shooter lacks a transform/flight).
-  inline ECS::EntityId SpawnMissile(ECS::Registry& _world, ECS::EntityId _shooter)
+  // Launch a homing missile from `_shooter` at the target the player locked (its
+  // entity index, as identified from the replicated view; resolved here to a live
+  // handle). The missile is a real entity (drawn as SHIP_MISSILE) that chases that
+  // specific target over several ticks; if the locked target is gone it flies
+  // straight ahead and self-destructs. There is NO auto-targeting - the lock is the
+  // player's, taken with the T key. Returns the missile entity (invalid only if the
+  // shooter lacks a transform/flight/combatant).
+  inline ECS::EntityId SpawnMissile(ECS::Registry& _world, ECS::EntityId _shooter, uint32_t _targetIndex)
   {
     WorldTransform* st = _world.TryGet<WorldTransform>(_shooter);
     Flight* sf = _world.TryGet<Flight>(_shooter);
@@ -51,42 +51,11 @@ namespace Neuron::GameLogic
     const Math::Vector3d nose = sf->nose;
     const Math::Vector3i64 origin = st->position;
 
-    // Acquire the nearest enemy inside the lock cone (may stay invalid -> dumb-fire).
-    ECS::EntityId lock;
-    bool found = false;
-    double bestLen = 0.0;
-    _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
-    {
-      if (_id == _shooter || _c.team == sc->team)
-        return;
-
-      const int64_t dx = _t.position.x - origin.x;
-      const int64_t dy = _t.position.y - origin.y;
-      const int64_t dz = _t.position.z - origin.z;
-      const int64_t ax = dx < 0 ? -dx : dx;
-      const int64_t ay = dy < 0 ? -dy : dy;
-      const int64_t az = dz < 0 ? -dz : dz;
-      if (ax > MISSILE_LOCK_RANGE || ay > MISSILE_LOCK_RANGE || az > MISSILE_LOCK_RANGE)
-        return;
-
-      const double ddx = static_cast<double>(dx);
-      const double ddy = static_cast<double>(dy);
-      const double ddz = static_cast<double>(dz);
-      const double len = std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
-      if (len <= 0.0)
-        return;
-
-      const double dot = (ddx * nose.x + ddy * nose.y + ddz * nose.z) / len;
-      if (dot < MISSILE_LOCK_CONE)
-        return;
-
-      if (!found || len < bestLen)
-      {
-        found = true;
-        bestLen = len;
-        lock = _id;
-      }
-    });
+    // The target the player locked. Never the shooter itself; invalid -> dumb-fire.
+    ECS::EntityId lock = _world.LiveEntity(_targetIndex);
+    if (lock == _shooter)
+      lock = ECS::EntityId{};
+    const bool found = _world.IsValid(lock);
 
     const ECS::EntityId m = _world.Create();
 

@@ -189,12 +189,12 @@ int main()
               applyShot(GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE));
 
             // Player launched a missile: spawn a homing projectile that chases the
-            // locked forward target and detonates on contact (its kill is resolved
-            // later in the tick loop by StepMissiles). Locking onto the station or
-            // police is a crime, exactly like firing the laser at them.
+            // target the player locked (in.missileTarget) and detonates on contact
+            // (its kill is resolved later in the tick loop by StepMissiles). Firing
+            // on the station or police is a crime, exactly like the laser.
             if (in.fireMissile && world.IsValid(player))
             {
-              const ECS::EntityId missile = GameLogic::SpawnMissile(world, player);
+              const ECS::EntityId missile = GameLogic::SpawnMissile(world, player, in.missileTarget);
               const GameLogic::Missile* mc =
                   world.IsValid(missile) ? world.TryGet<GameLogic::Missile>(missile) : nullptr;
               if (mc == nullptr)

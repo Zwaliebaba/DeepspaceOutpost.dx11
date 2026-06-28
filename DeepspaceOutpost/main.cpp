@@ -773,16 +773,58 @@ void run_escape_sequence (void)
 }
 
 
-// Pending fire-missile intent for the next input packet (thin-client mode). Set by
-// launch_missile(), consumed and cleared by send_player_input().
+// Pending fire-missile intent + the locked target it launches at, for the next
+// input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
+// send_player_input().
 static bool s_fire_missile_intent = false;
+static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 
-// Launch a missile. In thin-client mode missiles are server-authoritative: the
-// legacy fire_missile() spawns a local missile object that only the retired
-// single-player sim would steer, so it does nothing against the replicated world.
-// Instead we raise a fire-missile intent - the server locks the forward target and
-// detonates it - and spend a round from the HUD ammo so the cockpit matches. Falls
-// back to the legacy local spawn when not replicated.
+// The entity the missile is currently locked onto (picked from the replicated view
+// with the target key), or 0xFFFFFFFF for none. Drives the HUD lock indicator and
+// is the target M launches at.
+static unsigned int s_locked_target = 0xFFFFFFFFu;
+
+// Lock the missile onto the ship in the crosshairs (T key). Thin client: the server
+// is authoritative, so we pick the target from the replicated view and remember its
+// id; M then launches a homing missile at exactly that target. With nothing in the
+// sights, nothing locks. Falls back to the legacy arm when not replicated.
+static void lock_missile_target (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		arm_missile();
+		return;
+	}
+
+	if (cmdr.missiles == 0)
+		return;
+
+	const unsigned int tgt = find_lock_target();
+	if (tgt == 0xFFFFFFFFu)
+		return;   // nothing in the sights to lock
+
+	s_locked_target = tgt;
+	missile_target = 0;   // HUD: a missile is locked (red indicator)
+}
+
+// Clear the missile lock (U key).
+static void unlock_missile_target (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		unarm_missile();
+		return;
+	}
+
+	s_locked_target = 0xFFFFFFFFu;
+	missile_target = MISSILE_UNARMED;   // HUD: no lock
+	snd_play_sample (SND_BOOP);
+}
+
+// Launch a missile (M key). Thin client: only when a target is locked (T) and a
+// round is in the rack; the server spawns a projectile that homes that specific
+// locked target. No lock -> nothing fires. Falls back to the legacy local spawn
+// when not replicated.
 static void launch_missile (void)
 {
 	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
@@ -791,16 +833,14 @@ static void launch_missile (void)
 		return;
 	}
 
-	// Server-authoritative missiles: the server locks the nearest enemy in front and
-	// homes the projectile itself, so firing only needs a missile in the rack - no
-	// separate client-side arm/lock step (that legacy two-step doesn't map onto the
-	// server picking the target). Just need a round to fire.
-	if (cmdr.missiles == 0)
+	if ((s_locked_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
 		return;
 
 	s_fire_missile_intent = true;
+	s_fire_missile_target = s_locked_target;
 	cmdr.missiles--;
-	missile_target = MISSILE_UNARMED;   // clear any HUD arm indicator
+	s_locked_target = 0xFFFFFFFFu;
+	missile_target = MISSILE_UNARMED;   // lock consumed
 	snd_play_sample (SND_MISSILE);
 }
 
@@ -1043,13 +1083,13 @@ void handle_flight_keys (void)
 	if (kbd_target_missile_pressed)
 	{
 		if (!docked)
-			arm_missile();		
+			lock_missile_target();
 	}
 
 	if (kbd_unarm_missile_pressed)
 	{
 		if (!docked)
-			unarm_missile();
+			unlock_missile_target();
 	}
 	
 	if (kbd_inc_speed_pressed)
@@ -1399,6 +1439,8 @@ static void send_player_input (void)
 	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
 	in.fireMissile = s_fire_missile_intent;
+	in.missileTarget = s_fire_missile_intent ? (uint32_t)s_fire_missile_target
+	                                          : Neuron::Net::NO_MISSILE_TARGET;
 	s_fire_missile_intent = false;
 
 	Neuron::Client::ReplicationClientInstance().SendInput(in);

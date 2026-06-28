@@ -17,6 +17,7 @@ TEST(Input, RoundTrips)
   in.throttle = 0.25f;
   in.fire = true;
   in.fireMissile = true;
+  in.missileTarget = 4242;
 
   Net::DataWriter w;
   Net::WriteInput(w, in);
@@ -30,6 +31,7 @@ TEST(Input, RoundTrips)
   EXPECT_TRUE(out.throttle == 0.25f);
   EXPECT_TRUE(out.fire == true);
   EXPECT_TRUE(out.fireMissile == true);
+  EXPECT_TRUE(out.missileTarget == 4242u);
 }
 
 TEST(Input, RejectsForeignMagic)

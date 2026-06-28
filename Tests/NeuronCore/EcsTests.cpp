@@ -221,3 +221,28 @@ TEST(Ecs, RemoveMiddleKeepsOthersIntact)
   r.Each<Position>([&](EntityId, Position&) { ++count; });
   EXPECT_TRUE(count == 2);
 }
+
+TEST(Ecs, LiveEntityResolvesIndexToTheCurrentHandle)
+{
+  Registry r;
+  EntityId a = r.Create();
+  EntityId b = r.Create();
+
+  // A live index resolves back to the exact handle (index + generation).
+  EXPECT_TRUE(r.LiveEntity(a.index) == a);
+  EXPECT_TRUE(r.LiveEntity(b.index) == b);
+
+  // A dead slot resolves to an invalid handle...
+  r.Destroy(b);
+  EXPECT_TRUE(!r.IsValid(r.LiveEntity(b.index)));
+
+  // ...and once that slot is recycled, LiveEntity tracks the NEW generation, so the
+  // stale handle no longer matches.
+  EntityId c = r.Create();              // reuses b's index, bumped generation
+  EXPECT_TRUE(c.index == b.index);
+  EXPECT_TRUE(r.LiveEntity(c.index) == c);
+  EXPECT_TRUE(r.LiveEntity(c.index) != b);
+
+  // An out-of-range index is invalid.
+  EXPECT_TRUE(!r.IsValid(r.LiveEntity(9999)));
+}

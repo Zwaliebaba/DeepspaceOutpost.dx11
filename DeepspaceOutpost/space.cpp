@@ -731,6 +731,45 @@ void render_replicated_objects (void)
 }
 
 
+// Pick the missile lock target (T key): the nearest ship in the crosshairs from the
+// replicated view. The server then homes a missile at exactly this entity, so we
+// return its replicated entity index (0xFFFFFFFF when nothing suitable is ahead).
+// Planets, the sun, and other missiles are not lockable.
+unsigned int find_lock_target (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen())
+		return 0xFFFFFFFFu;
+
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords (ents, rc.LocalPlayer());
+
+	unsigned int best = 0xFFFFFFFFu;
+	double bestDist = 1.0e18;
+
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		// Lockable = a ship (not the planet/sun, not another missile) ahead of us...
+		if (rec.type < 0 || rec.type == SHIP_MISSILE)
+			continue;
+		if (rec.location.z <= 0.0)
+			continue;
+		// ...and inside the forward cone (roughly the crosshairs).
+		if (fabs (rec.location.x) > rec.location.z || fabs (rec.location.y) > rec.location.z)
+			continue;
+
+		if (rec.distance < bestDist)
+		{
+			bestDist = rec.distance;
+			best = rec.id;
+		}
+	}
+
+	return best;
+}
+
+
 
 
 /*

@@ -66,6 +66,7 @@ void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
+unsigned int find_lock_target (void);
 
 void update_console (void);
 

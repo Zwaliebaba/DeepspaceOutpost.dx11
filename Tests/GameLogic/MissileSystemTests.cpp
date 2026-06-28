@@ -26,13 +26,14 @@ namespace
   }
 }
 
-TEST(MissileSys, LaunchesAsAMissileEntityLockedOnTheForwardEnemy)
+TEST(MissileSys, LaunchesAsAMissileEntityLockedOnThePlayersTarget)
 {
   ECS::Registry w;
   ECS::EntityId shooter = SpawnShooter(w);
   ECS::EntityId pirate = SpawnTarget(w, 3000, GameLogic::Team::Pirate, 100);
 
-  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter);
+  // The player locked the pirate (passed by index, as it comes off the wire).
+  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter, pirate.index);
 
   EXPECT_TRUE(w.IsValid(missile));
   EXPECT_TRUE(w.Get<GameLogic::NetType>(missile).type == GameLogic::ShipType::Missile);
@@ -48,7 +49,7 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
   ECS::EntityId shooter = SpawnShooter(w);
   ECS::EntityId pirate = SpawnTarget(w, 3000, GameLogic::Team::Pirate, /*energy*/ 100);
 
-  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter);
+  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter, pirate.index);
   const int64_t zStart = w.Get<GameLogic::WorldTransform>(missile).position.z;
 
   // One tick: the missile has flown forward but not yet reached the target.
@@ -73,9 +74,10 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
 TEST(MissileSys, DumbFiresAndSelfDestructsWithNoTarget)
 {
   ECS::Registry w;
-  ECS::EntityId shooter = SpawnShooter(w);   // nothing in front to lock
+  ECS::EntityId shooter = SpawnShooter(w);
 
-  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter);
+  // Fired with no lock (sentinel index): the missile carries no target.
+  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter, 0xFFFFFFFFu);
   EXPECT_TRUE(w.IsValid(missile));
   EXPECT_TRUE(!w.IsValid(w.Get<GameLogic::Missile>(missile).target));   // no lock
 
@@ -91,7 +93,7 @@ TEST(MissileSys, DetonatesOnTheStationWithoutDestroyingIt)
   ECS::EntityId shooter = SpawnShooter(w);
   ECS::EntityId station = SpawnTarget(w, 3000, GameLogic::Team::Station, /*energy*/ 1000000);
 
-  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter);
+  ECS::EntityId missile = GameLogic::SpawnMissile(w, shooter, station.index);
   EXPECT_TRUE(w.Get<GameLogic::Missile>(missile).target == station);
 
   bool anyKill = false;
