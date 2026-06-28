@@ -377,3 +377,9 @@ erserver.config.json
 erheadless.config.json
 **/erserver.config.json
 **/erheadless.config.json
+
+# NeuronGame ships its fxc-generated shader byte arrays committed, so the build
+# works without a developer-environment fxc (see NeuronGame/CMakeLists.txt). These
+# are the one sanctioned exception to the CompiledShaders/ ignore rule above.
+!NeuronGame/CompiledShaders/
+!NeuronGame/CompiledShaders/*.h

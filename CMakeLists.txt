@@ -65,6 +65,10 @@ endif()
 # NeuronClient and NeuronServer build on it. Declare the libraries before their
 # consumers (DeepspaceOutpost = client, Server = dedicated server).
 add_subdirectory ("NeuronCore")
+# Native Direct3D 11 shaders (fxc -> CompiledShaders/*.h). Declared before
+# NeuronClient because NeuronClient's ImmediateRenderer #includes those headers and
+# depends on the NeuronGameShaders target.
+add_subdirectory ("NeuronGame")
 add_subdirectory ("NeuronClient")
 add_subdirectory ("NeuronServer")
 
