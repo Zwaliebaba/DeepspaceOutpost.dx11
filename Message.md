@@ -1,9 +1,9 @@
 # Message.md — A Unified Message System for NeuronCore
 
-> **Status:** Design / plan (v2.1). No code yet. v2 folded in a commercial-engine architecture
-> review; v2.1 resolves the four remaining open questions (now §16: one catalog;
-> `DamageApplied` server-internal; validation-now/crypto-deferred; raw-float with on-demand
-> quantization). The plan is ready to implement from Phase 0. The settled decisions:
+> **Status:** Implementation in progress — **Phases 0–2 landed**, Phase 3 next (see §14 and the
+> table just below). v2 folded in a commercial-engine architecture review; v2.1 resolved the four
+> open questions (now §16: one catalog; `DamageApplied` server-internal; validation-now/
+> crypto-deferred; raw-float with on-demand quantization). The settled decisions:
 >
 > | Decision | Choice |
 > |---|---|
@@ -14,6 +14,34 @@
 > | Version compatibility | **Lockstep, minimal versioning** — all peers run the same version; **cross-version interop is explicitly out of scope** (no capability negotiation / deprecation windows). Record-length framing and id-non-reuse are kept anyway (decode robustness + ABI hygiene, nearly free). |
 > | Determinism / replay | **Design for it now, build later** — deterministic ordering key + dispatch generations now; capture/replay harness is a later phase. |
 > | Reliable lanes | **Split control / gameplay / bulk** — multiple `ReliableChannel`s so a large manifest can't head-of-line-block a death or session-control message. |
+
+### Implementation status (at a glance)
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Mechanism: `NeuronCore/Messages/` (id/traits/`NetEntityId`/codec/registry/bus/framing) + tests | ✅ Landed |
+| 1 | In-process bus on the server: combat effects via `FireWeapon`/`Crime`/`EntityKilled` | ✅ Landed |
+| 2 | Unreliable lane: `InputCommand` on `'NMSG'`, `'NCMD'` deleted (byte-parity proven) | ✅ Landed |
+| 3 | Reliable lanes (Control/Gameplay/Bulk) + fold `GameEvents`/`StationProtocol`/manifest | ⏳ Next |
+| 4 | Client-side bus + presentation handlers; key→command mapper | ⏳ Pending |
+| 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
+
+> **Verification note.** The project targets MSVC; this environment has no Windows toolchain, so
+> the std-only message headers and the winsock-free test suites are built locally with clang++ 18
+> and g++ 13 (`-std=c++23 -Wall -Wextra`), and the MSVC build of the client/server objects is
+> confirmed by CI on the branch.
+
+**Catalog so far** (concrete messages that exist in code today):
+
+| Message | Home | Scope / Lane / Dir | Phase |
+|---|---|---|---|
+| `InputCommand` | `NeuronCore/Messages/Defs/` | Wire · Unreliable · C→S | 2 |
+| `FireWeapon` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (command) | 1 |
+| `Crime` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
+| `EntityKilled` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
+
+The wire `EntityDeath`/`EntityDespawn`/`Chat`/`AssignPlayer`/`GalaxyManifest`/`Station*` still ride
+the legacy `GameEvents`/`StationProtocol` over `'NEVT'` until Phase 3 folds them into the catalog.
 
 ---
 
