@@ -1,0 +1,45 @@
+# Boa
+# Exported from DeepspaceOutpost ship data (SHIP id 13).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching boa.json sidecar.
+mtllib elite.mtl
+o boa
+v 0 0 93
+v 0 40 -87
+v 38 -25 -99
+v -38 -25 -99
+v -38 40 -59
+v 38 40 -59
+v 62 0 -67
+v 24 -65 -79
+v -24 -65 -79
+v -62 0 -67
+v 0 7 -107
+v 13 -9 -107
+v -13 -9 -107
+usemtl col_4
+f 12 11 2 6 7 3
+usemtl col_46
+f 13 12 3 8 9 4
+usemtl col_133
+f 4 10 5 2 11 13
+usemtl col_4
+f 6 2 5
+usemtl col_46
+f 8 3 7
+usemtl col_133
+f 4 9 10
+usemtl col_248
+f 6 5 1
+usemtl col_248
+f 10 9 1
+usemtl col_248
+f 8 7 1
+usemtl col_235
+f 1 5 10
+usemtl col_235
+f 1 9 8
+usemtl col_235
+f 1 7 6
+usemtl col_28
+f 13 11 12

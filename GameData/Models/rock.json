@@ -1,0 +1,18 @@
+{
+  "name": "Rock",
+  "ship_id": 8,
+  "model": "rock.obj",
+  "num_points": 4,
+  "num_lines": 6,
+  "num_faces": 4,
+  "max_loot": 0,
+  "scoop_type": 11,
+  "size": 256,
+  "front_laser": 0,
+  "bounty": 0,
+  "vanish_point": 8,
+  "energy": 20,
+  "velocity": 10,
+  "missiles": 0,
+  "laser_strength": 0
+}

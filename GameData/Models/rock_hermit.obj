@@ -1,0 +1,43 @@
+# Rock Hermit
+# Exported from DeepspaceOutpost ship data (SHIP id 15).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching rock_hermit.json sidecar.
+mtllib elite.mtl
+o rock_hermit
+v 0 80 0
+v -80 -10 0
+v 0 -80 0
+v 70 -40 0
+v 60 50 0
+v 50 0 60
+v -40 0 70
+v 0 30 -75
+v 0 -50 -60
+usemtl col_183
+f 6 1 7
+usemtl col_248
+f 3 6 7
+usemtl col_235
+f 7 1 2
+usemtl col_183
+f 3 7 2
+usemtl col_235
+f 4 6 3
+usemtl col_248
+f 5 6 4
+usemtl col_235
+f 1 6 5
+usemtl col_183
+f 2 1 8
+usemtl col_248
+f 2 8 9
+usemtl col_235
+f 4 9 8
+usemtl col_235
+f 2 9 3
+usemtl col_183
+f 4 3 9
+usemtl col_183
+f 5 4 8
+usemtl col_248
+f 5 8 1

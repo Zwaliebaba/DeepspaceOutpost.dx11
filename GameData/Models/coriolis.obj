@@ -1,0 +1,52 @@
+# Coriolis Space Station
+# Exported from DeepspaceOutpost ship data (SHIP id 2).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching coriolis.json sidecar.
+mtllib elite.mtl
+o coriolis
+v 160 0 160
+v 0 160 160
+v -160 0 160
+v 0 -160 160
+v 160 -160 0
+v 160 160 0
+v -160 160 0
+v -160 -160 0
+v 160 0 -160
+v 0 160 -160
+v -160 0 -160
+v 0 -160 -160
+v 10 -30 160
+v 10 30 160
+v -10 30 160
+v -10 -30 160
+usemtl col_234
+f 5 1 4
+usemtl col_234
+f 1 6 2
+usemtl col_234
+f 2 7 3
+usemtl col_234
+f 3 8 4
+usemtl col_235
+f 5 4 8 12
+usemtl col_235
+f 9 6 1 5
+usemtl col_235
+f 11 8 3 7
+usemtl col_235
+f 2 6 10 7
+usemtl col_234
+f 12 8 11
+usemtl col_234
+f 12 9 5
+usemtl col_234
+f 10 6 9
+usemtl col_234
+f 11 7 10
+usemtl col_248
+f 12 11 10 9
+usemtl col_248
+f 1 2 3 4
+usemtl col_0
+f 16 13 14 15
