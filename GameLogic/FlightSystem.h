@@ -103,8 +103,11 @@ namespace Neuron::GameLogic
   // along the nose by `speed`, carrying the sub-unit remainder.
   inline void StepFlight(ECS::Registry& _world)
   {
-    _world.Each<WorldTransform, Flight>([](ECS::EntityId, WorldTransform& _t, Flight& _f)
+    _world.Each<WorldTransform, Flight>([&_world](ECS::EntityId _id, WorldTransform& _t, Flight& _f)
     {
+      if (_world.Has<Missile>(_id))
+        return;   // missiles are steered + advanced by StepMissiles, not the flight model
+
       Detail::RotateBasis(_f);
 
       Detail::Orthonormalize(_f);

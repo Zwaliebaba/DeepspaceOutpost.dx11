@@ -12,6 +12,7 @@ add_executable(GameLogic.Tests
     EconomyTests.cpp
     FlightInputTests.cpp
     FlightTests.cpp
+    MissileSystemTests.cpp
     GalaxyGenTests.cpp
     GalaxyTests.cpp
     MotionTests.cpp

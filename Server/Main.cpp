@@ -19,8 +19,6 @@ namespace
   constexpr int64_t DOCK_RANGE = 5000;               // how close a player must be to dock
   constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
   constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
-  constexpr int64_t MISSILE_RANGE = 20000;           // missile lock-on reach (longer than the laser)
-  constexpr double MISSILE_CONE = 0.85;              // ~32deg lock cone (wider than the laser)
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -182,10 +180,26 @@ int main()
             if (in.fire && world.IsValid(player))
               applyShot(GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE));
 
-            // Player launched a missile: a heavier guided hit on the locked
-            // forward target (longer reach, wider cone than the laser).
+            // Player launched a missile: spawn a homing projectile that chases the
+            // locked forward target and detonates on contact (its kill is resolved
+            // later in the tick loop by StepMissiles). Locking onto the station or
+            // police is a crime, exactly like firing the laser at them.
             if (in.fireMissile && world.IsValid(player))
-              applyShot(GameLogic::ResolvePlayerMissile(world, player, MISSILE_RANGE, MISSILE_CONE));
+            {
+              const ECS::EntityId missile = GameLogic::SpawnMissile(world, player);
+              const GameLogic::Missile* mc =
+                  world.IsValid(missile) ? world.TryGet<GameLogic::Missile>(missile) : nullptr;
+              if (mc != nullptr && world.IsValid(mc->target))
+              {
+                GameLogic::FireOutcome lock;
+                lock.hit = true;
+                lock.target = mc->target;
+                if (const GameLogic::Combatant* tc = world.TryGet<GameLogic::Combatant>(mc->target))
+                  lock.targetTeam = tc->team;
+                lock.destroyed = false;   // detonation/kill happens later in StepMissiles
+                applyShot(lock);
+              }
+            }
           }
           break;
         }
@@ -228,9 +242,13 @@ int main()
     ++tick;
     spawner.Step(world, tick);
 
-    // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
-    //     destroy the wrecks (their removal also rides the despawn diff below).
-    for (const GameLogic::Kill& kill : GameLogic::StepCombat(world))
+    // 2b. Advance in-flight missiles (homing + detonation) and realtime combat,
+    //     then resolve every resulting kill: broadcast a death event and destroy
+    //     the wreck (its removal also rides the despawn diff below).
+    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(world);
+    for (const GameLogic::Kill& k : GameLogic::StepCombat(world))
+      kills.push_back(k);
+    for (const GameLogic::Kill& kill : kills)
     {
       // A player "death" is a simple in-place respawn (restore hull, clear record)
       // until persistence/respawn points exist; NPCs are destroyed as wrecks.
