@@ -1457,8 +1457,14 @@ static void send_player_input (void)
 
 	Neuron::Net::ClientInput in;
 	in.sequence = ++seq;
-	in.rollAxis  = (float)PlayerFlight().roll  / (float)maxRoll;
-	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
+	// The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
+	// whose handedness is the transpose of the world basis the server rotates and
+	// the client renders (BuildRenderRecords projects with Bᵀ). Negating the two
+	// rotation axes maps the screen-handed control into that world frame, so the
+	// felt direction of roll and level pitch is identical to before while a banked
+	// pitch now pivots about the ship's own axes instead of the world's.
+	in.rollAxis  = -(float)PlayerFlight().roll  / (float)maxRoll;
+	in.pitchAxis = -(float)PlayerFlight().climb / (float)maxClimb;
 	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
 	in.fireMissile = s_fire_missile_intent;
