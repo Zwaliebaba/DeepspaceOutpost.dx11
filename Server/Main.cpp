@@ -12,13 +12,13 @@ using namespace Neuron;
 
 namespace
 {
-  constexpr uint16_t kServerPort = 40000;                 // clients send input here
-  constexpr int64_t kAoiCellSize = 100000;                // interest-management cell size
-  constexpr int kAoiRadiusCells = 1;                      // viewers see +/- 1 cell
-  constexpr uint32_t kSessionTimeoutTicks = 300;          // reap a client idle this long
-  constexpr int64_t kDockRange = 5000;                    // how close a player must be to dock
-  constexpr int64_t kFireRange = 6000;                    // player front-laser reach
-  constexpr double kAimCone = 0.9;                        // ~25deg aiming cone for a hit
+  constexpr uint16_t SERVER_PORT = 40000;            // clients send input here
+  constexpr int64_t AOI_CELL_SIZE = 100000;          // interest-management cell size
+  constexpr int AOI_RADIUS_CELLS = 1;                // viewers see +/- 1 cell
+  constexpr uint32_t SESSION_TIMEOUT_TICKS = 300;    // reap a client idle this long
+  constexpr int64_t DOCK_RANGE = 5000;               // how close a player must be to dock
+  constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
+  constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -35,14 +35,14 @@ namespace
 int main()
 {
   printf("Starting DSOServer (GameLogic v%u) on UDP %u...\n",
-         GameLogic::Version(), static_cast<unsigned>(kServerPort));
+         GameLogic::Version(), static_cast<unsigned>(SERVER_PORT));
   CoreEngine::Startup();
 
   Net::NetStartup();
   Net::UdpSocket socket;
-  if (!socket.Open(kServerPort))
+  if (!socket.Open(SERVER_PORT))
   {
-    printf("Failed to bind UDP %u\n", static_cast<unsigned>(kServerPort));
+    printf("Failed to bind UDP %u\n", static_cast<unsigned>(SERVER_PORT));
     return 1;
   }
 
@@ -110,9 +110,9 @@ int main()
     Net::GalaxySystemInfo h;
     h.id = static_cast<uint32_t>(-1);   // matches the home station's systemId (-1)
     h.x = 0; h.y = 0; h.z = 65536;      // the home planet
-    const char* kHomeName = "HOME";
-    for (std::size_t i = 0; kHomeName[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
-      h.name[i] = kHomeName[i];
+    const char* HOME_NAME = "HOME";
+    for (std::size_t i = 0; HOME_NAME[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
+      h.name[i] = HOME_NAME[i];
     h.government = static_cast<uint8_t>(home.government);
     h.economy = static_cast<uint8_t>(home.economy);
     h.techLevel = static_cast<uint8_t>(home.techLevel);
@@ -121,7 +121,7 @@ int main()
     manifest.push_back(h);
   }
 
-  GameLogic::AreaOfInterest aoi(kAoiCellSize);
+  GameLogic::AreaOfInterest aoi(AOI_CELL_SIZE);
   GameLogic::ServerSessions sessions;
   sessions.SetManifest(std::move(manifest));   // every client gets the chart on connect
   GameLogic::DespawnTracker despawns;
@@ -157,7 +157,7 @@ int main()
             // is a crime - the first offence summons police to hunt the player.
             if (in.fire && world.IsValid(player))
             {
-              const GameLogic::FireOutcome shot = GameLogic::ResolvePlayerFire(world, player, kFireRange, kAimCone);
+              const GameLogic::FireOutcome shot = GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE);
               if (shot.hit)
               {
                 if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
@@ -206,7 +206,7 @@ int main()
         if (Net::DecodeStationRequest(msg, req))
         {
           const Net::StationResponse resp =
-              GameLogic::ProcessStationRequest(world, s.entity, kDockRange, req);
+              GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
           Net::SendStationResponse(s.events, resp);
         }
       }
@@ -256,7 +256,7 @@ int main()
 
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
     //    as a reliable event to all remaining clients.
-    sessions.Reap(world, tick, kSessionTimeoutTicks);
+    sessions.Reap(world, tick, SESSION_TIMEOUT_TICKS);
     for (uint32_t goneId : despawns.Update(CurrentIds(world)))
       sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(goneId));
 
@@ -270,7 +270,7 @@ int main()
       if (world.IsValid(s.entity))
         viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
 
-      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, kAoiRadiusCells, s.entity.index);
+      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, AOI_RADIUS_CELLS, s.entity.index);
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 

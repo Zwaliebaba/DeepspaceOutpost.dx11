@@ -707,7 +707,7 @@ void render_replicated_objects (void)
 		// static (non-spinning) station and network lag that is punishing, and a
 		// fresh commander has no docking computer. So we dock forgivingly: fly up
 		// to the station (within ~600 units) with it ahead of you and you dock.
-		// The server still gates on its own proximity check (kDockRange), so this
+		// The server still gates on its own proximity check (DOCK_RANGE), so this
 		// only ever completes when genuinely at a station.
 		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && obj.distance < 600)
 		{
@@ -1349,7 +1349,7 @@ void launch_player (void)
 void engage_docking_computer (void)
 {
 	// Only dock when genuinely within the server's docking range (it will reject
-	// and strand us otherwise). 5000 world units matches the server's kDockRange.
+	// and strand us otherwise). 5000 world units matches the server's DOCK_RANGE.
 	if ((ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC]) &&
 		s_nearest_station_dist < 5000.0)
 	{
