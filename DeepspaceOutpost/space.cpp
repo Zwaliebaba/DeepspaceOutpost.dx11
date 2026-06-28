@@ -706,10 +706,14 @@ void render_replicated_objects (void)
 		// Docking. Authentic Elite demands a precise slot alignment, but with a
 		// static (non-spinning) station and network lag that is punishing, and a
 		// fresh commander has no docking computer. So we dock forgivingly: fly up
-		// to the station (within ~600 units) with it ahead of you and you dock.
-		// The server still gates on its own proximity check (DOCK_RANGE), so this
-		// only ever completes when genuinely at a station.
-		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && obj.distance < 600)
+		// to the station (within ~600 units) with it ahead of you, AT LOW SPEED,
+		// and you dock. The speed gate restores the classic "ease in to dock"
+		// feel - you can't slam into the slot at full throttle. The server still
+		// gates on its own proximity check (DOCK_RANGE), so this only ever
+		// completes when genuinely at a station.
+		const int dockSpeedLimit = (PlayerCaps().maxSpeed > 0) ? (PlayerCaps().maxSpeed / 4) : 10;
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
+			obj.distance < 600 && PlayerFlight().speed <= dockSpeedLimit)
 		{
 			struct vector approach = unit_vector (&obj.location);
 			if (approach.z > 0.5)   // station roughly ahead -> dock

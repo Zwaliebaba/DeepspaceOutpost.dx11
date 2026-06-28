@@ -19,6 +19,8 @@ namespace
   constexpr int64_t DOCK_RANGE = 5000;               // how close a player must be to dock
   constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
   constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
+  constexpr int64_t MISSILE_RANGE = 20000;           // missile lock-on reach (longer than the laser)
+  constexpr double MISSILE_CONE = 0.85;              // ~32deg lock cone (wider than the laser)
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -153,29 +155,37 @@ int main()
           {
             const ECS::EntityId player = sessions.OnInput(world, from, in, tick);
 
-            // Player fired: resolve a forward shot. Hitting the station or police
-            // is a crime - the first offence summons police to hunt the player.
-            if (in.fire && world.IsValid(player))
+            // Apply a resolved player shot (laser or missile): firing on the
+            // station or police is a crime - the first offence summons police to
+            // hunt the player - and a target driven to zero energy dies.
+            auto applyShot = [&](const GameLogic::FireOutcome& shot)
             {
-              const GameLogic::FireOutcome shot = GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE);
-              if (shot.hit)
+              if (!shot.hit)
+                return;
+              if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
               {
-                if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
-                {
-                  GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
-                  if (wnt != nullptr && wnt->level == 0)
-                    spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
-                  if (wnt != nullptr)
-                    wnt->level++;
-                }
-                if (shot.destroyed)
-                {
-                  sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
-                                     Net::EncodeDeath(shot.target.index, player.index));
-                  world.Destroy(shot.target);
-                }
+                GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
+                if (wnt != nullptr && wnt->level == 0)
+                  spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
+                if (wnt != nullptr)
+                  wnt->level++;
               }
-            }
+              if (shot.destroyed)
+              {
+                sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                                   Net::EncodeDeath(shot.target.index, player.index));
+                world.Destroy(shot.target);
+              }
+            };
+
+            // Player fired the front laser: resolve a forward shot.
+            if (in.fire && world.IsValid(player))
+              applyShot(GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE));
+
+            // Player launched a missile: a heavier guided hit on the locked
+            // forward target (longer reach, wider cone than the laser).
+            if (in.fireMissile && world.IsValid(player))
+              applyShot(GameLogic::ResolvePlayerMissile(world, player, MISSILE_RANGE, MISSILE_CONE));
           }
           break;
         }
@@ -217,22 +227,6 @@ int main()
     GameLogic::Tick(world);
     ++tick;
     spawner.Step(world, tick);
-
-    // 2a. Heartbeat: roughly every two seconds, log the first player's position
-    //     and flight so a launching client can be confirmed to actually move
-    //     through the world (and steer) server-side.
-    if (tick % 60 == 0 && !sessions.All().empty())
-    {
-      const GameLogic::Session& s = sessions.All().begin()->second;
-      if (world.IsValid(s.entity))
-      {
-        const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(s.entity);
-        const GameLogic::Flight& f = world.Get<GameLogic::Flight>(s.entity);
-        printf("Player @ (%lld, %lld, %lld)  speed=%.2f roll=%.3f pitch=%.3f\n",
-               static_cast<long long>(t.position.x), static_cast<long long>(t.position.y),
-               static_cast<long long>(t.position.z), f.speed, f.roll, f.pitch);
-      }
-    }
 
     // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
     //     destroy the wrecks (their removal also rides the despawn diff below).

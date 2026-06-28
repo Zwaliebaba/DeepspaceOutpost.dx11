@@ -773,6 +773,36 @@ void run_escape_sequence (void)
 }
 
 
+// Pending fire-missile intent for the next input packet (thin-client mode). Set by
+// launch_missile(), consumed and cleared by send_player_input().
+static bool s_fire_missile_intent = false;
+
+// Launch a missile. In thin-client mode missiles are server-authoritative: the
+// legacy fire_missile() spawns a local missile object that only the retired
+// single-player sim would steer, so it does nothing against the replicated world.
+// Instead we raise a fire-missile intent - the server locks the forward target and
+// detonates it - and spend a round from the HUD ammo so the cockpit matches. Falls
+// back to the legacy local spawn when not replicated.
+static void launch_missile (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		fire_missile();
+		return;
+	}
+
+	// Must be armed (target key) and carrying a missile; the server resolves which
+	// enemy in front is hit.
+	if ((missile_target == MISSILE_UNARMED) || (cmdr.missiles == 0))
+		return;
+
+	s_fire_missile_intent = true;
+	cmdr.missiles--;
+	missile_target = MISSILE_UNARMED;
+	snd_play_sample (SND_MISSILE);
+}
+
+
 void handle_flight_keys (void)
 {
     int keyasc;
@@ -999,7 +1029,7 @@ void handle_flight_keys (void)
 	if (kbd_fire_missile_pressed)
 	{
 		if (!docked)
-			fire_missile();
+			launch_missile();
 	}
 
 	if (kbd_origin_pressed)
@@ -1366,6 +1396,8 @@ static void send_player_input (void)
 	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
 	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
+	in.fireMissile = s_fire_missile_intent;
+	s_fire_missile_intent = false;
 
 	Neuron::Client::ReplicationClientInstance().SendInput(in);
 }
