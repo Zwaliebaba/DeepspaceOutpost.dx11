@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "ECS.h"
 
 #include "GameLogic.h"
 
@@ -53,7 +54,7 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
   const int64_t zStart = w.Get<GameLogic::WorldTransform>(missile).position.z;
 
   // One tick: the missile has flown forward but not yet reached the target.
-  GameLogic::StepMissiles(w);
+  std::ignore = GameLogic::StepMissiles(w);
   EXPECT_TRUE(w.Get<GameLogic::WorldTransform>(missile).position.z > zStart);
   EXPECT_TRUE(w.IsValid(missile));
 
@@ -86,7 +87,7 @@ TEST(MissileSys, DumbFiresAndSelfDestructsWithNoTarget)
 
   // It flies straight and self-destructs once its life runs out.
   for (int i = 0; i < GameLogic::MISSILE_LIFE; ++i)
-    GameLogic::StepMissiles(w);
+      std::ignore = GameLogic::StepMissiles(w);
   EXPECT_TRUE(!w.IsValid(missile));
 }
 

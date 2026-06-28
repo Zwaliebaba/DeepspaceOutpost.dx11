@@ -81,7 +81,7 @@ TEST(CombatSys, FiresAtTheNearestEnemy)
   ECS::EntityId near = Spawn(world, 1000, 1, 100, 0, /*range*/ 1);   // unarmed enemies
   ECS::EntityId far = Spawn(world, 5000, 1, 100, 0, /*range*/ 1);
 
-  GameLogic::StepCombat(world);
+  std::ignore = GameLogic::StepCombat(world);
 
   // A engages only the nearer enemy.
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(near).energy == 90);
@@ -123,7 +123,7 @@ TEST(CombatSys, PlayersDoNotAutoEngage)
   world.Add<GameLogic::Combatant>(player, GameLogic::Combatant{ GameLogic::Team::Player, 255, 10, 5000, false });
   ECS::EntityId pirate = Spawn(world, 1000, GameLogic::Team::Pirate, 50, 10);
 
-  GameLogic::StepCombat(world);
+  std::ignore = GameLogic::StepCombat(world);
 
   // The pirate fired on the player; the player did NOT fire back automatically.
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).energy == 245);
@@ -150,10 +150,10 @@ TEST(CombatSys, AutoFireRespectsCooldown)
   ECS::EntityId a = Spawn(world, 0, GameLogic::Team::Pirate, 100, 10);    // fireInterval defaults to 10
   ECS::EntityId b = Spawn(world, 1000, GameLogic::Team::Player, 100, /*laser*/ 0);
 
-  GameLogic::StepCombat(world);   // first tick: weapon ready, fires
+  std::ignore = GameLogic::StepCombat(world);   // first tick: weapon ready, fires
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 90);
 
-  GameLogic::StepCombat(world);   // next tick: still cooling down, no shot
+  std::ignore = GameLogic::StepCombat(world);   // next tick: still cooling down, no shot
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 90);
 }
 

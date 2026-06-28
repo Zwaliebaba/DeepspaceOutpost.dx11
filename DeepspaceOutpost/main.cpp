@@ -8,17 +8,7 @@
  * The platform layer calls game_main() from its WinMain.
  */
 
-
 #include "pch.h"
-
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <ctype.h>
-#include <time.h>
-#include <stdlib.h>
-
-#include "compat.h"
 
 #include "config.h"
 #include "gfx.h"
@@ -26,15 +16,12 @@
 #include "GameComponents.h"
 #include "main.h"
 #include "vector.h"
-#include "alg_data.h"
 #include "elite.h"
 #include "docked.h"
 #include "intro.h"
 #include "shipdata.h"
-#include "shipface.h"
 #include "space.h"
 #include "sound.h"
-#include "threed.h"
 #include "swat.h"
 #include "random.h"
 #include "options.h"
@@ -45,8 +32,6 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
-
-
 
 int old_cross_x, old_cross_y;
 int cross_timer;
@@ -61,7 +46,6 @@ int game_paused;
 
 int find_input;
 char find_name[20];
-
 
 /*
  * Flight-control responsiveness.
@@ -80,66 +64,60 @@ char find_name[20];
 #define ROLL_CENTRE_STEP   3		/* was 1: recentre roll ~3x faster on release    */
 #define CLIMB_CENTRE_STEP  2		/* was 1: recentre climb ~2x faster on release   */
 
-
 /*
  * Nudge the current turn rate toward full deflection by |steps| units this
  * frame (steps > 0 rolls/climbs one way, < 0 the other). Reuses the single-
  * step primitives so the per-ship max_roll / max_climb clamp still applies.
  */
-static void ramp_flight_roll (int steps)
+static void ramp_flight_roll(int steps)
 {
-	int i;
+  int i;
 
-	for (i = 0; i < steps; i++)
-		increase_flight_roll();
-	for (i = 0; i > steps; i--)
-		decrease_flight_roll();
+  for (i = 0; i < steps; i++)
+    increase_flight_roll();
+  for (i = 0; i > steps; i--)
+    decrease_flight_roll();
 }
 
-
-static void ramp_flight_climb (int steps)
+static void ramp_flight_climb(int steps)
 {
-	int i;
+  int i;
 
-	for (i = 0; i < steps; i++)
-		increase_flight_climb();
-	for (i = 0; i > steps; i--)
-		decrease_flight_climb();
+  for (i = 0; i < steps; i++)
+    increase_flight_climb();
+  for (i = 0; i > steps; i--)
+    decrease_flight_climb();
 }
-
 
 /*
  * Auto-centre the turn rate back toward zero when no key is held, moving up to
  * CENTRE_STEP units per frame but never overshooting past zero into a reversal.
  */
-static void centre_flight_roll (void)
+static void centre_flight_roll(void)
 {
-	int i;
+  int i;
 
-	for (i = 0; i < ROLL_CENTRE_STEP && PlayerFlight().roll != 0; i++)
-	{
-		if (PlayerFlight().roll > 0)
-			decrease_flight_roll();
-		else
-			increase_flight_roll();
-	}
+  for (i = 0; i < ROLL_CENTRE_STEP && PlayerFlight().roll != 0; i++)
+  {
+    if (PlayerFlight().roll > 0)
+      decrease_flight_roll();
+    else
+      increase_flight_roll();
+  }
 }
 
-
-static void centre_flight_climb (void)
+static void centre_flight_climb(void)
 {
-	int i;
+  int i;
 
-	for (i = 0; i < CLIMB_CENTRE_STEP && PlayerFlight().climb != 0; i++)
-	{
-		if (PlayerFlight().climb > 0)
-			decrease_flight_climb();
-		else
-			increase_flight_climb();
-	}
+  for (i = 0; i < CLIMB_CENTRE_STEP && PlayerFlight().climb != 0; i++)
+  {
+    if (PlayerFlight().climb > 0)
+      decrease_flight_climb();
+    else
+      increase_flight_climb();
+  }
 }
-
-
 
 /*
  * Initialise the game parameters.
@@ -147,640 +125,602 @@ static void centre_flight_climb (void)
 
 void initialise_game(void)
 {
-	set_rand_seed (time(NULL));
-	current_screen = SCR_INTRO_ONE;
+  set_rand_seed(time(nullptr));
+  current_screen = SCR_INTRO_ONE;
 
-	/*
-	 * A2 flip: stand up the de-globalised world and the player's ship entity.
-	 * Seeded here but not yet read - legacy globals (myship, flight state,
-	 * local_objects[]) still drive the game and migrate onto this world cluster
-	 * by cluster. Created before anything else so the player entity always exists.
-	 */
-	GameUniverse().Reset();
-	{
-		Neuron::ECS::EntityId player = GameUniverse().Reg().Create();
-		GameUniverse().Reg().Add<Neuron::Game::PlayerTag>(player, Neuron::Game::PlayerTag{});
-		GameUniverse().Reg().Add<Neuron::Game::Transform>(player, Neuron::Game::Transform{});
-		GameUniverse().Reg().Add<Neuron::Game::ShipCaps>(player, Neuron::Game::ShipCaps{});
-		GameUniverse().Reg().Add<Neuron::Game::FlightRates>(player, Neuron::Game::FlightRates{});
-		GameUniverse().Reg().Add<Neuron::Game::Defense>(player, Neuron::Game::Defense{});
-		GameUniverse().SetPlayer(player);
-	}
+  /*
+   * A2 flip: stand up the de-globalised world and the player's ship entity.
+   * Seeded here but not yet read - legacy globals (myship, flight state,
+   * local_objects[]) still drive the game and migrate onto this world cluster
+   * by cluster. Created before anything else so the player entity always exists.
+   */
+  GameUniverse().Reset();
+  {
+    ECS::EntityId player = GameUniverse().Reg().Create();
+    GameUniverse().Reg().Add<Game::PlayerTag>(player, Game::PlayerTag{});
+    GameUniverse().Reg().Add<Game::Transform>(player, Game::Transform{});
+    GameUniverse().Reg().Add<Game::ShipCaps>(player, Game::ShipCaps{});
+    GameUniverse().Reg().Add<Game::FlightRates>(player, Game::FlightRates{});
+    GameUniverse().Reg().Add<Game::Defense>(player, Game::Defense{});
+    GameUniverse().SetPlayer(player);
+  }
 
-	/* Create the ECS slot entities that back local_objects[] (must exist before
-	   clear_local_objects / any local_objects[i] access below). */
-	create_local_object_slots();
+  /* Create the ECS slot entities that back local_objects[] (must exist before
+     clear_local_objects / any local_objects[i] access below). */
+  create_local_object_slots();
 
-	restore_saved_commander();
+  restore_saved_commander();
 
-	PlayerFlight().speed = 1;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
-	docked = 1;
-	PlayerDefense().frontShield = 255;
-	PlayerDefense().aftShield = 255;
-	PlayerDefense().energy = 255;
-	draw_lasers = 0;
-	mcount = 0;
-	hyper_ready = 0;
-	detonate_bomb = 0;
-	find_input = 0;
-	witchspace = 0;
-	game_paused = 0;
-	auto_pilot = 0;
-	
-	create_new_stars();
-	clear_local_objects();
-	
-	cross_x = -1;
-	cross_y = -1;
-	cross_timer = 0;
+  PlayerFlight().speed = 1;
+  PlayerFlight().roll = 0;
+  PlayerFlight().climb = 0;
+  docked = 1;
+  PlayerDefense().frontShield = 255;
+  PlayerDefense().aftShield = 255;
+  PlayerDefense().energy = 255;
+  draw_lasers = 0;
+  mcount = 0;
+  hyper_ready = 0;
+  detonate_bomb = 0;
+  find_input = 0;
+  witchspace = 0;
+  game_paused = 0;
+  auto_pilot = 0;
 
-	
-	PlayerCaps().maxSpeed = 40;		/* 0.27 Light Mach */
-	PlayerCaps().maxRoll = 31;
-	PlayerCaps().maxClimb = 8;		/* CF 8 */
-	PlayerCaps().maxFuel = 70;		/* 7.0 Light Years */
+  create_new_stars();
+  clear_local_objects();
+
+  cross_x = -1;
+  cross_y = -1;
+  cross_timer = 0;
+
+  PlayerCaps().maxSpeed = 40; /* 0.27 Light Mach */
+  PlayerCaps().maxRoll = 31;
+  PlayerCaps().maxClimb = 8; /* CF 8 */
+  PlayerCaps().maxFuel = 70; /* 7.0 Light Years */
 }
 
-
-void finish_game (void)
+void finish_game(void)
 {
-	finish = 1;
-	game_over = 1;
+  finish = 1;
+  game_over = 1;
 }
-
-
-
-
-
-
 
 /*
  * Move the planet chart cross hairs to specified position.
  */
 
-
-void move_cross (int dx, int dy)
+void move_cross(int dx, int dy)
 {
-	cross_timer = 5;
+  cross_timer = 5;
 
-	if (current_screen == SCR_SHORT_RANGE)
-	{
-		cross_x += (dx * 4);
-		cross_y += (dy * 4);
-		return;
-	}
+  if (current_screen == SCR_SHORT_RANGE)
+  {
+    cross_x += (dx * 4);
+    cross_y += (dy * 4);
+    return;
+  }
 
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		cross_x += (dx * 2);
-		cross_y += (dy * 2);
+  if (current_screen == SCR_GALACTIC_CHART)
+  {
+    cross_x += (dx * 2);
+    cross_y += (dy * 2);
 
-		if (cross_x < 1)
-			cross_x = 1;
-			
-		if (cross_x > 510)
-			cross_x = 510;
+    if (cross_x < 1)
+      cross_x = 1;
 
-		if (cross_y < 37)
-			cross_y = 37;
-		
-		if (cross_y > 293)
-			cross_y = 293;
-	}
+    if (cross_x > 510)
+      cross_x = 510;
+
+    if (cross_y < 37)
+      cross_y = 37;
+
+    if (cross_y > 293)
+      cross_y = 293;
+  }
 }
-
 
 /*
  * Draw the cross hairs at the specified position.
  */
 
-void draw_cross (int cx, int cy)
+void draw_cross(int cx, int cy)
 {
-	if (current_screen == SCR_SHORT_RANGE)
-	{
-		gfx_set_clip_region (1, 37, 510, 339);
-		xor_mode (TRUE);
-		gfx_draw_colour_line (cx - 16, cy, cx + 16, cy, GFX_COL_RED);
-		gfx_draw_colour_line (cx, cy - 16, cx, cy + 16, GFX_COL_RED);
-		xor_mode (FALSE);
-		gfx_set_clip_region (1, 1, 510, 383);
-		return;
-	}
-	
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		gfx_set_clip_region (1, 37, 510, 293);
-		xor_mode (TRUE);
-		gfx_draw_colour_line (cx - 8, cy, cx + 8, cy, GFX_COL_RED);
-		gfx_draw_colour_line (cx, cy - 8, cx, cy + 8, GFX_COL_RED);
-		xor_mode (FALSE);
-		gfx_set_clip_region (1, 1, 510, 383);
-	}
+  if (current_screen == SCR_SHORT_RANGE)
+  {
+    gfx_set_clip_region(1, 37, 510, 339);
+    xor_mode(TRUE);
+    gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_RED);
+    gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_RED);
+    xor_mode(FALSE);
+    gfx_set_clip_region(1, 1, 510, 383);
+    return;
+  }
+
+  if (current_screen == SCR_GALACTIC_CHART)
+  {
+    gfx_set_clip_region(1, 37, 510, 293);
+    xor_mode(TRUE);
+    gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
+    gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
+    xor_mode(FALSE);
+    gfx_set_clip_region(1, 1, 510, 383);
+  }
 }
-
-
 
 void draw_laser_sights(void)
 {
-	int laser = 0;
-	int x1,y1,x2,y2;
-	
-	switch (current_screen)
-	{
-		case SCR_FRONT_VIEW:
-			gfx_display_centre_text (32, "Front View", 120, GFX_COL_WHITE);
-			laser = cmdr.front_laser;
-			break;
-		
-		case SCR_REAR_VIEW:
-			gfx_display_centre_text (32, "Rear View", 120, GFX_COL_WHITE);
-			laser = cmdr.rear_laser;
-			break;
+  int laser = 0;
+  int x1, y1, x2, y2;
 
-		case SCR_LEFT_VIEW:
-			gfx_display_centre_text (32, "Left View", 120, GFX_COL_WHITE);
-			laser = cmdr.left_laser;
-			break;
+  switch (current_screen)
+  {
+  case SCR_FRONT_VIEW:
+    gfx_display_centre_text(32, "Front View", 120, GFX_COL_WHITE);
+    laser = cmdr.front_laser;
+    break;
 
-		case SCR_RIGHT_VIEW:
-			gfx_display_centre_text (32, "Right View", 120, GFX_COL_WHITE);
-			laser = cmdr.right_laser;
-			break;
-	}
-	
+  case SCR_REAR_VIEW:
+    gfx_display_centre_text(32, "Rear View", 120, GFX_COL_WHITE);
+    laser = cmdr.rear_laser;
+    break;
 
-	if (laser)
-	{
-		// Centre the cross-hairs on the live view (window middle in full-window
-		// flight, 256,192 in retro) with arm lengths that scale with the optics.
-		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		const int cx = (int) vm.cx;
-		const int cy = (int) vm.cy;
-		const double s = vm.focal / 256.0;   // retro == GFX_SCALE (2)
-		const int in8  = (int)(8  * s);
-		const int in16 = (int)(16 * s);
+  case SCR_LEFT_VIEW:
+    gfx_display_centre_text(32, "Left View", 120, GFX_COL_WHITE);
+    laser = cmdr.left_laser;
+    break;
 
-		x1 = cx;
-		y1 = cy - in8;
-		y2 = cy - in16;
+  case SCR_RIGHT_VIEW:
+    gfx_display_centre_text(32, "Right View", 120, GFX_COL_WHITE);
+    laser = cmdr.right_laser;
+    break;
+  }
 
-		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1);
-		gfx_draw_colour_line (x1, y1, x1, y2, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1);
+  if (laser)
+  {
+    // Centre the cross-hairs on the live view (window middle in full-window
+    // flight, 256,192 in retro) with arm lengths that scale with the optics.
+    const Client::ViewMetrics& vm = gfx_view_metrics();
+    const int cx = static_cast<int>(vm.cx);
+    const int cy = static_cast<int>(vm.cy);
+    const double s = vm.focal / 256.0; // retro == GFX_SCALE (2)
+    const int in8 = static_cast<int>(8 * s);
+    const int in16 = static_cast<int>(16 * s);
 
-		y1 = cy + in8;
-		y2 = cy + in16;
+    x1 = cx;
+    y1 = cy - in8;
+    y2 = cy - in16;
 
-		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1);
-		gfx_draw_colour_line (x1, y1, x1, y2, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1 - 1, y1, x1 - 1, y2, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1, y1, x1, y2, GFX_COL_WHITE);
+    gfx_draw_colour_line(x1 + 1, y1, x1 + 1, y2, GFX_COL_GREY_1);
 
-		x1 = cx - in8;
-		y1 = cy;
-		x2 = cx - in16;
+    y1 = cy + in8;
+    y2 = cy + in16;
 
-		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1);
-		gfx_draw_colour_line (x1, y1, x2, y1, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1 - 1, y1, x1 - 1, y2, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1, y1, x1, y2, GFX_COL_WHITE);
+    gfx_draw_colour_line(x1 + 1, y1, x1 + 1, y2, GFX_COL_GREY_1);
 
-		x1 = cx + in8;
-		x2 = cx + in16;
+    x1 = cx - in8;
+    y1 = cy;
+    x2 = cx - in16;
 
-		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1);
-		gfx_draw_colour_line (x1, y1, x2, y1, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1);
-	}
+    gfx_draw_colour_line(x1, y1 - 1, x2, y1 - 1, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1, y1, x2, y1, GFX_COL_WHITE);
+    gfx_draw_colour_line(x1, y1 + 1, x2, y1 + 1, GFX_COL_GREY_1);
+
+    x1 = cx + in8;
+    x2 = cx + in16;
+
+    gfx_draw_colour_line(x1, y1 - 1, x2, y1 - 1, GFX_COL_GREY_1);
+    gfx_draw_colour_line(x1, y1, x2, y1, GFX_COL_WHITE);
+    gfx_draw_colour_line(x1, y1 + 1, x2, y1 + 1, GFX_COL_GREY_1);
+  }
 }
 
-
-void arrow_right (void)
+void arrow_right(void)
 {
-	switch (current_screen)
-	{
-		case SCR_MARKET_PRICES:
-			buy_stock();
-			break;
-		
-		case SCR_SETTINGS:
-			select_right_setting();
-			break;
+  switch (current_screen)
+  {
+  case SCR_MARKET_PRICES:
+    buy_stock();
+    break;
 
-		case SCR_SHORT_RANGE:
-		case SCR_GALACTIC_CHART:
-			move_cross(1, 0);
-			break;
+  case SCR_SETTINGS:
+    select_right_setting();
+    break;
 
-		case SCR_FRONT_VIEW:
-		case SCR_REAR_VIEW:
-		case SCR_RIGHT_VIEW:
-		case SCR_LEFT_VIEW:
-			if (PlayerFlight().roll > 0)
-				PlayerFlight().roll = 0;
-			else
-			{
-				ramp_flight_roll(-ROLL_RAMP_STEP);
-				rolling = 1;
-			}
-			break;
-	}
+  case SCR_SHORT_RANGE:
+  case SCR_GALACTIC_CHART:
+    move_cross(1, 0);
+    break;
+
+  case SCR_FRONT_VIEW:
+  case SCR_REAR_VIEW:
+  case SCR_RIGHT_VIEW:
+  case SCR_LEFT_VIEW:
+    if (PlayerFlight().roll > 0)
+      PlayerFlight().roll = 0;
+    else
+    {
+      ramp_flight_roll(-ROLL_RAMP_STEP);
+      rolling = 1;
+    }
+    break;
+  }
 }
 
-
-void arrow_left (void)
+void arrow_left(void)
 {
-	switch (current_screen)
-	{
-		case SCR_MARKET_PRICES:
-			sell_stock();
-			break;
+  switch (current_screen)
+  {
+  case SCR_MARKET_PRICES:
+    sell_stock();
+    break;
 
-		case SCR_SETTINGS:
-			select_left_setting();
-			break;
-		
-		case SCR_SHORT_RANGE:
-		case SCR_GALACTIC_CHART:
-			move_cross (-1, 0);
-			break;
+  case SCR_SETTINGS:
+    select_left_setting();
+    break;
 
-		case SCR_FRONT_VIEW:
-		case SCR_REAR_VIEW:
-		case SCR_RIGHT_VIEW:
-		case SCR_LEFT_VIEW:
-			if (PlayerFlight().roll < 0)
-				PlayerFlight().roll = 0;
-			else
-			{
-				ramp_flight_roll(ROLL_RAMP_STEP);
-				rolling = 1;
-			}
-			break;
-	}
+  case SCR_SHORT_RANGE:
+  case SCR_GALACTIC_CHART:
+    move_cross(-1, 0);
+    break;
+
+  case SCR_FRONT_VIEW:
+  case SCR_REAR_VIEW:
+  case SCR_RIGHT_VIEW:
+  case SCR_LEFT_VIEW:
+    if (PlayerFlight().roll < 0)
+      PlayerFlight().roll = 0;
+    else
+    {
+      ramp_flight_roll(ROLL_RAMP_STEP);
+      rolling = 1;
+    }
+    break;
+  }
 }
 
-
-void arrow_up (void)
+void arrow_up(void)
 {
-	switch (current_screen)
-	{
-		case SCR_MARKET_PRICES:
-			select_previous_stock();
-			break;
+  switch (current_screen)
+  {
+  case SCR_MARKET_PRICES:
+    select_previous_stock();
+    break;
 
-		case SCR_EQUIP_SHIP:
-			select_previous_equip();
-			break;
+  case SCR_EQUIP_SHIP:
+    select_previous_equip();
+    break;
 
-		case SCR_OPTIONS:
-			select_previous_option();
-			break;
+  case SCR_OPTIONS:
+    select_previous_option();
+    break;
 
-		case SCR_SETTINGS:
-			select_up_setting();
-			break;
-		
-		case SCR_SHORT_RANGE:
-		case SCR_GALACTIC_CHART:
-			move_cross (0, -1);
-			break;
+  case SCR_SETTINGS:
+    select_up_setting();
+    break;
 
-		case SCR_FRONT_VIEW:
-		case SCR_REAR_VIEW:
-		case SCR_RIGHT_VIEW:
-		case SCR_LEFT_VIEW:
-			if (PlayerFlight().climb > 0)
-				PlayerFlight().climb = 0;
-			else
-			{
-				ramp_flight_climb(-CLIMB_RAMP_STEP);
-			}
-			climbing = 1;
-			break;
-	}
+  case SCR_SHORT_RANGE:
+  case SCR_GALACTIC_CHART:
+    move_cross(0, -1);
+    break;
+
+  case SCR_FRONT_VIEW:
+  case SCR_REAR_VIEW:
+  case SCR_RIGHT_VIEW:
+  case SCR_LEFT_VIEW:
+    if (PlayerFlight().climb > 0)
+      PlayerFlight().climb = 0;
+    else
+      ramp_flight_climb(-CLIMB_RAMP_STEP);
+    climbing = 1;
+    break;
+  }
 }
 
-
-
-void arrow_down (void)
+void arrow_down(void)
 {
-	switch (current_screen)
-	{
-		case SCR_MARKET_PRICES:
-			select_next_stock();
-			break;
+  switch (current_screen)
+  {
+  case SCR_MARKET_PRICES:
+    select_next_stock();
+    break;
 
-		case SCR_EQUIP_SHIP:
-			select_next_equip();
-			break;
-		
-		case SCR_OPTIONS:
-			select_next_option();
-			break;
+  case SCR_EQUIP_SHIP:
+    select_next_equip();
+    break;
 
-		case SCR_SETTINGS:
-			select_down_setting();
-			break;
-		
-		case SCR_SHORT_RANGE:
-		case SCR_GALACTIC_CHART:
-			move_cross (0, 1);
-			break;
+  case SCR_OPTIONS:
+    select_next_option();
+    break;
 
-		case SCR_FRONT_VIEW:
-		case SCR_REAR_VIEW:
-		case SCR_RIGHT_VIEW:
-		case SCR_LEFT_VIEW:
-			if (PlayerFlight().climb < 0)
-				PlayerFlight().climb = 0;
-			else
-			{
-				ramp_flight_climb(CLIMB_RAMP_STEP);
-			}
-			climbing = 1;
-			break;
+  case SCR_SETTINGS:
+    select_down_setting();
+    break;
 
-	}
+  case SCR_SHORT_RANGE:
+  case SCR_GALACTIC_CHART:
+    move_cross(0, 1);
+    break;
+
+  case SCR_FRONT_VIEW:
+  case SCR_REAR_VIEW:
+  case SCR_RIGHT_VIEW:
+  case SCR_LEFT_VIEW:
+    if (PlayerFlight().climb < 0)
+      PlayerFlight().climb = 0;
+    else
+      ramp_flight_climb(CLIMB_RAMP_STEP);
+    climbing = 1;
+    break;
+  }
 }
 
-
-void return_pressed (void)
+void return_pressed(void)
 {
-	switch (current_screen)
-	{
-		case SCR_EQUIP_SHIP:
-			buy_equip();
-			break;
-		
-		case SCR_OPTIONS:
-			do_option();
-			break;
+  switch (current_screen)
+  {
+  case SCR_EQUIP_SHIP:
+    buy_equip();
+    break;
 
-		case SCR_SETTINGS:
-			toggle_setting();
-			break;
-	}	
+  case SCR_OPTIONS:
+    do_option();
+    break;
+
+  case SCR_SETTINGS:
+    toggle_setting();
+    break;
+  }
 }
 
-
-void y_pressed (void)
+void y_pressed(void)
 {
-	switch (current_screen)
-	{
-		case SCR_QUIT:
-			finish_game();
-			break;
-	}
+  switch (current_screen)
+  {
+  case SCR_QUIT:
+    finish_game();
+    break;
+  }
 }
 
-
-void n_pressed (void)
+void n_pressed(void)
 {
-	switch (current_screen)
-	{
-		case SCR_QUIT:
-			if (docked)
-				display_commander_status();
-			else
-				current_screen = SCR_FRONT_VIEW;
-			break;
-	}
+  switch (current_screen)
+  {
+  case SCR_QUIT:
+    if (docked)
+      display_commander_status();
+    else
+      current_screen = SCR_FRONT_VIEW;
+    break;
+  }
 }
 
-
-void d_pressed (void)
+void d_pressed(void)
 {
-	switch (current_screen)
-	{
-		case SCR_GALACTIC_CHART:
-		case SCR_SHORT_RANGE:
-    		show_distance_to_planet();
-			break;
-		
-		case SCR_FRONT_VIEW:
-		case SCR_REAR_VIEW:
-		case SCR_RIGHT_VIEW:
-		case SCR_LEFT_VIEW:
-			if (auto_pilot)
-				disengage_auto_pilot();
-			break;
-	}
+  switch (current_screen)
+  {
+  case SCR_GALACTIC_CHART:
+  case SCR_SHORT_RANGE:
+    show_distance_to_planet();
+    break;
+
+  case SCR_FRONT_VIEW:
+  case SCR_REAR_VIEW:
+  case SCR_RIGHT_VIEW:
+  case SCR_LEFT_VIEW:
+    if (auto_pilot)
+      disengage_auto_pilot();
+    break;
+  }
 }
 
-
-void f_pressed (void)
+void f_pressed(void)
 {
-	if ((current_screen == SCR_GALACTIC_CHART) ||
-		(current_screen == SCR_SHORT_RANGE))
-	{
-		find_input = 1;
-		*find_name = '\0';
-		gfx_clear_text_area();
-		gfx_display_text (16, 340, "Planet Name?");
-	}
+  if ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE))
+  {
+    find_input = 1;
+    *find_name = '\0';
+    gfx_clear_text_area();
+    gfx_display_text(16, 340, "Planet Name?");
+  }
 }
 
-
-void add_find_char (int letter)
+void add_find_char(int letter)
 {
-	char str[40];
-	
-	if (strlen (find_name) == 16)
-		return;
-		
-	str[0] = toupper (letter);
-	str[1] = '\0';
-	strcat (find_name, str);
+  char str[40];
 
-	sprintf (str, "Planet Name? %s", find_name);		
-	gfx_clear_text_area ();
-	gfx_display_text(16, 340, str);
+  if (strlen(find_name) == 16)
+    return;
+
+  str[0] = toupper(letter);
+  str[1] = '\0';
+  strcat(find_name, str);
+
+  sprintf(str, "Planet Name? %s", find_name);
+  gfx_clear_text_area();
+  gfx_display_text(16, 340, str);
 }
 
-
-void delete_find_char (void)
+void delete_find_char(void)
 {
-	char str[40];
-	int len;
+  char str[40];
 
-	len = strlen (find_name);
-	if (len == 0)
-		return;
-		
-	find_name[len - 1] = '\0';	
-		
-	sprintf (str, "Planet Name? %s", find_name);		
-	gfx_clear_text_area();
-	gfx_display_text(16, 340, str);
+  size_t len = strlen(find_name);
+  if (len == 0)
+    return;
+
+  find_name[len - 1] = '\0';
+
+  sprintf(str, "Planet Name? %s", find_name);
+  gfx_clear_text_area();
+  gfx_display_text(16, 340, str);
 }
 
 void o_pressed()
 {
-	switch (current_screen)
-	{
-		case SCR_GALACTIC_CHART:
-		case SCR_SHORT_RANGE:
-    		move_cursor_to_origin();
-			break;
-	}
+  switch (current_screen)
+  {
+  case SCR_GALACTIC_CHART:
+  case SCR_SHORT_RANGE:
+    move_cursor_to_origin();
+    break;
+  }
 }
 
-
-void auto_dock (void)
+void auto_dock(void)
 {
-	struct local_object ship;
+  struct local_object ship;
 
-	ship.location.x = 0;
-	ship.location.y = 0;
-	ship.location.z = 0;
-	
-	set_init_matrix (ship.rotmat);
-	ship.rotmat[2].z = 1;
-	ship.rotmat[0].x = -1;
-	ship.type = -96;
-	ship.velocity = PlayerFlight().speed;
-	ship.acceleration = 0;
-	ship.bravery = 0;
-	ship.rotz = 0;
-	ship.rotx = 0;
+  ship.location.x = 0;
+  ship.location.y = 0;
+  ship.location.z = 0;
 
-	auto_pilot_ship (&ship);
+  set_init_matrix(ship.rotmat);
+  ship.rotmat[2].z = 1;
+  ship.rotmat[0].x = -1;
+  ship.type = -96;
+  ship.velocity = PlayerFlight().speed;
+  ship.acceleration = 0;
+  ship.bravery = 0;
+  ship.rotz = 0;
+  ship.rotx = 0;
 
-	if (ship.velocity > 22)
-		PlayerFlight().speed = 22;
-	else
-		PlayerFlight().speed = ship.velocity;
-	
-	if (ship.acceleration > 0)
-	{
-		PlayerFlight().speed++;
-		if (PlayerFlight().speed > 22)
-			PlayerFlight().speed = 22;
-	}
+  auto_pilot_ship(&ship);
 
-	if (ship.acceleration < 0)
-	{
-		PlayerFlight().speed--;
-		if (PlayerFlight().speed < 1)
-			PlayerFlight().speed = 1;
-	}	
+  if (ship.velocity > 22)
+    PlayerFlight().speed = 22;
+  else
+    PlayerFlight().speed = ship.velocity;
 
-	if (ship.rotx == 0)
-		PlayerFlight().climb = 0;
-	
-	if (ship.rotx < 0)
-	{
-		increase_flight_climb();
+  if (ship.acceleration > 0)
+  {
+    PlayerFlight().speed++;
+    if (PlayerFlight().speed > 22)
+      PlayerFlight().speed = 22;
+  }
 
-		if (ship.rotx < -1)
-			increase_flight_climb();
-	}
-	
-	if (ship.rotx > 0)
-	{
-		decrease_flight_climb();
+  if (ship.acceleration < 0)
+  {
+    PlayerFlight().speed--;
+    if (PlayerFlight().speed < 1)
+      PlayerFlight().speed = 1;
+  }
 
-		if (ship.rotx > 1)
-			decrease_flight_climb();
-	}
-	
-	if (ship.rotz == 127)
-		PlayerFlight().roll = -14;
-	else
-	{
-		if (ship.rotz == 0)
-			PlayerFlight().roll = 0;
+  if (ship.rotx == 0)
+    PlayerFlight().climb = 0;
 
-		if (ship.rotz > 0)
-		{
-			increase_flight_roll();
+  if (ship.rotx < 0)
+  {
+    increase_flight_climb();
 
-			if (ship.rotz > 1)
-				increase_flight_roll();
-		}
-		
-		if (ship.rotz < 0)
-		{
-			decrease_flight_roll();
+    if (ship.rotx < -1)
+      increase_flight_climb();
+  }
 
-			if (ship.rotz < -1)
-				decrease_flight_roll();
-		}
-	}
+  if (ship.rotx > 0)
+  {
+    decrease_flight_climb();
+
+    if (ship.rotx > 1)
+      decrease_flight_climb();
+  }
+
+  if (ship.rotz == 127)
+    PlayerFlight().roll = -14;
+  else
+  {
+    if (ship.rotz == 0)
+      PlayerFlight().roll = 0;
+
+    if (ship.rotz > 0)
+    {
+      increase_flight_roll();
+
+      if (ship.rotz > 1)
+        increase_flight_roll();
+    }
+
+    if (ship.rotz < 0)
+    {
+      decrease_flight_roll();
+
+      if (ship.rotz < -1)
+        decrease_flight_roll();
+    }
+  }
 }
 
-
-void run_escape_sequence (void)
+void run_escape_sequence(void)
 {
-	int i;
-	int newship;
-	Matrix rotmat;
-	
-	current_screen = SCR_ESCAPE_POD;
-	
-	PlayerFlight().speed = 1;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
+  int i;
+  int newship;
+  Matrix rotmat;
 
-	set_init_matrix (rotmat);
-	rotmat[2].z = 1.0;
-	
-	newship = add_new_ship (SHIP_COBRA3, 0, 0, 200, rotmat, -127, -127);
-	local_objects[newship].velocity = 7;
-	snd_play_sample (SND_LAUNCH);
+  current_screen = SCR_ESCAPE_POD;
 
-	for (i = 0; i < 90; i++)
-	{
-		if (i == 40)
-		{
-			local_objects[newship].flags |= FLG_DEAD;
-			snd_play_sample (SND_EXPLODE);
-		}
+  PlayerFlight().speed = 1;
+  PlayerFlight().roll = 0;
+  PlayerFlight().climb = 0;
 
-		gfx_set_clip_region (1, 1, 510, 383);
-		gfx_clear_display();
-		update_starfield();
-		update_local_objects();
+  set_init_matrix(rotmat);
+  rotmat[2].z = 1.0;
 
-		local_objects[newship].location.x = 0;
-		local_objects[newship].location.y = 0;
-		local_objects[newship].location.z += 2;
+  newship = add_new_ship(SHIP_COBRA3, 0, 0, 200, rotmat, -127, -127);
+  local_objects[newship].velocity = 7;
+  snd_play_sample(SND_LAUNCH);
 
-		gfx_display_centre_text (358, "Escape pod launched - Ship auto-destuct initiated.", 120, GFX_COL_WHITE);
-		
-		update_console();
-		gfx_update_screen();
-	}
+  for (i = 0; i < 90; i++)
+  {
+    if (i == 40)
+    {
+      local_objects[newship].flags |= FLG_DEAD;
+      snd_play_sample(SND_EXPLODE);
+    }
 
-	
-	while ((ship_count[SHIP_CORIOLIS] == 0) &&
-		   (ship_count[SHIP_DODEC] == 0))
-	{
-		auto_dock();
+    gfx_set_clip_region(1, 1, 510, 383);
+    gfx_clear_display();
+    update_starfield();
+    update_local_objects();
 
-		if ((abs(PlayerFlight().roll) < 3) && (abs(PlayerFlight().climb) < 3))
-		{
-			for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
-			{
-				if (local_objects[i].type != 0)
-					local_objects[i].location.z -= 1500;
-			}
+    local_objects[newship].location.x = 0;
+    local_objects[newship].location.y = 0;
+    local_objects[newship].location.z += 2;
 
-		}
+    gfx_display_centre_text(358, "Escape pod launched - Ship auto-destuct initiated.", 120, GFX_COL_WHITE);
 
-		warp_stars = 1;
-		gfx_set_clip_region (1, 1, 510, 383);
-		gfx_clear_display();
-		update_starfield();
-		update_local_objects();
-		update_console();
-		gfx_update_screen();
-	}
+    update_console();
+    gfx_update_screen();
+  }
 
-	abandon_ship();
+  while ((ship_count[SHIP_CORIOLIS] == 0) && (ship_count[SHIP_DODEC] == 0))
+  {
+    auto_dock();
+
+    if ((abs(PlayerFlight().roll) < 3) && (abs(PlayerFlight().climb) < 3))
+    {
+      for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
+      {
+        if (local_objects[i].type != 0)
+          local_objects[i].location.z -= 1500;
+      }
+    }
+
+    warp_stars = 1;
+    gfx_set_clip_region(1, 1, 510, 383);
+    gfx_clear_display();
+    update_starfield();
+    update_local_objects();
+    update_console();
+    gfx_update_screen();
+  }
+
+  abandon_ship();
 }
-
 
 // Pending fire-missile intent + the locked target it launches at, for the next
 // input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
@@ -798,522 +738,498 @@ unsigned int g_missile_lock_target = 0xFFFFFFFFu;
 // is authoritative, so we pick the target from the replicated view and remember its
 // id; M then launches a homing missile at exactly that target. With nothing in the
 // sights, nothing locks. Falls back to the legacy arm when not replicated.
-static void lock_missile_target (void)
+static void lock_missile_target(void)
 {
-	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		arm_missile();
-		return;
-	}
+  if (!Client::ReplicationClientInstance().IsOpen())
+  {
+    arm_missile();
+    return;
+  }
 
-	if (cmdr.missiles == 0)
-		return;
+  if (cmdr.missiles == 0)
+    return;
 
-	const unsigned int tgt = find_lock_target();
-	if (tgt == 0xFFFFFFFFu)
-		return;   // nothing in the sights to lock
+  const unsigned int tgt = find_lock_target();
+  if (tgt == 0xFFFFFFFFu)
+    return; // nothing in the sights to lock
 
-	g_missile_lock_target = tgt;
-	missile_target = 0;   // HUD: a missile is locked (red indicator)
+  g_missile_lock_target = tgt;
+  missile_target = 0; // HUD: a missile is locked (red indicator)
 }
 
 // Clear the missile lock (U key).
-static void unlock_missile_target (void)
+static void unlock_missile_target(void)
 {
-	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		unarm_missile();
-		return;
-	}
+  if (!Client::ReplicationClientInstance().IsOpen())
+  {
+    unarm_missile();
+    return;
+  }
 
-	g_missile_lock_target = 0xFFFFFFFFu;
-	missile_target = MISSILE_UNARMED;   // HUD: no lock
-	snd_play_sample (SND_BOOP);
+  g_missile_lock_target = 0xFFFFFFFFu;
+  missile_target = MISSILE_UNARMED; // HUD: no lock
+  snd_play_sample(SND_BOOP);
 }
 
 // Launch a missile (M key). Thin client: only when a target is locked (T) and a
 // round is in the rack; the server spawns a projectile that homes that specific
 // locked target. No lock -> nothing fires. Falls back to the legacy local spawn
 // when not replicated.
-static void launch_missile (void)
+static void launch_missile(void)
 {
-	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		fire_missile();
-		return;
-	}
+  if (!Client::ReplicationClientInstance().IsOpen())
+  {
+    fire_missile();
+    return;
+  }
 
-	if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
-		return;
+  if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
+    return;
 
-	s_fire_missile_intent = true;
-	s_fire_missile_target = g_missile_lock_target;
-	cmdr.missiles--;
-	g_missile_lock_target = 0xFFFFFFFFu;
-	missile_target = MISSILE_UNARMED;   // lock consumed
-	snd_play_sample (SND_MISSILE);
+  s_fire_missile_intent = true;
+  s_fire_missile_target = g_missile_lock_target;
+  cmdr.missiles--;
+  g_missile_lock_target = 0xFFFFFFFFu;
+  missile_target = MISSILE_UNARMED; // lock consumed
+  snd_play_sample(SND_MISSILE);
 }
 
-
-void handle_flight_keys (void)
+void handle_flight_keys(void)
 {
-    int keyasc;
-	
-	if (docked &&
-	    ((current_screen == SCR_MARKET_PRICES) ||
-		 (current_screen == SCR_OPTIONS) ||
-		 (current_screen == SCR_SETTINGS) ||
-		 (current_screen == SCR_EQUIP_SHIP)))
-		kbd_read_key();
+  int keyasc;
 
-	kbd_poll_keyboard();
+  if (docked && ((current_screen == SCR_MARKET_PRICES) || (current_screen == SCR_OPTIONS) || (current_screen == SCR_SETTINGS) || (
+    current_screen == SCR_EQUIP_SHIP)))
+    kbd_read_key();
 
-	if (game_paused)
-	{
-		if (kbd_resume_pressed)
-			game_paused = 0;
-		return;
-	}
-		
-	if (kbd_F1_pressed)
-	{
-		find_input = 0;
-		
-		if (docked)
-			launch_player();
-		else
-		{
-			if (current_screen != SCR_FRONT_VIEW)
-			{
-				current_screen = SCR_FRONT_VIEW;
-				flip_stars();
-			}
-		}
-	}
+  kbd_poll_keyboard();
 
-	if (kbd_F2_pressed)
-	{
-		find_input = 0;
-		
-		if (!docked)
-		{
-			if (current_screen != SCR_REAR_VIEW)
-			{
-				current_screen = SCR_REAR_VIEW;
-				flip_stars();
-			}
-		}
-	}
+  if (game_paused)
+  {
+    if (kbd_resume_pressed)
+      game_paused = 0;
+    return;
+  }
 
-	if (kbd_F3_pressed)
-	{
-		find_input = 0;
-		
-		if (!docked)
-		{
-			if (current_screen != SCR_LEFT_VIEW)
-			{
-				current_screen = SCR_LEFT_VIEW;
-				flip_stars();
-			}
-		}
-	}
+  if (kbd_F1_pressed)
+  {
+    find_input = 0;
 
-	if (kbd_F4_pressed)
-	{
-		find_input = 0;
-		
-		if (docked)
-			equip_ship();
-		else
-		{
-			if (current_screen != SCR_RIGHT_VIEW)
-			{
-				current_screen = SCR_RIGHT_VIEW;
-				flip_stars();
-			}
-		}
-	}
+    if (docked)
+      launch_player();
+    else
+    {
+      if (current_screen != SCR_FRONT_VIEW)
+      {
+        current_screen = SCR_FRONT_VIEW;
+        flip_stars();
+      }
+    }
+  }
 
-	
-	if (kbd_F5_pressed)
-	{
-		find_input = 0;
-		old_cross_x = -1;
-		display_galactic_chart();
-	}
+  if (kbd_F2_pressed)
+  {
+    find_input = 0;
 
-	if (kbd_F6_pressed)
-	{
-		find_input = 0;
-		old_cross_x = -1;
-		display_short_range_chart();
-	}
+    if (!docked)
+    {
+      if (current_screen != SCR_REAR_VIEW)
+      {
+        current_screen = SCR_REAR_VIEW;
+        flip_stars();
+      }
+    }
+  }
 
-	if (kbd_F7_pressed)
-	{
-		find_input = 0;
-		display_data_on_planet();
-	}
+  if (kbd_F3_pressed)
+  {
+    find_input = 0;
 
-	if (kbd_F8_pressed && (!witchspace))
-	{
-		find_input = 0;
-		display_market_prices();
-	}	
+    if (!docked)
+    {
+      if (current_screen != SCR_LEFT_VIEW)
+      {
+        current_screen = SCR_LEFT_VIEW;
+        flip_stars();
+      }
+    }
+  }
 
-	if (kbd_F9_pressed)
-	{
-		find_input = 0;
-		display_commander_status();
-	}
+  if (kbd_F4_pressed)
+  {
+    find_input = 0;
 
-	if (kbd_F10_pressed)
-	{
-		find_input = 0;
-		display_inventory();
-	}
-	
-	if (kbd_F11_pressed)
-	{
-		find_input = 0;
-		display_options();
-	}
+    if (docked)
+      equip_ship();
+    else
+    {
+      if (current_screen != SCR_RIGHT_VIEW)
+      {
+        current_screen = SCR_RIGHT_VIEW;
+        flip_stars();
+      }
+    }
+  }
 
-	// F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
-	// triggered so holding the key flips the view exactly once.
-	static int f12_was_down = 0;
-	if (kbd_F12_pressed)
-	{
-		if (!f12_was_down)
-		{
-			Neuron::Client::SetCameraMode(
-				Neuron::Client::GetCameraMode() == Neuron::Client::CameraMode::Cockpit
-					? Neuron::Client::CameraMode::Chase
-					: Neuron::Client::CameraMode::Cockpit);
-		}
-		f12_was_down = 1;
-	}
-	else
-	{
-		f12_was_down = 0;
-	}
+  if (kbd_F5_pressed)
+  {
+    find_input = 0;
+    old_cross_x = -1;
+    display_galactic_chart();
+  }
 
-	if (find_input)
-	{
-		keyasc = kbd_read_key();
-		
-		if (kbd_enter_pressed)
-		{
-			find_input = 0;
-			find_planet_by_name (find_name);
-			return;
-		}
+  if (kbd_F6_pressed)
+  {
+    find_input = 0;
+    old_cross_x = -1;
+    display_short_range_chart();
+  }
 
-		if (kbd_backspace_pressed)
-		{
-			delete_find_char();
-			return;
-		}
+  if (kbd_F7_pressed)
+  {
+    find_input = 0;
+    display_data_on_planet();
+  }
 
-		if (isalpha(keyasc))
-			add_find_char (keyasc);
+  if (kbd_F8_pressed && (!witchspace))
+  {
+    find_input = 0;
+    display_market_prices();
+  }
 
-		return;		
-	}
-	
-	if (kbd_y_pressed)
-		y_pressed();
+  if (kbd_F9_pressed)
+  {
+    find_input = 0;
+    display_commander_status();
+  }
 
-	if (kbd_n_pressed)
-		n_pressed();
+  if (kbd_F10_pressed)
+  {
+    find_input = 0;
+    display_inventory();
+  }
 
- 
-	if (kbd_fire_pressed)
-	{
-		if ((!docked) && (draw_lasers == 0))
-			draw_lasers = fire_laser();
-	}
+  if (kbd_F11_pressed)
+  {
+    find_input = 0;
+    display_options();
+  }
 
-	if (kbd_dock_pressed)
-	{
-		if (!docked && cmdr.docking_computer)
-		{
-			if (instant_dock)
-				engage_docking_computer();
-			else
-				engage_auto_pilot();
-		}
-	}
+  // F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
+  // triggered so holding the key flips the view exactly once.
+  static int f12_was_down = 0;
+  if (kbd_F12_pressed)
+  {
+    if (!f12_was_down)
+    {
+      Neuron::Client::SetCameraMode(Client::GetCameraMode() == Client::CameraMode::Cockpit
+                                      ? Client::CameraMode::Chase
+                                      : Client::CameraMode::Cockpit);
+    }
+    f12_was_down = 1;
+  }
+  else
+    f12_was_down = 0;
 
-	if (kbd_d_pressed)
-		d_pressed();
-	
-	if (kbd_ecm_pressed)
-	{
-		if (!docked && cmdr.ecm)
-			activate_ecm(1);
-	}
+  if (find_input)
+  {
+    keyasc = kbd_read_key();
 
-	if (kbd_find_pressed)
-		f_pressed ();
-	
-	if (kbd_hyperspace_pressed && (!docked))
-	{
-		if (kbd_ctrl_pressed)
-			start_galactic_hyperspace();
-		else
-			start_hyperspace();
-	}
+    if (kbd_enter_pressed)
+    {
+      find_input = 0;
+      find_planet_by_name(find_name);
+      return;
+    }
 
-	// Docked at a station's "teleport building": the hyperspace key on either chart
-	// jumps to the system under the crosshair (server-validated). Thin-client only;
-	// teleport_to_cursor() is a no-op without a replicated galaxy.
-	if (kbd_hyperspace_pressed && docked &&
-		((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
-		teleport_to_cursor();
+    if (kbd_backspace_pressed)
+    {
+      delete_find_char();
+      return;
+    }
 
-	if (kbd_jump_pressed && (!docked) && (!witchspace))
-	{
-		jump_warp();
-	}
-	
-	if (kbd_fire_missile_pressed)
-	{
-		if (!docked)
-			launch_missile();
-	}
+    if (isalpha(keyasc))
+      add_find_char(keyasc);
 
-	if (kbd_origin_pressed)
-		o_pressed();
+    return;
+  }
 
-	if (kbd_pause_pressed)
-		game_paused = 1;
-	
-	if (kbd_target_missile_pressed)
-	{
-		if (!docked)
-			lock_missile_target();
-	}
+  if (kbd_y_pressed)
+    y_pressed();
 
-	if (kbd_unarm_missile_pressed)
-	{
-		if (!docked)
-			unlock_missile_target();
-	}
-	
-	if (kbd_inc_speed_pressed)
-	{
-		if (!docked)
-		{
-			if (PlayerFlight().speed < PlayerCaps().maxSpeed)
-				PlayerFlight().speed++;
-		}
-	}
+  if (kbd_n_pressed)
+    n_pressed();
 
-	if (kbd_dec_speed_pressed)
-	{
-		if (!docked)
-		{
-			if (PlayerFlight().speed > 1)
-				PlayerFlight().speed--;
-		}
-	}
+  if (kbd_fire_pressed)
+  {
+    if ((!docked) && (draw_lasers == 0))
+      draw_lasers = fire_laser();
+  }
 
-	if (kbd_up_pressed)
-		arrow_up();
-	
-	if (kbd_down_pressed)
-		arrow_down();
+  if (kbd_dock_pressed)
+  {
+    if (!docked && cmdr.docking_computer)
+    {
+      if (instant_dock)
+        engage_docking_computer();
+      else
+        engage_auto_pilot();
+    }
+  }
 
-	if (kbd_left_pressed)
-		arrow_left();
-		
-	if (kbd_right_pressed)
-		arrow_right();
-	
-	if (kbd_enter_pressed)
-		return_pressed();
+  if (kbd_d_pressed)
+    d_pressed();
 
-	if (kbd_energy_bomb_pressed)
-	{
-		if ((!docked) && (cmdr.energy_bomb))
-		{
-			detonate_bomb = 1;
-			cmdr.energy_bomb = 0;
-		}
-	}		
+  if (kbd_ecm_pressed)
+  {
+    if (!docked && cmdr.ecm)
+      activate_ecm(1);
+  }
 
-	if (kbd_escape_pressed)
-	{
-		if ((!docked) && (cmdr.escape_pod) && (!witchspace))
-			run_escape_sequence();
-	}
+  if (kbd_find_pressed)
+    f_pressed();
+
+  if (kbd_hyperspace_pressed && (!docked))
+  {
+    if (kbd_ctrl_pressed)
+      start_galactic_hyperspace();
+    else
+      start_hyperspace();
+  }
+
+  // Docked at a station's "teleport building": the hyperspace key on either chart
+  // jumps to the system under the crosshair (server-validated). Thin-client only;
+  // teleport_to_cursor() is a no-op without a replicated galaxy.
+  if (kbd_hyperspace_pressed && docked && ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
+    teleport_to_cursor();
+
+  if (kbd_jump_pressed && (!docked) && (!witchspace))
+    jump_warp();
+
+  if (kbd_fire_missile_pressed)
+  {
+    if (!docked)
+      launch_missile();
+  }
+
+  if (kbd_origin_pressed)
+    o_pressed();
+
+  if (kbd_pause_pressed)
+    game_paused = 1;
+
+  if (kbd_target_missile_pressed)
+  {
+    if (!docked)
+      lock_missile_target();
+  }
+
+  if (kbd_unarm_missile_pressed)
+  {
+    if (!docked)
+      unlock_missile_target();
+  }
+
+  if (kbd_inc_speed_pressed)
+  {
+    if (!docked)
+    {
+      if (PlayerFlight().speed < PlayerCaps().maxSpeed)
+        PlayerFlight().speed++;
+    }
+  }
+
+  if (kbd_dec_speed_pressed)
+  {
+    if (!docked)
+    {
+      if (PlayerFlight().speed > 1)
+        PlayerFlight().speed--;
+    }
+  }
+
+  if (kbd_up_pressed)
+    arrow_up();
+
+  if (kbd_down_pressed)
+    arrow_down();
+
+  if (kbd_left_pressed)
+    arrow_left();
+
+  if (kbd_right_pressed)
+    arrow_right();
+
+  if (kbd_enter_pressed)
+    return_pressed();
+
+  if (kbd_energy_bomb_pressed)
+  {
+    if ((!docked) && (cmdr.energy_bomb))
+    {
+      detonate_bomb = 1;
+      cmdr.energy_bomb = 0;
+    }
+  }
+
+  if (kbd_escape_pressed)
+  {
+    if ((!docked) && (cmdr.escape_pod) && (!witchspace))
+      run_escape_sequence();
+  }
 }
 
-
-
-void set_commander_name (char *path)
+void set_commander_name(char* path)
 {
-	char *fname, *cname;
-	int i;
-	
-	fname = get_filename (path);
-	cname = cmdr.name;
+  char *fname, *cname;
+  int i;
 
-	for (i = 0; i < 31; i++)
-	{
-		if (!isalnum(*fname))
-			break;
-		
-		*cname++ = toupper(*fname++);
-	}	
+  fname = get_filename(path);
+  cname = cmdr.name;
 
-	*cname = '\0';
+  for (i = 0; i < 31; i++)
+  {
+    if (!isalnum(*fname))
+      break;
+
+    *cname++ = toupper(*fname++);
+  }
+
+  *cname = '\0';
 }
 
-
-void save_commander_screen (void)
+void save_commander_screen(void)
 {
-	char path[255];
-	int okay;
-	int rv;
-	
-	current_screen = SCR_SAVE_CMDR;
+  char path[255];
+  int okay;
+  int rv;
 
-	gfx_clear_display();
-	gfx_display_centre_text (10, "SAVE COMMANDER", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-	gfx_update_screen();
-	
-	strcpy (path, cmdr.name);
-	strcat (path, ".nkc");
-	
-	okay = gfx_request_file ("Save Commander", path, "nkc");
-	
-	if (!okay)
-	{
-		display_options();
-		return;
-	}
+  current_screen = SCR_SAVE_CMDR;
 
-	rv = save_commander_file (path);
+  gfx_clear_display();
+  gfx_display_centre_text(10, "SAVE COMMANDER", 140, GFX_COL_GOLD);
+  gfx_draw_line(0, 36, 511, 36);
+  gfx_update_screen();
 
-	if (rv)
-	{
-		gfx_display_centre_text (175, "Error Saving Commander!", 140, GFX_COL_GOLD);
-		return;
-	}
-	
-	gfx_display_centre_text (175, "Commander Saved.", 140, GFX_COL_GOLD);
+  strcpy(path, cmdr.name);
+  strcat(path, ".nkc");
 
-	set_commander_name (path);
-	saved_cmdr = cmdr;
-	saved_cmdr.ship_x = docked_planet.d;
-	saved_cmdr.ship_y = docked_planet.b;
+  okay = gfx_request_file("Save Commander", path, "nkc");
+
+  if (!okay)
+  {
+    display_options();
+    return;
+  }
+
+  rv = save_commander_file(path);
+
+  if (rv)
+  {
+    gfx_display_centre_text(175, "Error Saving Commander!", 140, GFX_COL_GOLD);
+    return;
+  }
+
+  gfx_display_centre_text(175, "Commander Saved.", 140, GFX_COL_GOLD);
+
+  set_commander_name(path);
+  saved_cmdr = cmdr;
+  saved_cmdr.ship_x = docked_planet.d;
+  saved_cmdr.ship_y = docked_planet.b;
 }
 
-
-void load_commander_screen (void)
+void load_commander_screen(void)
 {
-	char path[255];
-	int rv;
+  char path[255];
+  int rv;
 
-	gfx_clear_display();
-	gfx_display_centre_text (10, "LOAD COMMANDER", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-	gfx_update_screen();
-	
-	
-	strcpy (path, "jameson.nkc");
-	
-	rv = gfx_request_file ("Load Commander", path, "nkc");
+  gfx_clear_display();
+  gfx_display_centre_text(10, "LOAD COMMANDER", 140, GFX_COL_GOLD);
+  gfx_draw_line(0, 36, 511, 36);
+  gfx_update_screen();
 
-	if (rv == 0)
-		return;
+  strcpy(path, "jameson.nkc");
 
-	rv = load_commander_file (path);
+  rv = gfx_request_file("Load Commander", path, "nkc");
 
-	if (rv)
-	{
-		saved_cmdr = cmdr;
-		gfx_display_centre_text (175, "Error Loading Commander!", 140, GFX_COL_GOLD);
-		gfx_display_centre_text (200, "Press any key to continue.", 140, GFX_COL_GOLD);
-		gfx_update_screen();
-		kbd_wait_key();
-		return;
-	}
-	
-	restore_saved_commander();
-	set_commander_name (path);
-	saved_cmdr = cmdr;
-	update_console();
+  if (rv == 0)
+    return;
+
+  rv = load_commander_file(path);
+
+  if (rv)
+  {
+    saved_cmdr = cmdr;
+    gfx_display_centre_text(175, "Error Loading Commander!", 140, GFX_COL_GOLD);
+    gfx_display_centre_text(200, "Press any key to continue.", 140, GFX_COL_GOLD);
+    gfx_update_screen();
+    kbd_wait_key();
+    return;
+  }
+
+  restore_saved_commander();
+  set_commander_name(path);
+  saved_cmdr = cmdr;
+  update_console();
 }
 
-
-
-void run_first_intro_screen (void)
+void run_first_intro_screen(void)
 {
-	current_screen = SCR_INTRO_ONE;
+  current_screen = SCR_INTRO_ONE;
 
-	snd_play_midi (SND_ELITE_THEME, TRUE);
+  snd_play_midi(SND_ELITE_THEME, TRUE);
 
-	initialise_intro1();
+  initialise_intro1();
 
-	for (;;)
-	{
-		update_intro1();
+  for (;;)
+  {
+    update_intro1();
 
-		gfx_update_screen();
+    gfx_update_screen();
 
-		kbd_poll_keyboard();
+    kbd_poll_keyboard();
 
-		if (kbd_y_pressed)
-		{
-			snd_stop_midi();	
-			load_commander_screen();
-			break;
-		}
-		
-		if (kbd_n_pressed)
-		{ 
-			snd_stop_midi();	
-			break;
-		}
-	} 
+    if (kbd_y_pressed)
+    {
+      snd_stop_midi();
+      load_commander_screen();
+      break;
+    }
 
+    if (kbd_n_pressed)
+    {
+      snd_stop_midi();
+      break;
+    }
+  }
 }
 
-
-
-void run_second_intro_screen (void)
+void run_second_intro_screen(void)
 {
-	current_screen = SCR_INTRO_TWO;
-	
-	snd_play_midi (SND_BLUE_DANUBE, TRUE);
-		
-	initialise_intro2();
+  current_screen = SCR_INTRO_TWO;
 
-	PlayerFlight().speed = 3;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
+  snd_play_midi(SND_BLUE_DANUBE, TRUE);
 
-	for (;;)
-	{
-		update_intro2();
+  initialise_intro2();
 
-		gfx_update_screen();
+  PlayerFlight().speed = 3;
+  PlayerFlight().roll = 0;
+  PlayerFlight().climb = 0;
 
-		kbd_poll_keyboard();
+  for (;;)
+  {
+    update_intro2();
 
-		if (kbd_space_pressed) 
-			break;
-	} 
+    gfx_update_screen();
 
-	snd_stop_midi();
+    kbd_poll_keyboard();
+
+    if (kbd_space_pressed)
+      break;
+  }
+
+  snd_stop_midi();
 }
-
-
 
 /*
  * Draw the game over sequence. 
@@ -1321,89 +1237,77 @@ void run_second_intro_screen (void)
 
 void run_game_over_screen()
 {
-	int i;
-	int newship;
-	Matrix rotmat;
-	int type;
-	
-	current_screen = SCR_GAME_OVER;
-	gfx_set_clip_region (1, 1, 510, 383);
-	
-	PlayerFlight().speed = 6;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
-	clear_local_objects();
+  int i;
+  int newship;
+  Matrix rotmat;
+  int type;
 
-	set_init_matrix (rotmat);
+  current_screen = SCR_GAME_OVER;
+  gfx_set_clip_region(1, 1, 510, 383);
 
-	newship = add_new_ship (SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
-	local_objects[newship].flags |= FLG_DEAD;
+  PlayerFlight().speed = 6;
+  PlayerFlight().roll = 0;
+  PlayerFlight().climb = 0;
+  clear_local_objects();
 
-	for (i = 0; i < 5; i++)
-	{
-		type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
-		newship = add_new_ship (type, (rand255() & 63) - 32,
-								(rand255() & 63) - 32, -400, rotmat, 0, 0);
-		local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
-		local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
-		local_objects[newship].velocity = rand255() & 15;
-	}
-	
-	
-	for (i = 0; i < 100; i++)
-	{
-		gfx_clear_display();
-		update_starfield();
-		update_local_objects();
-		gfx_display_centre_text (190, "GAME OVER", 140, GFX_COL_GOLD);
-		gfx_update_screen();
-	}
+  set_init_matrix(rotmat);
+
+  newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
+  local_objects[newship].flags |= FLG_DEAD;
+
+  for (i = 0; i < 5; i++)
+  {
+    type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
+    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, -400, rotmat, 0, 0);
+    local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
+    local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
+    local_objects[newship].velocity = rand255() & 15;
+  }
+
+  for (i = 0; i < 100; i++)
+  {
+    gfx_clear_display();
+    update_starfield();
+    update_local_objects();
+    gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
+    gfx_update_screen();
+  }
 }
-
-
-
 
 /*
  * Draw a break pattern (for launching, docking and hyperspacing).
  * Just draw a very simple one for the moment.
  */
 
-void display_break_pattern (void)
+void display_break_pattern(void)
 {
-	int i;
+  int i;
 
-	gfx_set_clip_region (1, 1, 510, 383);
-	gfx_clear_display();
-	
-	for (i = 0; i < 20; i++)
-	{
-		gfx_draw_circle (256, 192, 30 + i * 15, GFX_COL_WHITE);
-		gfx_update_screen();
-	}	
+  gfx_set_clip_region(1, 1, 510, 383);
+  gfx_clear_display();
 
+  for (i = 0; i < 20; i++)
+  {
+    gfx_draw_circle(256, 192, 30 + i * 15, GFX_COL_WHITE);
+    gfx_update_screen();
+  }
 
-	if (docked)
-	{
-		check_mission_brief();
-		display_commander_status();
-		update_console();
-	}
-	else
-		current_screen = SCR_FRONT_VIEW;
+  if (docked)
+  {
+    check_mission_brief();
+    display_commander_status();
+    update_console();
+  }
+  else
+    current_screen = SCR_FRONT_VIEW;
 }
 
-
-void info_message (const char *message)
+void info_message(const char* message)
 {
-	strcpy (message_string, message);
-	message_count = 37;
-//	snd_play_sample (SND_BEEP);
+  strcpy(message_string, message);
+  message_count = 37;
+  //	snd_play_sample (SND_BEEP);
 }
-
-
-
-
-
 
 /*
  * Game entry point. Called by the platform layer (WinMain) once the
@@ -1414,306 +1318,292 @@ void info_message (const char *message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
-static void process_server_events (void)
+static void process_server_events(void)
 {
-	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	Neuron::Net::ReliableMessage msg;
-	while (rc.PollEvent(msg))
-	{
-		Neuron::Net::StationResponse resp;
-		uint32_t entityId = 0;
-		uint32_t killerId = 0;
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  Net::ReliableMessage msg;
+  while (rc.PollEvent(msg))
+  {
+    Net::StationResponse resp;
+    uint32_t entityId = 0;
+    uint32_t killerId = 0;
 
-		if (Neuron::Net::DecodeStationResponse(msg, resp))
-		{
-			if (resp.status == Neuron::Net::StationStatus::Ok)
-			{
-				cmdr.credits = resp.credits;
-				if (resp.commodity < NO_OF_STOCK_ITEMS)
-					cmdr.current_cargo[resp.commodity] = resp.cargo;
-			}
-		}
-		else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
-		{
-			// A kill/detonation: clear the lock if it was on the dead entity, drop
-			// it from the view, and play the explosion.
-			if (entityId == g_missile_lock_target)
-				g_missile_lock_target = 0xFFFFFFFFu;
-			rc.Forget(entityId);
-			snd_play_sample (SND_EXPLODE);
-		}
-		else if (Neuron::Net::DecodeDespawn(msg, entityId))
-		{
-			if (entityId == g_missile_lock_target)
-				g_missile_lock_target = 0xFFFFFFFFu;
-			rc.Forget(entityId);
-		}
-	}
+    if (Neuron::Net::DecodeStationResponse(msg, resp))
+    {
+      if (resp.status == Net::StationStatus::Ok)
+      {
+        cmdr.credits = resp.credits;
+        if (resp.commodity < NO_OF_STOCK_ITEMS)
+          cmdr.current_cargo[resp.commodity] = resp.cargo;
+      }
+    }
+    else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
+    {
+      // A kill/detonation: clear the lock if it was on the dead entity, drop
+      // it from the view, and play the explosion.
+      if (entityId == g_missile_lock_target)
+        g_missile_lock_target = 0xFFFFFFFFu;
+      rc.Forget(entityId);
+      snd_play_sample(SND_EXPLODE);
+    }
+    else if (Neuron::Net::DecodeDespawn(msg, entityId))
+    {
+      if (entityId == g_missile_lock_target)
+        g_missile_lock_target = 0xFFFFFFFFu;
+      rc.Forget(entityId);
+    }
+  }
 }
-
 
 // The four in-flight cockpit views render the 3D scene full-window; every other
 // screen (charts, station, intro, game-over, save/load) stays on the retro
 // letterboxed canvas.
-static int is_flight_view (int scr)
+static int is_flight_view(int scr)
 {
-	return (scr == SCR_FRONT_VIEW) || (scr == SCR_REAR_VIEW) ||
-	       (scr == SCR_LEFT_VIEW)  || (scr == SCR_RIGHT_VIEW);
+  return (scr == SCR_FRONT_VIEW) || (scr == SCR_REAR_VIEW) || (scr == SCR_LEFT_VIEW) || (scr == SCR_RIGHT_VIEW);
 }
-
 
 // Gather the player's flight intent and send it to the server. Driven from the
 // legacy flight state (PlayerFlight roll/climb/speed) that the flight keys and
 // the cockpit HUD already maintain, normalized to axes, so the server moves the
 // ship at exactly the speed shown on the dashboard. Used only in thin-client mode.
-static void send_player_input (void)
+static void send_player_input(void)
 {
-	static uint32_t seq = 0;
+  static uint32_t seq = 0;
 
-	const int maxRoll  = (PlayerCaps().maxRoll  > 0) ? PlayerCaps().maxRoll  : 1;
-	const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
-	const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
+  const int maxRoll = (PlayerCaps().maxRoll > 0) ? PlayerCaps().maxRoll : 1;
+  const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
+  const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
 
-	Neuron::Net::ClientInput in;
-	in.sequence = ++seq;
-	// The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
-	// whose handedness is the transpose of the world basis the server rotates and
-	// the client renders (BuildRenderRecords projects with Bᵀ). Negating the two
-	// rotation axes maps the screen-handed control into that world frame, so the
-	// felt direction of roll and level pitch is identical to before while a banked
-	// pitch now pivots about the ship's own axes instead of the world's.
-	in.rollAxis  = -(float)PlayerFlight().roll  / (float)maxRoll;
-	in.pitchAxis = -(float)PlayerFlight().climb / (float)maxClimb;
-	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
-	in.fire = (kbd_fire_pressed != 0);
-	in.fireMissile = s_fire_missile_intent;
-	in.missileTarget = s_fire_missile_intent ? (uint32_t)s_fire_missile_target
-	                                          : Neuron::Net::NO_MISSILE_TARGET;
-	s_fire_missile_intent = false;
+  Net::ClientInput in;
+  in.sequence = ++seq;
+  // The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
+  // whose handedness is the transpose of the world basis the server rotates and
+  // the client renders (BuildRenderRecords projects with Bᵀ). Negating the two
+  // rotation axes maps the screen-handed control into that world frame, so the
+  // felt direction of roll and level pitch is identical to before while a banked
+  // pitch now pivots about the ship's own axes instead of the world's.
+  in.rollAxis = -static_cast<float>(PlayerFlight().roll) / static_cast<float>(maxRoll);
+  in.pitchAxis = -static_cast<float>(PlayerFlight().climb) / static_cast<float>(maxClimb);
+  in.throttle = static_cast<float>(PlayerFlight().speed) / static_cast<float>(maxSpeed);
+  in.fire = (kbd_fire_pressed != 0);
+  in.fireMissile = s_fire_missile_intent;
+  in.missileTarget = s_fire_missile_intent ? s_fire_missile_target : Net::NO_MISSILE_TARGET;
+  s_fire_missile_intent = false;
 
-	Neuron::Client::ReplicationClientInstance().SendInput(in);
+  Client::ReplicationClientInstance().SendInput(in);
 }
 
-
-int game_main (void)
+int game_main(void)
 {
-	read_config_file();
+  read_config_file();
 
-	if (gfx_graphics_startup() == 1)
-	{
-		return 1;
-	}
-	
-	/* Start the sound system... */
-	snd_sound_startup();
+  if (gfx_graphics_startup() == 1)
+    return 1;
 
-	/* Do any setup necessary for the keyboard... */
-	kbd_keyboard_startup();
+  /* Start the sound system... */
+  snd_sound_startup();
 
-	// Server-only client: single-player has been retired, so we always connect to
-	// the authoritative server and render its world. The bind port and server
-	// address can be overridden with DSO_BIND / DSO_SERVER (dotted-quad host);
-	// they default to loopback for local play. The local-simulation path remains
-	// only as a degraded fallback if networking fails to initialise.
-	{
-		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+  /* Do any setup necessary for the keyboard... */
+  kbd_keyboard_startup();
 
-		uint16_t bindPort = 50000;
-		if (const char* b = getenv("DSO_BIND"))
-			bindPort = (uint16_t) atoi(b);
+  // Server-only client: single-player has been retired, so we always connect to
+  // the authoritative server and render its world. The bind port and server
+  // address can be overridden with DSO_BIND / DSO_SERVER (dotted-quad host);
+  // they default to loopback for local play. The local-simulation path remains
+  // only as a degraded fallback if networking fails to initialise.
+  {
+    Client::ReplicationClient& rc = Client::ReplicationClientInstance();
 
-		int a = 127, c = 0, d = 0, e = 1;
-		if (const char* host = getenv("DSO_SERVER"))
-			sscanf(host, "%d.%d.%d.%d", &a, &c, &d, &e);
+    uint16_t bindPort = 50000;
+    if (const char* b = getenv("DSO_BIND"))
+      bindPort = static_cast<uint16_t>(atoi(b));
 
-		rc.Open(bindPort);
-		rc.SetServerEndpoint(Neuron::Net::MakeEndpoint((uint8_t)a, (uint8_t)c, (uint8_t)d, (uint8_t)e, 40000));
-		// LocalPlayer is set by the server's AssignPlayer handshake; default 0.
-	}
+    int a = 127, c = 0, d = 0, e = 1;
+    if (const char* host = getenv("DSO_SERVER"))
+      sscanf(host, "%d.%d.%d.%d", &a, &c, &d, &e);
 
-	finish = 0;
-	auto_pilot = 0;
-	
-	while (!finish)
-	{
-		game_over = 0;	
-		initialise_game();
-		dock_player();
+    rc.Open(bindPort);
+    rc.SetServerEndpoint(Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
+                                           static_cast<uint8_t>(e), 40000));
+    // LocalPlayer is set by the server's AssignPlayer handshake; default 0.
+  }
 
-		update_console();
+  finish = 0;
+  auto_pilot = 0;
 
-		current_screen = SCR_FRONT_VIEW;
-		run_first_intro_screen();
-		run_second_intro_screen();
+  while (!finish)
+  {
+    game_over = 0;
+    initialise_game();
+    dock_player();
 
-		old_cross_x = -1;
-		old_cross_y = -1;
+    update_console();
 
-		dock_player ();
-		display_commander_status ();
-		
-		while (!game_over)
-		{
-			// Drain any replicated world state that arrived since last frame. This
-			// is a no-op until ReplicationClientInstance().Open() is called, so the
-			// single-player path is unchanged; once open, the client consumes the
-			// server's authoritative snapshots here instead of simulating locally.
-			Neuron::Client::ReplicationClientInstance().Pump();
-			if (Neuron::Client::ReplicationClientInstance().IsOpen())
-			{
-				process_server_events();
-				// Backstop: forget entities that silently left our area of interest
-				// (no despawn event is sent for those), so they don't pile up as
-				// ghosts. ~3s at the server's 30 Hz tick.
-				Neuron::Client::ReplicationClientInstance().EvictStale(90);
-			}
+    current_screen = SCR_FRONT_VIEW;
+    run_first_intro_screen();
+    run_second_intro_screen();
 
-			snd_update_sound();
-			gfx_update_screen();
-			// Full-window 3D for cockpit views (retro/letterboxed for menus); this
-			// also sets the aspect-aware optics used by the projection below.
-			gfx_set_scene_fullwindow (is_flight_view (current_screen));
-			gfx_set_scene_clip ();
+    old_cross_x = -1;
+    old_cross_y = -1;
 
-			rolling = 0;
-			climbing = 0;
+    dock_player();
+    display_commander_status();
 
-			handle_flight_keys ();
+    while (!game_over)
+    {
+      // Drain any replicated world state that arrived since last frame. This
+      // is a no-op until ReplicationClientInstance().Open() is called, so the
+      // single-player path is unchanged; once open, the client consumes the
+      // server's authoritative snapshots here instead of simulating locally.
+      Client::ReplicationClientInstance().Pump();
+      if (Client::ReplicationClientInstance().IsOpen())
+      {
+        process_server_events();
+        // Backstop: forget entities that silently left our area of interest
+        // (no despawn event is sent for those), so they don't pile up as
+        // ghosts. ~3s at the server's 30 Hz tick.
+        Client::ReplicationClientInstance().EvictStale(90);
+      }
 
-			// In thin-client mode, the player's intent goes to the server.
-			if (Neuron::Client::ReplicationClientInstance().IsOpen())
-				send_player_input ();
+      snd_update_sound();
+      gfx_update_screen();
+      // Full-window 3D for cockpit views (retro/letterboxed for menus); this
+      // also sets the aspect-aware optics used by the projection below.
+      gfx_set_scene_fullwindow(is_flight_view(current_screen));
+      gfx_set_scene_clip();
 
-			if (game_paused)
-				continue;
-				
-			if (message_count > 0)
-				message_count--;
+      rolling = 0;
+      climbing = 0;
 
-			if (!rolling)
-				centre_flight_roll();
+      handle_flight_keys();
 
-			if (!climbing)
-				centre_flight_climb();
+      // In thin-client mode, the player's intent goes to the server.
+      if (Client::ReplicationClientInstance().IsOpen())
+        send_player_input();
 
+      if (game_paused)
+        continue;
 
-			if (!docked)
-			{
-				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
-					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
-					(current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) ||
-					(current_screen == SCR_GAME_OVER))
-				{
-					gfx_clear_display();
-					update_starfield();
-				}
+      if (message_count > 0)
+        message_count--;
 
-				if (auto_pilot)
-				{
-					auto_dock();
-					if ((mcount & 127) == 0)
-						info_message ("Docking Computers On");
-				}
+      if (!rolling)
+        centre_flight_roll();
 
-				// In thin-client mode the server owns the world: render the
-				// replicated, interpolated state instead of simulating locally.
-				if (Neuron::Client::ReplicationClientInstance().IsOpen())
-					render_replicated_objects ();
-				else
-					update_local_objects ();
+      if (!climbing)
+        centre_flight_climb();
 
-				if (docked)
-				{
-					update_console();
-					continue;
-				}
+      if (!docked)
+      {
+        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+          == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+        {
+          gfx_clear_display();
+          update_starfield();
+        }
 
-				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
-					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW))
-				{
-					if (draw_lasers)
-					{
-						draw_laser_lines();
-						draw_lasers--;
-					}
-					
-					draw_laser_sights();
-				}
+        if (auto_pilot)
+        {
+          auto_dock();
+          if ((mcount & 127) == 0)
+            info_message("Docking Computers On");
+        }
 
-				if (message_count > 0)
-					gfx_display_centre_text (358, message_string, 120, GFX_COL_WHITE);
-					
-				if (hyper_ready)
-				{
-					display_hyper_status();
-					if ((mcount & 3) == 0)
-					{
-						countdown_hyperspace();
-					}
-				}
+        // In thin-client mode the server owns the world: render the
+        // replicated, interpolated state instead of simulating locally.
+        if (Client::ReplicationClientInstance().IsOpen())
+          render_replicated_objects();
+        else
+          update_local_objects();
 
-				mcount--;
-				if (mcount < 0)
-					mcount = 255;
+        if (docked)
+        {
+          update_console();
+          continue;
+        }
 
-				if ((mcount & 7) == 0)
-					regenerate_shields();
+        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+          == SCR_RIGHT_VIEW))
+        {
+          if (draw_lasers)
+          {
+            draw_laser_lines();
+            draw_lasers--;
+          }
 
-				if ((mcount & 31) == 10)
-				{
-					if (PlayerDefense().energy < 50)
-					{
-						info_message ("ENERGY LOW");
-						snd_play_sample (SND_BEEP);
-					}
+          draw_laser_sights();
+        }
 
-					update_altitude();
-				}
-				
-				if ((mcount & 31) == 20)
-					update_cabin_temp();
-					
-				if ((mcount == 0) && (!witchspace))
-					random_encounter();
-					
-				cool_laser();				
-				time_ecm();
+        if (message_count > 0)
+          gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
 
-				update_console();
-			}
+        if (hyper_ready)
+        {
+          display_hyper_status();
+          if ((mcount & 3) == 0)
+            countdown_hyperspace();
+        }
 
-			if (current_screen == SCR_BREAK_PATTERN)
-				display_break_pattern();
+        mcount--;
+        if (mcount < 0)
+          mcount = 255;
 
-			if (cross_timer > 0)
-			{
-				cross_timer--;
-				if (cross_timer == 0)
-				{
-    				show_distance_to_planet();
-				}
-			}
-			
-			if ((cross_x != old_cross_x) ||
-				(cross_y != old_cross_y))
-			{
-				if (old_cross_x != -1)
-					draw_cross (old_cross_x, old_cross_y);
+        if ((mcount & 7) == 0)
+          regenerate_shields();
 
-				old_cross_x = cross_x;
-				old_cross_y = cross_y;
+        if ((mcount & 31) == 10)
+        {
+          if (PlayerDefense().energy < 50)
+          {
+            info_message("ENERGY LOW");
+            snd_play_sample(SND_BEEP);
+          }
 
-				draw_cross (old_cross_x, old_cross_y);
-			}
-		}
+          update_altitude();
+        }
 
-		if (!finish)		
-			run_game_over_screen();
-	}
+        if ((mcount & 31) == 20)
+          update_cabin_temp();
 
-	snd_sound_shutdown();
-	
-	gfx_graphics_shutdown ();
+        if ((mcount == 0) && (!witchspace))
+          random_encounter();
 
-	return 0;
+        cool_laser();
+        time_ecm();
+
+        update_console();
+      }
+
+      if (current_screen == SCR_BREAK_PATTERN)
+        display_break_pattern();
+
+      if (cross_timer > 0)
+      {
+        cross_timer--;
+        if (cross_timer == 0)
+          show_distance_to_planet();
+      }
+
+      if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
+      {
+        if (old_cross_x != -1)
+          draw_cross(old_cross_x, old_cross_y);
+
+        old_cross_x = cross_x;
+        old_cross_y = cross_y;
+
+        draw_cross(old_cross_x, old_cross_y);
+      }
+    }
+
+    if (!finish)
+      run_game_over_screen();
+  }
+
+  snd_sound_shutdown();
+
+  gfx_graphics_shutdown();
+
+  return 0;
 }
