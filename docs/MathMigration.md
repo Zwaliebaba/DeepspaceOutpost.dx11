@@ -33,6 +33,13 @@ These forks were settled up front; the rest of the plan assumes them.
 
 ## 2. Current state
 
+> **Sync note.** This inventory reflects `main` as of the latest merge into the
+> migration branch. Recent gameplay work (homing missiles, target lock/reticle,
+> own-axis flight fix, Wavefront-OBJ ship export) **expanded** the legacy-math
+> surface in the client render path (see §2.2) but did not change the migration
+> strategy. Server-side additions (`MissileSystem.h`) are `Vector3d`/`int64` and
+> stay out of scope; the `tools/shipdata2obj` exporter is unrelated to this work.
+
 ### 2.1 Legacy math (the migration target)
 
 [`DeepspaceOutpost/vector.h`](../DeepspaceOutpost/vector.h) +
@@ -66,9 +73,11 @@ axis spins on matrix columns.
 
 | File | Legacy math used for |
 |---|---|
-| [`space.cpp`](../DeepspaceOutpost/space.cpp) (~1360 ln) | `move_local_object`, `rotate_vec`, object position/velocity integration, distance, docking/approach vectors |
+| [`space.cpp`](../DeepspaceOutpost/space.cpp) (~1430 ln) | `move_local_object`, `rotate_vec`, object position/velocity integration, distance, `unit_vector` docking/approach; **(main)** the target-reticle divide-by-z projection and `find_lock_target` forward-cone test |
 | [`threed.cpp`](../DeepspaceOutpost/threed.cpp) (~1000 ln) | `draw_solid_ship`, `render_planet`, `draw_wireframe_planet` — model→camera transform, projection, back-face/normal checks |
 | [`swat.cpp`](../DeepspaceOutpost/swat.cpp) (~1230 ln) | `add_new_ship` rotation-matrix setup, NPC spawn orientation, tactics geometry |
+| [`ReplicatedScene.h`](../DeepspaceOutpost/ReplicatedScene.h) | **`RenderRecord` stores `Vector location` + `Matrix rotmat`**; `BuildRenderRecords` rebases each entity to the floating origin and runs the **world→camera transform** (the transpose convention — see §4). Pure legacy `Vector`/`Matrix`, includes `vector.h` |
+| [`Camera.h`](../DeepspaceOutpost/Camera.h) | `Vector position` — camera eye offset from the ship |
 | [`pilot.cpp`](../DeepspaceOutpost/pilot.cpp), [`missions.cpp`](../DeepspaceOutpost/missions.cpp), [`intro.cpp`](../DeepspaceOutpost/intro.cpp), [`main.cpp`](../DeepspaceOutpost/main.cpp) | Scattered matrix/vector setup, trig, scripted motion |
 | [`GameComponents.h`](../DeepspaceOutpost/GameComponents.h) | ECS `Transform` stores `Vector location` + `Matrix rotmat` (storage layout) |
 | [`space.h`](../DeepspaceOutpost/space.h) | `struct local_object { Vector location; Matrix rotmat; … }` |
@@ -81,12 +90,19 @@ axis spins on matrix columns.
   `Invert`, and the `Vector3::{ZERO,UNITX,UP,FORWARD,…}` constants.
 - [`Vector3d.h`](../NeuronCore/Vector3d.h) — fp64 local-frame vector, a legitimate
   `Neuron::Math` type (**stays — out of scope**; fills a gap DirectXMath's
-  float32-only types can't).
+  float32-only types can't). Server-sim consumers: `FlightSystem.h`,
+  `SimComponents.h`, `CombatSystem.h`, `StationServices.h`, `SnapshotInterpolator.h`,
+  and **(main)** the new homing-missile system [`MissileSystem.h`](../GameLogic/MissileSystem.h)
+  (steering/homing in `Vector3d`, `int64` position stepping) — all reinforce that
+  `Vector3d` is the fp64 sim type, not a migration target.
 - [`Vector3i64.h`](../NeuronCore/Vector3i64.h) — int64 world coordinate (**stays**).
-- `GameLogic/`, `NeuronServer/`, `Server/`, most of `Tests/`, and the newer
-  client files (`Camera.h`, `CameraFollow.h`, `RenderQueue.h`, `ReplicatedScene.h`)
-  already use `XMVECTOR` / `XMFLOAT3` / `Neuron::Math`. They are **not** part of
-  this migration except where they touch a `Transform` whose storage type changes.
+- `GameLogic/`, `NeuronServer/`, `Server/`, and the `NeuronCore`/`GameLogic` test
+  targets use the SIMD / `Neuron::Math` types and are **not** migration targets.
+  > **Correction (this sync).** The client render files are **mixed**, not
+  > already-native: `CameraFollow.h` uses `Vector3d` (out of scope), but
+  > `Camera.h` and `ReplicatedScene.h`/`RenderRecord` still use the legacy
+  > `Vector`/`Matrix` and **are** in scope — they are listed in §2.2. `RenderQueue.h`
+  > is screen-space ints (no vector math).
 
 ---
 
@@ -163,6 +179,17 @@ intentional transpose of `rotmat` (model↔camera orientation). Track it
 independently of the convention transpose above and express it with
 `XMMatrixTranspose`, not element swaps. Preserve the legacy left-handed `-Z` basis
 (`start_matrix`) so handedness — and the back-face winding test — don't flip.
+
+> **Concrete in-repo example (added on main).** `BuildRenderRecords`'s `toCamera`
+> lambda in [`ReplicatedScene.h`](../DeepspaceOutpost/ReplicatedScene.h) was just
+> corrected to rebuild the offset **from** the basis
+> (`x*side.x + y*roof.x + z*nose.x`, i.e. `B·v`) rather than project **onto** it
+> (`x*side.x + y*side.y + z*side.z`). Its own comment documents this as "the
+> transpose of a textbook view matrix, but it is what the starfield uses … at the
+> identity orientation the two are identical." That is exactly the convention the
+> DirectXMath port must reproduce — the same trap, already live in the code. The
+> server's `RotateBasis` in [`FlightSystem.h`](../GameLogic/FlightSystem.h) makes
+> the same `B·M` choice for the same reason.
 
 ---
 
@@ -254,10 +281,12 @@ locked before storage layout churns the ECS.
   `XMVectorSet((float)dx, (float)dy, (float)dz, 0.0f)`. The conversion is the
   load→compute boundary; everything upstream stays double.
 
-### Phase 3 — Migrate storage types (`Transform`, `local_object`)
-- In [`GameComponents.h`](../DeepspaceOutpost/GameComponents.h) and
-  [`space.h`](../DeepspaceOutpost/space.h): `Vector location → XMFLOAT3`,
-  `Matrix rotmat → XMFLOAT4X4` (decision §1).
+### Phase 3 — Migrate storage types (`Transform`, `local_object`, `RenderRecord`)
+- In [`GameComponents.h`](../DeepspaceOutpost/GameComponents.h),
+  [`space.h`](../DeepspaceOutpost/space.h), and **(main)**
+  [`ReplicatedScene.h`](../DeepspaceOutpost/ReplicatedScene.h)'s `RenderRecord` +
+  [`Camera.h`](../DeepspaceOutpost/Camera.h)'s `Vector position`:
+  `Vector location → XMFLOAT3`, `Matrix rotmat → XMFLOAT4X4` (decision §1).
 - This is the **highest-blast-radius** change (every consumer touches these), so
   it lands as a focused commit. These fields are **not** persisted as 3×double
   (decision §1), so the switch is internal-only — **no** wire/save format version
@@ -277,6 +306,14 @@ locked before storage layout churns the ECS.
   follow-up (§1(B)).
 - Preserve the flight-intent semantics (roll/climb/speed from `FlightRates`).
 - Validate against the Phase-0 golden tests within tolerance.
+- **Reference (out of scope, server-side).** The authoritative
+  [`FlightSystem.h`](../GameLogic/FlightSystem.h) now rotates a ship's basis about
+  its **own** axes via `RotateBasis` (`B' = B·M`, where `M`'s columns come from the
+  same legacy shear), bit-identical to the world-frame form at the identity
+  orientation. It runs in `Vector3d` and is **not** migrated, but it is the
+  canonical "rotate about own axes" reference if the client motion is ever reframed.
+  Note `StepFlight` now **skips `Missile` entities** (homing missiles are integrated
+  by `StepMissiles`).
 
 ### Phase 5 — Migrate `threed.cpp` (render / projection)
 - Model→camera vertex loop: transform the whole vertex array with
@@ -295,6 +332,13 @@ locked before storage layout churns the ECS.
 - Back-face / normal checks: `Neuron::Math::Dotf`. The signed-area back-face test
   and `sy = -sy` are coupled to winding/handedness — preserve the `-Z` basis **and**
   the winding together, or faces cull inversely.
+- **(main) Also migrate the client render-frame transform** in
+  [`ReplicatedScene.h`](../DeepspaceOutpost/ReplicatedScene.h) `BuildRenderRecords`
+  / `toCamera` — it is the `B·v` transpose convention (§4), and the obvious place to
+  get the transpose wrong. The new **target-reticle** and **`find_lock_target`**
+  sites in [`space.cpp`](../DeepspaceOutpost/space.cpp) reuse the same divide-by-z
+  projection (`x*256/z + 128`, `-(y*256/z) + 96`) and forward-cone test — migrate
+  them the same way (vectorize the transform, keep the scalar divide/clamp).
 - Verify ships/planets aren't mirrored or inside-out after the change.
 
 ### Phase 6 — Migrate `swat.cpp` + remaining consumers
