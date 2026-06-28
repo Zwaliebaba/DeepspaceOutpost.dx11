@@ -67,8 +67,8 @@ struct commander saved_cmdr =
 	0,											/* Fuel Scoop		*/
 	0,											/* Energy Bomb		*/
 	0,											/* Energy Unit		*/
-	0,											/* Docking Computer */
-	0,											/* Galactic H'Drive	*/
+	1,											/* Docking Computer */
+	1,											/* Galactic H'Drive	*/
 	0,											/* Escape Pod		*/
 	0,0,0,0,
 	3,											/* No. of Missiles	*/

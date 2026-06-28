@@ -17,6 +17,10 @@ add_library(NeuronServer STATIC ${NEURONSERVER_SOURCES} ${NEURONSERVER_HEADERS})
 
 target_compile_features(NeuronServer PUBLIC cxx_std_23)
 
+if(MSVC)
+    target_compile_options(NeuronServer PRIVATE /W4)
+endif()
+
 # PUBLIC so the Server target can include NeuronServer headers.
 target_include_directories(NeuronServer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

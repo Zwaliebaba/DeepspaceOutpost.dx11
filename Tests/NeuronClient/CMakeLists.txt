@@ -24,7 +24,6 @@ target_include_directories(NeuronClient.Tests PRIVATE
 
 if(MSVC)
     target_compile_options(NeuronClient.Tests PRIVATE /W4)
-    target_compile_definitions(NeuronClient.Tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 gtest_discover_tests(NeuronClient.Tests)

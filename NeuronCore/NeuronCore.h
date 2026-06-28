@@ -1,10 +1,6 @@
 #pragma once
 
-#define TARGET_MSVC
-#define USE_DIRECT3D
 #define _CRT_SECURE_NO_WARNINGS
-#define _SILENCE_CXX17_STRSTREAM_DEPRECATION_WARNING
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #pragma warning(disable:4201) // nonstandard extension used : nameless struct/union
 #pragma warning(disable:4238) // nonstandard extension used : class rvalue used as lvalue
@@ -59,7 +55,7 @@
 #define NOHELP
 
 #if !defined WIN32_LEAN_AND_MEAN
-// #define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
 
 #include <winsock2.h>
