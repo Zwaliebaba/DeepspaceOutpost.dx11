@@ -121,10 +121,11 @@ TEST(Scene, RotmatIsBuiltFromTheOrientationBasis)
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 99);
   EXPECT_TRUE(recs.size() == 1);
 
-  // nose and roof preserved, side = roof x nose = (0,1,0).
-  EXPECT_TRUE(recs[0].rotmat[2].x == 1.0);   // nose
-  EXPECT_TRUE(recs[0].rotmat[1].z == 1.0);   // roof
-  EXPECT_TRUE(recs[0].rotmat[0].x == 0.0);   // side
-  EXPECT_TRUE(recs[0].rotmat[0].y == 1.0);
-  EXPECT_TRUE(recs[0].rotmat[0].z == 0.0);
+  // nose and roof preserved, side = roof x nose = (0,1,0). rotmat rows are
+  // side (_1x), roof (_2x), nose (_3x) in the XMFLOAT4X4.
+  EXPECT_TRUE(recs[0].rotmat._31 == 1.0f);   // nose.x
+  EXPECT_TRUE(recs[0].rotmat._23 == 1.0f);   // roof.z
+  EXPECT_TRUE(recs[0].rotmat._11 == 0.0f);   // side.x
+  EXPECT_TRUE(recs[0].rotmat._12 == 1.0f);   // side.y
+  EXPECT_TRUE(recs[0].rotmat._13 == 0.0f);   // side.z
 }

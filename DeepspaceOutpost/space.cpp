@@ -693,10 +693,15 @@ void render_replicated_objects (void)
 			ship_count[obj.type]++;
 		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && rec.distance < s_nearest_station_dist)
 			s_nearest_station_dist = rec.distance;
-		obj.location = rec.location;
-		obj.rotmat[0] = rec.rotmat[0];
-		obj.rotmat[1] = rec.rotmat[1];
-		obj.rotmat[2] = rec.rotmat[2];
+		// RenderRecord is now XMFLOAT3 / XMFLOAT4X4 (DirectXMath migration); local_object
+		// is still legacy Vector / Matrix, so convert at this boundary until it migrates
+		// too. rotmat rows are side (_1x), roof (_2x), nose (_3x).
+		obj.location.x = rec.location.x;
+		obj.location.y = rec.location.y;
+		obj.location.z = rec.location.z;
+		obj.rotmat[0].x = rec.rotmat._11; obj.rotmat[0].y = rec.rotmat._12; obj.rotmat[0].z = rec.rotmat._13;
+		obj.rotmat[1].x = rec.rotmat._21; obj.rotmat[1].y = rec.rotmat._22; obj.rotmat[1].z = rec.rotmat._23;
+		obj.rotmat[2].x = rec.rotmat._31; obj.rotmat[2].y = rec.rotmat._32; obj.rotmat[2].z = rec.rotmat._33;
 		obj.distance = (int) rec.distance;
 
 		Neuron::Client::ApplyCamera (cam, &obj);

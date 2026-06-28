@@ -295,6 +295,26 @@ locked before storage layout churns the ECS.
 - At each compute site introduce explicit `XMLoadFloat3` / `XMStoreFloat3`
   (and `XMLoadFloat4x4` / `XMStoreFloat4x4`) at the load→compute→store boundary.
 
+**Execution — whole-cluster migration delivered in buildable installments.** The
+`Vector`/`Matrix` typedefs are shared, so consumers cascade; rather than one
+unverifiable ~270-site blind diff, each installment migrates one storage type and
+**converts at the boundary** to not-yet-migrated code, keeping the tree buildable.
+(I can't compile MSVC/DirectXMath here, so each installment needs a Windows build.)
+
+- **Installment 1 — `RenderRecord` (done, pending build).** `RenderRecord` →
+  `XMFLOAT3`/`XMFLOAT4X4`; `BuildRenderRecords` rewritten in `XMVECTOR`/`XMMATRIX`
+  (`XMVector3TransformNormal` for the world→camera transform, `XMMatrixMultiply`
+  for the orientation — the §4 `B·v` convention, exercised headlessly by
+  `ReplicatedSceneTests`). Consumed only by `space.cpp` (converted at the
+  `obj.location = rec.location` boundary into the still-legacy `local_object`) and
+  the test (rotmat checks → `XMFLOAT4X4._rc`). `find_lock_target` reads `.x/.y/.z`
+  unchanged. `ReplicatedScene.h` no longer includes `vector.h`.
+- **Installment 2 — `local_object` / `Transform`** (`space.h`, `GameComponents.h`)
+  + `space.cpp` / `threed.cpp` / `swat.cpp` consumers. The large one.
+- **Installment 3 — `Camera.h`** `Vector position` + `ApplyCamera`, and the
+  remaining `pilot/missions/intro/main` sites.
+- **Then Phase 7** deletes `vector.{h,cpp}` once nothing references them.
+
 ### Phase 4 — Migrate `space.cpp` (sim / motion)
 - Rewrite `move_local_object`, `rotate_vec`, approach/docking vectors in
   `XMVECTOR`/`XMMATRIX`. Hoist `XMLoad*` before loops, `XMStore*` after.
