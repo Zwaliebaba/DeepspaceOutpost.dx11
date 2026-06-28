@@ -130,9 +130,12 @@ namespace Neuron::GameLogic
         {
           if (Combatant* tc = _world.TryGet<Combatant>(mc->target))
           {
-            tc->energy -= mc->damage;
-            if (tc->energy <= 0)
-              kills.push_back(Kill{ mc->target, mc->owner });
+            if (tc->invulnTicks <= 0)   // respect spawn/respawn grace
+            {
+              tc->energy -= mc->damage;
+              if (tc->energy <= 0)
+                kills.push_back(Kill{ mc->target, mc->owner });
+            }
           }
           // Report the missile itself as a "kill" so the server broadcasts its
           // EntityDeath (the client plays the explosion + drops it) and destroys

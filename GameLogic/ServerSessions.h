@@ -149,6 +149,9 @@ namespace Neuron::GameLogic
       // command (autoEngage = false), and starts with a clean record.
       _world.Add<PlayerTag>(e, PlayerTag{});
       _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ 255, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
+      // Spawn protection: brief immunity so connecting into nearby hostiles isn't
+      // an instant death.
+      _world.Get<Combatant>(e).invulnTicks = RESPAWN_GRACE_TICKS;
       _world.Add<Wanted>(e, Wanted{});
       _world.Add<NetType>(e, NetType{ ShipType::Viper });
       return e;

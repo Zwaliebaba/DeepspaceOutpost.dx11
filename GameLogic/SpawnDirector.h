@@ -56,7 +56,10 @@ namespace Neuron::GameLogic
       const ECS::EntityId e = _world.Create();
       _world.Add<WorldTransform>(e, WorldTransform{ pos });
       _world.Add<Flight>(e, Flight{});
-      _world.Add<Combatant>(e, Combatant{ Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 8000, /*autoEngage*/ true });
+      // Range <= the player's laser range (6000) so the fight is symmetric: the
+      // pirate can't shoot the player from outside the range the player can shoot
+      // back. (Previously 8000 - the player got hit from where they couldn't reply.)
+      _world.Add<Combatant>(e, Combatant{ Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 5000, /*autoEngage*/ true });
       return e;
     }
 
@@ -70,7 +73,7 @@ namespace Neuron::GameLogic
         const ECS::EntityId e = _world.Create();
         _world.Add<WorldTransform>(e, WorldTransform{ { _pos.x + static_cast<int64_t>(i) * 300, _pos.y, _pos.z } });
         _world.Add<Flight>(e, Flight{});
-        _world.Add<Combatant>(e, Combatant{ Team::Police, /*energy*/ 120, /*laser*/ 4, /*range*/ 9000, /*autoEngage*/ true });
+        _world.Add<Combatant>(e, Combatant{ Team::Police, /*energy*/ 120, /*laser*/ 4, /*range*/ 6000, /*autoEngage*/ true });
         spawned.push_back(e);
       }
       return spawned;
