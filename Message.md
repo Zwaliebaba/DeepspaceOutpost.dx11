@@ -1,51 +1,43 @@
 # Message.md — A Unified Message System for NeuronCore
 
-> **Status:** Design / plan. No code yet. This document works out the concept and the
-> phased path to land it. It reflects the three decisions taken up front:
-> 1. **Unified bus + wire** — one message concept drives *both* an in-process pub/sub
->    bus (system → system, e.g. *shoot → hit → death*) *and* the client ↔ server wire
->    protocol, the wire layer built on the same message definitions.
-> 2. **Fold in / replace incrementally** — `ClientInput`, `GameEvents`, and
->    `StationProtocol` become the first entries in the new message catalog and their
->    bespoke encode/decode is deleted once parity is proven.
-> 3. **Typed structs + auto-serialize** — each message is a strongly-typed C++23 struct;
->    a concept-constrained templated serializer derives wire encode/decode from a single
->    field description, so no per-message `DataWriter` calls are hand-written.
+> **Status:** Design / plan (v2). No code yet. v2 folds in an architecture review aimed at
+> commercial-engine scalability. The settled decisions:
+>
+> | Decision | Choice |
+> |---|---|
+> | Scope of the concept | **Unified bus + wire** — one message concept drives an in-process pub/sub bus *and* the client↔server wire protocol, built on shared definitions. |
+> | Existing schemas | **Fold in / replace incrementally** — `ClientInput`, `GameEvents`, `StationProtocol` become catalog entries; bespoke encode/decode deleted after byte-parity. |
+> | Payload style | **Typed structs + auto-serialize** — each message is a C++23 struct describing its fields once; a concept-constrained serializer derives the codec. |
+> | Catalog authoring | **Structs + registration macro** — idiomatic structs, each `REGISTER_MESSAGE`'d into a runtime+compile-time registry for tooling/CI. |
+> | Version compatibility | **Lockstep, minimal versioning** — all peers run the same version; **cross-version interop is explicitly out of scope** (no capability negotiation / deprecation windows). Record-length framing and id-non-reuse are kept anyway (decode robustness + ABI hygiene, nearly free). |
+> | Determinism / replay | **Design for it now, build later** — deterministic ordering key + dispatch generations now; capture/replay harness is a later phase. |
+> | Reliable lanes | **Split control / gameplay / bulk** — multiple `ReliableChannel`s so a large manifest can't head-of-line-block a death or session-control message. |
 
 ---
 
 ## 1. Goals & non-goals
 
 ### Goals
-- **One mechanism.** A single way to express "X happened / do Y" that works the same
-  whether the sender and receiver are two systems in the same process or two machines
-  across the network.
-- **Drive interactions through messages.** Key presses, shots, hits, deaths, despawns,
-  docking, trades, chat, lifecycle — all become messages, decoupling producers from
-  consumers. Systems stop calling each other directly; they publish and subscribe.
-- **All client ↔ server traffic is messages.** The wire protocol *is* the message
-  catalog serialized. There is no second, hand-written network format.
-- **Flexible parameters on demand (C++23).** A message struct declares its fields once;
-  the serializer is generated from that. Optional/extension fields can be attached
-  without touching the wire of existing messages.
-- **Zero behaviour in NeuronCore.** The bus and the codec are *mechanism* — schema and
-  plumbing only — so NeuronCore stays "shared data/protocol only" (see `AGENTS.md`).
-  Behaviour (what a death *does*) stays per-side: server handlers in `GameLogic`,
-  presentation handlers in `NeuronClient`/`DeepspaceOutpost`.
-- **Deterministic & testable.** Pure, socket-free core (bytes in / bytes out, in-memory
-  dispatch) so loss, ordering, and handler wiring are all unit-testable headlessly —
-  matching how `ReliableChannel` is tested today.
+- **One mechanism** to express "X happened / do Y", identical whether sender and receiver
+  are two systems in one process or two machines across the network.
+- **Drive interactions through messages** at the *edges*: key presses, commands, lifecycle,
+  deaths, despawns, docking, trades, chat — decoupling producers from consumers.
+- **All gameplay client ↔ server traffic is cataloged messages.** (The pre-session
+  security/transport envelope may live below the catalog — see §13.)
+- **Flexible parameters on demand (C++23)** without a flag-day wire break.
+- **Zero behaviour in NeuronCore.** The bus, codec, and registry are *mechanism* only;
+  behaviour (handlers) stays per-side (server in `GameLogic`/`Server`, presentation in
+  `NeuronClient`/`DeepspaceOutpost`).
+- **Deterministic & testable**, socket-free core; replay-ready ordering.
+- **Commercial-scalable**: validated inbound, bounded allocation, observable, multi-lane.
 
 ### Non-goals
-- Not a general actor framework or coroutine scheduler.
-- Not replacing the **snapshot/replication** stream. Bulk entity state stays
-  self-superseding snapshots (`SnapshotPacketizer`/`SnapshotInterpolator`); messages are
-  for the things a snapshot can *never* express by superseding state (a kill, a key
-  press, a trade) — exactly the line `ReliableChannel.h` already draws.
-- Not a new transport. We reuse the existing raw-UDP socket, the `ReliableChannel`
-  (seq/ack/resend) for must-arrive messages, and the unreliable datagram path for
-  self-superseding ones.
-- No third-party libraries (native-first; std-only core, consistent with the repo rule).
+- Not the simulation scheduler. **Hot deterministic simulation stays direct ECS/system
+  iteration**; messages are for *edges* only (§5).
+- Not replacing snapshots/replication (bulk self-superseding state stays snapshots).
+- Not a new transport (reuse UDP + `ReliableChannel`).
+- **Not cross-version compatible** (lockstep; see decision table).
+- No third-party libraries (native-first, std-only core).
 
 ---
 
@@ -53,448 +45,456 @@
 
 | Concern | Today | Lives in |
 |---|---|---|
-| Client → server intent | `ClientInput` struct + `WriteInput`/`ReadInput`, unreliable, "latest seq wins" | `NeuronCore/ClientInput.h` |
-| Reliable events | `EventType` (u16) + per-event `Encode*`/`Decode*`/`Send*` (Despawn, Death, Chat, AssignPlayer, …) | `NeuronCore/GameEvents.h` |
-| Docked request/response | `StationRequest`/`StationResponse` structs + encode/decode, ride `ReliableChannel` | `NeuronCore/StationProtocol.h` |
+| Client → server intent | `ClientInput` + `WriteInput`/`ReadInput`, unreliable, latest-seq-wins | `NeuronCore/ClientInput.h` |
+| Reliable events | `EventType` (u16) + per-event `Encode*`/`Decode*` (Despawn, Death, Chat, AssignPlayer, …) | `NeuronCore/GameEvents.h` |
+| Docked request/response | `StationRequest`/`StationResponse` + encode/decode over `ReliableChannel` | `NeuronCore/StationProtocol.h` |
 | Reliable transport | `ReliableChannel` (seq/ack/resend/ordered), magic `'NEVT'` | `NeuronCore/ReliableChannel.h` |
-| Byte codec | `DataWriter` / `DataReader` (little-endian, bounds-checked) | `NeuronCore/DataWriter.h`, `DataReader.h` |
-| In-process events | **None.** Systems call each other directly. `Server/Main.cpp` inlines fire→crime→death→despawn; `StepCombat()` returns `std::vector<Kill>` the main loop hand-processes. | `Server/Main.cpp`, `GameLogic/*` |
-| Client consumption | `ReplicationClient::PollEvent()` returns raw `ReliableMessage`; `main.cpp` switch-decodes each `EventType` | `NeuronClient/ReplicationClient.*`, `DeepspaceOutpost/main.cpp` |
+| Byte codec | `DataWriter`/`DataReader` (LE, bounds-checked) | `NeuronCore/DataWriter.h`, `DataReader.h` |
+| In-process events | **None** — systems call directly; `Server/Main.cpp` inlines fire→crime→death→despawn; `StepCombat()` returns `vector<Kill>` | `Server/Main.cpp`, `GameLogic/*` |
+| Client consumption | `ReplicationClient::PollEvent()` → raw `ReliableMessage`; `main.cpp` switch-decodes `EventType` | `NeuronClient/*`, `DeepspaceOutpost/main.cpp` |
 
-**Observations that shape the design**
-- The reliable side already has the right shape: a `ReliableMessage { uint16_t type;
-  vector<uint8_t> payload; }`. The new system generalises `type` into a **message id**
-  and replaces hand-written `Encode*`/`Decode*` with generated codecs.
-- The unreliable side (`ClientInput`) has its own magic/version. We unify this under one
-  framing so *any* message can be sent reliably or unreliably.
-- The server loop is a **fixed ~30 Hz tick** that drains datagrams → applies → simulates
-  → broadcasts. That cadence is the natural place to **drain and dispatch** queued
-  messages. The bus is therefore **queued/deferred by default**, not immediate-recursive.
-- There is no thread-safety requirement *inside* a tick today (single-threaded sim loop),
-  but `TasksCore` exists and the roadmap anticipates worker threads — so the queue design
-  leaves room for a thread-safe ingress without forcing it now.
+**Facts that shape the design**
+- The reliable side already is `ReliableMessage { uint16_t type; vector<uint8_t> payload }`
+  — we generalise `type` → `MessageId` and replace hand codecs with generated ones.
+- The server is a **fixed ~30 Hz tick** (drain → apply → simulate → broadcast): the natural
+  drain-and-dispatch point. The bus is **queued/deferred**, not recursive-immediate.
+- **`ECS::EntityId` has a `generation`, but snapshots/events send the bare `index`** and the
+  server resolves with `Registry::LiveEntity(index)`. Under slot recycling a stale index can
+  resolve to a *different* entity — a latent authority bug the new system must close (§9).
 
 ---
 
-## 3. Core concept
+## 3. Three separated concerns (the core of v2)
 
-A **Message** is an immutable, strongly-typed value describing *something that happened*
-or *something requested*. Every message type has:
+The review's central point: one *struct* can be the schema for a local event and a wire
+payload, but that must **not** mean every local event is automatically network-capable or
+that dispatch and transport are the same thing. We separate three axes explicitly:
 
-- a **stable `MessageId`** (u16) — its identity on the wire and in the catalog;
-- a **field description** — declared once on the struct, used to generate the codec;
-- **delivery traits** — reliability and direction (compile-time constants on the type).
-
-The same struct is the in-process event *and* the wire payload. Publishing locally and
-sending to a peer differ only in the **sink**: a local `MessageBus` vs a network channel.
+1. **Message schema** — typed struct + stable `MessageId` + field description. (§4)
+2. **Dispatch policy** — `MessageScope` + `Kind` + delivery timing, governing *local*
+   routing. (§5)
+3. **Network policy** — per-message lane/reliability, governing *wire* routing. (§6)
 
 ```
-              publish(msg)                       send(msg)
-  Producer ───────────────► MessageBus ◄──────── network ingress (UDP)
-  (system / input / UI)         │                        ▲
-                                ▼                        │ WritePacket / datagram
-                          Subscribers                network egress
-                       (handlers per side)
+        schema (what it is)          dispatch (how it routes locally)     transport (how it crosses the wire)
+   struct + MessageId + Fields()  ──►  MessageScope / Kind / generation  ──►  lane + reliability (only if Wire)
 ```
 
-The unifying idea: **a network endpoint is just another subscriber/publisher.** Inbound
-datagrams are decoded into messages and published onto the local bus; outbound messages
-addressed to a peer are serialized into that peer's channel. Local code never cares which
-side of the wire a message came from — it subscribes to a type and reacts.
+### 3.1 `MessageScope` — keeps local events out of the wire ABI
+
+```cpp
+enum class MessageScope : uint8_t {
+  LocalOnly,   // never serialized; e.g. KeyPressed. Not part of the wire ABI.
+  Wire,        // travels client↔server; permanent network ABI.
+  Control,     // session/handshake/clock — Wire, but on the control lane (§6).
+  DebugOnly,   // dev builds only; stripped from release wire.
+  Tooling,     // capture/trace/inspector streams; never gameplay.
+};
+```
+A `static_assert` forbids serializing a `LocalOnly` message; `KeyPressed` *cannot* become a
+forever-supported packet by accident.
+
+### 3.2 `Kind` — command vs fact
+
+```cpp
+enum class MessageKind : uint8_t {
+  Command,   // a REQUEST that may be rejected; must be validated; usually client→server.
+  Event,     // a FACT that already happened; trusted when server-origin; observe-only.
+};
+```
+This tells the inbound pipeline what to validate (commands are validated; server-origin
+events are trusted) and tells handlers what they may assume.
 
 ---
 
-## 4. The message definition (C++23 "parameters on demand")
+## 4. The message definition (C++23, parameters on demand)
 
-We do **not** have C++26 static reflection. The flexible-parameters requirement is met
-with a **single field-description point per message** plus concept-constrained generic
-serialization, fold expressions, and optional/extension fields.
+No C++26 reflection; flexible parameters come from a single field-description point plus
+concept-constrained generic serialization.
 
-### 4.1 A message is a struct that describes its own fields
-
-Each message struct exposes its serializable fields *once*, as a tuple of references via a
-`Fields()` member. The serializer walks that tuple; nothing else is hand-written.
+### 4.1 A message describes its own fields once
 
 ```cpp
-// NeuronCore/Messages/InputCommand.h  (illustrative)
-namespace Neuron::Msg
+// NeuronCore/Messages/Defs/InputCommand.h  (illustrative)
+struct InputCommand
 {
-  struct InputCommand
-  {
-    static constexpr MessageId   Id        = MessageId::InputCommand;
-    static constexpr Reliability kDelivery = Reliability::Unreliable; // self-superseding
-    static constexpr Direction   kDir      = Direction::ClientToServer;
+  static constexpr MessageId    Id    = MessageId::InputCommand;
+  static constexpr MessageScope Scope = MessageScope::Wire;
+  static constexpr MessageKind  Kind  = MessageKind::Command;
+  static constexpr Lane         Lane  = Lane::Unreliable;     // self-superseding
+  static constexpr Direction    Dir   = Direction::ClientToServer;
 
-    uint32_t sequence    = 0;
-    float    rollAxis    = 0.0f;
-    float    pitchAxis   = 0.0f;
-    float    throttle    = 0.0f;
-    bool     fire        = false;
-    bool     fireMissile = false;
-    uint32_t missileTarget = NO_MISSILE_TARGET;
+  uint32_t  tick        = 0;      // sim-tick / client clock stamp (§9)
+  uint32_t  sequence    = 0;      // latest-wins
+  float     rollAxis    = 0.0f;
+  float     pitchAxis   = 0.0f;
+  float     throttle    = 0.0f;
+  bool      fire        = false;
+  bool      fireMissile = false;
+  NetEntityId missileTarget{};    // generation-stamped reference (§9)
 
-    // The ONE description point. Order defines wire order. Add a field here and the
-    // codec follows automatically.
-    constexpr auto Fields() { return std::tie(sequence, rollAxis, pitchAxis,
-                                              throttle, fire, fireMissile, missileTarget); }
-    constexpr auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis,
-                                                     throttle, fire, fireMissile, missileTarget); }
-  };
+  constexpr auto Fields()       { return std::tie(tick, sequence, rollAxis, pitchAxis,
+                                                  throttle, fire, fireMissile, missileTarget); }
+  constexpr auto Fields() const { return std::tie(tick, sequence, rollAxis, pitchAxis,
+                                                  throttle, fire, fireMissile, missileTarget); }
+};
+REGISTER_MESSAGE(InputCommand);   // §7 — adds it to the registry + duplicate-id CI
+```
+
+### 4.2 The generic codec (concept-constrained fold over the field tuple)
+
+```cpp
+template <typename T>
+concept Message = requires (T t) {
+  { T::Id } -> std::convertible_to<MessageId>;
+  t.Fields();
+};
+
+inline void WriteField(Net::DataWriter& w, uint8_t v)  { w.WriteU8(v); }
+inline void WriteField(Net::DataWriter& w, uint32_t v) { w.WriteU32(v); }
+inline void WriteField(Net::DataWriter& w, float v)    { w.WriteF32(v); }
+inline void WriteField(Net::DataWriter& w, bool v)     { w.WriteU8(v ? 1 : 0); }
+inline void WriteField(Net::DataWriter& w, const std::string& v);   // len-prefixed, capped
+inline void WriteField(Net::DataWriter& w, NetEntityId v);          // index+generation
+// enums via std::to_underlying; Vector3i64; std::optional<T> (presence flag); fixed arrays…
+
+template <Message M>
+std::vector<uint8_t> Encode(const M& m)
+{
+  Net::DataWriter w;
+  std::apply([&](auto&... fs){ (WriteField(w, fs), ...); }, m.Fields());
+  return w.Bytes();
+}
+
+template <Message M>
+bool Decode(Net::DataReader& r, M& out)
+{
+  std::apply([&](auto&... fs){ (ReadField(r, fs), ...); }, out.Fields());
+  return r.Ok();   // sticky bounds-check; the record length (§6.1) bounds the reader
 }
 ```
 
-### 4.2 The generic codec (concept-constrained, fold over the field tuple)
-
-```cpp
-// NeuronCore/Messages/Serialize.h  (illustrative)
-namespace Neuron::Msg
-{
-  // A type is a Message if it has a MessageId and a Fields() tuple.
-  template <typename T>
-  concept Message = requires (T t) {
-    { T::Id } -> std::convertible_to<MessageId>;
-    t.Fields();
-  };
-
-  // Leaf writers: one overload per primitive the wire understands. Reuses DataWriter.
-  inline void WriteField(Net::DataWriter& w, uint8_t  v) { w.WriteU8(v); }
-  inline void WriteField(Net::DataWriter& w, uint16_t v) { w.WriteU16(v); }
-  inline void WriteField(Net::DataWriter& w, uint32_t v) { w.WriteU32(v); }
-  inline void WriteField(Net::DataWriter& w, int32_t  v) { w.WriteI32(v); }
-  inline void WriteField(Net::DataWriter& w, int64_t  v) { w.WriteI64(v); }
-  inline void WriteField(Net::DataWriter& w, float    v) { w.WriteF32(v); }
-  inline void WriteField(Net::DataWriter& w, bool     v) { w.WriteU8(v ? 1 : 0); }
-  inline void WriteField(Net::DataWriter& w, const std::string& v) { /* len-prefixed */ }
-  // … Vector3i64, EntityRef (index), enums (as underlying), std::optional<T>, etc.
-
-  template <Message M>
-  std::vector<uint8_t> Encode(const M& m)
-  {
-    Net::DataWriter w;
-    std::apply([&](auto&... fs){ (WriteField(w, fs), ...); }, m.Fields()); // fold
-    return w.Bytes();
-  }
-
-  template <Message M>
-  bool Decode(Net::DataReader& r, M& out)
-  {
-    std::apply([&](auto&... fs){ (ReadField(r, fs), ...); }, out.Fields()); // fold
-    return r.Ok();   // sticky bounds-check, exactly like today
-  }
-}
-```
-
-The serializer is **zero-overhead** (folds inline to the same `DataWriter` calls written
-by hand today) and **type-safe** (a missing/extra field is a compile error in `Fields()`,
-not a silent wire-format drift). `Vector3i64`, enums, `std::optional<T>`, fixed arrays,
-and nested messages get leaf overloads so any field type "just works".
+The fold inlines to exactly the `DataWriter` calls written by hand today (zero overhead),
+and a `Fields()`/member mismatch is a compile error rather than silent wire drift.
 
 ### 4.3 "Parameters on demand"
+- **Designated-initializer construction** — supply only what matters:
+  `bus.Publish(Chat{ .sender = me, .text = "hi" });`
+- **`std::optional<T>` fields** — presence-flagged (1 byte); attach a parameter only when
+  relevant.
+- *(Trailing-field forward-compat is **out of scope** under lockstep versioning — see the
+  decision table. We do not rely on old readers tolerating new fields.)*
 
-Three complementary mechanisms, all C++23-ergonomic:
-
-1. **Designated-initializer construction** — supply only the parameters you care about,
-   the rest defaulted:
-   ```cpp
-   bus.Publish(ChatMessage{ .senderId = me, .text = "hi" });
-   bus.Publish(FireWeapon{ .shooter = me, .weapon = Weapon::Missile, .target = locked });
-   ```
-2. **Optional fields** (`std::optional<T>`) — encoded behind a 1-byte presence flag, so a
-   message can carry a parameter *only when relevant* without breaking the wire for those
-   that omit it. Adding a new trailing optional field is backward-compatible.
-3. **Extension blocks** — a message may end with an optional `Extensions` map
-   (id → bytes) for rare/forward-compat parameters that the receiver can ignore if it
-   doesn't recognise them. Reserved for cold-path/debug use; hot messages stay fixed-layout.
-
-> This keeps the *common* case compact and fixed-width (good for the hot path) while
-> letting messages grow parameters "on demand" without a flag-day wire break.
-
-### 4.4 Versioning
-
-A single envelope `PROTOCOL_VERSION` (replacing the per-schema `INPUT_VERSION` /
-`EVENT_VERSION`) is checked at the framing layer. Individual messages evolve by
-*appending* fields (old readers stop at their known field count; trailing optionals are
-presence-flagged), so most additions need no version bump. A bump is reserved for an
-incompatible reshaping of an existing field.
+### 4.4 Serialization hardening (rec 9)
+- Little-endian, fixed-width integers only (already the `DataWriter` contract).
+- Enums serialized via explicit underlying type (`std::to_underlying`).
+- Strings UTF-8, **length-prefixed and capped**; `std::vector`/array reads are **bounded**
+  (mirror `GALAXY_NAME_MAX`) — no unbounded allocation from a hostile length.
+- `bool` encoded as `u8`; never raw struct layout.
+- **Float policy:** raw IEEE-754 for presentation/intent; **deterministic gameplay values
+  that must replay identically are quantized/fixed-point** (decided per field, documented in
+  the catalog).
+- Never serialize pointers, platform/STL-layout-dependent types, or transient handles.
+- Entity references use `NetEntityId` (§9), never a bare recyclable ECS index.
 
 ---
 
-## 5. The in-process MessageBus
+## 5. The in-process MessageBus (edges only)
 
-A lightweight, header-only, std-only dispatcher in NeuronCore (mechanism, no behaviour).
+Header-only, std-only, NeuronCore mechanism. **Used for edges, not core simulation.**
 
-### 5.1 Model
-- **Typed subscribe:** `bus.Subscribe<Death>([](const Death& d){ … })` registers a handler
-  keyed by `Death::Id`.
-- **Typed publish:** `bus.Publish(Death{ .victim = v, .killer = k })` enqueues the message.
-- **Queued/deferred dispatch:** `Publish` appends to an internal queue; `bus.Dispatch()`
-  drains it and invokes handlers. This is called once per server tick and once per client
-  frame, so message effects are ordered and re-entrancy-safe (a handler that publishes is
-  processed on the next drain, not recursively mid-handler). A queue-depth guard bounds a
-  publish storm.
-- **Immediate option:** `bus.Emit(msg)` dispatches synchronously for the rare case that
-  needs it (e.g. a query-like request inside one system). Default is queued.
+| Use the bus for | Keep as direct ECS/system work |
+|---|---|
+| inbound commands, network ingress/egress | per-tick combat resolution, motion integration |
+| facts/notifications (`EntityDeath`, `Chat`, `TradeResult`) | per-projectile/per-stat-delta inner loops |
+| UI / audio / VFX / camera triggers | anything that defines simulation order/determinism |
 
+> **`Hit` is deliberately NOT a bus message.** Combat resolution stays the existing direct
+> `StepCombat()`/`ResolvePlayerFire()` path; only its **batched outputs** (`EntityDeath`,
+> optionally a coalesced `DamageApplied`) and the inbound `FireWeapon` *command* are messages.
+> `Crime` is a fact the combat system emits, not a per-hit event. This keeps the hot path off
+> the bus and simulation order explicit.
+
+### 5.1 Dispatch model — generations within a tick (rec 8, refined)
+- `Publish(msg)` enqueues; handlers run only during `Dispatch()`.
+- `Dispatch()` drains in **generations**, all *within the same tick*: gen 0 = ingress +
+  simulation outputs, gen 1 = their consequences, … capped at `MAX_GENERATIONS`. A handler
+  that publishes is processed in the **next generation this tick**, never recursively
+  mid-handler and never silently deferred to next frame. This resolves fire→death→despawn in
+  one tick while keeping ordering deterministic and re-entrancy-safe.
+- **Deterministic ordering key** (replay-ready, rec 8): within a generation, messages order
+  by `(tick, sourceConnectionId, sequence, enqueueOrder)`. Defined now; the capture/replay
+  harness that exploits it is a later phase.
+- **Queue-overflow policy is explicit**, per scope: gameplay → warn + drop oldest with a
+  counter; control → fatal (a dropped session message is unrecoverable). No silent drops.
+- **Unsubscribe-during-dispatch** is safe (deferred removal); handlers get **subscription
+  tokens** with defined lifetime.
+
+### 5.2 Allocation & observability (rec 7, rec 10)
+- API is designed so a **low/zero-allocation** implementation is possible later: small
+  messages stored inline (small-buffer), large payloads behind explicitly owned buffers,
+  queues frame-arena-backed. v1 may use `std::function`/type-erasure for cold handlers, but
+  the **interface does not preclude** the arena path.
+- Built-in **metrics**: per-`MessageId` counts, queue depth, dispatch time, drops,
+  rate-limit rejections — feeding the tooling in §10.
+
+### 5.3 Buses
+One bus per side (server loop / client engine); identical type, different registered
+handlers. This is how behaviour stays per-side while the mechanism is shared.
+
+---
+
+## 6. Wire binding — gameplay traffic *is* the catalog
+
+### 6.1 Framing (rec 3 — record length is mandatory)
+```
+Envelope:  [ MAGIC 'NMSG' ][ PROTOCOL_VERSION u16 ][ lane u8 ][ records… ]
+Record:    [ MessageId u16 ][ payloadLength u16 ][ payloadBytes… ]
+```
+- **`payloadLength` is mandatory** so a reliable packet can carry several messages and each
+  decoder is bounded to its own record (the `DataReader` is constructed over exactly
+  `payloadLength` bytes). This is decode-robustness, independent of versioning.
+- `PROTOCOL_VERSION` is a single hard gate (lockstep): a mismatch drops the peer. No
+  per-message negotiation.
+
+### 6.2 Lanes (rec 6 — split now)
 ```cpp
-// NeuronCore/Messages/MessageBus.h  (illustrative)
-namespace Neuron::Msg
-{
-  class MessageBus
-  {
-  public:
-    template <Message M> void Subscribe(std::function<void(const M&)> fn);
-    template <Message M> void Publish(const M& m);   // enqueue (typed → type-erased)
-    void Dispatch();                                  // drain queue → handlers
-  private:
-    // MessageId → list<handler>; queue of (MessageId, erased payload).
-  };
-}
+enum class Lane : uint8_t {
+  Control,      // reliable ordered, dedicated channel: handshake, AssignPlayer, clock, session
+  Gameplay,     // reliable ordered: death, despawn, chat, station req/resp
+  Bulk,         // reliable ordered, separate channel: galaxy manifest, station catalogs (cold/large)
+  Unreliable,   // self-superseding sequenced latest-wins: InputCommand
+};
 ```
+- **Separate `ReliableChannel` instances per reliable lane**, so a large `Bulk` manifest
+  cannot head-of-line-block a `Gameplay` death or a `Control` session message. `ReliableChannel`
+  already exists; we instantiate a few keyed by lane and tag each packet's `lane` byte.
+- Per-message **max payload** is declared and asserted; fragmentation is **disallowed except
+  for approved `Bulk` messages**.
+- The lane is a `static constexpr` on the message; the send path cannot misroute it.
 
-### 5.2 Where buses live
-- **Server:** one bus owned by the server loop (or `ServerSessions`). Systems publish
-  domain events (`Death`, `Despawn`, `Crime`, `TradeResult`); the loop's handlers turn the
-  outbound-to-clients ones into channel sends.
-- **Client:** one bus owned by the client engine. Input publishes `InputCommand`; the
-  network ingress publishes decoded inbound messages (`Death`, `StationResponse`, …); UI
-  / audio / VFX / camera subscribe. (Roadmap row: client-side explosion VFX simply
-  subscribes to `Death` — no server entity needed.)
-- The bus type is identical on both sides; only the registered handlers differ. This is
-  how "behaviour stays per-side" is preserved while the *mechanism* is shared.
-
----
-
-## 6. The wire binding — every client ↔ server byte is a message
-
-### 6.1 Unified framing
-One envelope replaces the three magics (`'NCMD'`, `'NEVT'`, and the bespoke input header):
-
+### 6.3 Inbound pipeline — validate before publish (rec 5)
+Untrusted bytes must never reach GameLogic directly:
 ```
-[ MAGIC 'NMSG' ][ PROTOCOL_VERSION u16 ][ channel u8 ][ payload … ]
+1. parse envelope            (magic, version, lane)
+2. validate packet/lane      (lane exists; reliable lanes drain their ReliableChannel)
+3. decode record             (MessageId known? payloadLength within cap? Decode<T> Ok()?)
+4. validate message:
+     • direction valid for this peer (a client cannot send a server-origin Event)
+     • allowed in current session state (e.g. nothing but handshake pre-login)
+     • rate-limited (per-peer, per-MessageId)
+     • authority: does this peer control/▾see the referenced NetEntityId? (§9)
+     • no spoofing of another player/entity
+5. publish to the SERVER bus
 ```
+Direction/lane are also `static_assert`ed at **local** send sites — compile-time for our own
+code, runtime for the network because a hostile client can emit any bytes.
 
-- **channel** selects the delivery lane:
-  - `Reliable` → the payload is one or more `(MessageId, len, bytes)` records carried by
-    `ReliableChannel` (seq/ack/resend/ordered) — unchanged transport, generalised content.
-  - `Unreliable` → a single self-superseding message (e.g. `InputCommand`), latest-seq-wins
-    just like `ClientInput` today.
-- The existing `PeekMagic` switch in `Server/Main.cpp` collapses to a single `'NMSG'`
-  branch that routes by `channel`, then decodes by `MessageId`.
-
-### 6.2 Delivery traits are on the type
-`Reliability` and `Direction` are `static constexpr` on each message (see §4.1), so the
-send path *cannot* put a self-superseding message on the reliable lane by mistake, and a
-client cannot emit a server-only message. A `static_assert` enforces direction at the
-send call site.
-
-### 6.3 Routing tables (catalog-driven)
-A central **catalog** (`Messages/Catalog.h`) lists every message type once. From it we
-generate, at compile time:
-- `MessageId` ↔ type mapping for decode dispatch (`switch (id)` → `Decode<T>` → `Publish`),
-- the reliable/unreliable classification,
-- a golden **wire-format test** per message (encode → decode → compare), mirroring the
-  existing `SnapshotTransportTests` / `StationProtocolTests` style.
-
-### 6.4 Inbound pipeline (server)
-```
-recvfrom → Peek 'NMSG' → ReadPacket (reliable lane drains ReliableChannel)
-        → for each (id,bytes): Decode<T> → bus.Publish(T)        ← network becomes a publisher
-tick: bus.Dispatch()  → session/GameLogic handlers apply intent, resolve combat, etc.
-      systems Publish outbound messages (Death, Despawn, StationResponse, AssignPlayer)
-egress: outbound handler routes each to the addressed session's Reliable/Unreliable lane
-```
-Client mirrors this: input handler publishes `InputCommand` (unreliable egress), ingress
-publishes decoded inbound onto the bus, presentation subscribes.
+### 6.4 The carve-out (rec 12, refined)
+**All gameplay protocol traffic is cataloged messages.** Session/transport primitives
+(handshake, clock-sync, ping, MTU, AssignPlayer) are cataloged messages on the **`Control`
+lane**. The *only* things that may live **below** the catalog are primitives that must exist
+*before* a decoder/session is trusted — encryption/auth negotiation and anti-cheat framing —
+if and when those are added (§13). Raw snapshot packets remain their own format (§11).
 
 ---
 
-## 7. The initial message catalog (folding in today's protocols)
+## 7. Catalog & governance (rec 4 + decision: structs + registration macro)
 
-| MessageId | Struct | Replaces | Lane | Dir |
-|---|---|---|---|---|
-| `InputCommand` | flight intent + fire/missile | `ClientInput` (`WriteInput`/`ReadInput`) | Unreliable | C→S |
-| `AssignPlayer` | controlled entity id | `EncodeAssignPlayer` | Reliable | S→C |
-| `EntityDespawn` | entity id | `EncodeDespawn` | Reliable | S→C |
-| `EntityDeath` | victim + killer | `EncodeDeath` | Reliable | S→C |
-| `Chat` | sender + text | `EncodeChat` | Reliable | both |
-| `GalaxyManifest` | chunk of system list | `SendManifest` | Reliable | S→C |
-| `StationRequest` | dock/undock/buy/sell/equip/teleport | `StationProtocol` req | Reliable | C→S |
-| `StationResponse` | authoritative result | `StationProtocol` resp | Reliable | S→C |
+The catalog is the **single source of truth** for the wire ABI and for tooling.
 
-**New domain (in-process first, some later wire) messages this unlocks**
-- `FireWeapon{ shooter, weapon, target }` — published by input/AI; combat subscribes.
-- `Hit{ attacker, victim, weapon, damage }` — published by combat resolution; drives death,
-  crime flagging, and (client) hit VFX/sound on its own subscription.
-- `Crime{ offender, victimTeam }` — replaces the inline crime block in `Server/Main.cpp`;
-  the spawn director subscribes to dispatch police.
-- `EntitySpawned{ id, type }` — lifecycle, complements `EntityDespawn`.
-- `KeyPressed` / `ActionTriggered` — client-local input events (see §8.1) that the input
-  mapper turns into `InputCommand` / `StationRequest`, decoupling key polling from intent.
+### 7.1 Authoring
+Each message is an idiomatic struct (§4.1) plus one `REGISTER_MESSAGE(T)` that records, at
+compile time *and* in a runtime registry: `Id`, name, `Scope`, `Kind`, `Lane`, `Direction`,
+and field metadata (names/types/offsets, derived from `Fields()`). Tooling enumerates the
+registry; no separate IDL to maintain.
 
----
-
-## 8. Worked examples
-
-### 8.1 A key press
-1. The platform layer polls the keyboard (today `kbd_poll_keyboard` sets `kbd_*` flags).
-2. An **input mapper** publishes local intent messages instead of code reading globals:
-   `bus.Publish(KeyPressed{ .key = Key::Fire })` (or directly the higher-level
-   `FireWeapon`). Key-state → semantic action lives in one subscriber, not scattered `if`s.
-3. The **command builder** (subscriber) accumulates the frame's intents into one
-   `InputCommand` and publishes it for **unreliable egress** to the server.
-4. Server ingress decodes `InputCommand` → `bus.Publish` → `ServerSessions` handler applies
-   it to the player's `FlightIntent` (today's `OnInput` body becomes a handler).
-
-> Net effect: the chain from physical key → wire intent is a series of messages, so
-> rebinding, recording/replaying input, or a headless bot driving the same `InputCommand`
-> are all the same path (the `BotClient` already wants this).
-
-### 8.2 One ship shoots, another registers a hit
-Today this is inlined in `Server/Main.cpp` (`applyShot` lambda) and `StepCombat()` returns
-`Kill` vectors. Reworked through messages, server-side:
-
-1. Input/AI publishes `FireWeapon{ shooter, weapon, target }`.
-2. The **combat system** subscribes, runs the existing geometry (`ResolvePlayerFire` /
-   `StepCombat` math is unchanged — only its *outputs* become messages), and for each
-   resolved strike publishes `Hit{ attacker, victim, weapon, damage }`.
-3. Subscribers react independently — the decoupling the user asked for:
-   - **Damage handler** applies energy loss; if it reaches zero it publishes
-     `EntityDeath{ victim, killer }`.
-   - **Crime handler** sees a `Hit` on a `Station`/`Police` victim and publishes `Crime`,
-     which the spawn director turns into dispatched police (replacing the inline block).
-   - **Death handler** destroys the entity (or respawns a player) and the outbound router
-     sends `EntityDeath` reliably to every client in AOI.
-4. On the **client**, ingress publishes the inbound `EntityDeath`; the VFX subscriber spawns
-   an explosion, the audio subscriber plays the boom, and `ReplicationClient::Forget`
-   drops the ghost — each an independent subscriber to the same message.
-
-The combat *math* is untouched; what changes is that its results travel as messages, so
-crime, death, VFX, audio, and despawn are no longer one tangled function.
+### 7.2 `MessageId` is a permanent ABI
+- **Never reuse** a value; retired ids stay **reserved** (commented, not deleted).
+- **Subsystem-reserved ranges** with an invalid/reserved band:
+  ```
+  0x0000          Invalid (reserved)
+  0x0001–0x00FF   core / session / control
+  0x0100–0x01FF   input
+  0x0200–0x02FF   replication control / lifecycle
+  0x0300–0x03FF   chat / social
+  0x0400–0x04FF   station / economy
+  0x0F00–0x0FFF   debug / tooling
+  0x1000+         game-specific extensions
+  ```
+- Each id documented with **owner + lifecycle**.
+- **CI test** asserts no duplicate ids and that every `Wire` message has a lane + direction.
 
 ---
 
-## 9. Threading & ordering
+## 8. The initial catalog (folding today's protocols in)
 
-- **Single-threaded today:** server tick and client frame each call `bus.Dispatch()` once;
-  ordering is FIFO within a drain. Deterministic and unit-testable.
-- **Future worker threads (`TasksCore`):** `Publish` is the only cross-thread entry; it can
-  be made lock-free/MPSC later without changing call sites. Handlers always run on the
-  owning loop thread during `Dispatch()`, so subscribers need no locking. The design
-  *reserves* this; it does not build it now (YAGNI, but no dead-end).
-- **Re-entrancy:** queued dispatch means a handler that publishes does not recurse; the new
-  message is drained in the same `Dispatch()` pass (bounded by a max-iterations guard to
-  avoid a publish loop wedging a tick).
+| MessageId | Scope | Kind | Lane | Dir | Replaces |
+|---|---|---|---|---|---|
+| `InputCommand` | Wire | Command | Unreliable | C→S | `ClientInput` |
+| `AssignPlayer` | Control | Event | Control | S→C | `EncodeAssignPlayer` |
+| `GalaxyManifest` | Wire | Event | **Bulk** | S→C | `SendManifest` |
+| `EntityDespawn` | Wire | Event | Gameplay | S→C | `EncodeDespawn` |
+| `EntityDeath` | Wire | Event | Gameplay | S→C | `EncodeDeath` |
+| `Chat` | Wire | Event | Gameplay | both | `EncodeChat` |
+| `StationRequest` | Wire | Command | Gameplay | C→S | `StationProtocol` req |
+| `StationResponse` | Wire | Event | Gameplay | S→C | `StationProtocol` resp |
+| `FireWeapon` | Wire | Command | Unreliable\* | C→S | inline `in.fire`/`in.fireMissile` |
+| `EntitySpawned` | Wire | Event | Gameplay | S→C | (new lifecycle) |
+| `KeyPressed` / `ActionTriggered` | **LocalOnly** | Command | — | — | (new, client-local) |
+| `Crime`, `DamageApplied` | LocalOnly\*\* | Event | — | — | inline crime/kill handling |
 
----
-
-## 10. Testing strategy
-
-Mirror the existing `Tests/NeuronCore` GoogleTest suites:
-- **Codec golden tests** — for every catalog entry: `Encode` → `Decode` → field-equality;
-  plus a fixed byte-vector golden so wire drift is caught (like `StationProtocolTests`).
-- **Bus tests** — subscribe/publish/dispatch ordering, multiple subscribers, queued vs
-  immediate, re-entrant publish, queue-depth guard.
-- **Round-trip over `ReliableChannel`** — publish reliable message → `WritePacket` →
-  `ReadPacket` → ingress → handler fired, under simulated loss/reorder (reuse the
-  `ReliableChannel` test harness).
-- **Direction/lane `static_assert`s** — compile-time tests that a server-only message can't
-  be sent from the client, and an unreliable message can't be queued reliably.
-- **Parity tests during migration** — assert the new codec produces byte-identical output
-  to the legacy `Encode*` for each folded message *before* deleting the legacy path.
+\* `FireWeapon` may stay folded into `InputCommand`'s fire bits initially; broken out only if
+weapons grow parameters. \*\* server-internal facts; promoted to `Wire` only if a client needs
+them (e.g. damage numbers).
 
 ---
 
-## 11. Phased rollout (incremental, always-building)
+## 9. Entity references, time, and identity (new — codebase-specific)
 
-> Each phase compiles, passes tests, and leaves the game runnable. We fold legacy schemas
-> in one at a time and delete the old encode/decode only after a byte-parity test passes.
-
-**Phase 0 — Foundations (NeuronCore, no behaviour change)**
-- Add `NeuronCore/Messages/`: `MessageId.h` (catalog enum), `Serialize.h` (concept + leaf
-  codecs over `DataWriter`/`DataReader`), `Message` concept, `MessageBus.h`.
-- Unit tests for codec + bus. Nothing wired into the game yet.
-
-**Phase 1 — In-process bus on the server**
-- Introduce `FireWeapon` / `Hit` / `EntityDeath` / `Crime` as in-process messages.
-- Refactor `Server/Main.cpp`'s `applyShot` and the kill loop to publish/subscribe, with
-  the combat math (`ResolvePlayerFire`, `StepCombat`) unchanged. Behaviour identical;
-  structure decoupled. Validate with existing combat tests + manual run.
-
-**Phase 2 — Fold the unreliable lane (`InputCommand`)**
-- Define `InputCommand` as a message; add the `'NMSG'` unreliable framing alongside the
-  existing `'NCMD'` path. Parity test vs `WriteInput`/`ReadInput`. Switch client send and
-  server ingress to the message; delete `ClientInput.h`'s encode once green.
-
-**Phase 3 — Fold the reliable lane (`GameEvents`, `StationProtocol`, manifest)**
-- Move `AssignPlayer`, `EntityDespawn`, `EntityDeath`, `Chat`, `GalaxyManifest`,
-  `StationRequest/Response` into the catalog with generated codecs. Generalise
-  `ReliableChannel` content to `(MessageId, bytes)` (it already is `type` + payload — this
-  is mostly a rename + codec swap). Replace the `PollEvent`/switch in `main.cpp` and the
-  request loop in `Server/Main.cpp` with bus subscriptions. Delete `GameEvents.h` /
-  `StationProtocol.h` encode/decode after parity.
-
-**Phase 4 — Client-side bus & presentation handlers**
-- Stand up the client `MessageBus`; route `ReplicationClient` ingress through it. Convert
-  input polling to the mapper/command-builder chain (§8.1). Subscribe VFX/audio/camera/UI
-  to inbound messages (enables the roadmap's Death-driven explosion VFX with no server
-  entity).
-
-**Phase 5 — Cleanup & docs**
-- Remove the now-unused magics/versions, collapse `PeekMagic` to one branch, update
-  `AGENTS.md`/roadmap references, and document the catalog as the single source of truth
-  for the wire protocol.
+- **`NetEntityId{ uint32_t index; uint32_t generation; }`** is a first-class serializable
+  field type. Client-originated references (e.g. `InputCommand::missileTarget`) carry the
+  generation the client last saw; the server validates `index→generation` against the live
+  `Registry` (extending today's `LiveEntity`) and **rejects stale/foreign references** in the
+  inbound validation step (§6.3). Closes the recycle-aliasing hole.
+- **Authority rule (resolves review Q5):** a client may reference **only entities it controls
+  or currently sees in its AOI**. Arbitrary-entity references are rejected pre-publish.
+- **Tick/clock stamping:** gameplay messages carry a `tick` (sim-tick / client clock). Used
+  now for latest-wins + the deterministic ordering key, and ready for lag-compensation and
+  the snapshot↔event race reconciliation (§11) without a later wire change.
+- **Idempotent client handlers:** reliable delivery is exactly-once, but death-VFX,
+  inventory-grant, etc. are written idempotently so replay or a future at-least-once lane
+  can't double-apply.
 
 ---
 
-## 12. Proposed file layout (NeuronCore — mechanism only)
+## 10. Tooling & observability (rec 10 — enabled by the registry)
+- **Packet-dump decoder** that reads the registry and prints any `'NMSG'` capture **without
+  the game executable** (the registry is std-only and linkable standalone).
+- **Message/packet trace capture** and **input/message replay** (built on §5.1's ordering
+  key) for desync analysis.
+- **Bandwidth per `MessageId`**, **CPU per handler**, queue-depth graphs, drop/rate-limit
+  counters (from §5.2 metrics).
+- **Schema-doc generator** from the catalog, and a **catalog-diff/compat report** between two
+  builds (even under lockstep, useful to *see* what changed and force the version bump).
 
+---
+
+## 11. Snapshots stay separate (rec 11)
+- Messages = discrete commands/events (observed exactly once). Snapshots = current replicated
+  state. **Never** stream high-frequency state over reliable messages; **never** carry an
+  irreversible once-only event in a snapshot.
+- **Defined race handling**, with tests:
+  - `EntityDeath` before a snapshot that still contains the entity → client suppresses the
+    entity (today's `Forget`) and reconciles.
+  - Snapshot drops the entity before `EntityDeath` arrives → client still plays/skips VFX per
+    policy (the death is the authoritative VFX trigger).
+  - Add explicit event/snapshot race tests alongside the existing transport tests.
+
+---
+
+## 12. MessageBus & codec — file layout (NeuronCore, mechanism only)
 ```
 NeuronCore/Messages/
-  MessageId.h      // enum class MessageId : uint16_t  (the catalog ids)
-  MessageTraits.h  // Reliability, Direction enums; per-type static traits
-  Serialize.h      // Message concept + WriteField/ReadField leaves + Encode/Decode
-  MessageBus.h     // Subscribe / Publish / Dispatch / Emit
-  Catalog.h        // includes every message struct; the decode-dispatch table
-  Messages/        // one header per message struct (InputCommand.h, Death.h, …)
+  MessageId.h        // enum class MessageId : uint16_t  + reserved-range constants
+  MessageTraits.h    // MessageScope, MessageKind, Lane, Direction
+  NetEntityId.h      // generation-stamped entity reference + leaf codec
+  Serialize.h        // Message concept + WriteField/ReadField leaves + Encode/Decode
+  Registry.h         // REGISTER_MESSAGE, runtime/compile-time catalog, duplicate-id check
+  MessageBus.h       // Subscribe (token)/Publish/Dispatch (generations)/metrics
+  Framing.h          // 'NMSG' envelope + record (length-prefixed) read/write, lane routing
+  Defs/              // one header per message struct (InputCommand.h, EntityDeath.h, …)
 Tests/NeuronCore/
-  MessageCodecTests.cpp
-  MessageBusTests.cpp
-  MessageWireTests.cpp   // golden bytes + ReliableChannel round-trip
+  MessageCodecTests.cpp     // encode→decode + golden bytes per message/version
+  MessageBusTests.cpp       // generations, ordering key, overflow policy, unsubscribe-in-dispatch
+  MessageWireTests.cpp      // multi-record framing, per-lane ReliableChannel round-trip under loss
+  MessageValidationTests.cpp// direction/state/rate/authority rejection; malformed/oversized fuzz
+  CatalogGovernanceTests.cpp// no duplicate ids; every Wire msg has lane+direction; LocalOnly unserializable
 ```
-
-Handlers (behaviour) live **outside** NeuronCore: server handlers in `GameLogic` /
-`Server`, presentation handlers in `NeuronClient` / `DeepspaceOutpost`.
+Handlers (behaviour) live **outside** NeuronCore.
 
 ---
 
-## 13. Risks & open questions
-
-- **Codec for variable-length/nested fields.** `std::string`, `std::vector<T>`, and the
-  `GalaxyManifest` chunking need careful leaf overloads (length-prefixed) and a max-size
-  guard so a hostile length can't allocate unbounded. Mitigation: bounds-checked reads
-  (already the `DataReader` contract) + explicit caps mirroring `GALAXY_NAME_MAX`.
-- **`std::tie`-based reflection ergonomics.** Requires every message to keep `Fields()` in
-  sync with its members. Mitigation: a `static_assert(sizeof)` / field-count check and the
-  golden wire tests catch drift immediately. (If C++26 reflection lands, `Fields()` can be
-  generated and removed — the codec API stays.)
-- **Per-message vs batched reliable sends.** `ReliableChannel::WritePacket` already packs
-  multiple messages per datagram; we keep that and just change the record content.
-- **Hot-path overhead of the bus.** `std::function` + type-erased queue has cost. For the
-  highest-frequency in-process events we can specialise, but at 30 Hz with ≤100 players the
-  simple version is fine; measure before optimising.
-- **Ordering between snapshot and reliable messages.** Unchanged from today (death event
-  vs snapshot that still shows the entity); the client already handles this via `Forget`.
-  Worth restating in the catalog docs so new messages respect it.
+## 13. Security posture (rec 5/“questions” — stated assumption)
+**Assumed now:** the inbound **validation + per-peer rate-limiting** pipeline (§6.3) and
+authority checks (§9) — these are gameplay-integrity essentials and cheap.
+**Deferred (hooks left, not built):** encryption, authentication, connection tokens, replay-
+protection nonces, anti-spoofing crypto. The framing reserves space for a pre-catalog
+security envelope (§6.4) so these can be added below the message layer later **without
+touching the catalog**. *Flag if you want any of these in the near-term scope.*
 
 ---
 
-## 14. Summary
+## 14. Phased rollout (each phase builds, tests green, game runnable)
 
-The system makes a **message** the single currency of interaction: a typed C++23 struct
-that describes its own fields once, is serialized automatically, is published onto an
-in-process bus *or* serialized to a peer with no change to producer/consumer code, and
-carries compile-time delivery traits so it can only travel the right lane in the right
-direction. The existing hand-rolled protocols fold in as the first catalog entries and are
-deleted as parity is proven, leaving **one** mechanism that drives input, combat, lifecycle,
-trade, and chat — and makes *all* client ↔ server communication nothing more than the
-message catalog on the wire.
+**Phase 0 — Foundations (NeuronCore, no behaviour change).**
+`MessageId` + reserved ranges, `MessageTraits`, `NetEntityId`, `Serialize` (concept + leaves
++ caps), `Registry`/`REGISTER_MESSAGE`, `MessageBus` (generations + ordering key + overflow
+policy + metrics), `Framing` (length-prefixed records + lanes). Codec/bus/governance tests.
+Nothing wired into the game yet.
+
+**Phase 1 — In-process bus on the server.**
+Introduce `FireWeapon` (command) and `EntityDeath`/`Crime`/`DamageApplied` (facts). Refactor
+`Server/Main.cpp`'s `applyShot` + kill loop to publish/subscribe; **combat math unchanged**.
+Validate with existing combat tests + manual run.
+
+**Phase 2 — Unreliable lane (`InputCommand`).**
+Add `'NMSG'` unreliable framing alongside `'NCMD'`; byte-parity test vs `WriteInput`. Switch
+client send + server ingress through the validation pipeline; delete `ClientInput` encode once
+green.
+
+**Phase 3 — Reliable lanes + fold reliable schemas.**
+Stand up Control/Gameplay/Bulk `ReliableChannel`s. Move `AssignPlayer`(Control),
+`GalaxyManifest`(Bulk), `EntityDespawn`/`EntityDeath`/`Chat`/`Station*`(Gameplay) into the
+catalog with generated codecs + validation. Replace `PollEvent`/switch and the station loop
+with bus subscriptions. Delete legacy encode/decode after parity.
+
+**Phase 4 — Client bus & presentation.**
+Client `MessageBus`; route `ReplicationClient` ingress through it. Convert key polling →
+`KeyPressed`/`ActionTriggered` (LocalOnly) → command-builder → `InputCommand`. Subscribe
+VFX/audio/camera/UI to inbound facts (enables the roadmap's Death-driven explosion VFX).
+
+**Phase 5 — Tooling & hardening.**
+Standalone packet-dump decoder, schema-doc + catalog-diff generators, message/bandwidth/CPU
+metrics surfaced, malformed-packet fuzz + event/snapshot race tests, 100-bot trace run.
+Collapse `PeekMagic` to one branch; update `AGENTS.md`/roadmap.
+
+---
+
+## 15. Commercial-scalability checklist (gate before committing the design)
+- [ ] Reject malicious oversized strings/vectors without allocation spikes (§4.4).
+- [ ] Rate-limit spammy clients before GameLogic sees messages (§6.3).
+- [ ] Profile CPU per message type and per handler; bandwidth per message type (§5.2/§10).
+- [ ] Replay a captured input/message stream via the deterministic ordering key (§5.1).
+- [ ] Run 100 bot clients with message tracing enabled (§14 Phase 5).
+- [ ] Fuzz malformed/oversized packets (§12 tests).
+- [ ] Retire a `MessageId` without reuse; duplicate-id CI catches mistakes (§7.2).
+- [ ] Multiple reliable lanes prevent bulk HOL-blocking gameplay/control (§6.2).
+- [ ] `LocalOnly` events never enter the wire catalog (§3.1).
+- [ ] Client-originated entity refs validated for authority/visibility (§9).
+
+---
+
+## 16. Open questions still on the table
+1. **Local vs wire catalogs:** v2 keeps **one catalog** with `MessageScope` separating
+   local/wire (simplest, one registry for tooling). Switch to physically separate
+   local-domain catalogs only if the wire catalog feels polluted — flag if preferred.
+2. **`DamageApplied` to the client?** Kept server-internal for now; promote to `Wire` only if
+   the client needs damage numbers/hit feedback beyond death VFX.
+3. **Security timing (§13):** confirm crypto/auth stays deferred, or pull any forward.
+4. **Quantization policy:** which gameplay floats become fixed-point for deterministic
+   replay? (Position is already `int64`; intent axes likely fine as raw float.)
+
+---
+
+## 17. Summary
+A **message** is the currency of *edge* interactions: a typed C++23 struct that describes its
+fields once, is auto-serialized, carries explicit **scope / kind / lane / direction** traits,
+and is registered into a single catalog that is the network ABI *and* the source for tooling.
+Local events (`LocalOnly`) never reach the wire; gameplay wire traffic is validated before it
+touches GameLogic; reliable traffic is split across control/gameplay/bulk lanes; dispatch is
+deterministic and replay-ready. Hot simulation stays direct ECS work — the bus decouples the
+edges, not the inner loop. The existing hand-rolled protocols fold in as the first catalog
+entries and are deleted as parity is proven, leaving **one** mechanism for input, lifecycle,
+combat edges, trade, and chat — with the headroom to grow into a commercial-quality engine
+messaging layer rather than a convenient refactor.
