@@ -34,6 +34,7 @@ set(NEURONCLIENT_SOURCES
     gui/GuiButton.cpp
     gui/GuiWindow.cpp
     gui/Canvas.cpp
+    gui/GuiOverlay.cpp
 
     # Win32 / Direct3D 11 / XAudio2 platform backend.
     platform/platform_win.cpp
@@ -64,6 +65,7 @@ set(NEURONCLIENT_HEADERS
     gui/GuiButton.h
     gui/GuiWindow.h
     gui/Canvas.h
+    gui/GuiOverlay.h
     gui/Resource.h
     gui/Input.h
     gui/GameApp.h

@@ -21,6 +21,7 @@
 #include "gfx_dx11.h"
 #include "input_win.h"
 #include "audio_win.h"
+#include "GuiOverlay.h"
 
 #include <mmsystem.h>
 
@@ -163,11 +164,16 @@ int gfx_graphics_startup(void)
 		return 1;
 	}
 	g_renderer_ready = true;
+
+	/* Bring up the native GraphicsCore/ImmediateRenderer GUI overlay on the same
+	 * device (best-effort; leaves the GUI disabled on any failure). Toggle with F1. */
+	GuiOverlay::Startup();
 	return 0;
 }
 
 void gfx_graphics_shutdown(void)
 {
+	GuiOverlay::Shutdown();
 	if (g_renderer_ready)
 	{
 		g_renderer.shutdown();
@@ -186,6 +192,10 @@ void gfx_update_screen(void)
 	if (g_renderer_ready)
 	{
 		gfx_dx11_flush();        /* replay the frame's 2D batch into the canvas */
+		/* Native GUI overlay (F1): drawn into the same canvas, on top of the game's
+		 * 2D, before the letterboxed present. No-op unless shown. */
+		GuiOverlay::Update();
+		GuiOverlay::Render(g_renderer.canvasWidth(), g_renderer.canvasHeight());
 		g_renderer.present();    /* blit the canvas to the window */
 		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
 		 * render path re-enables full-window mode each frame it draws. This keeps

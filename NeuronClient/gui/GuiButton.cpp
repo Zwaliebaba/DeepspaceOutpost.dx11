@@ -9,6 +9,19 @@
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
 
+namespace
+{
+  // Is `btn` the window's currently-selected (keyboard-navigated) button? Guards the
+  // m_buttonOrder[m_currentButton] access so a window whose Create() did not populate
+  // m_buttonOrder (or an out-of-range index) cannot read out of bounds.
+  bool IsCurrentButton(const GuiWindow* parent, const GuiButton* btn)
+  {
+    return parent && !parent->m_buttonOrder.empty() && parent->m_currentButton >= 0 &&
+           parent->m_currentButton < static_cast<int>(parent->m_buttonOrder.size()) &&
+           parent->m_buttonOrder[parent->m_currentButton] == btn;
+  }
+}
+
 GuiButton::GuiButton()
   : m_fontSize(11.0f),
     m_centered(false),
@@ -33,7 +46,7 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
   if (!m_mouseHighlightMode)
     highlighted = false;
 
-  if (parent->m_buttonOrder[parent->m_currentButton] == this)
+  if (IsCurrentButton(parent, this))
     highlighted = true;
 
   if (highlighted || clicked)
@@ -155,7 +168,7 @@ BorderlessButton::BorderlessButton()
 void BorderlessButton::Render(int realX, int realY, bool highlighted, bool clicked)
 {
   auto parent = m_parent;
-  if (parent->m_buttonOrder[parent->m_currentButton] == this)
+  if (IsCurrentButton(parent, this))
     clicked = true;
   if (clicked)
   {

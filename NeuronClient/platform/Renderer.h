@@ -69,6 +69,9 @@ public:
 	/* Accessors for the 2D primitive layer added in later milestones. */
 	ID3D11Device*        device()  const { return device_.get(); }
 	ID3D11DeviceContext* context() const { return context_.get(); }
+	/* The swap chain, so Neuron::Graphics::Core can adopt the existing device/swap
+	 * chain (device unification) instead of creating a second one. */
+	IDXGISwapChain*      swapChain() const { return swap_chain_.get(); }
 
 private:
 	bool createDeviceAndSwapChain(HWND hwnd);

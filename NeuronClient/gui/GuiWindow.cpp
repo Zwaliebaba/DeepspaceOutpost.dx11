@@ -182,9 +182,12 @@ void GuiWindow::Update()
 
     if (g_inputManager->controlEvent(ControlMenuActivate))
     {
-      GuiButton* b = m_buttonOrder[m_currentButton];
-      if (b)
-        b->MouseUp();
+      if (!m_buttonOrder.empty() && m_currentButton >= 0 && m_currentButton < static_cast<int>(m_buttonOrder.size()))
+      {
+        GuiButton* b = m_buttonOrder[m_currentButton];
+        if (b)
+          b->MouseUp();
+      }
     }
 
     if (g_inputManager->controlEvent(ControlMenuClose))
