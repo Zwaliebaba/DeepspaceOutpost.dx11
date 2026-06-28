@@ -50,8 +50,14 @@ int cross_y = 0;
 // Thin-client galactic chart helpers (defined further down, used by the legacy
 // chart entry points above their definition).
 int chart_nearest_to_cursor (void);
+int chart_current_system (void);
 bool display_replicated_galactic_chart (void);
+bool display_replicated_short_range_chart (void);
 bool display_replicated_system_data (void);
+static void chart_project_all (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
+							   std::vector<int>& _px, std::vector<int>& _py);
+static void chart_project_current (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
+								   std::vector<int>& _px, std::vector<int>& _py);
 
 
 
@@ -131,7 +137,8 @@ void show_distance_to_planet (void)
 	// what the hyperspace key will teleport to), instead of the legacy lookup.
 	{
 		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-		if (rc.IsOpen() && rc.HasGalaxy() && current_screen == SCR_GALACTIC_CHART)
+		if (rc.IsOpen() && rc.HasGalaxy() &&
+			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
 		{
 			const int sel = chart_nearest_to_cursor();
 			if (sel >= 0)
@@ -182,6 +189,35 @@ void show_distance_to_planet (void)
 
 void move_cursor_to_origin (void)
 {
+	// Thin-client charts are driven by the manifest, not the legacy seeds. Park the
+	// crosshair on the current system: chart centre on the short range chart, and
+	// the current system's plotted dot on the galactic chart.
+	{
+		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+		if (rc.IsOpen() && rc.HasGalaxy() &&
+			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
+		{
+			if (current_screen == SCR_SHORT_RANGE)
+			{
+				cross_x = GFX_X_CENTRE;
+				cross_y = GFX_Y_CENTRE;
+			}
+			else
+			{
+				const int cur = chart_current_system();
+				std::vector<int> px, py;
+				chart_project_all (rc.Galaxy(), px, py);
+				if (cur >= 0 && cur < (int)px.size())
+				{
+					cross_x = px[cur];
+					cross_y = py[cur];
+				}
+			}
+			show_distance_to_planet();
+			return;
+		}
+	}
+
 	if (current_screen == SCR_GALACTIC_CHART)
 	{
 		cross_x = docked_planet.d * GFX_SCALE;
@@ -205,13 +241,72 @@ void find_planet_by_name (char *find_name)
 	int found;
 	char str[32];
 	
+	// Thin-client charts search the manifest (the same galaxy the chart plots),
+	// not the legacy procedural seeds. Match by name (case-insensitive) and move
+	// the crosshair onto that system's dot in the active chart.
+	{
+		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+		if (rc.IsOpen() && rc.HasGalaxy() &&
+			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
+		{
+			const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+			int hit = -1;
+			for (size_t k = 0; k < g.size(); k++)
+			{
+				char nm[16];
+				strncpy (nm, g[k].name, sizeof(nm) - 1);
+				nm[sizeof(nm) - 1] = '\0';
+
+				int same = 1;
+				const char *a = nm;
+				const char *b = find_name;
+				while (*a || *b)
+				{
+					if (toupper((unsigned char)*a) != toupper((unsigned char)*b))
+					{
+						same = 0;
+						break;
+					}
+					a++;
+					b++;
+				}
+				if (same)
+				{
+					hit = (int)k;
+					break;
+				}
+			}
+
+			if (hit < 0)
+			{
+				gfx_clear_text_area();
+				gfx_display_text (16, 340, "Unknown Planet");
+				return;
+			}
+
+			std::vector<int> px, py;
+			chart_project_current (g, px, py);
+			cross_x = px[hit];
+			cross_y = py[hit];
+
+			char nm[16];
+			strncpy (nm, g[hit].name, sizeof(nm) - 1);
+			nm[sizeof(nm) - 1] = '\0';
+			capitalise_name (nm);
+			gfx_clear_text_area();
+			sprintf (str, "%-18s", nm);
+			gfx_display_text (16, 340, str);
+			return;
+		}
+	}
+
 	glx = cmdr.galaxy;
 	found = 0;
-	
+
 	for (i = 0; i < 256; i++)
 	{
 		name_planet (planet_name, glx);
-		
+
 		if (strcmp (planet_name, find_name) == 0)
 		{
 			found = 1;
@@ -263,6 +358,9 @@ void display_short_range_chart (void)
 	int row_used[64];
 	int row;
 	int blob_size;
+
+	if (display_replicated_short_range_chart())
+		return;
 
 	current_screen = SCR_SHORT_RANGE;
 
@@ -385,6 +483,73 @@ static void chart_project_all (const std::vector<Neuron::Net::GalaxySystemInfo>&
 	}
 }
 
+// The short range chart shares the galactic chart's manifest, but instead of
+// scaling the whole galaxy to fit it shows a zoomed view around the player's
+// current system. World units are converted to light years so the fuel circle
+// (drawn in light years) lines up with the plotted neighbours.
+static const long long SR_UNITS_PER_LY = 2'000'000LL;   // world units per light year
+static const int       SR_PX_PER_LY    = 20;            // chart pixels per light year (isotropic)
+
+// Index of the manifest system the player's ship is currently in (the nearest
+// system to the live ship position), or -1 with no galaxy. Falls back to system 0
+// until the first snapshot carrying the ship's position has arrived.
+int chart_current_system (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return -1;
+
+	Neuron::Net::EntitySnapshot ship;
+	if (!rc.Sample (rc.LocalPlayer(), 1.0, ship))
+		return 0;
+
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+	int best = 0;
+	long long bestD = 1LL << 62;
+	for (size_t i = 0; i < g.size(); i++)
+	{
+		long long dx = g[i].x - ship.x;
+		long long dz = g[i].z - ship.z;
+		long long d = dx * dx + dz * dz;
+		if (d < bestD)
+		{
+			bestD = d;
+			best = (int)i;
+		}
+	}
+	return best;
+}
+
+// Project the manifest into short-range chart pixels, centred on `_origin`
+// (the current system) and scaled by light years. Uses the same world x/z axes
+// as the galactic chart, so the two charts agree on where systems lie.
+static void chart_project_short_range (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
+									   int _origin, std::vector<int>& _px, std::vector<int>& _py)
+{
+	const long long ox = (_origin >= 0 && _origin < (int)_g.size()) ? _g[_origin].x : 0;
+	const long long oz = (_origin >= 0 && _origin < (int)_g.size()) ? _g[_origin].z : 0;
+	_px.resize (_g.size());
+	_py.resize (_g.size());
+	for (size_t i = 0; i < _g.size(); i++)
+	{
+		double lyx = (double)(_g[i].x - ox) / (double)SR_UNITS_PER_LY;
+		double lyz = (double)(_g[i].z - oz) / (double)SR_UNITS_PER_LY;
+		_px[i] = GFX_X_CENTRE + (int)lround (lyx * SR_PX_PER_LY);
+		_py[i] = GFX_Y_CENTRE + (int)lround (lyz * SR_PX_PER_LY);
+	}
+}
+
+// Project the manifest into the chart pixels of whichever chart is active, so the
+// crosshair "nearest system" pick matches what is actually drawn on screen.
+static void chart_project_current (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
+								   std::vector<int>& _px, std::vector<int>& _py)
+{
+	if (current_screen == SCR_SHORT_RANGE)
+		chart_project_short_range (_g, chart_current_system(), _px, _py);
+	else
+		chart_project_all (_g, _px, _py);
+}
+
 // Index of the manifest system whose plotted dot is nearest the crosshair, or -1
 // when there is no replicated galaxy.
 int chart_nearest_to_cursor (void)
@@ -395,7 +560,7 @@ int chart_nearest_to_cursor (void)
 
 	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
 	std::vector<int> px, py;
-	chart_project_all (g, px, py);
+	chart_project_current (g, px, py);
 
 	int best = 0;
 	long long bestD = 1LL << 62;
@@ -446,6 +611,69 @@ bool display_replicated_galactic_chart (void)
 
 	gfx_display_text (16, 304, "Arrows: move crosshair   D: system data");
 	gfx_display_text (16, 326, "Hyperspace key: teleport to nearest system");
+	return true;
+}
+
+// Draw the short range chart from the manifest, zoomed around the current system,
+// so it shows the SAME galaxy as the galactic chart (just nearer). Returns false
+// (so the legacy chart runs) when not in thin-client mode or the manifest has not
+// arrived yet.
+bool display_replicated_short_range_chart (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy())
+		return false;
+
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+
+	current_screen = SCR_SHORT_RANGE;
+	gfx_clear_display();
+	gfx_display_centre_text (10, "SHORT RANGE CHART", 140, GFX_COL_GOLD);
+	gfx_draw_line (0, 36, 511, 36);
+
+	draw_fuel_limit_circle (GFX_X_CENTRE, GFX_Y_CENTRE);
+
+	const int origin = chart_current_system();
+	std::vector<int> px, py;
+	chart_project_short_range (g, origin, px, py);
+
+	int row_used[64];
+	for (int i = 0; i < 64; i++)
+		row_used[i] = 0;
+
+	for (size_t i = 0; i < g.size(); i++)
+	{
+		// Only plot systems whose dot falls inside the visible chart area.
+		if (px[i] < 1 || px[i] > 510 || py[i] < 37 || py[i] > 339)
+			continue;
+
+		int row = py[i] / (8 * GFX_SCALE);
+		if (row > 3 && row < 64 && row_used[row] == 0)
+		{
+			row_used[row] = 1;
+
+			char planet_name[16];
+			strncpy (planet_name, g[i].name, sizeof(planet_name) - 1);
+			planet_name[sizeof(planet_name) - 1] = '\0';
+			capitalise_name (planet_name);
+
+			gfx_display_text (px[i] + (4 * GFX_SCALE), (row * 8 - 5) * GFX_SCALE, planet_name);
+		}
+
+		// A little size variety (2..4), echoing the legacy chart's blob sizes; the
+		// manifest carries no carry_flag, so derive it from the system attributes.
+		int blob_size = ((g[i].economy ^ g[i].techLevel) & 1) + (g[i].government & 1) + 2;
+		blob_size *= GFX_SCALE;
+		gfx_draw_filled_circle (px[i], py[i], blob_size, GFX_COL_GOLD);
+	}
+
+	// Park the crosshair on the current system (chart centre) when first opening.
+	if (cross_x < 1 || cross_x > 510 || cross_y < 37 || cross_y > 339)
+	{
+		cross_x = GFX_X_CENTRE;
+		cross_y = GFX_Y_CENTRE;
+	}
+
 	return true;
 }
 

@@ -984,10 +984,11 @@ void handle_flight_keys (void)
 			start_hyperspace();
 	}
 
-	// Docked at a station's "teleport building": the hyperspace key on the galactic
-	// chart jumps to the system under the crosshair (server-validated). Thin-client
-	// only; teleport_to_cursor() is a no-op without a replicated galaxy.
-	if (kbd_hyperspace_pressed && docked && (current_screen == SCR_GALACTIC_CHART))
+	// Docked at a station's "teleport building": the hyperspace key on either chart
+	// jumps to the system under the crosshair (server-validated). Thin-client only;
+	// teleport_to_cursor() is a no-op without a replicated galaxy.
+	if (kbd_hyperspace_pressed && docked &&
+		((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
 		teleport_to_cursor();
 
 	if (kbd_jump_pressed && (!docked) && (!witchspace))
