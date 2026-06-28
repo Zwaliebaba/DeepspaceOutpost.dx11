@@ -33,6 +33,10 @@ add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})
 
 target_compile_features(GameLogic PUBLIC cxx_std_23)
 
+if(MSVC)
+    target_compile_options(GameLogic PRIVATE /W4)
+endif()
+
 # PUBLIC so consumers (Server, Tests) get GameLogic's headers and the header-only
 # NeuronCore engine headers it builds on.
 target_include_directories(GameLogic PUBLIC

@@ -45,6 +45,10 @@ add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})
 
 target_compile_features(NeuronCore PUBLIC cxx_std_23)
 
+if(MSVC)
+    target_compile_options(NeuronCore PRIVATE /W4)
+endif()
+
 # PUBLIC: consumers include "NeuronCore.h", "Debug.h", "FileSys.h", ... directly
 # (e.g. via their own pch.h), so the include dir must propagate.
 target_include_directories(NeuronCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

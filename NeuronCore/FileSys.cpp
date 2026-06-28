@@ -6,7 +6,7 @@ byte_buffer_t BinaryFile::ReadFile(const std::wstring& _fileName)
   byte_buffer_t data;
 
 	std::wstring fullName = FileSys::GetHomeDirectory() + _fileName;
-  ScopedHandle hFile(safe_handle(CreateFile2(fullName.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr)));
+  ScopedHandle hFile(SafeHandle(CreateFile2(fullName.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr)));
   if (!hFile)
       return {};
 
@@ -38,7 +38,7 @@ std::wstring TextFile::ReadFile(const std::wstring& _fileName)
 {
   std::wstring data;
 
-  ScopedHandle hFile(safe_handle(CreateFile2(_fileName.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr)));
+  ScopedHandle hFile(SafeHandle(CreateFile2(_fileName.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, nullptr)));
   if (!hFile)
     return {};
 

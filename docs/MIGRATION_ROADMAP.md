@@ -10,7 +10,7 @@ first milestone.
 
 ---
 
-## Implementation status — last updated 2026-06-27
+## Implementation status — last updated 2026-06-28
 
 The client decouple **and** the server split are both done: the game now runs
 **fully server-authoritative** over UDP. Single-player has been retired; the
@@ -32,7 +32,7 @@ CI-verified and visually validated by the project owner.
 | **D** Replication & AOI | 🟡 Partial | Tactical AOI (`AreaOfInterest`), MTU-bounded reliability-free snapshots (`SnapshotPacketizer`). **No strategic tier, delta-compression, or quantization yet.** |
 | **E** Client smoothing | 🟡 Partial | `SnapshotInterpolator` + floating origin done. **Dead-reckoning is minimal; local starfield drifts from the replicated world (no client-side prediction).** |
 | **F** Persistence (SQL Server) | 🔴 Not started | **The main remaining blocker — a server restart wipes all player state.** |
-| **G** Multiplayer gameplay | 🟡 Partial | Server-authoritative combat, trading, docking, multi-client sessions, police/wanted, **procedural galaxy + galactic chart + teleport** all done. **No player names / chat UI; minimal PvP rules.** |
+| **G** Multiplayer gameplay | 🟡 Partial | Server-authoritative combat, trading, docking, multi-client sessions, police/wanted, **procedural galaxy + galactic/short-range charts + teleport**, **homing missiles** all done. **No player names / chat UI; minimal PvP rules. Several legacy mechanics still missing — see §7 for the full parity backlog (bounty, shields, loot/scooping, explosions, NPC AI, …).** |
 | **H** Hardening & scale to 100 | 🔴 Not started | Needs BotClient load harness. |
 | **I** Operations | 🔴 Minimal | Console logging only. |
 
@@ -58,6 +58,9 @@ CI-verified and visually validated by the project owner.
 5. **Player identity & chat UI** (Phase G) — names/factions across players; the
    `Chat` event type exists but has no UI.
 6. **Delete remaining dead single-player code** now the replicated path is proven.
+7. **Server gameplay parity backlog (§7)** — legacy mechanics with no server
+   counterpart yet: bounty/credits, shields+regen, loot drops + scooping,
+   explosions, real NPC AI, collisions, hyperspace fuel/witchspace, ECM, missions.
 
 ---
 
@@ -510,3 +513,44 @@ tables, and wire **load-on-connect / async save** around the session lifecycle
 Strong runners-up: stand up the **`BotClient`** (Phase B) so the 100-player load
 test (Phase H) becomes possible, and add the **strategic AOI tier + delta/
 quantization** (Phase D) once persistence lands.
+
+---
+
+## 7. Server gameplay parity — feature gaps (legacy → server)
+
+The migration moved the *architecture* over, but several **legacy gameplay
+mechanics have no server-authoritative counterpart yet** (the thin client runs no
+game logic, so anything not re-implemented in `GameLogic`/`Server` simply does not
+happen). This is the running backlog of those gaps, from a legacy-vs-server audit.
+Order is roughly by gameplay impact ÷ effort. **Nothing here is started unless its
+row says so.**
+
+> **Two are already written but un-wired:** `Combat.h` ports `ApplyKill` (bounty)
+> and `ApplyDamageToShields` (directional shields) faithfully, but **neither is
+> called by the live server** — items 1 and 2 are mostly "wire up existing code,"
+> not greenfield. Everything else (loot, scooping, collisions, NPC steering,
+> witchspace/fuel, missions) has **no server code at all**.
+
+| # | Gap | Legacy (client) | Server state | Effort |
+|---|---|---|---|---|
+| 1 | **Kill rewards / bounty** — combat currently earns nothing | `space.cpp` `update_local_objects` (`cmdr.credits += bounty` on kill) | **Not wired.** `Combat.h ApplyKill` exists but is never called; the kill loop in `Server/Main.cpp` destroys the wreck without crediting the killer's `Wallet` | **Low** (wire `ApplyKill` + a per-`NetType` bounty table) |
+| 2 | **Player shields + energy regen** — survivability is all-or-nothing | `space.cpp` `regenerate_shields` / `damage_ship` (front/aft shields + energy bank) | **Not wired.** Player has only a flat `Combatant.energy=255`; `Combat.h ApplyDamageToShields` exists but is unused; no `ShieldState` component, no regen tick | Medium |
+| 3 | **Loot drops + scooping** — the "kill → loot → sell" loop is absent | `swat.cpp` `launch_loot`/`check_target` (drops canisters/alloys/rock); `trade.cpp` `scoop_item` (`distance < 170`, needs fuel scoop) | **None.** No loot/cargo entity is ever spawned; `Equipment.fuelScoop` is purchasable but inert; no proximity-collect logic | Medium |
+| 4 | **Explosion / debris VFX** — killed ships just vanish | `swat.cpp` `explode_object` + `draw_ship` debris (`exp_seed`/`exp_delta`) | **None.** Server only `Destroy()`s + sends `EntityDeath`; no explosion entity | **Low** (client-side VFX on the existing `EntityDeath` event — no server entity needed) |
+| 5 | **Real NPC AI movement** — NPCs are stationary turrets | `swat.cpp` `tactics` + `pilot.cpp` (pursue, flee at low energy, escape pods, NPC missiles, station-launched Vipers, traders/Thargoids) | **Minimal.** `StepCombat` only makes NPCs fire on the nearest enemy in range; `SpawnDirector` spawns generic pirates on a timer. No pursuit/flee/missiles. *(Also: spawned NPCs get no `NetType`, so they render as the default ship.)* | High |
+| 6 | **Collisions** — planets/stations/ships are pass-through | `space.cpp` `check_docking` (crash), `trade.cpp` collision (`distance < 170` → damage), planet altitude | **None.** Combat tick only does ranged distance checks; no contact damage | Medium |
+| 7 | **Hyperspace fuel / witchspace / in-system jump** — travel is free + instant | `space.cpp` `complete_hyperspace` (deduct `cmdr.fuel`), `enter_witchspace` (Thargoid ambush), `jump_warp` (mass-lock) | **Differs.** Docked-only instant `Teleport` (`StationServices.h`) with no fuel cost, witchspace, mass-lock, or in-flight jump; no fuel resource server-side | Medium |
+| 8 | **ECM** — now meaningful since missiles fly | `swat.cpp` `activate_ecm`/`time_ecm` (destroys in-flight missiles) | **None.** `Equipment.ecm` purchasable but inert; could cancel locked missiles in range | Low |
+| 9 | **Mission system** — progression/content | `missions.cpp` (Constrictor hunt, Thargoid invasion; dock-time briefings; `cmdr.mission`) | **None.** No mission state, briefings, or scripted targets server-side | High |
+| 10 | **Inert purchased equipment & misc.** | energy bomb (`detonate_bomb`), escape pod (`abandon_ship`), cabin temp / sun damage (`update_cabin_temp`), laser heat (`fire_laser`), contraband legal-status accrual | **None / partial.** Several items are buyable in `StationServices` but have no runtime effect; `Wanted` is a coarse level bump on firing at police/station, with no contraband scanning or decay | Varies |
+
+**Already done this migration (for contrast):** server-authoritative flight (with
+correct ship-local pitch/roll), forward-laser combat + police/wanted response,
+**homing missiles as real projectiles** (`MissileSystem`), docking (low-speed
+gate), per-station markets/trading, procedural galaxy + galactic/short-range
+charts + teleport.
+
+**Suggested order when we pick this up:** 1 (bounty) and 4 (explosions) are the
+cheapest wins; 2 (shields) and 3 (loot + scooping) restore the core combat
+survivability and reward loop; 5–10 are larger and can follow persistence
+(Phase F).

@@ -66,6 +66,12 @@ void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
+unsigned int find_lock_target (void);
+
+// Entity index of the missile-locked ship (0xFFFFFFFF = none). Set by the missile
+// lock keys in main.cpp; read by render_replicated_objects to draw the target
+// reticle on the locked ship.
+extern unsigned int g_missile_lock_target;
 
 void update_console (void);
 

@@ -17,6 +17,10 @@ add_library(NeuronClient STATIC ${NEURONCLIENT_SOURCES} ${NEURONCLIENT_HEADERS})
 
 target_compile_features(NeuronClient PUBLIC cxx_std_23)
 
+if(MSVC)
+    target_compile_options(NeuronClient PRIVATE /W4)
+endif()
+
 # PUBLIC so the DeepspaceOutpost target can include NeuronClient headers.
 target_include_directories(NeuronClient PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

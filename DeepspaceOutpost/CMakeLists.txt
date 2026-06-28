@@ -64,10 +64,7 @@ target_include_directories(DeepspaceOutpost PRIVATE
 
 if(MSVC)
     target_compile_definitions(DeepspaceOutpost PRIVATE
-        _CRT_SECURE_NO_WARNINGS   # legacy strcpy/sprintf/fopen in the ported C
         UNICODE _UNICODE
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
     )
     # Single conformance tier: the whole target builds with /permissive.
     #
@@ -75,12 +72,9 @@ if(MSVC)
     # char*) that /permissive- rejects, and the shared precompiled header (pch.h)
     # must be built and consumed under the same conformance flags or MSVC raises
     # C2855. Unifying on /permissive lets every translation unit - ported game
-    # logic and platform layer alike - share one PCH. It still compiles as C++23.
-    target_compile_options(DeepspaceOutpost PRIVATE /permissive)
-
-    # The freshly written platform layer is still held to a higher warning bar.
-    set_source_files_properties(${PLATFORM_SOURCES} PROPERTIES
-        COMPILE_OPTIONS "/W4")
+    # logic and platform layer alike - share one PCH. It still compiles as C++23,
+    # and the whole target now uses the same /W4 warning level.
+    target_compile_options(DeepspaceOutpost PRIVATE /permissive /W4)
 endif()
 
 # Libraries the platform layer will need across the milestones.

@@ -7,104 +7,104 @@ void Core::Startup() {}
 
 void Core::Shutdown() {}
 
-Thread::Thread(std::string name)
-  : m_name(std::move(name)),
-    m_request_stop(false),
+Thread::Thread(std::string _name)
+  : m_name(std::move(_name)),
+    m_requestStop(false),
     m_running(false) {}
 
 Thread::~Thread()
 {
   // kill the thread if running
   if (!m_running)
-    wait();
+    Wait();
   else
   {
     m_running = false;
 
-    TerminateThread(getThreadHandle(), 0);
-    CloseHandle(getThreadHandle());
+    TerminateThread(GetThreadHandle(), 0);
+    CloseHandle(GetThreadHandle());
   }
 
   // Make sure start finished mutex is unlocked before it's destroyed
-  if (m_start_finished_mutex.try_lock())
-    m_start_finished_mutex.unlock();
+  if (m_startFinishedMutex.try_lock())
+    m_startFinishedMutex.unlock();
 }
 
-bool Thread::start()
+bool Thread::Start()
 {
   std::lock_guard lock(m_mutex);
 
   if (m_running)
     return false;
 
-  m_request_stop = false;
+  m_requestStop = false;
 
   // The mutex may already be locked if the thread is being restarted
   // FIXME: what if this fails, or if already locked by same thread?
-  std::unique_lock sf_lock(m_start_finished_mutex, std::try_to_lock);
+  std::unique_lock sfLock(m_startFinishedMutex, std::try_to_lock);
 
-  try { m_thread_obj = NEW std::thread(threadProc, this); }
+  try { m_threadObj = NEW std::thread(ThreadProc, this); }
   catch ([[maybe_unused]] const std::system_error& e) { return false; }
 
   while (!m_running) { Sleep(1); }
 
   // Allow spawned thread to continue
-  sf_lock.unlock();
+  sfLock.unlock();
 
   m_joinable = true;
 
   return true;
 }
 
-bool Thread::stop()
+bool Thread::Stop()
 {
-  m_request_stop = true;
+  m_requestStop = true;
   return true;
 }
 
-bool Thread::wait()
+bool Thread::Wait()
 {
   std::lock_guard lock(m_mutex);
 
   if (!m_joinable)
     return false;
 
-  m_thread_obj->join();
+  m_threadObj->join();
 
-  delete m_thread_obj;
-  m_thread_obj = nullptr;
+  delete m_threadObj;
+  m_threadObj = nullptr;
 
   assert(m_running == false);
   m_joinable = false;
   return true;
 }
 
-bool Thread::getReturnValue(void** ret) const
+bool Thread::GetReturnValue(void** _ret) const
 {
   if (m_running)
     return false;
 
-  *ret = m_retval;
+  *_ret = m_retval;
   return true;
 }
 
-void Thread::threadProc(Thread* thr)
+void Thread::ThreadProc(Thread* _thr)
 {
-  g_currentThread = thr;
+  s_currentThread = _thr;
 
-  setName(thr->m_name);
+  SetName(_thr->m_name);
 
-  thr->m_running = true;
+  _thr->m_running = true;
 
   // Wait for the thread that started this one to finish initializing the
-  // thread handle so that getThreadId/getThreadHandle will work.
-  std::unique_lock sf_lock(thr->m_start_finished_mutex);
+  // thread handle so that GetThreadId/GetThreadHandle will work.
+  std::unique_lock sfLock(_thr->m_startFinishedMutex);
 
-  thr->m_retval = thr->run();
+  _thr->m_retval = _thr->Run();
 
-  thr->m_running = false;
-  // Unlock m_start_finished_mutex to prevent data race condition on Windows.
+  _thr->m_running = false;
+  // Unlock m_startFinishedMutex to prevent data race condition on Windows.
   // On Windows with VS2017 build TerminateThread is called and this mutex is not
   // released. We try to unlock it from caller thread and it's refused by system.
-  sf_lock.unlock();
+  sfLock.unlock();
 }

@@ -229,6 +229,7 @@ const char* spriteFile(int sprite_no)
 		case IMG_MISSILE_YELLOW: return "missyell.bmp";
 		case IMG_MISSILE_RED:    return "missred.bmp";
 		case IMG_BLAKE:          return "blake.bmp";
+		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
 		default:                 return nullptr;
 	}
 }
@@ -519,6 +520,18 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 	if (!t || !t->srv) return;
 	if (x == -1) x = (256 * GFX_SCALE - t->w) / 2;
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + t->w), (float)(y + t->h),
+				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+/* As gfx_draw_sprite but stretched to an explicit w x h (used for the missile
+ * target reticle, which is sized to the locked ship's on-screen extent). */
+void gfx_draw_sprite_scaled(int sprite_no, int x, int y, int w, int h)
+{
+	const char* fn = spriteFile(sprite_no);
+	if (!fn) return;
+	const Texture* t = getTexture(fn, true);
+	if (!t || !t->srv) return;
+	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + w), (float)(y + h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 

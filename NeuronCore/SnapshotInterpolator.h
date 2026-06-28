@@ -114,6 +114,14 @@ namespace Neuron::Net
       return out;
     }
 
+    // Drop one entity immediately (e.g. on an authoritative despawn/death event),
+    // so it stops being sampled/rendered right away rather than lingering as a
+    // ghost until it ages out.
+    void Forget(uint32_t _id)
+    {
+      m_history.erase(_id);
+    }
+
     // Forget entities not refreshed within `_maxAge` ticks of the latest tick.
     void EvictStale(uint32_t _maxAge)
     {

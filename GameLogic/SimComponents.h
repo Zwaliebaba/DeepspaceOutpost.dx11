@@ -9,6 +9,7 @@
 
 #include "Vector3i64.h"
 #include "Vector3d.h"
+#include "ECS.h"
 
 namespace Neuron::GameLogic
 {
@@ -30,9 +31,24 @@ namespace Neuron::GameLogic
   {
     inline constexpr int Sun = -2;
     inline constexpr int Planet = -1;
+    inline constexpr int Missile = 1;
     inline constexpr int Coriolis = 2;
     inline constexpr int Viper = 16;
   }
+
+  // An in-flight homing missile - a real entity that chases its locked target and
+  // detonates on contact. It is steered and advanced by StepMissiles (StepFlight
+  // deliberately skips Missile entities), so its speed/lifetime live here; the
+  // entity's Flight component only carries the orientation that gets replicated so
+  // the client draws the missile pointing along its travel.
+  struct Missile
+  {
+    ECS::EntityId target{};   // locked target; homes toward it while it stays valid
+    uint32_t owner = 0;       // firer's entity index (kill credit + crime attribution)
+    int damage = 250;         // detonation damage
+    int life = 0;             // ticks remaining before it self-destructs
+    double speed = 0.0;       // world units advanced per tick
+  };
 
   // The model an entity is drawn as (replicated to the client). Absent => 0,
   // which the client draws as a default ship.

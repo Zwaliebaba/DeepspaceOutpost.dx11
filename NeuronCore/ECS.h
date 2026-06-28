@@ -155,6 +155,17 @@ namespace Neuron::ECS
           && m_generations[_e.index] == _e.generation;
     }
 
+    // Resolve a bare entity index (e.g. one the client identified from a replicated
+    // snapshot, which carries no generation) to its live EntityId, or an invalid
+    // handle if that slot is currently dead. Lets server code act on a target the
+    // client picked by index alone.
+    [[nodiscard]] EntityId LiveEntity(uint32_t _index) const
+    {
+      if (_index < m_alive.size() && m_alive[_index])
+        return EntityId{ _index, m_generations[_index] };
+      return EntityId{};
+    }
+
     void Destroy(EntityId _e)
     {
       if (!IsValid(_e))

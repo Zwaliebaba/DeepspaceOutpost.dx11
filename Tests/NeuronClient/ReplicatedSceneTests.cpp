@@ -68,8 +68,11 @@ TEST(Scene, OnlyTheLocalPlayerIsSkipped)
 TEST(Scene, CameraRotatesWithTheLocalShipRoll)
 {
   // The local ship is rolled 90 degrees: nose still +z, but roof points +x.
-  // A prop directly "above" in the world (+y) must therefore appear to the
-  // camera-LEFT (negative side axis), proving the view rotates with the ship.
+  // Render records use the legacy starfield convention (the world rotates around a
+  // fixed cockpit: offset rebuilt as x*side + y*roof + z*nose), so a prop directly
+  // "above" in the world (+y) is carried onto the +roof axis, which now points to
+  // world +x -> camera location.x = +100. This is the transpose of a textbook view
+  // matrix, and it is what keeps replicated objects rotating WITH the local stars.
   std::vector<Net::EntitySnapshot> ents;
   Net::EntitySnapshot me = At(1, 0, 0, 0);
   me.noseX = 0.0f; me.noseY = 0.0f; me.noseZ = 1.0f;   // nose +z
@@ -79,10 +82,31 @@ TEST(Scene, CameraRotatesWithTheLocalShipRoll)
 
   std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
   EXPECT_TRUE(recs.size() == 1);
-  EXPECT_TRUE(recs[0].location.x == -100.0);   // world-up -> camera-left
+  EXPECT_TRUE(recs[0].location.x == 100.0);    // world-up carried onto +roof (now world +x)
   EXPECT_TRUE(recs[0].location.y == 0.0);
   EXPECT_TRUE(recs[0].location.z == 0.0);
   EXPECT_TRUE(recs[0].distance == 100.0);      // distance is frame-independent
+}
+
+TEST(Scene, RollMatchesTheLegacyStarfieldDirection)
+{
+  // A small right-roll tilts the roof toward +x (roof = (a,1,0)). A prop straight
+  // "up" in the world (+y) must then shift to camera +x, exactly as the legacy
+  // move_local_object()/starfield rotates it: (x,y) -> (x + a*y, y - a*x). A
+  // textbook view projection would shift it to -x instead, i.e. counter to the
+  // local stars - the bug this convention fixes.
+  const double a = 0.1;
+  std::vector<Net::EntitySnapshot> ents;
+  Net::EntitySnapshot me = At(1, 0, 0, 0);
+  me.noseX = 0.0f;        me.noseY = 0.0f; me.noseZ = 1.0f;   // nose +z
+  me.roofX = (float)a;    me.roofY = 1.0f; me.roofZ = 0.0f;   // roof tilted toward +x (rolled)
+  ents.push_back(me);
+  ents.push_back(At(2, 0, 100, 0));                           // 100 "up" in the world
+
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
+  EXPECT_TRUE(recs.size() == 1);
+  EXPECT_TRUE(recs[0].location.x > 0.0);   // world-up -> camera +x (with the stars), not -x
+  EXPECT_TRUE(recs[0].location.y > 0.0);
 }
 
 TEST(Scene, RotmatIsBuiltFromTheOrientationBasis)
