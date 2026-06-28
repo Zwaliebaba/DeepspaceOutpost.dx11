@@ -781,8 +781,9 @@ static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 
 // The entity the missile is currently locked onto (picked from the replicated view
 // with the target key), or 0xFFFFFFFF for none. Drives the HUD lock indicator and
-// is the target M launches at.
-static unsigned int s_locked_target = 0xFFFFFFFFu;
+// the on-target reticle (drawn in render_replicated_objects), and is the target M
+// launches at. Global so the renderer can read it.
+unsigned int g_missile_lock_target = 0xFFFFFFFFu;
 
 // Lock the missile onto the ship in the crosshairs (T key). Thin client: the server
 // is authoritative, so we pick the target from the replicated view and remember its
@@ -803,7 +804,7 @@ static void lock_missile_target (void)
 	if (tgt == 0xFFFFFFFFu)
 		return;   // nothing in the sights to lock
 
-	s_locked_target = tgt;
+	g_missile_lock_target = tgt;
 	missile_target = 0;   // HUD: a missile is locked (red indicator)
 }
 
@@ -816,7 +817,7 @@ static void unlock_missile_target (void)
 		return;
 	}
 
-	s_locked_target = 0xFFFFFFFFu;
+	g_missile_lock_target = 0xFFFFFFFFu;
 	missile_target = MISSILE_UNARMED;   // HUD: no lock
 	snd_play_sample (SND_BOOP);
 }
@@ -833,13 +834,13 @@ static void launch_missile (void)
 		return;
 	}
 
-	if ((s_locked_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
+	if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
 		return;
 
 	s_fire_missile_intent = true;
-	s_fire_missile_target = s_locked_target;
+	s_fire_missile_target = g_missile_lock_target;
 	cmdr.missiles--;
-	s_locked_target = 0xFFFFFFFFu;
+	g_missile_lock_target = 0xFFFFFFFFu;
 	missile_target = MISSILE_UNARMED;   // lock consumed
 	snd_play_sample (SND_MISSILE);
 }
