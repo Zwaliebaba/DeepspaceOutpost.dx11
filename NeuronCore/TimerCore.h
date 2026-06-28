@@ -35,10 +35,10 @@ namespace Neuron::Timer
       static uint32_t GetFramesPerSecond() { return m_framesPerSecond; }
 
       // Integer format represents time using 10,000,000 ticks per second.
-      static constexpr uint64_t TicksPerSecond = 10000000;
+      static constexpr uint64_t TICKS_PER_SECOND = 10000000;
 
-      static double TicksToSeconds(uint64_t ticks) { return static_cast<double>(ticks) / TicksPerSecond; }
-      static uint64_t SecondsToTicks(double seconds) { return static_cast<uint64_t>(seconds * TicksPerSecond); }
+      static double TicksToSeconds(uint64_t _ticks) { return static_cast<double>(_ticks) / TICKS_PER_SECOND; }
+      static uint64_t SecondsToTicks(double _seconds) { return static_cast<uint64_t>(_seconds * TICKS_PER_SECOND); }
 
       // After an intentional timing discontinuity (for instance a blocking IO operation)
       // call this to avoid fixed timestep logic attempting a string of catch-up Update calls.
@@ -72,7 +72,7 @@ namespace Neuron::Timer
           timeDelta = m_qpcMaxDelta;
 
         // Convert QPC units into our own canonical tick format. Cannot overflow due to the previous clamp.
-        timeDelta *= TicksPerSecond;
+        timeDelta *= TICKS_PER_SECOND;
         timeDelta /= m_qpcFrequency.QuadPart;
 
         const uint32_t lastFrameCount = m_frameCount;
