@@ -26,6 +26,8 @@ These forks were settled up front; the rest of the plan assumes them.
 | **`Transform.rotmat` storage** | **`XMFLOAT4X4` (engine-uniform).** | Matches the rest of the engine's matrices for uniform `XMLoadFloat4x4`/`XMStoreFloat4x4` and easy translation folding; the 3×3 rotation basis occupies the upper-left, row 3 / column 3 identity. |
 | **Legacy type naming** | **Fix the docs to match the code.** | `AGENTS.md` / `coding-standards.md` get updated to say `struct vector` / `Matrix`; the code is **not** renamed (the types are deleted in Phase 7 anyway). |
 | **Serialization** | **`Transform.location` / `rotmat` are not persisted as 3×double.** | The storage switch is internal-only — **no** wire/save format version bump is required. |
+| **Flight integrator (`rotate_vec`)** | **(A) Preserve the legacy shear math in `XMVECTOR` first; (B) true-rotation upgrade is a separate follow-up.** | `rotate_vec` is a sequential **shear integrator**, not a rotation (see [§7](#7-precision--determinism-risk)). Reproducing it faithfully keeps flight feel and lets the golden tests pass tightly; swapping in `XMMatrixRotation*` is a deliberate gameplay-tuning change, done later and on its own. |
+| **Build flags (`/arch`, `/fp`)** | **Pin both in the CMake presets and baseline against them.** | DirectXMath's code path and FMA contraction depend on `/arch` (SSE2 vs AVX/AVX2) and `/fp`. Pin them so reproducibility holds within a build and any later `/arch:AVX2` flip is a conscious, re-baselined change — not a silent golden-test break. |
 
 ---
 
@@ -100,6 +102,22 @@ the plan is self-contained:
 - **Returns**: `XMVECTOR` if the caller keeps computing; `XMFLOAT3` if storing.
 - **Anti-pattern**: no `XMFLOAT3` arithmetic operators — they hide load→op→store
   and defeat the SIMD boundary.
+- **ABI — x86 *and* x64 are targets.** `XM_CALLCONV` lowers to `__vectorcall`;
+  the `FXMVECTOR`/`GXMVECTOR`/`HXMVECTOR`/`CXMVECTOR` parameter-ordering rules are
+  stricter on 32-bit (the by-value vector-register slots differ). Verify both ABIs
+  when adding `XM_CALLCONV` signatures.
+- **`XMFLOAT4X4` default is all-zeros, not identity.** A `XMFLOAT4X4{}` has
+  `m33 = 0`; feeding it to `XMVector3TransformCoord` divides by `w = 0` → NaN/inf.
+  For the rotation-only `rotmat`, build from `XMMatrixIdentity()` then fill the
+  upper-left 3×3, and transform directions with **`XMVector3TransformNormal`**
+  (ignores translation and w), never `…TransformCoord`.
+- **Don't drip scalars out with `XMVectorGetX/Y/Z`.** Per-component getters force
+  SIMD→scalar store-forwarding stalls. In a scalar tail (e.g. the perspective
+  divide writing integer screen coords), `XMStoreFloat3` once and read the struct,
+  rather than three `XMVectorGet*` calls.
+- **Default to precise, not `*Est`.** `XMVector3NormalizeEst` / `LengthEst` widen
+  golden-test tolerances; use the precise forms unless a hot path measurably needs
+  the estimate.
 
 ---
 
@@ -113,13 +131,35 @@ the plan is self-contained:
 | `Vector3d` (small-magnitude local) | `XMVECTOR` | `XMFLOAT3` | fold in **only** where data is local-frame & feeds render/flight; keep `double` if a routine genuinely needs >float precision |
 | `Vector3i64` (world) | — | `Vector3i64` | **unchanged**; convert to `XMVECTOR` at the floating-origin rebase via `RelativeTo` then `XMVectorSet`/`XMLoadFloat3` |
 
-**Matrix layout caveat.** Legacy `Matrix` is row-vectors and the renderer hand-
-swaps elements for transpose (e.g. [`threed.cpp:205`](../DeepspaceOutpost/threed.cpp)).
-DirectXMath is row-major with row-vector convention (`XMVector3Transform` does
-`v · M`), which matches the legacy `mult_vector` semantics — but every transpose
-must be made explicit with `XMMatrixTranspose` instead of element swaps, and the
-legacy left-handed `-1` Z basis (`start_matrix`) must be preserved so handedness
-doesn't flip.
+### Matrix convention — there is a transpose between legacy and DirectXMath
+
+> ⚠️ **This is the single most error-prone part of the migration. Get it wrong
+> and every rotation applies inverted (ships orient the wrong way), without
+> crashing.**
+
+Legacy `mult_vector(vec, mat)` ([`vector.cpp:61`](../DeepspaceOutpost/vector.cpp))
+computes `result.i = dot(vec, mat[i])`, i.e. **`result = M · v`** (column-vector
+convention). DirectXMath `XMVector3Transform(v, M)` computes **`v · M = Mᵀ · v`**.
+With a natural row-preserving `XMLoadFloat4x4`, the two differ by a transpose:
+
+```cpp
+// legacy  mult_vector(vec, mat)   ≡
+XMVector3TransformNormal(v, XMMatrixTranspose(M));   // NOT XMVector3TransformNormal(v, M)
+```
+
+For an orthonormal rotation basis `Mᵀ = M⁻¹`, so omitting the transpose silently
+applies the **inverse** rotation — no crash, just wrong orientation. Pin the exact
+mapping with a golden test on a **rotation about a skew axis** (a symmetric matrix
+would hide the transpose). You may instead bake the transpose into how the matrix
+is loaded (store legacy rows into matrix columns) — but choose one approach and
+assert it.
+
+Separately, the renderer's own manual element-swaps
+([`threed.cpp:205`](../DeepspaceOutpost/threed.cpp)) are an *additional*,
+intentional transpose of `rotmat` (model↔camera orientation). Track it
+independently of the convention transpose above and express it with
+`XMMatrixTranspose`, not element swaps. Preserve the legacy left-handed `-Z` basis
+(`start_matrix`) so handedness — and the back-face winding test — don't flip.
 
 ---
 
@@ -133,11 +173,11 @@ a wrapper.** Delete `vector.cpp`/`vector.h` at the end of the migration.
 | `vector_dot_product(a,b)` | `XMVector3Dot` / `Neuron::Math::Dotf` (scalar) | DirectXMath / GameMath |
 | `unit_vector(v)` | `XMVector3Normalize` / `Neuron::Math::Normalize` | DirectXMath / GameMath |
 | length (`sqrt(x²+y²+z²)`) | `XMVector3Length` / `Neuron::Math::Length` | DirectXMath / GameMath |
-| `mult_vector(v, mat)` | `XMVector3Transform` (or `…TransformNormal` for directions — no translation) | DirectXMath |
-| `mult_matrix(a, b)` | `XMMatrixMultiply` / `operator*` | DirectXMath |
+| `mult_vector(v, mat)` | `XMVector3TransformNormal(v, XMMatrixTranspose(M))` — **mind the transpose** (see §4); directions take `…Normal` (no translation) | DirectXMath |
+| `mult_matrix(a, b)` | `XMMatrixMultiply` / `operator*` (verify factor order against `mult_matrix`, which writes into `first`) | DirectXMath |
 | `set_init_matrix(mat)` | `XMMatrixIdentity` + explicit `-Z` basis, or build from `Vector3::FORWARD/UP` constants | DirectXMath / GameMath |
-| `tidy_matrix(mat)` (re-orthonormalize) | Rebuild basis: `Normalize` forward, `Cross` to get right, `Cross` for up (Gram–Schmidt) | GameMath `Normalize`/`Cross` |
-| `rotate_vec(v, α, β)` | `XMVector3Transform` by `XMMatrixRotation*` / `Neuron::Math::RotateAround[X/Y/Z]` | DirectXMath / GameMath |
+| `tidy_matrix(mat)` (re-orthonormalize) | New `Neuron::Math::Orthonormalize` mirroring the **legacy axis order**: fix Z (forward), re-perpendicularize Y, then X = `Cross(Y,Z)` — *not* a different Gram–Schmidt order, or golden tests won't match | GameMath `Normalize`/`Cross` |
+| `rotate_vec(v, α, β)` | **(A) faithful:** reproduce the sequential shear in `XMVECTOR`. **(B) follow-up:** `XMMatrixRotation*` / `RotateAround[X/Y/Z]` — behavior change (see §1, §7) | DirectXMath / GameMath |
 | `rotate_x_first` / `rotate_z_first` | `XMMatrixRotationX/Z` then `XMMatrixMultiply` | DirectXMath |
 | inverse | `XMMatrixInverse` / `Neuron::Math::Invert` | DirectXMath / GameMath |
 
@@ -159,8 +199,12 @@ locked before storage layout churns the ECS.
   `mult_matrix`, `unit_vector`, `tidy_matrix`, `rotate_vec`, and a full
   `move_local_object` step for representative inputs. These become the
   float-tolerance oracle for every later phase.
+- **Snapshot whole matrices and whole transformed vertex sets, not just scalars,
+  and use a rotation about a skew axis** — a symmetric/identity case would hide
+  the §4 convention transpose and any handedness flip.
 - Decide the comparison tolerance for float32 vs. the old double path and record
-  it in the test file (see [§7](#7-precision--determinism-risk)).
+  it in the test file (relative epsilon scaled by magnitude — see
+  [§7](#7-precision--determinism-risk)).
 
 ### Phase 1 — Reconcile the helper layer & docs *(no behavior change)*
 - Fix `AGENTS.md` / `coding-standards.md` to name the real legacy types
@@ -191,18 +235,33 @@ locked before storage layout churns the ECS.
 ### Phase 4 — Migrate `space.cpp` (sim / motion)
 - Rewrite `move_local_object`, `rotate_vec`, approach/docking vectors in
   `XMVECTOR`/`XMMATRIX`. Hoist `XMLoad*` before loops, `XMStore*` after.
-- Replace `rotate_vec`'s small-angle roll/climb integration with
-  `XMMatrixRotation*` + `XMVector3Transform` (or `RotateAround*`), preserving the
-  flight-intent semantics (roll/climb/speed from `FlightRates`).
+- **`rotate_vec` is a sequential shear integrator, not a rotation** — reproduce
+  the exact shear in `XMVECTOR` (decision §1(A)). Do **not** substitute
+  `XMMatrixRotation*` here: `α = roll/256` (up to ~0.5) is a linear coefficient,
+  not radians (`sin 0.5 ≠ 0.5`), so true rotation changes handling rates and makes
+  `tidy_matrix` partly redundant. The true-rotation upgrade is a separate, tuned
+  follow-up (§1(B)).
+- Preserve the flight-intent semantics (roll/climb/speed from `FlightRates`).
 - Validate against the Phase-0 golden tests within tolerance.
 
 ### Phase 5 — Migrate `threed.cpp` (render / projection)
-- Model→camera transform: `XMVector3Transform` / `XMVector3TransformNormal`.
-- Replace the manual element-swap transpose with `XMMatrixTranspose`.
-- Back-face / normal checks: `Neuron::Math::Dotf`. Re-derive the projection in
-  `XMVECTOR`; keep the existing screen-space mapping.
-- Preserve handedness (the legacy `-Z` basis) — verify ships/planets aren't
-  mirrored or inside-out after the change.
+- Model→camera vertex loop: transform the whole vertex array with
+  **`XMVector3TransformCoordStream`** (and `XMVector3TransformNormalStream` for
+  normals) rather than a hand `XMVector3Transform` per vertex — the idiomatic,
+  faster DirectXMath form. Ship points are **ints**: load via
+  `XMVectorSet((float)x, …)` (or `XMLoadSInt3` + `XMConvertVectorIntToFloat`), not
+  a float reinterpret.
+- Replace the manual element-swap transpose ([`threed.cpp:205`](../DeepspaceOutpost/threed.cpp))
+  with `XMMatrixTranspose`, and apply the §4 convention transpose correctly.
+- **Do not turn the projection into a matrix.** The legacy projection
+  ([`threed.cpp:233`](../DeepspaceOutpost/threed.cpp)) is a hand divide-by-z
+  (`sx=(rx*256)/rz; sy=-(ry*256)/rz; +128/+96`) with a `rz<=0 → rz=1` near clamp.
+  `XMMatrixPerspectiveFovLH` would change NDC mapping and the clamp. Vectorize only
+  the **transform**; keep the divide and clamp as-is (scalar, or `XMVectorReciprocal`).
+- Back-face / normal checks: `Neuron::Math::Dotf`. The signed-area back-face test
+  and `sy = -sy` are coupled to winding/handedness — preserve the `-Z` basis **and**
+  the winding together, or faces cull inversely.
+- Verify ships/planets aren't mirrored or inside-out after the change.
 
 ### Phase 6 — Migrate `swat.cpp` + remaining consumers
 - `add_new_ship` orientation setup, NPC spawn matrices, tactics geometry →
@@ -236,8 +295,13 @@ the one behavioral risk in this plan and deserves explicit attention:
   roadmap's deterministic integer/fixed-point physics
   ([`MIGRATION_ROADMAP.md` §"good news"](MIGRATION_ROADMAP.md)) remains in
   integer where it already is — this migration only moves the float/double math.
-- **Drift.** Re-orthonormalization (`tidy_matrix` → Gram–Schmidt) matters more in
-  float32; keep it every frame so the rotation basis doesn't skew.
+- **Shear integrator.** `rotate_vec` is a non-orthonormal shear *by design*; its
+  drift is exactly why `tidy_matrix` exists. Reproduce the shear faithfully
+  (§1(A)) rather than substituting a true rotation, which would change handling
+  and partly obsolete `tidy_matrix`.
+- **Drift.** Re-orthonormalization (`tidy_matrix` → `Orthonormalize`) matters more
+  in float32; keep it every frame, in the legacy axis order, so the basis doesn't
+  skew.
 - **World precision is unaffected** — absolute positions stay `Vector3i64`; only
   the small floating-origin-relative delta is ever in float, which is exactly the
   range float32 handles cleanly.
@@ -247,7 +311,31 @@ the one behavioral risk in this plan and deserves explicit attention:
 
 ---
 
-## 8. Native-first guardrails (apply throughout)
+## 8. DirectXMath performance & ABI notes
+
+Consolidated DirectXMath-specific guidance (also referenced inline above):
+
+- **Batch vertex transforms with the Stream APIs.** `XMVector3TransformCoordStream`
+  / `XMVector3TransformNormalStream` over a vertex array beat a hand
+  `XMVector3Transform` loop and are the idiomatic form (Phase 5).
+- **Cross the SIMD→scalar boundary once.** Avoid repeated `XMVectorGetX/Y/Z`;
+  `XMStoreFloat3` and read the struct in scalar tails (the perspective divide).
+- **Precise over `*Est`.** Keep golden-test tolerances tight; opt into
+  `*Est`/`*Reciprocal` only where a hot path measurably benefits.
+- **No `XMVECTOR`/`XMMATRIX` in storage or containers.** They need 16-byte
+  alignment; keep them out of ECS components, `std::vector` elements, and
+  serialized structs. Storage stays `XMFLOAT3` / `XMFLOAT4X4` (unaligned, movable).
+  C++23 aligned-`new` exists, but storage types sidestep the issue entirely.
+- **`XMFLOAT4X4{}` ≠ identity.** Zero-init leaves `m33 = 0`; start from
+  `XMMatrixIdentity()` and use `XMVector3TransformNormal` for rotation-only data.
+- **Pin `/arch` and `/fp` in the presets.** Reproducibility within a build depends
+  on them; treat any change as a re-baseline of the golden tests.
+- **x86 + x64 both ship.** Re-check `XM_CALLCONV` / `FXMVECTOR`…`CXMVECTOR`
+  ordering on 32-bit, where the vector-register passing rules are stricter.
+
+---
+
+## 9. Native-first guardrails (apply throughout)
 
 - ✅ Call `XMVector3Normalize` / `XMVector3Transform` / `XMMatrixMultiply` and the
   existing `Neuron::Math` helpers directly.
@@ -262,7 +350,7 @@ the one behavioral risk in this plan and deserves explicit attention:
 
 ---
 
-## 9. Resolved decisions
+## 10. Resolved decisions
 
 The earlier open questions are now settled (folded into [§1](#1-decisions-locked)):
 
