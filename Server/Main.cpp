@@ -6,6 +6,8 @@
 #include "GameEvents.h"
 #include "ClientInput.h"
 #include "StationProtocol.h"
+#include "CombatMessages.h"
+#include "Messages/MessageBus.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -140,6 +142,73 @@ int main()
   uint32_t lastRespawnLogTick = 0;
   int      suppressedRespawns = 0;
 
+  // Combat effects are driven by in-process messages instead of inline tangled
+  // logic: a FireWeapon command resolves to facts (Crime / EntityKilled) that
+  // independent subscribers act on. The combat math itself is unchanged.
+  Msg::MessageBus bus;
+
+  // A FireWeapon command resolves against the authoritative world (laser geometry
+  // / missile spawn unchanged), publishing the resulting facts.
+  bus.Subscribe<GameLogic::FireWeapon>([&](const GameLogic::FireWeapon& _fw)
+  {
+    GameLogic::ResolveFireWeapon(world, bus, _fw, FIRE_RANGE, AIM_CONE);
+  });
+
+  // A crime dispatches police to the offender, once, on the first offence.
+  bus.Subscribe<GameLogic::Crime>([&](const GameLogic::Crime& _c)
+  {
+    if (!_c.firstOffence || !world.IsValid(_c.offender))
+      return;
+    const GameLogic::WorldTransform* t = world.TryGet<GameLogic::WorldTransform>(_c.offender);
+    if (t == nullptr)
+      return;
+    spawner.SpawnPolice(world, t->position, 2);
+    printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched\n",
+           tick, _c.offender.index, _c.victimTeam);
+  });
+
+  // A death: respawn a player in place (restore hull, clear record, brief grace),
+  // or broadcast the death and destroy a wreck. Unifies the old laser-kill and
+  // tick-kill-loop paths into one subscriber.
+  bus.Subscribe<GameLogic::EntityKilled>([&](const GameLogic::EntityKilled& _k)
+  {
+    if (!world.IsValid(_k.victim))
+      return;   // already resolved this tick (e.g. two shots on one target)
+
+    if (world.TryGet<GameLogic::PlayerTag>(_k.victim) != nullptr)
+    {
+      if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(_k.victim))
+      {
+        c->energy = 255;
+        c->invulnTicks = GameLogic::RESPAWN_GRACE_TICKS;
+      }
+      if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(_k.victim))
+        wnt->level = 0;
+
+      if (tick - lastRespawnLogTick >= kRespawnLogWindow)
+      {
+        if (suppressedRespawns > 0)
+          printf("[tick %u] player %u respawned (killer %u; +%d more respawn(s) since last log)\n",
+                 tick, _k.victim.index, _k.killer, suppressedRespawns);
+        else
+          printf("[tick %u] player %u was killed by %u -> respawned in place\n",
+                 tick, _k.victim.index, _k.killer);
+        lastRespawnLogTick = tick;
+        suppressedRespawns = 0;
+      }
+      else
+      {
+        ++suppressedRespawns;
+      }
+      return;
+    }
+
+    sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                       Net::EncodeDeath(_k.victim.index, _k.killer));
+    world.Destroy(_k.victim);
+    printf("[tick %u] entity %u destroyed by %u\n", tick, _k.victim.index, _k.killer);
+  });
+
   for (;;)
   {
     Timer::Core::Update();
@@ -163,72 +232,14 @@ int main()
           {
             const ECS::EntityId player = sessions.OnInput(world, from, in, tick);
 
-            // Apply a resolved player shot (laser or missile): firing on the
-            // station or police is a crime - the first offence summons police to
-            // hunt the player - and a target driven to zero energy dies.
-            auto applyShot = [&](const GameLogic::FireOutcome& shot)
-            {
-              if (!shot.hit)
-                return;
-              if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
-              {
-                GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
-                if (wnt != nullptr && wnt->level == 0)
-                {
-                  spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
-                  printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched\n",
-                         tick, player.index, shot.targetTeam);
-                }
-                if (wnt != nullptr)
-                  wnt->level++;
-              }
-              if (shot.destroyed)
-              {
-                sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
-                                   Net::EncodeDeath(shot.target.index, player.index));
-                world.Destroy(shot.target);
-                printf("[tick %u] player %u destroyed entity %u with the laser\n",
-                       tick, player.index, shot.target.index);
-              }
-            };
-
-            // Player fired the front laser: resolve a forward shot.
+            // Player weapon intent becomes a FireWeapon command on the bus; the
+            // combat subscriber resolves it to facts after the receive loop. (Today
+            // the server synthesises FireWeapon from the client's input; later the
+            // client sends the command directly.)
             if (in.fire && world.IsValid(player))
-              applyShot(GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE));
-
-            // Player launched a missile: spawn a homing projectile that chases the
-            // target the player locked (in.missileTarget) and detonates on contact
-            // (its kill is resolved later in the tick loop by StepMissiles). Firing
-            // on the station or police is a crime, exactly like the laser.
+              bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
             if (in.fireMissile && world.IsValid(player))
-            {
-              const ECS::EntityId missile = GameLogic::SpawnMissile(world, player, in.missileTarget);
-              const GameLogic::Missile* mc =
-                  world.IsValid(missile) ? world.TryGet<GameLogic::Missile>(missile) : nullptr;
-              if (mc == nullptr)
-              {
-                printf("[tick %u] player %u MISSILE LAUNCH FAILED (missing transform/flight/combatant)\n",
-                       tick, player.index);
-              }
-              else if (world.IsValid(mc->target))
-              {
-                const GameLogic::Combatant* tc = world.TryGet<GameLogic::Combatant>(mc->target);
-                printf("[tick %u] player %u LAUNCHED missile %u -> locked target %u (team %d)\n",
-                       tick, player.index, missile.index, mc->target.index, tc != nullptr ? tc->team : -1);
-
-                GameLogic::FireOutcome lock;
-                lock.hit = true;
-                lock.target = mc->target;
-                lock.targetTeam = tc != nullptr ? tc->team : -1;
-                lock.destroyed = false;   // detonation/kill happens later in StepMissiles
-                applyShot(lock);
-              }
-              else
-              {
-                printf("[tick %u] player %u LAUNCHED missile %u (no target lock - flying straight)\n",
-                       tick, player.index, missile.index);
-              }
-            }
+              bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
           }
           break;
         }
@@ -239,6 +250,11 @@ int main()
           break;
       }
     }
+
+    // Resolve this tick's player fire commands -> Crime / EntityKilled facts
+    // (police dispatch and death/destroy happen in their subscribers) before the
+    // simulation advances.
+    bus.Dispatch();
 
     if (sessions.Count() != lastSessions)
     {
@@ -276,45 +292,12 @@ int main()
     std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(world);
     for (const GameLogic::Kill& k : GameLogic::StepCombat(world))
       kills.push_back(k);
+    // Each kill is an EntityKilled fact; the subscriber respawns a player in place
+    // or broadcasts the death and destroys the wreck (whose removal also rides the
+    // despawn diff below).
     for (const GameLogic::Kill& kill : kills)
-    {
-      // A player "death" is a simple in-place respawn (restore hull, clear record)
-      // until persistence/respawn points exist; NPCs are destroyed as wrecks.
-      if (world.IsValid(kill.victim) && world.TryGet<GameLogic::PlayerTag>(kill.victim) != nullptr)
-      {
-        if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(kill.victim))
-        {
-          c->energy = 255;
-          // Brief immunity so the in-place respawn isn't instantly re-killed by
-          // hostiles still in range (gives time to flee or fight back).
-          c->invulnTicks = GameLogic::RESPAWN_GRACE_TICKS;
-        }
-        if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(kill.victim))
-          wnt->level = 0;
-
-        if (tick - lastRespawnLogTick >= kRespawnLogWindow)
-        {
-          if (suppressedRespawns > 0)
-            printf("[tick %u] player %u respawned (killer %u; +%d more respawn(s) since last log)\n",
-                   tick, kill.victim.index, kill.killer, suppressedRespawns);
-          else
-            printf("[tick %u] player %u was killed by %u -> respawned in place\n",
-                   tick, kill.victim.index, kill.killer);
-          lastRespawnLogTick = tick;
-          suppressedRespawns = 0;
-        }
-        else
-        {
-          ++suppressedRespawns;
-        }
-        continue;
-      }
-
-      sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
-                         Net::EncodeDeath(kill.victim.index, kill.killer));
-      world.Destroy(kill.victim);
-      printf("[tick %u] entity %u destroyed by %u\n", tick, kill.victim.index, kill.killer);
-    }
+      bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
+    bus.Dispatch();
 
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
     //    as a reliable event to all remaining clients.

@@ -8,6 +8,7 @@
 add_executable(GameLogic.Tests
     AreaOfInterestTests.cpp
     CombatSystemTests.cpp
+    CombatMessagesTests.cpp
     CombatTests.cpp
     EconomyTests.cpp
     FlightInputTests.cpp

@@ -446,10 +446,16 @@ layer later **without touching the catalog**. Revisit when accounts/persistence 
 `Framing` (length-prefixed records + lanes). Shipped under `NeuronCore/Messages/` with codec/
 bus/wire/governance suites in `Tests/NeuronCore/` (27 cases). Nothing wired into the game yet.
 
-**Phase 1 — In-process bus on the server.**
-Introduce `FireWeapon` (command) and `EntityDeath`/`Crime`/`DamageApplied` (facts). Refactor
-`Server/Main.cpp`'s `applyShot` + kill loop to publish/subscribe; **combat math unchanged**.
-Validate with existing combat tests + manual run.
+**Phase 1 — In-process bus on the server. ✅ DONE.**
+Introduced `FireWeapon` (command) and `Crime` / `EntityKilled` (facts) in
+`GameLogic/CombatMessages.h` (LocalOnly server messages; the wire `EntityDeath` stays the
+existing `GameEvents` broadcast until the wire-folding phases). `Hit`/`DamageApplied` stay
+off the bus by design — combat geometry is direct ECS work. `ResolveFireWeapon` delegates to
+the unchanged `ResolvePlayerFire` / `SpawnMissile` and only publishes facts; police dispatch,
+death broadcast/respawn and logging live in the `Server/Main.cpp` subscribers. The old
+`applyShot` lambda and the per-kill loop body are gone — one `EntityKilled` subscriber unifies
+the laser-kill and tick-kill paths. **Combat math unchanged.** Covered by
+`Tests/GameLogic/CombatMessagesTests.cpp` (5 cases); verified locally on clang++ 18 / g++ 13.
 
 **Phase 2 — Unreliable lane (`InputCommand`).**
 Add `'NMSG'` unreliable framing alongside `'NCMD'`; byte-parity test vs `WriteInput`. Switch
