@@ -14,6 +14,14 @@
 #include <dxgidebug.h>
 #endif
 
+// The donor graphics/GUI sources use bare `com_ptr`, `check_hresult` and the
+// `Windows::Foundation` value types (Size/Rect). The target PCH pulls in
+// winrt/base.h but does not `using namespace winrt` (its own code fully-qualifies),
+// so bring the projection + the using in here, scoped to the imported graphics/GUI
+// stack (only these files include this header).
+#include <winrt/Windows.Foundation.h>
+using namespace winrt;
+
 namespace Neuron::Graphics
 {
   // Controls all the DirectX device resources.

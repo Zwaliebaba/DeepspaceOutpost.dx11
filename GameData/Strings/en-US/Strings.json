@@ -1,0 +1,10 @@
+{
+  "AppName": "Deepspace Outpost",
+  "Menu_Start": "Start Game",
+  "Menu_Load": "Load Commander",
+  "Menu_Options": "Options",
+  "Menu_Quit": "Quit",
+  "Button_Ok": "OK",
+  "Button_Cancel": "Cancel",
+  "Button_Close": "Close"
+}
