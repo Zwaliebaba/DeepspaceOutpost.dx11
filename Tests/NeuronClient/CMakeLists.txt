@@ -10,6 +10,7 @@ add_executable(NeuronClient.Tests
     CameraFollowTests.cpp
     UniverseTests.cpp
     ReplicatedSceneTests.cpp
+    ViewMetricsTests.cpp
 )
 
 target_compile_features(NeuronClient.Tests PRIVATE cxx_std_23)
