@@ -1,16 +1,16 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "Galaxy.h"
 
 using namespace Neuron::GameLogic;
 
-TEST(Galaxy_FirstSystemIsTibedied)
+TEST(Galaxy, FirstSystemIsTibedied)
 {
   // System 0 of the canonical galaxy-1 seed is the iconic "Tibedied".
-  CHECK(NamePlanet(BASE_GALAXY_SEED) == "TIBEDIED");
+  EXPECT_TRUE(NamePlanet(BASE_GALAXY_SEED) == "TIBEDIED");
 }
 
-TEST(Galaxy_GeneratePlanetMatchesLegacyMath)
+TEST(Galaxy, GeneratePlanetMatchesLegacyMath)
 {
   // Hand-computed from generate_planet_data() with the base seed
   // {0x4a,0x5a,0x48,0x02,0x53,0xb7}:
@@ -21,15 +21,15 @@ TEST(Galaxy_GeneratePlanetMatchesLegacyMath)
   //   productivity = (5+3)*(1+4)*36*8 = 8*5*36*8 = 11520
   //   radius     = ((0xb7&15)+11)*256 + 2 = 18*256 + 2 = 4610
   PlanetData pl = GeneratePlanet(BASE_GALAXY_SEED);
-  CHECK(pl.government == 1);
-  CHECK(pl.economy == 2);
-  CHECK(pl.techLevel == 8);
-  CHECK(pl.population == 36);
-  CHECK(pl.productivity == 11520);
-  CHECK(pl.radius == 4610);
+  EXPECT_TRUE(pl.government == 1);
+  EXPECT_TRUE(pl.economy == 2);
+  EXPECT_TRUE(pl.techLevel == 8);
+  EXPECT_TRUE(pl.population == 36);
+  EXPECT_TRUE(pl.productivity == 11520);
+  EXPECT_TRUE(pl.radius == 4610);
 }
 
-TEST(Galaxy_WaggleIsDeterministic)
+TEST(Galaxy, WaggleIsDeterministic)
 {
   GalaxySeed a = BASE_GALAXY_SEED;
   GalaxySeed b = BASE_GALAXY_SEED;
@@ -38,10 +38,10 @@ TEST(Galaxy_WaggleIsDeterministic)
     Waggle(a);
     Waggle(b);
   }
-  CHECK(a == b);
+  EXPECT_TRUE(a == b);
 }
 
-TEST(Galaxy_SystemSeedSpacesByFourWaggles)
+TEST(Galaxy, SystemSeedSpacesByFourWaggles)
 {
   // SystemSeed(.,1) must equal four manual twists of the galaxy seed.
   GalaxySeed manual = BASE_GALAXY_SEED;
@@ -49,28 +49,28 @@ TEST(Galaxy_SystemSeedSpacesByFourWaggles)
   Waggle(manual);
   Waggle(manual);
   Waggle(manual);
-  CHECK(SystemSeed(BASE_GALAXY_SEED, 1) == manual);
-  CHECK(SystemSeed(BASE_GALAXY_SEED, 0) == BASE_GALAXY_SEED);
+  EXPECT_TRUE(SystemSeed(BASE_GALAXY_SEED, 1) == manual);
+  EXPECT_TRUE(SystemSeed(BASE_GALAXY_SEED, 0) == BASE_GALAXY_SEED);
 }
 
-TEST(Galaxy_NextGalaxyRotatesEachByte)
+TEST(Galaxy, NextGalaxyRotatesEachByte)
 {
   // rotate_byte_left on each byte of {0x4a,0x5a,0x48,0x02,0x53,0xb7}.
   GalaxySeed g2 = NextGalaxy(BASE_GALAXY_SEED);
-  CHECK(g2.a == 0x94);
-  CHECK(g2.b == 0xb4);
-  CHECK(g2.c == 0x90);
-  CHECK(g2.d == 0x04);
-  CHECK(g2.e == 0xa6);
-  CHECK(g2.f == 0x6f);
+  EXPECT_TRUE(g2.a == 0x94);
+  EXPECT_TRUE(g2.b == 0xb4);
+  EXPECT_TRUE(g2.c == 0x90);
+  EXPECT_TRUE(g2.d == 0x04);
+  EXPECT_TRUE(g2.e == 0xa6);
+  EXPECT_TRUE(g2.f == 0x6f);
 }
 
-TEST(Galaxy_EightGalaxiesWrapAround)
+TEST(Galaxy, EightGalaxiesWrapAround)
 {
   // Eight single-bit rotations of a byte return it unchanged, so cycling all
   // eight galaxies returns to the starting seed (legacy galaxy_number & 7).
   GalaxySeed g = BASE_GALAXY_SEED;
   for (int i = 0; i < 8; ++i)
     g = NextGalaxy(g);
-  CHECK(g == BASE_GALAXY_SEED);
+  EXPECT_TRUE(g == BASE_GALAXY_SEED);
 }

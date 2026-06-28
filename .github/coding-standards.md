@@ -416,7 +416,10 @@ Guidelines:
 
 ### Testing Strategy
 
-Follow the project's test framework and test naming conventions. Prefer tests that are:
+Unit tests use **GoogleTest**, the project's standard framework. Tests live in per-library
+projects under `Tests/<Library>/`, are written with `TEST(Suite, Name)` and `EXPECT_*` /
+`ASSERT_*`, and run via CTest (`ctest --output-on-failure`). See the Testing Instructions in
+`AGENTS.md` for layout and how the framework is wired in. Prefer tests that are:
 
 - Focused on one behavior.
 - Deterministic and repeatable.

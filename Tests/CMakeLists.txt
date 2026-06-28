@@ -1,56 +1,14 @@
-# Tests - the project's unit/golden-run test executable.
+# Tests/ - per-library GoogleTest projects.
 #
-# A standalone console exe with a tiny hand-rolled framework (TestFramework.h),
-# run by CTest in CI. It is dependency-light on purpose: it includes the
-# header-only NeuronCore engine pieces (e.g. ECS.h) directly rather than linking
-# the full NeuronCore static lib, so the tests stay fast and headless.
+# One companion "<Library>.Tests" executable per engine library, each registering
+# its cases with CTest via gtest_discover_tests(). These were migrated from the
+# original single hand-rolled Tests/ executable (TestFramework.h): every source
+# file now lives under the library whose code it exercises.
+#
+# GoogleTest itself is fetched once at the top level (see the root CMakeLists);
+# this directory only consumes the GTest::gtest_main target.
 
-set(TEST_SOURCES
-    TestMain.cpp
-    EcsTests.cpp
-    UniverseTests.cpp
-    MathTests.cpp
-    LegacyMathGoldenTests.cpp
-    SpatialTests.cpp
-    MotionTests.cpp
-    EconomyTests.cpp
-    GalaxyTests.cpp
-    CombatTests.cpp
-    FlightTests.cpp
-    FlightInputTests.cpp
-    CameraFollowTests.cpp
-    ReplicationTests.cpp
-    SnapshotTransportTests.cpp
-    InterpolationTests.cpp
-    ReliableChannelTests.cpp
-    AreaOfInterestTests.cpp
-    ReplicatedSceneTests.cpp
-    ClientInputTests.cpp
-    SessionTests.cpp
-    CombatSystemTests.cpp
-    StationServicesTests.cpp
-    StationProtocolTests.cpp
-    SpawnDirectorTests.cpp
-    GalaxyGenTests.cpp
-    GalaxyManifestTests.cpp
-)
-
-add_executable(Tests ${TEST_SOURCES} TestFramework.h)
-
-target_compile_features(Tests PRIVATE cxx_std_23)
-
-# Header-only access to the engine code under test: ECS.h lives in NeuronCore;
-# the game components / Universe + vector.h live in the DeepspaceOutpost project
-# (they relocate to GameLogic at A4). All are header-only, so no linking needed.
-target_include_directories(Tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/NeuronCore
-    ${CMAKE_SOURCE_DIR}/DeepspaceOutpost
-    ${CMAKE_SOURCE_DIR}/GameLogic
-)
-
-if(MSVC)
-    target_compile_options(Tests PRIVATE /W4)
-    target_compile_definitions(Tests PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
-
-add_test(NAME unit COMMAND Tests)
+add_subdirectory(NeuronCore)
+add_subdirectory(NeuronClient)
+add_subdirectory(NeuronServer)
+add_subdirectory(GameLogic)

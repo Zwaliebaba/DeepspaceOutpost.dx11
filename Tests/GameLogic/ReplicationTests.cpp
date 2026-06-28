@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "DataWriter.h"
 #include "DataReader.h"
@@ -7,7 +7,7 @@
 
 using namespace Neuron;
 
-TEST(Wire_ScalarsRoundTripLittleEndian)
+TEST(Wire, ScalarsRoundTripLittleEndian)
 {
   Net::DataWriter w;
   w.WriteU8(0x12);
@@ -18,33 +18,33 @@ TEST(Wire_ScalarsRoundTripLittleEndian)
   w.WriteF64(-2.25);
 
   // U16 0x3456 must be stored low byte first.
-  CHECK(w.Bytes()[1] == 0x56);
-  CHECK(w.Bytes()[2] == 0x34);
+  EXPECT_TRUE(w.Bytes()[1] == 0x56);
+  EXPECT_TRUE(w.Bytes()[2] == 0x34);
 
   Net::DataReader r(w.Data(), w.Size());
-  CHECK(r.ReadU8() == 0x12);
-  CHECK(r.ReadU16() == 0x3456);
-  CHECK(r.ReadU32() == 0x789ABCDEu);
-  CHECK(r.ReadI64() == -1);
-  CHECK(r.ReadF32() == 1.5f);
-  CHECK(r.ReadF64() == -2.25);
-  CHECK(r.Ok());
-  CHECK(r.Remaining() == 0);
+  EXPECT_TRUE(r.ReadU8() == 0x12);
+  EXPECT_TRUE(r.ReadU16() == 0x3456);
+  EXPECT_TRUE(r.ReadU32() == 0x789ABCDEu);
+  EXPECT_TRUE(r.ReadI64() == -1);
+  EXPECT_TRUE(r.ReadF32() == 1.5f);
+  EXPECT_TRUE(r.ReadF64() == -2.25);
+  EXPECT_TRUE(r.Ok());
+  EXPECT_TRUE(r.Remaining() == 0);
 }
 
-TEST(Wire_ReadPastEndFailsCleanly)
+TEST(Wire, ReadPastEndFailsCleanly)
 {
   Net::DataWriter w;
   w.WriteU16(0xABCD);
 
   Net::DataReader r(w.Data(), w.Size());
-  CHECK(r.ReadU16() == 0xABCD);
-  CHECK(r.Ok());
+  EXPECT_TRUE(r.ReadU16() == 0xABCD);
+  EXPECT_TRUE(r.Ok());
   (void)r.ReadU32();      // only 0 bytes left -> overrun
-  CHECK(!r.Ok());
+  EXPECT_TRUE(!r.Ok());
 }
 
-TEST(Replication_SnapshotRoundTrips)
+TEST(Replication, SnapshotRoundTrips)
 {
   Net::WorldSnapshot snap;
   snap.tick = 42;
@@ -60,15 +60,15 @@ TEST(Replication_SnapshotRoundTrips)
 
   Net::WorldSnapshot out;
   Net::DataReader r(w.Data(), w.Size());
-  CHECK(Net::ReadSnapshot(r, out));
-  CHECK(out.tick == 42);
-  CHECK(out.viewerId == 7);
-  CHECK(out.entities.size() == 2);
-  CHECK((out.entities[0] == snap.entities[0]));
-  CHECK((out.entities[1] == snap.entities[1]));
+  EXPECT_TRUE(Net::ReadSnapshot(r, out));
+  EXPECT_TRUE(out.tick == 42);
+  EXPECT_TRUE(out.viewerId == 7);
+  EXPECT_TRUE(out.entities.size() == 2);
+  EXPECT_TRUE((out.entities[0] == snap.entities[0]));
+  EXPECT_TRUE((out.entities[1] == snap.entities[1]));
 }
 
-TEST(Replication_BadMagicIsRejected)
+TEST(Replication, BadMagicIsRejected)
 {
   Net::WorldSnapshot snap;
   snap.tick = 1;
@@ -80,10 +80,10 @@ TEST(Replication_BadMagicIsRejected)
 
   Net::WorldSnapshot out;
   Net::DataReader r(bytes.data(), bytes.size());
-  CHECK(!Net::ReadSnapshot(r, out));
+  EXPECT_TRUE(!Net::ReadSnapshot(r, out));
 }
 
-TEST(Replication_TruncatedPacketIsRejected)
+TEST(Replication, TruncatedPacketIsRejected)
 {
   Net::WorldSnapshot snap;
   snap.tick = 1;
@@ -94,10 +94,10 @@ TEST(Replication_TruncatedPacketIsRejected)
   // Drop the tail of the single entity: header + count parse, the entity overruns.
   Net::WorldSnapshot out;
   Net::DataReader r(w.Data(), w.Size() - 8);
-  CHECK(!Net::ReadSnapshot(r, out));
+  EXPECT_TRUE(!Net::ReadSnapshot(r, out));
 }
 
-TEST(Replication_BuildSnapshotReadsAuthoritativeComponents)
+TEST(Replication, BuildSnapshotReadsAuthoritativeComponents)
 {
   ECS::Registry world;
 
@@ -114,8 +114,8 @@ TEST(Replication_BuildSnapshotReadsAuthoritativeComponents)
   // b has no Flight -> default facing, speed 0
 
   Net::WorldSnapshot snap = GameLogic::BuildWorldSnapshot(world, 5);
-  CHECK(snap.tick == 5);
-  CHECK(snap.entities.size() == 2);
+  EXPECT_TRUE(snap.tick == 5);
+  EXPECT_TRUE(snap.entities.size() == 2);
 
   auto find = [&](uint32_t id) -> const Net::EntitySnapshot*
   {
@@ -127,19 +127,19 @@ TEST(Replication_BuildSnapshotReadsAuthoritativeComponents)
 
   const Net::EntitySnapshot* ea = find(a.index);
   const Net::EntitySnapshot* eb = find(b.index);
-  CHECK(ea != nullptr);
-  CHECK(eb != nullptr);
+  EXPECT_TRUE(ea != nullptr);
+  EXPECT_TRUE(eb != nullptr);
 
-  CHECK(ea->x == 100);
-  CHECK(ea->y == 200);
-  CHECK(ea->z == 300);
-  CHECK(ea->noseX == 1.0f);
-  CHECK(ea->noseZ == 0.0f);
-  CHECK(ea->speed == 9.0f);
-  CHECK(ea->type == 2);          // Coriolis
+  EXPECT_TRUE(ea->x == 100);
+  EXPECT_TRUE(ea->y == 200);
+  EXPECT_TRUE(ea->z == 300);
+  EXPECT_TRUE(ea->noseX == 1.0f);
+  EXPECT_TRUE(ea->noseZ == 0.0f);
+  EXPECT_TRUE(ea->speed == 9.0f);
+  EXPECT_TRUE(ea->type == 2);          // Coriolis
 
-  CHECK(eb->x == -7);
-  CHECK(eb->noseZ == 1.0f);   // default forward
-  CHECK(eb->speed == 0.0f);
-  CHECK(eb->type == 0);          // no NetType -> default
+  EXPECT_TRUE(eb->x == -7);
+  EXPECT_TRUE(eb->noseZ == 1.0f);   // default forward
+  EXPECT_TRUE(eb->speed == 0.0f);
+  EXPECT_TRUE(eb->type == 0);          // no NetType -> default
 }

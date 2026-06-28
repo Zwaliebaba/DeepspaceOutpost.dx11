@@ -109,9 +109,15 @@ When context files don't provide specific guidance:
 
 ## Testing Approach
 
-- There is currently **no test project or test framework** in the repository.
-- Do not invent a test framework. If tests are needed, confirm the choice with the maintainer first.
-- Manual validation (build + run the client) is the current practice.
+- **GoogleTest is the standard unit-test framework.** Tests live in per-library projects under
+  `Tests/<Library>/` (`Tests/NeuronCore`, `Tests/GameLogic`, `Tests/NeuronClient`,
+  `Tests/NeuronServer`), written with `TEST(Suite, Name)` and `EXPECT_*` / `ASSERT_*`.
+- GoogleTest is fetched via CMake `FetchContent` for the test binaries only — the one
+  sanctioned exception to the native-first / no-third-party rule. The old hand-rolled
+  `TestFramework.h` harness has been removed; do not reintroduce it.
+- Tests register with CTest (`gtest_discover_tests`); run `ctest --output-on-failure` from the
+  build directory. Manual validation (build + run the client) still applies where unit tests
+  cannot cover behavior. See `AGENTS.md` → Testing Instructions for details.
 
 ## General Best Practices
 

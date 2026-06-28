@@ -20,7 +20,7 @@ These forks were settled up front; the rest of the plan assumes them.
 | Decision | Choice | Consequence |
 |---|---|---|
 | **Precision** | **Full float32 / DirectXMath.** | Sim *and* render math move to `XMVECTOR`/`XMMATRIX`. The ported flight model goes from `double` to `float`; numeric results of the old double path will shift. See [§7 Precision & determinism](#7-precision--determinism-risk). |
-| **`Vector3d` / `Vector3i64`** | **Both stay — out of scope.** | Neither has a DirectXMath equivalent (DirectXMath is float32-only), so they are **not** wrappers and **not** migration targets. `Vector3d` is a legitimate fp64 `Neuron::Math` type carrying the authoritative server sim's precision-sensitive state — the `ShipFrame` orientation basis and the **`carry` sub-unit remainder** that steps the `int64` world (`SimComponents.h` / `FlightSystem.h`), plus `LocalOffset` (`SnapshotInterpolator.h`). `Vector3i64` holds absolute `int64³` world coordinates that must stay exact (see [`MathTests`](../Tests/MathTests.cpp)). The migration touches them only at the **render boundary**: when the legacy float render path consumes a world/local offset, convert double→`XMVECTOR` there (`XMVectorSet((float)dx, …)`). |
+| **`Vector3d` / `Vector3i64`** | **Both stay — out of scope.** | Neither has a DirectXMath equivalent (DirectXMath is float32-only), so they are **not** wrappers and **not** migration targets. `Vector3d` is a legitimate fp64 `Neuron::Math` type carrying the authoritative server sim's precision-sensitive state — the `ShipFrame` orientation basis and the **`carry` sub-unit remainder** that steps the `int64` world (`SimComponents.h` / `FlightSystem.h`), plus `LocalOffset` (`SnapshotInterpolator.h`). `Vector3i64` holds absolute `int64³` world coordinates that must stay exact (see [`MathTests`](../Tests/NeuronCore/MathTests.cpp)). The migration touches them only at the **render boundary**: when the legacy float render path consumes a world/local offset, convert double→`XMVECTOR` there (`XMVectorSet((float)dx, …)`). |
 | **`GameMath.h` helper layer** | **Use `Neuron::Math` helpers freely.** | `Neuron::Math` is the sanctioned helper layer; calling `Normalize`, `Cross`, `Dot`, `RotateAround`, `Vector3::FORWARD`, etc. is *not* a native-first violation. The no-wrapper rule applies to **new** code: do **not** add fresh thin forwarders, and do **not** keep the legacy `vector.h` wrappers alive. |
 | **Determinism** | **Reproducible-enough (no cross-machine bit-exactness).** | Same-build reproducibility is the bar; no lockstep/replay bit-exact guarantee. Default `/fp` is acceptable — no path is forced to stay integer/fixed-point for determinism's sake. |
 | **`Transform.rotmat` storage** | **`XMFLOAT4X4` (engine-uniform).** | Matches the rest of the engine's matrices for uniform `XMLoadFloat4x4`/`XMStoreFloat4x4` and easy translation folding; the 3×3 rotation basis occupies the upper-left, row 3 / column 3 identity. |
@@ -198,11 +198,17 @@ locked before storage layout churns the ECS.
 
 ### Phase 0 — Scaffolding & golden tests *(no behavior change)*
 - **Done:** characterization tests for the pure leaf functions live in
-  [`Tests/LegacyMathGoldenTests.cpp`](../Tests/LegacyMathGoldenTests.cpp)
-  (registered in [`Tests/CMakeLists.txt`](../Tests/CMakeLists.txt)). They capture
+  [`Tests/NeuronCore/LegacyMathGoldenTests.cpp`](../Tests/NeuronCore/LegacyMathGoldenTests.cpp)
+  (registered in [`Tests/NeuronCore/CMakeLists.txt`](../Tests/NeuronCore/CMakeLists.txt)
+  under the `NeuronCore.Tests` GoogleTest target). They capture
   the **current** double-precision outputs of `unit_vector`,
   `vector_dot_product`, `mult_vector`, `mult_matrix`, `tidy_matrix`, and
   `rotate_vec`, and become the float-tolerance oracle for every later phase.
+- **Framework: GoogleTest** (the project standard since the test migration) —
+  `TEST(LegacyMath, …)` cases with `EXPECT_NEAR`. The tests sit under
+  `NeuronCore.Tests` because the migration's replacement helper
+  (`Neuron::Math::Orthonormalize`) lives in NeuronCore and there is no
+  DeepspaceOutpost test project (the client is a Win32 exe).
 - The legacy `vector.cpp` `#include`s the heavy DeepspaceOutpost pch and can't
   compile into the dependency-light test exe, so the tests embed a **verbatim
   oracle** of those pure functions; keep it bit-identical to `vector.cpp` until
@@ -215,8 +221,9 @@ locked before storage layout churns the ECS.
 - **`move_local_object` is a *manual integration check*, not a unit golden** — it
   depends on `PlayerFlight()`, `ship_list`, and other `space.cpp` globals that
   can't be isolated header-only. Validate it by the Phase-4 flight smoke test.
-- Comparison tolerance is a relative-with-absolute-floor epsilon
-  (`Near`/`NearVec` in the test, see [§7](#7-precision--determinism-risk)).
+- Comparison uses `EXPECT_NEAR` with a tight `kEps` (double oracle vs double
+  oracle); the later float32-port comparison loosens to a magnitude-scaled
+  epsilon (see [§7](#7-precision--determinism-risk)).
 
 ### Phase 1 — Reconcile the helper layer & docs *(no behavior change)* — **done**
 - **Docs fixed** to name the real legacy types (`struct vector` / `Matrix`,
@@ -303,7 +310,8 @@ locked before storage layout churns the ECS.
 - Grep-gate: no remaining `struct vector`, `Matrix[`, `mult_matrix`,
   `mult_vector`, `vector_dot_product`, `unit_vector`, `set_init_matrix`,
   `tidy_matrix`, `rotate_vec` outside history.
-- Build x64 Debug + Release; run the full `Tests/` suite; manual flight/render
+- Build x64 Debug + Release; run the full test suite via `ctest`
+  (the `NeuronCore.Tests` GoogleTest target includes the math goldens); manual flight/render
   smoke test (fly, rotate, dock, view ships & planets).
 
 ---

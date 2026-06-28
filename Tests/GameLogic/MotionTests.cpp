@@ -1,10 +1,10 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "GameLogic.h"
 
 using namespace Neuron;
 
-TEST(GameLogic_MotionIntegratesDeterministically)
+TEST(GameLogic, MotionIntegratesDeterministically)
 {
   ECS::Registry world;
 
@@ -16,11 +16,11 @@ TEST(GameLogic_MotionIntegratesDeterministically)
     GameLogic::Tick(world);
 
   // 100 ticks * (10,-5,2) added to (1000,0,0).
-  CHECK((world.Get<GameLogic::WorldTransform>(mover).position
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(mover).position
          == Math::Vector3i64{ 2000, -500, 200 }));
 }
 
-TEST(GameLogic_EntitiesWithoutVelocityStayPut)
+TEST(GameLogic, EntitiesWithoutVelocityStayPut)
 {
   ECS::Registry world;
 
@@ -31,11 +31,11 @@ TEST(GameLogic_EntitiesWithoutVelocityStayPut)
   for (int i = 0; i < 50; ++i)
     GameLogic::Tick(world);
 
-  CHECK((world.Get<GameLogic::WorldTransform>(still).position
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(still).position
          == Math::Vector3i64{ 7, 8, 9 }));
 }
 
-TEST(GameLogic_ManyEntitiesAdvanceIndependently)
+TEST(GameLogic, ManyEntitiesAdvanceIndependently)
 {
   ECS::Registry world;
 
@@ -49,6 +49,6 @@ TEST(GameLogic_ManyEntitiesAdvanceIndependently)
   for (int i = 0; i < 10; ++i)
     GameLogic::Tick(world);
 
-  CHECK((world.Get<GameLogic::WorldTransform>(a).position == Math::Vector3i64{ 10, 0, 0 }));
-  CHECK((world.Get<GameLogic::WorldTransform>(b).position == Math::Vector3i64{ 0, 20, 0 }));
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(a).position == Math::Vector3i64{ 10, 0, 0 }));
+  EXPECT_TRUE((world.Get<GameLogic::WorldTransform>(b).position == Math::Vector3i64{ 0, 20, 0 }));
 }

@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include <vector>
 
@@ -6,17 +6,17 @@
 
 using namespace Neuron;
 
-TEST(GalaxyGen_ProducesTheRequestedCount)
+TEST(GalaxyGen, ProducesTheRequestedCount)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.planetCount = 50;
   std::vector<GameLogic::GalaxySystem> g = GameLogic::GenerateGalaxy(cfg);
-  CHECK(g.size() == 50);
-  CHECK(g[0].id == 0);
-  CHECK(g[49].id == 49);
+  EXPECT_TRUE(g.size() == 50);
+  EXPECT_TRUE(g[0].id == 0);
+  EXPECT_TRUE(g[49].id == 49);
 }
 
-TEST(GalaxyGen_IsDeterministic)
+TEST(GalaxyGen, IsDeterministic)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.seed = 12345;
@@ -25,18 +25,18 @@ TEST(GalaxyGen_IsDeterministic)
   std::vector<GameLogic::GalaxySystem> a = GameLogic::GenerateGalaxy(cfg);
   std::vector<GameLogic::GalaxySystem> b = GameLogic::GenerateGalaxy(cfg);
 
-  CHECK(a.size() == b.size());
+  EXPECT_TRUE(a.size() == b.size());
   for (std::size_t i = 0; i < a.size(); ++i)
   {
-    CHECK((a[i].planetPos == b[i].planetPos));
-    CHECK((a[i].stationPos == b[i].stationPos));
-    CHECK((a[i].seed == b[i].seed));
-    CHECK(a[i].name == b[i].name);
-    CHECK(a[i].planet.economy == b[i].planet.economy);
+    EXPECT_TRUE((a[i].planetPos == b[i].planetPos));
+    EXPECT_TRUE((a[i].stationPos == b[i].stationPos));
+    EXPECT_TRUE((a[i].seed == b[i].seed));
+    EXPECT_TRUE(a[i].name == b[i].name);
+    EXPECT_TRUE(a[i].planet.economy == b[i].planet.economy);
   }
 }
 
-TEST(GalaxyGen_DifferentSeedsGiveDifferentGalaxies)
+TEST(GalaxyGen, DifferentSeedsGiveDifferentGalaxies)
 {
   GameLogic::GalaxyConfig c1; c1.seed = 1; c1.planetCount = 16;
   GameLogic::GalaxyConfig c2; c2.seed = 2; c2.planetCount = 16;
@@ -49,10 +49,10 @@ TEST(GalaxyGen_DifferentSeedsGiveDifferentGalaxies)
   for (std::size_t i = 0; i < a.size(); ++i)
     if (a[i].planetPos != b[i].planetPos)
       anyDifferent = true;
-  CHECK(anyDifferent);
+  EXPECT_TRUE(anyDifferent);
 }
 
-TEST(GalaxyGen_PlanetsStayWithinTheExtent)
+TEST(GalaxyGen, PlanetsStayWithinTheExtent)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.extent = 1'000'000;
@@ -61,13 +61,13 @@ TEST(GalaxyGen_PlanetsStayWithinTheExtent)
 
   for (const GameLogic::GalaxySystem& s : g)
   {
-    CHECK(s.planetPos.x >= -cfg.extent && s.planetPos.x <= cfg.extent);
-    CHECK(s.planetPos.y >= -cfg.extent && s.planetPos.y <= cfg.extent);
-    CHECK(s.planetPos.z >= -cfg.extent && s.planetPos.z <= cfg.extent);
+    EXPECT_TRUE(s.planetPos.x >= -cfg.extent && s.planetPos.x <= cfg.extent);
+    EXPECT_TRUE(s.planetPos.y >= -cfg.extent && s.planetPos.y <= cfg.extent);
+    EXPECT_TRUE(s.planetPos.z >= -cfg.extent && s.planetPos.z <= cfg.extent);
   }
 }
 
-TEST(GalaxyGen_StationSitsBesideItsPlanet)
+TEST(GalaxyGen, StationSitsBesideItsPlanet)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.stationOrbit = 8000;
@@ -76,11 +76,11 @@ TEST(GalaxyGen_StationSitsBesideItsPlanet)
 
   for (const GameLogic::GalaxySystem& s : g)
   {
-    CHECK((s.stationPos == Math::Vector3i64{ s.planetPos.x + 8000, s.planetPos.y, s.planetPos.z }));
+    EXPECT_TRUE((s.stationPos == Math::Vector3i64{ s.planetPos.x + 8000, s.planetPos.y, s.planetPos.z }));
   }
 }
 
-TEST(GalaxyGen_PlanetsHaveSaneAttributes)
+TEST(GalaxyGen, PlanetsHaveSaneAttributes)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.planetCount = 100;
@@ -88,12 +88,12 @@ TEST(GalaxyGen_PlanetsHaveSaneAttributes)
 
   for (const GameLogic::GalaxySystem& s : g)
   {
-    CHECK(s.planet.economy >= 0 && s.planet.economy <= 7);
-    CHECK(s.planet.government >= 0 && s.planet.government <= 7);
+    EXPECT_TRUE(s.planet.economy >= 0 && s.planet.economy <= 7);
+    EXPECT_TRUE(s.planet.government >= 0 && s.planet.government <= 7);
   }
 }
 
-TEST(GalaxyGen_PlanetsAreSpreadOutNotStacked)
+TEST(GalaxyGen, PlanetsAreSpreadOutNotStacked)
 {
   GameLogic::GalaxyConfig cfg;
   cfg.planetCount = 64;
@@ -105,5 +105,5 @@ TEST(GalaxyGen_PlanetsAreSpreadOutNotStacked)
     for (std::size_t j = i + 1; j < g.size(); ++j)
       if (g[i].planetPos == g[j].planetPos)
         ++collisions;
-  CHECK(collisions == 0);
+  EXPECT_TRUE(collisions == 0);
 }
