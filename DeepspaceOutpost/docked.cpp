@@ -520,6 +520,26 @@ int chart_current_system (void)
 	return best;
 }
 
+// Name of the player's current system. In thin-client mode this is the manifest
+// name of the system the ship is in (so it matches the galactic chart); otherwise
+// the legacy procedural name of docked_planet. `_out` must hold at least 16 chars.
+void current_system_name (char *_out)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (rc.IsOpen() && rc.HasGalaxy())
+	{
+		const int cur = chart_current_system();
+		if (cur >= 0 && cur < (int)rc.Galaxy().size())
+		{
+			strncpy (_out, rc.Galaxy()[cur].name, 15);
+			_out[15] = '\0';
+			return;
+		}
+	}
+
+	name_planet (_out, docked_planet);
+}
+
 // Project the manifest into short-range chart pixels, centred on `_origin`
 // (the current system) and scaled by light years. Uses the same world x/z axes
 // as the galactic chart, so the two charts agree on where systems lie.
@@ -931,7 +951,7 @@ void display_commander_status (void)
 	
 	if (!witchspace)
 	{
-		name_planet (planet_name, docked_planet);
+		current_system_name (planet_name);
 		capitalise_name (planet_name);
 		sprintf (str, "%s", planet_name);
 		gfx_display_text (190, 58, str);
@@ -1268,7 +1288,8 @@ void display_market_prices (void)
 
 	gfx_clear_display();
 
-	name_planet (planet_name, docked_planet);
+	current_system_name (planet_name);
+	capitalise_name (planet_name);
 	sprintf (str, "%s MARKET PRICES", planet_name);
 	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
 
