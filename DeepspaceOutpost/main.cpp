@@ -791,14 +791,16 @@ static void launch_missile (void)
 		return;
 	}
 
-	// Must be armed (target key) and carrying a missile; the server resolves which
-	// enemy in front is hit.
-	if ((missile_target == MISSILE_UNARMED) || (cmdr.missiles == 0))
+	// Server-authoritative missiles: the server locks the nearest enemy in front and
+	// homes the projectile itself, so firing only needs a missile in the rack - no
+	// separate client-side arm/lock step (that legacy two-step doesn't map onto the
+	// server picking the target). Just need a round to fire.
+	if (cmdr.missiles == 0)
 		return;
 
 	s_fire_missile_intent = true;
 	cmdr.missiles--;
-	missile_target = MISSILE_UNARMED;
+	missile_target = MISSILE_UNARMED;   // clear any HUD arm indicator
 	snd_play_sample (SND_MISSILE);
 }
 

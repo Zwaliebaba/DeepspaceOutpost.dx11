@@ -166,7 +166,11 @@ int main()
               {
                 GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
                 if (wnt != nullptr && wnt->level == 0)
+                {
                   spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
+                  printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched\n",
+                         tick, player.index, shot.targetTeam);
+                }
                 if (wnt != nullptr)
                   wnt->level++;
               }
@@ -175,6 +179,8 @@ int main()
                 sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
                                    Net::EncodeDeath(shot.target.index, player.index));
                 world.Destroy(shot.target);
+                printf("[tick %u] player %u destroyed entity %u with the laser\n",
+                       tick, player.index, shot.target.index);
               }
             };
 
@@ -191,15 +197,28 @@ int main()
               const ECS::EntityId missile = GameLogic::SpawnMissile(world, player);
               const GameLogic::Missile* mc =
                   world.IsValid(missile) ? world.TryGet<GameLogic::Missile>(missile) : nullptr;
-              if (mc != nullptr && world.IsValid(mc->target))
+              if (mc == nullptr)
               {
+                printf("[tick %u] player %u MISSILE LAUNCH FAILED (missing transform/flight/combatant)\n",
+                       tick, player.index);
+              }
+              else if (world.IsValid(mc->target))
+              {
+                const GameLogic::Combatant* tc = world.TryGet<GameLogic::Combatant>(mc->target);
+                printf("[tick %u] player %u LAUNCHED missile %u -> locked target %u (team %d)\n",
+                       tick, player.index, missile.index, mc->target.index, tc != nullptr ? tc->team : -1);
+
                 GameLogic::FireOutcome lock;
                 lock.hit = true;
                 lock.target = mc->target;
-                if (const GameLogic::Combatant* tc = world.TryGet<GameLogic::Combatant>(mc->target))
-                  lock.targetTeam = tc->team;
+                lock.targetTeam = tc != nullptr ? tc->team : -1;
                 lock.destroyed = false;   // detonation/kill happens later in StepMissiles
                 applyShot(lock);
+              }
+              else
+              {
+                printf("[tick %u] player %u LAUNCHED missile %u (no target lock - flying straight)\n",
+                       tick, player.index, missile.index);
               }
             }
           }
@@ -259,12 +278,15 @@ int main()
           c->energy = 255;
         if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(kill.victim))
           wnt->level = 0;
+        printf("[tick %u] player %u was killed by %u -> respawned in place\n",
+               tick, kill.victim.index, kill.killer);
         continue;
       }
 
       sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
                          Net::EncodeDeath(kill.victim.index, kill.killer));
       world.Destroy(kill.victim);
+      printf("[tick %u] entity %u destroyed by %u\n", tick, kill.victim.index, kill.killer);
     }
 
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
