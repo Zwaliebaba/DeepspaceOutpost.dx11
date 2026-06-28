@@ -1,0 +1,18 @@
+{
+  "name": "Cargo Canister",
+  "ship_id": 5,
+  "model": "cargo.obj",
+  "num_points": 10,
+  "num_lines": 15,
+  "num_faces": 7,
+  "max_loot": 0,
+  "scoop_type": 0,
+  "size": 400,
+  "front_laser": 0,
+  "bounty": 0,
+  "vanish_point": 12,
+  "energy": 17,
+  "velocity": 15,
+  "missiles": 0,
+  "laser_strength": 0
+}

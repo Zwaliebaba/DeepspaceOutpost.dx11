@@ -1,0 +1,55 @@
+# Asp MkII
+# Exported from DeepspaceOutpost ship data (SHIP id 25).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching asp_mk2.json sidecar.
+mtllib elite.mtl
+o asp_mk2
+v 0 -18 0
+v 0 -9 -45
+v 43 0 -45
+v 69 -3 0
+v 43 -14 28
+v -43 0 -45
+v -69 -3 0
+v -43 -14 28
+v 26 -7 73
+v -26 -7 73
+v 43 14 28
+v -43 14 28
+v 0 9 -45
+v -17 0 -45
+v 17 0 -45
+v 0 -4 -45
+v 0 4 -45
+v 0 -7 73
+v 0 -7 83
+usemtl col_237
+f 9 10 8 1 5
+usemtl col_235
+f 4 5 1 2 3
+usemtl col_248
+f 2 1 8 7 6
+usemtl col_234
+f 9 5 4
+usemtl col_234
+f 7 8 10
+usemtl col_46
+f 12 11 13
+usemtl col_45
+f 10 9 11 12
+usemtl col_4
+f 7 12 13 6
+usemtl col_4
+f 3 13 11 4
+usemtl col_133
+f 4 11 9
+usemtl col_133
+f 10 12 7
+usemtl col_28
+f 3 2 6 13
+usemtl col_49
+f 15 16 14 17
+usemtl col_255
+f 19 18
+usemtl col_255
+f 18 19

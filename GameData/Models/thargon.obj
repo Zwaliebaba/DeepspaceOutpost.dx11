@@ -1,0 +1,30 @@
+# Thargon
+# Exported from DeepspaceOutpost ship data (SHIP id 30).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching thargon.json sidecar.
+mtllib elite.mtl
+o thargon
+v -9 0 40
+v -9 -38 12
+v -9 -24 -32
+v -9 24 -32
+v -9 38 12
+v 9 0 -8
+v 9 -10 -15
+v 9 -6 -26
+v 9 6 -26
+v 9 10 -15
+usemtl col_28
+f 4 3 2 1 5
+usemtl col_248
+f 7 6 1 2
+usemtl col_235
+f 8 7 2 3
+usemtl col_237
+f 9 8 3 4
+usemtl col_235
+f 10 9 4 5
+usemtl col_234
+f 5 1 6 10
+usemtl col_28
+f 10 6 7 8 9

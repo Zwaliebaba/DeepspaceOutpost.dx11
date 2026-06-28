@@ -1,0 +1,14 @@
+# Alloy
+# Exported from DeepspaceOutpost ship data (SHIP id 4).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching alloy.json sidecar.
+mtllib elite.mtl
+o alloy
+v -15 -22 -9
+v -15 38 -9
+v 19 32 11
+v 10 -46 6
+usemtl col_248
+f 1 2 3 4
+usemtl col_234
+f 4 3 2 1

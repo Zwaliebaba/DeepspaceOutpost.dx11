@@ -1,0 +1,41 @@
+# Cobra MkI
+# Exported from DeepspaceOutpost ship data (SHIP id 22).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching cobra_mk1.json sidecar.
+mtllib elite.mtl
+o cobra_mk1
+v -18 -1 50
+v 18 -1 50
+v -66 0 7
+v 66 0 7
+v -32 12 -38
+v 32 12 -38
+v -54 -12 -38
+v 54 -12 -38
+v 0 12 -6
+v 0 -1 50
+v 0 -1 60
+usemtl col_46
+f 1 2 9
+usemtl col_46
+f 7 8 2 1
+usemtl col_133
+f 3 1 9 5
+usemtl col_4
+f 7 1 3
+usemtl col_133
+f 2 4 6 9
+usemtl col_4
+f 2 8 4
+usemtl col_46
+f 5 9 6
+usemtl col_4
+f 8 7 5 6
+usemtl col_46
+f 3 5 7
+usemtl col_46
+f 4 8 6
+usemtl col_255
+f 10 11
+usemtl col_255
+f 11 10

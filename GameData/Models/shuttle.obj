@@ -1,0 +1,57 @@
+# Orbit Shuttle
+# Exported from DeepspaceOutpost ship data (SHIP id 9).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching shuttle.json sidecar.
+mtllib elite.mtl
+o shuttle
+v 0 -17 23
+v -17 0 23
+v 0 18 23
+v 18 0 23
+v -20 -20 -27
+v -20 20 -27
+v 20 20 -27
+v 20 -20 -27
+v 5 0 -27
+v 0 -2 -27
+v -5 0 -27
+v 0 3 -27
+v 0 -9 35
+v 3 -1 31
+v 4 11 25
+v 11 4 25
+v -3 -1 31
+v -3 11 25
+v -10 4 25
+usemtl col_248
+f 1 5 8
+usemtl col_235
+f 2 5 1
+usemtl col_248
+f 2 6 5
+usemtl col_235
+f 3 6 2
+usemtl col_248
+f 3 7 6
+usemtl col_235
+f 4 7 3
+usemtl col_248
+f 4 8 7
+usemtl col_235
+f 1 8 4
+usemtl col_234
+f 8 5 6 7
+usemtl col_49
+f 12 9 10 11
+usemtl col_237
+f 1 13 2
+usemtl col_248
+f 2 13 3
+usemtl col_237
+f 3 13 4
+usemtl col_248
+f 4 13 1
+usemtl col_45
+f 15 14 16
+usemtl col_45
+f 19 17 18

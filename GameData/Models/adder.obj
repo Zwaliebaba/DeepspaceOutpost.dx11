@@ -1,0 +1,52 @@
+# Adder
+# Exported from DeepspaceOutpost ship data (SHIP id 20).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching adder.json sidecar.
+mtllib elite.mtl
+o adder
+v -18 0 40
+v 18 0 40
+v 30 0 -24
+v 30 0 -40
+v 18 -7 -40
+v -18 -7 -40
+v -30 0 -40
+v -30 0 -24
+v -18 7 -40
+v 18 7 -40
+v -18 7 13
+v 18 7 13
+v -18 -7 13
+v 18 -7 13
+v -11 3 29
+v 11 3 29
+v 11 4 24
+v -11 4 24
+usemtl col_248
+f 1 2 12 11
+usemtl col_248
+f 2 1 13 14
+usemtl col_71
+f 3 12 2
+usemtl col_49
+f 2 14 3
+usemtl col_28
+f 10 12 3 4
+usemtl col_1
+f 4 3 14 5
+usemtl col_28
+f 11 9 7 8
+usemtl col_1
+f 8 7 6 13
+usemtl col_71
+f 11 8 1
+usemtl col_49
+f 1 8 13
+usemtl col_234
+f 4 5 6 7 9 10
+usemtl col_235
+f 11 12 10 9
+usemtl col_235
+f 6 5 14 13
+usemtl col_45
+f 18 15 16 17

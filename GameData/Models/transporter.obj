@@ -1,0 +1,101 @@
+# Transporter
+# Exported from DeepspaceOutpost ship data (SHIP id 10).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching transporter.json sidecar.
+mtllib elite.mtl
+o transporter
+v 0 10 -26
+v -25 4 -26
+v -28 -3 -26
+v -25 -8 -26
+v 26 -8 -26
+v 29 -3 -26
+v 26 4 -26
+v 0 6 12
+v -30 -1 12
+v -33 -8 12
+v 33 -8 12
+v 30 -1 12
+v -11 -2 30
+v -13 -8 30
+v 14 -8 30
+v 11 -2 30
+v -5 6 2
+v -18 3 2
+v -5 7 -7
+v -18 4 -7
+v -11 6 -14
+v -11 5 -7
+v 5 7 -14
+v 18 4 -14
+v 11 5 -7
+v 5 6 -3
+v 18 3 -3
+v 11 4 8
+v 11 5 -3
+v -16 -8 -13
+v -16 -8 16
+v 17 -8 -13
+v 17 -8 16
+v -13 -3 -26
+v 13 -3 -26
+v 9 3 -26
+v -8 3 -26
+usemtl col_234
+f 6 5 4 3 2 1 7
+usemtl col_45
+f 10 9 2 3
+usemtl col_46
+f 4 10 3
+usemtl col_4
+f 15 14 10 4 5 11
+usemtl col_46
+f 6 11 5
+usemtl col_45
+f 12 11 6 7
+usemtl col_248
+f 7 1 8 12
+usemtl col_235
+f 9 8 1 2
+usemtl col_45
+f 14 13 9 10
+usemtl col_45
+f 16 15 11 12
+usemtl col_248
+f 9 13 8
+usemtl col_235
+f 8 16 12
+usemtl col_237
+f 8 13 16
+usemtl col_242
+f 16 13 14 15
+usemtl col_28
+f 36 35 34 37
+usemtl col_255
+f 31 30
+usemtl col_255
+f 32 33
+usemtl col_255
+f 18 17
+usemtl col_255
+f 19 20
+usemtl col_255
+f 19 21
+usemtl col_255
+f 21 22
+usemtl col_255
+f 21 20
+usemtl col_255
+f 24 23
+usemtl col_255
+f 26 27
+usemtl col_255
+f 25 23
+usemtl col_255
+f 25 24
+usemtl col_255
+f 29 28
+usemtl col_255
+f 26 28
+usemtl col_255
+f 28 27
