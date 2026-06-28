@@ -62,6 +62,43 @@ namespace Neuron::Math
 
   [[nodiscard]] inline XMMATRIX XM_CALLCONV Invert(const XMMATRIX _m) noexcept { return XMMatrixInverse(nullptr, _m); }
 
+  // Re-orthonormalize a ship orientation basis whose rows are (side, roof, nose),
+  // faithfully reproducing the legacy tidy_matrix(): renormalize the nose, square
+  // the roof against it by fixing a SINGLE component (deliberately NOT classic
+  // Gram-Schmidt - this exact form is what the golden tests pin), then rebuild
+  // side = roof x nose. The scalar lane access is inherent to the legacy
+  // algorithm; this is a cold, once-per-object correction, not a hot path. Row 3
+  // is passed through unchanged.
+  [[nodiscard]] inline XMMATRIX XM_CALLCONV Orthonormalize(FXMMATRIX _basis)
+  {
+    const XMVECTOR nose = XMVector3Normalize(_basis.r[2]);
+
+    const float nx = XMVectorGetX(nose);
+    const float ny = XMVectorGetY(nose);
+    const float nz = XMVectorGetZ(nose);
+
+    float rx = XMVectorGetX(_basis.r[1]);
+    float ry = XMVectorGetY(_basis.r[1]);
+    float rz = XMVectorGetZ(_basis.r[1]);
+
+    if (nx > -1.0f && nx < 1.0f)
+    {
+      if (ny > -1.0f && ny < 1.0f)
+        rz = -(nx * rx + ny * ry) / nz;
+      else
+        ry = -(nx * rx + nz * rz) / ny;
+    }
+    else
+    {
+      rx = -(ny * ry + nz * rz) / nx;
+    }
+
+    const XMVECTOR roof = XMVector3Normalize(XMVectorSet(rx, ry, rz, 0.0f));
+    const XMVECTOR side = XMVector3Cross(roof, nose);
+
+    return XMMATRIX(side, roof, nose, _basis.r[3]);
+  }
+
   [[nodiscard]] inline XMVECTOR XM_CALLCONV operator-(const XMVECTOR _v1, const XMVECTORF32 _v2) { return XMVectorSubtract(_v1, _v2); }
   [[nodiscard]] inline XMVECTOR XM_CALLCONV operator-(const XMVECTORF32 _v1, const XMVECTOR _v2) { return XMVectorSubtract(_v1, _v2); }
 

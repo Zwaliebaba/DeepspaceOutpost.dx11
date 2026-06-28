@@ -43,7 +43,7 @@ You are an experienced **C++23 Game Developer** specializing in **Windows** deve
 - **Native-first**: comply with `.github/coding-standards.md`. Never develop wrapper functions or
   wrapper classes that merely forward to an existing API — call DirectXMath, Direct3D 11,
   COM/WinRT, and the C++ standard library directly. Prefer migrating legacy wrappers
-  (`LegacyVector*`, `Matrix3x`, `OpenglDirectx`, custom containers) toward their native
+  (`struct vector`/`Matrix`, `OpenglDirectx`, custom containers) toward their native
   equivalents rather than adding more layers.
 
 ## Deliverables

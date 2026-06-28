@@ -56,10 +56,11 @@ Plus inline rotation helpers in the consumers:
 roll/climb integration; `rotate_x_first` / `rotate_z_first` — incremental
 axis spins on matrix columns.
 
-> **Naming note.** `AGENTS.md` and `coding-standards.md` refer to the legacy
-> types as `LegacyVector2/3` and `Matrix33/34`. Those names do **not** exist in
-> the code — the real types are `struct vector` and `Matrix` (`vector.h`). Treat
-> the doc names as aliases for these. Update those references when this lands.
+> **Naming note (resolved in Phase 1).** The repo docs previously referred to the
+> legacy types as `LegacyVector2/3` and `Matrix33/34` — names that never existed
+> in the code. The real types are `struct vector` and `Matrix` (`vector.h`). The
+> docs (`AGENTS.md`, `coding-standards.md`, `copilot-instructions.md`,
+> `SoftwareEngineer.agent.md`) have been corrected to the real names.
 
 ### 2.2 Consumers of legacy math
 
@@ -217,12 +218,25 @@ locked before storage layout churns the ECS.
 - Comparison tolerance is a relative-with-absolute-floor epsilon
   (`Near`/`NearVec` in the test, see [§7](#7-precision--determinism-risk)).
 
-### Phase 1 — Reconcile the helper layer & docs *(no behavior change)*
-- Fix `AGENTS.md` / `coding-standards.md` to name the real legacy types
-  (`struct vector` / `Matrix`); the code is **not** renamed (decision §1).
-- Confirm `GameMath.h` already covers the Phase-5 call sites; add any genuinely
-  missing real helper (e.g. a Gram–Schmidt `Orthonormalize(XMMATRIX)` to replace
-  `tidy_matrix`) **once**, in `Neuron::Math`.
+### Phase 1 — Reconcile the helper layer & docs *(no behavior change)* — **done**
+- **Docs fixed** to name the real legacy types (`struct vector` / `Matrix`,
+  `DeepspaceOutpost/vector.{h,cpp}`); the code is **not** renamed (decision §1).
+  Corrected in `AGENTS.md`, [`coding-standards.md`](../.github/coding-standards.md),
+  [`copilot-instructions.md`](../.github/copilot-instructions.md), and
+  [`SoftwareEngineer.agent.md`](../.github/agents/SoftwareEngineer.agent.md) — the
+  nonexistent `LegacyVector2/3` / `Matrix33/34` / `Matrix3x` names are gone.
+- **`GameMath.h` coverage confirmed.** Phase 5 (`threed.cpp`) needs only native
+  DirectXMath (`XMVector3Transform*`, `XMMatrixTranspose`, `XMMatrixMultiply`) plus
+  existing helpers (`Dotf`, `Normalize`, `Cross`) — no new helper required there.
+- **Added one genuinely-missing helper:** `Neuron::Math::Orthonormalize(FXMMATRIX)`
+  in [`GameMath.h`](../NeuronCore/GameMath.h) to replace `tidy_matrix`
+  (space.cpp:190,476). DirectXMath has no orthonormalize call, so this is real
+  behavior, not a wrapper. It **faithfully reproduces the legacy single-component
+  adjustment — *not* classic Gram–Schmidt** — so the §4/Phase-0 goldens match; it
+  mirrors the already-certified `Detail::Orthonormalize` in
+  [`FlightSystem.h`](../GameLogic/FlightSystem.h). Float-exactness vs. the legacy
+  golden is cross-checked when its consumer lands in **Phase 4** (and the
+  `TODO(windows)` `tidy_matrix` literals are captured).
 
 ### Phase 2 — Render-boundary conversions (`Vector3d` / `Vector3i64` → `XMVECTOR`)
 - `Vector3d` and `Vector3i64` are **out of scope** (decision §1) — do **not**

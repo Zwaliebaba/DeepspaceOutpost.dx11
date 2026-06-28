@@ -28,8 +28,8 @@ something that already exists — it adds no new behavior, no invariant, and no 
 Apply this rule concretely in this codebase:
 
 - Prefer **DirectXMath** (`XMVECTOR` / `XMMATRIX`, and `Neuron::Math` in `NeuronCore/GameMath.h`)
-  directly over the legacy `LegacyVector2` / `LegacyVector3` / `Matrix33` / `Matrix34` wrapper
-  types. Do not extend those legacy types.
+  directly over the legacy `struct vector` / `Matrix` wrapper types
+  (`DeepspaceOutpost/vector.h`). Do not extend those legacy types.
 - Prefer native **Direct3D 11** (`Neuron::Graphics::Core`) over the legacy `OpenglDirectx`
   OpenGL-on-D3D compatibility layer. Do not extend that compatibility layer.
 - Prefer `winrt::com_ptr` and the native COM / C++/WinRT projections directly — do not re-wrap them.

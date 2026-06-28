@@ -30,7 +30,7 @@ architecture work.
 
 | Project | Type | Role |
 |---|---|---|
-| **NeuronCore** | Static lib | Engine foundation **+ the only client/server *shared data***: the **in-house ECS** container, the component & wire-protocol **schemas** (`Transform`, `Motion`, `ShipDef`, …), static ship-data tables, math (`GameMath`/`Neuron::Math` over DirectXMath, plus legacy `LegacyVector2/3`, `Matrix33/34`, `MathCommon`), networking (`NetLib` — raw-winsock **UDP** sockets, custom reliability layer, packets, connections), filesystem (`FileSys`), tasks/threads (`TasksCore`), timers, events, debug, serialization (`DataReader`/`DataWriter` hand-rolled binary; `Json` cold path). **No game behavior.** C++/WinRT via `NeuronCore.h`. |
+| **NeuronCore** | Static lib | Engine foundation **+ the only client/server *shared data***: the **in-house ECS** container, the component & wire-protocol **schemas** (`Transform`, `Motion`, `ShipDef`, …), static ship-data tables, math (`GameMath`/`Neuron::Math` over DirectXMath, plus `Vector3d`/`Vector3i64` and `MathCommon`; the legacy `struct vector`/`Matrix` types live in the `DeepspaceOutpost` client), networking (`NetLib` — raw-winsock **UDP** sockets, custom reliability layer, packets, connections), filesystem (`FileSys`), tasks/threads (`TasksCore`), timers, events, debug, serialization (`DataReader`/`DataWriter` hand-rolled binary; `Json` cold path). **No game behavior.** C++/WinRT via `NeuronCore.h`. |
 | **NeuronClient** | Static lib | Client engine: Direct3D 11 graphics core (`GraphicsCore`, `TextureManager`), the `OpenglDirectx` GL-over-D3D compat layer (legacy), audio, input, GUI/window manager, **plus client networking** (session, **snapshot interpolation + dead-reckoning** — presentation only, *no game rules*). Depends on NeuronCore. |
 | **NeuronServer** | Static lib | Server engine: authoritative session management, **AOI/replication**, and **persistence (Microsoft SQL Server)**. Depends on GameLogic, NeuronCore. |
 | **GameLogic** | Static lib | **SERVER-ONLY — the single home of ALL game behavior**: motion/physics integration, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **NeuronCore**. **The client never links it; there is no shared game-logic library.** |
@@ -87,8 +87,8 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
   top of D3D11. This is **legacy**; prefer native D3D11 for new rendering work and do not
   extend the GL-emulation layer.
 - **DirectXMath migration**: New and migrated math uses SIMD types via `Neuron::Math`
-  (`NeuronCore/GameMath.h`). Legacy `LegacyVector2/3`, `Matrix33/34`, and `MathCommon` are the
-  types being migrated away from.
+  (`NeuronCore/GameMath.h`). The legacy `struct vector` / `Matrix` types
+  (`DeepspaceOutpost/vector.{h,cpp}`) are the ones being migrated away from.
 - **C++/WinRT**: `NeuronCore.h` includes WinRT projections and `using namespace winrt`, so
   both client and server pull in WinRT. COM smart pointers use `winrt::com_ptr`.
 
@@ -167,7 +167,7 @@ When developing, comply with [coding-standards.md](.github/coding-standards.md).
 - Use the native API directly rather than a thin pass-through wrapper that only renames or
   forwards calls.
 - Prefer **DirectXMath** (`XMVECTOR`/`XMMATRIX`, `Neuron::Math`) directly over the legacy
-  `LegacyVector2/3` / `Matrix33/34` wrapper types.
+  `struct vector` / `Matrix` wrapper types (`DeepspaceOutpost/vector.h`).
 - Prefer native **Direct3D 11** calls over the `OpenglDirectx` GL-emulation layer; do not
   extend that compatibility layer.
 - Prefer `winrt::com_ptr` and native COM/WinRT projections directly — do not re-wrap them.
@@ -207,7 +207,7 @@ them. The load→compute→store boundary must be explicit.
 
 - All new math utility functions go in `Neuron::Math` (`NeuronCore/GameMath.h`) — do not add
   math methods to storage types, and (per native-first) do not extend the legacy
-  `LegacyVector*` / `Matrix3x` wrapper types in new code.
+  `struct vector` / `Matrix` wrapper types in new code.
 - Follow the DirectXMath `FXMVECTOR` / `GXMVECTOR` / `HXMVECTOR` / `CXMVECTOR` parameter-order
   rules (see the [DirectXMath calling conventions](https://learn.microsoft.com/en-us/windows/win32/dxmath/pg-xnamath-internals#calling-conventions)).
 

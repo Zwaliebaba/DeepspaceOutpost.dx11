@@ -99,7 +99,7 @@ When context files don't provide specific guidance:
   `XM_CALLCONV` to keep values in SIMD registers. Use `XMFLOAT3`/`XMFLOAT4X4` only for storage
   (struct members, serialization). Follow DirectXMath parameter-position rules
   (`FXMVECTOR`/`GXMVECTOR`/`HXMVECTOR`/`CXMVECTOR`). All new math functions go in `Neuron::Math`
-  (`NeuronCore/GameMath.h`). Do not extend the legacy `LegacyVector2/3` / `Matrix33/34` types.
+  (`NeuronCore/GameMath.h`). Do not extend the legacy `struct vector` / `Matrix` types (`DeepspaceOutpost/vector.h`).
 
 ## Documentation Requirements
 
@@ -170,6 +170,6 @@ When context files don't provide specific guidance:
 Keep development as native as possible. **Do not create wrapper functions or wrapper classes.**
 If an API already exists (DirectXMath, Direct3D 11, COM/WinRT, the C++ standard library), call it
 directly. A wrapper that only forwards, renames, or thinly adapts an existing call is not allowed.
-Replace legacy wrappers (`LegacyVector*`, `Matrix3x`, `OpenglDirectx`, custom containers) with the
+Replace legacy wrappers (`struct vector`/`Matrix`, `OpenglDirectx`, custom containers) with the
 native equivalent when you touch them, rather than adding more wrappers on top.
 </content>
