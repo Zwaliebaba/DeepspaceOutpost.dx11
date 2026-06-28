@@ -20,7 +20,7 @@ These forks were settled up front; the rest of the plan assumes them.
 | Decision | Choice | Consequence |
 |---|---|---|
 | **Precision** | **Full float32 / DirectXMath.** | Sim *and* render math move to `XMVECTOR`/`XMMATRIX`. The ported flight model goes from `double` to `float`; numeric results of the old double path will shift. See [§7 Precision & determinism](#7-precision--determinism-risk). |
-| **`Vector3d` / `Vector3i64`** | **Fold `Vector3d` into DirectXMath where it fits; keep `Vector3i64` as int64.** | Small-magnitude, local-frame `Vector3d` data that feeds render/flight becomes `XMVECTOR` (compute) / `XMFLOAT3` (storage). `Vector3i64` stays — int64 world coordinates have no DirectXMath equivalent and must not lose precision (see [`MathTests`](../Tests/MathTests.cpp)). The `int64 → float` rebase happens at the floating-origin boundary via `Vector3i64::RelativeTo`. |
+| **`Vector3d` / `Vector3i64`** | **Both stay — out of scope.** | Neither has a DirectXMath equivalent (DirectXMath is float32-only), so they are **not** wrappers and **not** migration targets. `Vector3d` is a legitimate fp64 `Neuron::Math` type carrying the authoritative server sim's precision-sensitive state — the `ShipFrame` orientation basis and the **`carry` sub-unit remainder** that steps the `int64` world (`SimComponents.h` / `FlightSystem.h`), plus `LocalOffset` (`SnapshotInterpolator.h`). `Vector3i64` holds absolute `int64³` world coordinates that must stay exact (see [`MathTests`](../Tests/MathTests.cpp)). The migration touches them only at the **render boundary**: when the legacy float render path consumes a world/local offset, convert double→`XMVECTOR` there (`XMVectorSet((float)dx, …)`). |
 | **`GameMath.h` helper layer** | **Use `Neuron::Math` helpers freely.** | `Neuron::Math` is the sanctioned helper layer; calling `Normalize`, `Cross`, `Dot`, `RotateAround`, `Vector3::FORWARD`, etc. is *not* a native-first violation. The no-wrapper rule applies to **new** code: do **not** add fresh thin forwarders, and do **not** keep the legacy `vector.h` wrappers alive. |
 | **Determinism** | **Reproducible-enough (no cross-machine bit-exactness).** | Same-build reproducibility is the bar; no lockstep/replay bit-exact guarantee. Default `/fp` is acceptable — no path is forced to stay integer/fixed-point for determinism's sake. |
 | **`Transform.rotmat` storage** | **`XMFLOAT4X4` (engine-uniform).** | Matches the rest of the engine's matrices for uniform `XMLoadFloat4x4`/`XMStoreFloat4x4` and easy translation folding; the 3×3 rotation basis occupies the upper-left, row 3 / column 3 identity. |
@@ -78,7 +78,9 @@ axis spins on matrix columns.
   DirectXMath: `Set`, `Normalize`, `Cross`, `Dot`/`Dotf`, `Length`,
   `LengthSquare`, `SetLength`, `RotateAround[X/Y/Z]`, `CreateRotationMatrix`,
   `Invert`, and the `Vector3::{ZERO,UNITX,UP,FORWARD,…}` constants.
-- [`Vector3d.h`](../NeuronCore/Vector3d.h) — double local-frame vector (partial fold-in target).
+- [`Vector3d.h`](../NeuronCore/Vector3d.h) — fp64 local-frame vector, a legitimate
+  `Neuron::Math` type (**stays — out of scope**; fills a gap DirectXMath's
+  float32-only types can't).
 - [`Vector3i64.h`](../NeuronCore/Vector3i64.h) — int64 world coordinate (**stays**).
 - `GameLogic/`, `NeuronServer/`, `Server/`, most of `Tests/`, and the newer
   client files (`Camera.h`, `CameraFollow.h`, `RenderQueue.h`, `ReplicatedScene.h`)
@@ -128,8 +130,8 @@ the plan is self-contained:
 | `struct vector` (3 doubles) | `XMVECTOR` | `XMFLOAT3` | w-lane unused / 0 for points & directions |
 | `Vector` (alias) | `XMVECTOR` | `XMFLOAT3` | same as above |
 | `Matrix` (`vector[3]`, 3×3 basis) | `XMMATRIX` | `XMFLOAT4X4` | rotation/orientation basis in the upper-left 3×3; `XMFLOAT4X4` chosen for engine uniformity (decision §1) |
-| `Vector3d` (small-magnitude local) | `XMVECTOR` | `XMFLOAT3` | fold in **only** where data is local-frame & feeds render/flight; keep `double` if a routine genuinely needs >float precision |
-| `Vector3i64` (world) | — | `Vector3i64` | **unchanged**; convert to `XMVECTOR` at the floating-origin rebase via `RelativeTo` then `XMVectorSet`/`XMLoadFloat3` |
+| `Vector3d` (fp64 local frame) | — | `Vector3d` | **out of scope — not migrated.** No fp64 DirectXMath type exists; it carries the authoritative sim's precision-sensitive state. Convert to `XMVECTOR` only when the render path consumes it (`XMVectorSet((float)x, …)`) |
+| `Vector3i64` (world) | — | `Vector3i64` | **unchanged**; convert to `XMVECTOR` at the floating-origin rebase via `RelativeTo`/`LocalOffset` (→ `Vector3d`) then `XMVectorSet` |
 
 ### Matrix convention — there is a transpose between legacy and DirectXMath
 
@@ -213,12 +215,14 @@ locked before storage layout churns the ECS.
   missing real helper (e.g. a Gram–Schmidt `Orthonormalize(XMMATRIX)` to replace
   `tidy_matrix`) **once**, in `Neuron::Math`.
 
-### Phase 2 — Migrate `Vector3d` fold-in candidates
-- Identify each `Vector3d` use that is local-frame and float-safe; convert those
-  compute sites to `XMVECTOR` and storage to `XMFLOAT3`. Leave `Vector3d` for any
-  routine that genuinely needs double precision (document why inline).
-- `Vector3i64` is untouched; only its `RelativeTo` → float conversion sites learn
-  to emit `XMVECTOR` (`XMVectorSet(dx,dy,dz,0)`).
+### Phase 2 — Render-boundary conversions (`Vector3d` / `Vector3i64` → `XMVECTOR`)
+- `Vector3d` and `Vector3i64` are **out of scope** (decision §1) — do **not**
+  convert their storage or sim-side compute. They stay fp64 / int64.
+- The only in-scope work is at the **render boundary**: where the legacy float
+  render path consumes a world/local offset (`RelativeTo` / `LocalOffset`, which
+  return `Vector3d`), convert double→`XMVECTOR` there with
+  `XMVectorSet((float)dx, (float)dy, (float)dz, 0.0f)`. The conversion is the
+  load→compute boundary; everything upstream stays double.
 
 ### Phase 3 — Migrate storage types (`Transform`, `local_object`)
 - In [`GameComponents.h`](../DeepspaceOutpost/GameComponents.h) and
