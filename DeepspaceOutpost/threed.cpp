@@ -39,72 +39,55 @@ static struct point point_list[100];
 
 void draw_wireframe_ship (struct local_object *obj)
 {
-	Matrix trans_mat;
 	int i;
 	int sx,sy,ex,ey;
 	double rx,ry,rz;
 	int visible[32];
-	Vector vec;
-	Vector camera_vec;
 	double cos_angle;
-	double tmp;
 	struct ship_face_normal *ship_norm;
 	int num_faces;
 	struct ship_data *ship;
 	int lasv;
 
 	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-	
+
+	// Orientation basis, rows side/roof/nose (docs/MathMigration.md section 4).
+	const XMMATRIX rot(
+		XMVectorSet((float) obj->rotmat[0].x, (float) obj->rotmat[0].y, (float) obj->rotmat[0].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[1].x, (float) obj->rotmat[1].y, (float) obj->rotmat[1].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[2].x, (float) obj->rotmat[2].y, (float) obj->rotmat[2].z, 0.0f),
+		g_XMIdentityR3);
+	const XMVECTOR objLoc = XMVectorSet((float) obj->location.x, (float) obj->location.y, (float) obj->location.z, 0.0f);
+
+	// Camera direction in the model frame = unit(rotmat . location); the legacy
+	// mult_vector(location, rotmat) is the row-vector times transpose(rotmat).
+	const XMVECTOR cameraDir = XMVector3Normalize(XMVector3TransformNormal(objLoc, XMMatrixTranspose(rot)));
+
 	num_faces = ship->num_faces;
-	
+
 	for (i = 0; i < num_faces; i++)
 	{
 		ship_norm = ship->normals;
 
-		vec.x = ship_norm[i].x;
-		vec.y = ship_norm[i].y;
-		vec.z = ship_norm[i].z;
-
-		if ((vec.x == 0) && (vec.y == 0) && (vec.z == 0))
+		if (ship_norm[i].x == 0 && ship_norm[i].y == 0 && ship_norm[i].z == 0)
 			visible[i] = 1;
 		else
 		{
-			vec = unit_vector (&vec);
-			cos_angle = vector_dot_product (&vec, &camera_vec);
+			const XMVECTOR n = XMVectorSet((float) ship_norm[i].x, (float) ship_norm[i].y, (float) ship_norm[i].z, 0.0f);
+			cos_angle = Dotf(XMVector3Normalize(n), cameraDir);
 			visible[i] = (cos_angle < -0.2);
 		}
 	}
 
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
 	for (i = 0; i < ship->num_points; i++)
 	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
+		const XMVECTOR v = XMVectorSet((float) ship->points[i].x, (float) ship->points[i].y, (float) ship->points[i].z, 0.0f);
+		XMFLOAT3 world;
+		XMStoreFloat3(&world, XMVectorAdd(XMVector3TransformNormal(v, rot), objLoc));
 
-		mult_vector (&vec, trans_mat);
-
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
+		rx = world.x;
+		ry = world.y;
+		rz = world.z;
 
 		sx = (rx * 256) / rz;
 		sy = (ry * 256) / rz;
@@ -119,7 +102,6 @@ void draw_wireframe_ship (struct local_object *obj)
 
 		point_list[i].x = sx;
 		point_list[i].y = sy;
-
 	}
 
 	for (i = 0; i < ship->num_lines; i++)
@@ -776,14 +758,10 @@ void draw_explosion (struct local_object *obj)
 	int px,py;
 	int cnt;
 	int sizex,sizey,psx,psy;
-	Matrix trans_mat;
 	int sx,sy;
 	double rx,ry,rz;
 	int visible[32];
-	struct vector vec;
-	struct vector camera_vec;
 	double cos_angle;
-	double tmp;
 	struct ship_face_normal *ship_norm;
 	struct ship_point *sp;
 	struct ship_data *ship;
@@ -804,38 +782,23 @@ void draw_explosion (struct local_object *obj)
 
 	ship = ship_list[obj->type];
 	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-	
+	// Orientation basis, rows side/roof/nose (docs/MathMigration.md section 4).
+	const XMMATRIX rot(
+		XMVectorSet((float) obj->rotmat[0].x, (float) obj->rotmat[0].y, (float) obj->rotmat[0].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[1].x, (float) obj->rotmat[1].y, (float) obj->rotmat[1].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[2].x, (float) obj->rotmat[2].y, (float) obj->rotmat[2].z, 0.0f),
+		g_XMIdentityR3);
+	const XMVECTOR objLoc = XMVectorSet((float) obj->location.x, (float) obj->location.y, (float) obj->location.z, 0.0f);
+	const XMVECTOR cameraDir = XMVector3Normalize(XMVector3TransformNormal(objLoc, XMMatrixTranspose(rot)));
+
 	ship_norm = ship->normals;
-	
+
 	for (i = 0; i < ship->num_faces; i++)
 	{
-		vec.x = ship_norm[i].x;
-		vec.y = ship_norm[i].y;
-		vec.z = ship_norm[i].z;
-
-		vec = unit_vector (&vec);
-		cos_angle = vector_dot_product (&vec, &camera_vec);
-
+		const XMVECTOR n = XMVectorSet((float) ship_norm[i].x, (float) ship_norm[i].y, (float) ship_norm[i].z, 0.0f);
+		cos_angle = Dotf(XMVector3Normalize(n), cameraDir);
 		visible[i] = (cos_angle < -0.13);
 	}
-
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
 	
 	sp = ship->points;
 	np = 0;
@@ -845,15 +808,13 @@ void draw_explosion (struct local_object *obj)
 		if (visible[sp[i].face1] || visible[sp[i].face2] ||
 			visible[sp[i].face3] || visible[sp[i].face4])
 		{
-			vec.x = sp[i].x;
-			vec.y = sp[i].y;
-			vec.z = sp[i].z;
+			const XMVECTOR v = XMVectorSet((float) sp[i].x, (float) sp[i].y, (float) sp[i].z, 0.0f);
+			XMFLOAT3 world;
+			XMStoreFloat3(&world, XMVectorAdd(XMVector3TransformNormal(v, rot), objLoc));
 
-			mult_vector (&vec, trans_mat);
-
-			rx = vec.x + obj->location.x;
-			ry = vec.y + obj->location.y;
-			rz = vec.z + obj->location.z;
+			rx = world.x;
+			ry = world.y;
+			rz = world.z;
 
 			sx = (rx * 256) / rz;
 			sy = (ry * 256) / rz;
