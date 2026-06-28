@@ -1,0 +1,18 @@
+{
+  "name": "Asp MkII",
+  "ship_id": 25,
+  "model": "asp_mk2.obj",
+  "num_points": 19,
+  "num_lines": 28,
+  "num_faces": 12,
+  "max_loot": 0,
+  "scoop_type": 0,
+  "size": 3600,
+  "front_laser": 8,
+  "bounty": 200,
+  "vanish_point": 40,
+  "energy": 150,
+  "velocity": 40,
+  "missiles": 1,
+  "laser_strength": 20
+}

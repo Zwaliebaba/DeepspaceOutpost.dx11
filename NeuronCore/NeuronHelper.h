@@ -46,7 +46,7 @@ namespace Neuron
   class BaseException : public std::exception
   {
   public:
-    BaseException(std::string s) noexcept : m_s(std::move(s)) {}
+    BaseException(std::string _s) noexcept : m_s(std::move(_s)) {}
     ~BaseException() noexcept override = default;
 
     [[nodiscard]] const char* what() const noexcept override
@@ -64,15 +64,15 @@ namespace Neuron
     NonCopyable& operator=(const NonCopyable&) = delete;
   };
 
-  struct handle_closer
+  struct HandleCloser
   {
-    void operator()(HANDLE h) const noexcept
+    void operator()(HANDLE _h) const noexcept
     {
-      if (h)
-        CloseHandle(h);
+      if (_h)
+        CloseHandle(_h);
     }
   };
 
-  using ScopedHandle = std::unique_ptr<void, handle_closer>;
-  inline HANDLE safe_handle(HANDLE h) noexcept { return (h == INVALID_HANDLE_VALUE) ? nullptr : h; }
+  using ScopedHandle = std::unique_ptr<void, HandleCloser>;
+  inline HANDLE SafeHandle(HANDLE _h) noexcept { return (_h == INVALID_HANDLE_VALUE) ? nullptr : _h; }
 }

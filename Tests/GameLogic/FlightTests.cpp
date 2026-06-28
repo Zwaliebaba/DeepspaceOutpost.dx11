@@ -74,6 +74,40 @@ TEST(Flight, PitchTiltsNoseAndCurvesPath)
   EXPECT_TRUE(world.Get<GameLogic::WorldTransform>(ship).position.y < yAfter1);
 }
 
+TEST(Flight, PitchPivotsAboutShipSideAxisAfterRoll)
+{
+  // Regression: pitch/roll must rotate about the ship's OWN axes, not the world
+  // axes. A ship rolled 90 deg about its nose has side=+y, roof=-x, nose=+z.
+  // Applying a pure pitch must rotate about that (now vertical-in-world) side
+  // axis - leaving `side` unchanged and tilting the nose toward -roof (here +x) -
+  // rather than rotating about world-x, which would twist `side` off its axis and
+  // make a straight-ahead object drift sideways on screen.
+  ECS::Registry world;
+  ECS::EntityId ship = world.Create();
+  world.Add<GameLogic::WorldTransform>(ship, GameLogic::WorldTransform{ { 0, 0, 0 } });
+
+  GameLogic::Flight f;
+  f.side = { 0.0, 1.0, 0.0 };
+  f.roof = { -1.0, 0.0, 0.0 };
+  f.nose = { 0.0, 0.0, 1.0 };
+  f.roll = 0.0;
+  f.pitch = 0.1;
+  f.speed = 0.0;
+  world.Add<GameLogic::Flight>(ship, f);
+
+  GameLogic::Tick(world);
+
+  const GameLogic::Flight& r = world.Get<GameLogic::Flight>(ship);
+  // The side axis (the pitch pivot) is preserved.
+  EXPECT_TRUE(std::fabs(r.side.x - 0.0) < 1e-9);
+  EXPECT_TRUE(std::fabs(r.side.y - 1.0) < 1e-9);
+  EXPECT_TRUE(std::fabs(r.side.z - 0.0) < 1e-9);
+  // The nose tilts toward -roof (= +x) and stays in the roll-free plane (y ~ 0),
+  // i.e. no spurious yaw.
+  EXPECT_TRUE(r.nose.x > 0.0);
+  EXPECT_TRUE(std::fabs(r.nose.y) < 1e-9);
+}
+
 TEST(Flight, SubUnitSpeedAccumulatesViaCarry)
 {
   ECS::Registry world;

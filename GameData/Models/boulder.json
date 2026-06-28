@@ -1,0 +1,18 @@
+{
+  "name": "Boulder",
+  "ship_id": 6,
+  "model": "boulder.obj",
+  "num_points": 7,
+  "num_lines": 15,
+  "num_faces": 10,
+  "max_loot": 0,
+  "scoop_type": 0,
+  "size": 900,
+  "front_laser": 0,
+  "bounty": 1,
+  "vanish_point": 20,
+  "energy": 20,
+  "velocity": 30,
+  "missiles": 0,
+  "laser_strength": 0
+}

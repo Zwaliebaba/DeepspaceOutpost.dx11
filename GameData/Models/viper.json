@@ -1,0 +1,18 @@
+{
+  "name": "Viper",
+  "ship_id": 16,
+  "model": "viper.obj",
+  "num_points": 15,
+  "num_lines": 20,
+  "num_faces": 7,
+  "max_loot": 0,
+  "scoop_type": 0,
+  "size": 5625,
+  "front_laser": 0,
+  "bounty": 0,
+  "vanish_point": 23,
+  "energy": 140,
+  "velocity": 32,
+  "missiles": 1,
+  "laser_strength": 8
+}

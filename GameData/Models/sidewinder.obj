@@ -1,0 +1,32 @@
+# Sidewinder
+# Exported from DeepspaceOutpost ship data (SHIP id 17).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching sidewinder.json sidecar.
+mtllib elite.mtl
+o sidewinder
+v -32 0 36
+v 32 0 36
+v 64 0 -28
+v -64 0 -28
+v 0 16 -28
+v 0 -16 -28
+v -12 6 -28
+v 12 6 -28
+v 12 -6 -28
+v -12 -6 -28
+usemtl col_37
+f 5 1 2
+usemtl col_39
+f 5 4 1
+usemtl col_39
+f 3 5 2
+usemtl col_248
+f 3 6 4 5
+usemtl col_37
+f 6 1 4
+usemtl col_39
+f 2 1 6
+usemtl col_37
+f 3 2 6
+usemtl col_49
+f 9 10 7 8

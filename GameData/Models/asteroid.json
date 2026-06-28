@@ -1,0 +1,18 @@
+{
+  "name": "Asteroid",
+  "ship_id": 7,
+  "model": "asteroid.obj",
+  "num_points": 9,
+  "num_lines": 21,
+  "num_faces": 14,
+  "max_loot": 0,
+  "scoop_type": 0,
+  "size": 6400,
+  "front_laser": 0,
+  "bounty": 5,
+  "vanish_point": 50,
+  "energy": 60,
+  "velocity": 30,
+  "missiles": 0,
+  "laser_strength": 0
+}

@@ -1,0 +1,18 @@
+# Rock
+# Exported from DeepspaceOutpost ship data (SHIP id 8).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching rock.json sidecar.
+mtllib elite.mtl
+o rock
+v -24 -25 16
+v 0 12 -10
+v 11 -6 2
+v 12 42 7
+usemtl col_248
+f 4 3 2
+usemtl col_235
+f 1 3 4
+usemtl col_234
+f 4 2 1
+usemtl col_237
+f 1 2 3

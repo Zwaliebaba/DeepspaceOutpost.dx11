@@ -71,6 +71,11 @@ namespace Neuron::Client
 
     void EvictStale(uint32_t _maxAge) { m_interp.EvictStale(_maxAge); }
 
+    // Drop one entity now (on an authoritative despawn/death), so a destroyed
+    // entity (e.g. a detonated missile or a killed ship) disappears immediately
+    // instead of lingering as a ghost.
+    void Forget(uint32_t _id) { m_interp.Forget(_id); }
+
     [[nodiscard]] std::size_t Count() const { return m_interp.Count(); }
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 

@@ -1,0 +1,58 @@
+# Thargoid
+# Exported from DeepspaceOutpost ship data (SHIP id 29).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching thargoid.json sidecar.
+mtllib elite.mtl
+o thargoid
+v 32 -48 48
+v 32 -68 0
+v 32 -48 -48
+v 32 0 -68
+v 32 48 -48
+v 32 68 0
+v 32 48 48
+v 32 0 68
+v -24 -116 116
+v -24 -164 0
+v -24 -116 -116
+v -24 0 -164
+v -24 116 -116
+v -24 164 0
+v -24 116 116
+v -24 0 164
+v -24 64 80
+v -24 64 -80
+v -24 -64 -80
+v -24 -64 80
+usemtl col_28
+f 2 1 9 10
+usemtl col_235
+f 3 2 10 11
+usemtl col_28
+f 4 3 11 12
+usemtl col_235
+f 5 4 12 13
+usemtl col_234
+f 1 2 3 8
+usemtl col_234
+f 3 4 7 8
+usemtl col_234
+f 4 5 6 7
+usemtl col_28
+f 6 5 13 14
+usemtl col_235
+f 7 6 14 15
+usemtl col_28
+f 8 7 15 16
+usemtl col_235
+f 1 8 16 9
+usemtl col_234
+f 10 9 16 11
+usemtl col_234
+f 12 11 16 15
+usemtl col_234
+f 13 12 15 14
+usemtl col_255
+f 17 18
+usemtl col_255
+f 19 20

@@ -152,6 +152,61 @@ IndexedImage load_pcx_indexed(const std::vector<uint8_t>& b)
 	return img;
 }
 
+// Minimal DDS reader: UNCOMPRESSED 32-bpp RGBA/BGRA only (enough for the HUD
+// textures we author, e.g. Textures/TargetLock.dds). Block-compressed (DXTn/BCn)
+// DDS is not decoded here and returns an empty image. The byte order is derived
+// from the channel masks, so both A8R8G8B8 (BGRA in memory) and R8G8B8A8 load.
+Image load_dds(const std::vector<uint8_t>& b)
+{
+	Image img;
+	if (b.size() < 128 || b[0] != 'D' || b[1] != 'D' || b[2] != 'S' || b[3] != ' ')
+		return img;
+
+	auto rd32 = [&](size_t o) -> uint32_t {
+		return static_cast<uint32_t>(b[o]) | (static_cast<uint32_t>(b[o + 1]) << 8) |
+		       (static_cast<uint32_t>(b[o + 2]) << 16) | (static_cast<uint32_t>(b[o + 3]) << 24);
+	};
+
+	const uint32_t height = rd32(12);
+	const uint32_t width  = rd32(16);
+	const uint32_t pfFlags  = rd32(80);   // DDS_PIXELFORMAT.dwFlags
+	const uint32_t fourCC   = rd32(84);
+	const uint32_t bitCount = rd32(88);
+
+	const uint32_t DDPF_RGB = 0x40;
+	if (fourCC != 0 || (pfFlags & DDPF_RGB) == 0 || bitCount != 32)
+		return img;   // compressed or non-32bpp: unsupported
+
+	const uint32_t rMask = rd32(92), gMask = rd32(96), bMask = rd32(100), aMask = rd32(104);
+	if (width == 0 || height == 0 || b.size() < 128 + static_cast<size_t>(width) * height * 4)
+		return img;
+
+	auto lowShift = [](uint32_t m) -> int {
+		int s = 0;
+		if (m == 0) return 0;
+		while ((m & 0xFF) == 0) { m >>= 8; s += 8; }
+		return s;
+	};
+	const int rs = lowShift(rMask), gs = lowShift(gMask), bs = lowShift(bMask), as = lowShift(aMask);
+
+	img.width  = static_cast<int>(width);
+	img.height = static_cast<int>(height);
+	img.rgba.resize(static_cast<size_t>(width) * height);
+
+	const uint8_t* p = b.data() + 128;   // pixels follow the 128-byte header (no mips needed)
+	for (size_t i = 0; i < img.rgba.size(); i++)
+	{
+		const uint32_t px = static_cast<uint32_t>(p[i * 4]) | (static_cast<uint32_t>(p[i * 4 + 1]) << 8) |
+		                    (static_cast<uint32_t>(p[i * 4 + 2]) << 16) | (static_cast<uint32_t>(p[i * 4 + 3]) << 24);
+		const uint32_t R = (px >> rs) & 0xFF;
+		const uint32_t G = (px >> gs) & 0xFF;
+		const uint32_t B = (px >> bs) & 0xFF;
+		const uint32_t A = aMask ? ((px >> as) & 0xFF) : 0xFF;
+		img.rgba[i] = R | (G << 8) | (B << 16) | (A << 24);   // 0xAABBGGRR
+	}
+	return img;
+}
+
 } // namespace
 
 IndexedImage load_indexed(const char* path)
@@ -164,6 +219,11 @@ IndexedImage load_indexed(const char* path)
 
 Image load_image_rgba(const char* path, bool key_index0)
 {
+	// True-colour DDS (e.g. the HUD target-lock reticle) loads directly to RGBA;
+	// the colour-key only applies to the 8-bit palettised BMP/PCX sprites.
+	if (ends_with_ci(path, ".dds"))
+		return load_dds(read_file(path));
+
 	IndexedImage ii = load_indexed(path);
 	Image img;
 	if (!ii.ok())

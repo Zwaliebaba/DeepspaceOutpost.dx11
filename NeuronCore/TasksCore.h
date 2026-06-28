@@ -12,22 +12,22 @@ namespace Neuron::Tasks
   class Thread : NonCopyable
   {
     public:
-      Thread(std::string name = "");
+      Thread(std::string _name = "");
       virtual ~Thread();
 
       /*
-       * Begins execution of a new thread at the pure virtual method Thread::run().
+       * Begins execution of a new thread at the pure virtual method Thread::Run().
        * Execution of the thread is guaranteed to have started after this function
        * returns.
        */
-      bool start();
+      bool Start();
 
       /*
        * Requests that the thread exit gracefully.
        * Returns immediately; thread execution is guaranteed to be complete after
-       * a subsequent call to Thread::wait.
+       * a subsequent call to Thread::Wait.
        */
-      bool stop();
+      bool Stop();
 
       /*
        * Waits for thread to finish.
@@ -35,35 +35,35 @@ namespace Neuron::Tasks
        * Returns false immediately if the thread is not started or has been waited
        * on before.
        */
-      bool wait();
+      bool Wait();
 
       /*
        * Returns true if the calling thread is this Thread object.
        */
-      bool isCurrentThread() const { return std::this_thread::get_id() == getThreadId(); }
+      bool IsCurrentThread() const { return std::this_thread::get_id() == GetThreadId(); }
 
-      bool isRunning() const { return m_running; }
-      bool stopRequested() const { return m_request_stop; }
+      bool IsRunning() const { return m_running; }
+      bool StopRequested() const { return m_requestStop; }
 
-      std::thread::id getThreadId() const { return m_thread_obj->get_id(); }
+      std::thread::id GetThreadId() const { return m_threadObj->get_id(); }
 
       /*
        * Gets the thread return value.
        * Returns true if the thread has exited and the return value was available,
        * or false if the thread has yet to finish.
        */
-      bool getReturnValue(void** ret) const;
+      bool GetReturnValue(void** _ret) const;
 
       /*
        * Binds (if possible, otherwise sets the affinity of) the thread to the
-       * specific processor specified by proc_number.
+       * specific processor specified by _procNumber.
        */
-      bool bindToProcessor(DWORD_PTR proc_number) { return SetThreadAffinityMask(getThreadHandle(), 1ull << proc_number); }
+      bool BindToProcessor(DWORD_PTR _procNumber) { return SetThreadAffinityMask(GetThreadHandle(), 1ull << _procNumber); }
 
       /*
        * Sets the thread priority to the specified priority.
        *
-       * prio can be one of: THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_BELOW_NORMAL,
+       * _prio can be one of: THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_BELOW_NORMAL,
        * THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST.
        * On Windows, any of the other priorites as defined by SetThreadPriority
        * are supported as well.
@@ -72,43 +72,43 @@ namespace Neuron::Tasks
        * scheduling algorithm to one that supports thread priorities if not
        * supported by default, otherwise this call will have no effect.
        */
-      bool setPriority(int prio) { return SetThreadPriority(getThreadHandle(), prio); }
+      bool SetPriority(int _prio) { return SetThreadPriority(GetThreadHandle(), _prio); }
 
       /*
        * Returns the thread object of the current thread if it exists.
        */
-      static Thread* getCurrentThread() { return g_currentThread; }
+      static Thread* GetCurrentThread() { return s_currentThread; }
 
       /*
        * Sets the currently executing thread's name to where supported; useful
        * for debugging.
        */
-      static void setName(const std::string& name) {}
+      static void SetName(const std::string& _name) {}
 
       /*
        * Returns the number of processors/cores configured and active on this machine.
        */
-      static unsigned int getNumberOfProcessors() { return std::thread::hardware_concurrency(); }
+      static unsigned int GetNumberOfProcessors() { return std::thread::hardware_concurrency(); }
 
     protected:
       std::string m_name;
 
-      virtual void* run() = 0;
+      virtual void* Run() = 0;
 
     private:
-      [[nodiscard]] HANDLE getThreadHandle() const { return m_thread_obj->native_handle(); }
+      [[nodiscard]] HANDLE GetThreadHandle() const { return m_threadObj->native_handle(); }
 
-      static void threadProc(Thread* thr);
+      static void ThreadProc(Thread* _thr);
 
       void* m_retval = nullptr;
       bool m_joinable = false;
-      std::atomic<bool> m_request_stop;
+      std::atomic<bool> m_requestStop;
       std::atomic<bool> m_running;
       std::mutex m_mutex;
-      std::mutex m_start_finished_mutex;
+      std::mutex m_startFinishedMutex;
 
-      std::thread* m_thread_obj = nullptr;
+      std::thread* m_threadObj = nullptr;
 
-      inline static thread_local Thread* g_currentThread = nullptr;
+      inline static thread_local Thread* s_currentThread = nullptr;
   };
 }

@@ -1,0 +1,51 @@
+# Fer-de-Lance
+# Exported from DeepspaceOutpost ship data (SHIP id 27).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching fer_de_lance.json sidecar.
+mtllib elite.mtl
+o fer_de_lance
+v 0 -14 108
+v -40 -14 -4
+v -12 -14 -52
+v 12 -14 -52
+v 40 -14 -4
+v -40 14 -4
+v -12 2 -52
+v 12 2 -52
+v 40 14 -4
+v 0 18 -20
+v -3 -11 97
+v -26 8 18
+v -16 14 -4
+v 3 -11 97
+v 26 8 18
+v 16 14 -4
+v 0 -14 -20
+v -14 -14 44
+v 14 -14 44
+usemtl col_248
+f 6 1 9 10
+usemtl col_235
+f 1 6 2
+usemtl col_46
+f 3 2 6 7
+usemtl col_49
+f 4 3 7 8
+usemtl col_46
+f 5 4 8 9
+usemtl col_235
+f 5 9 1
+usemtl col_133
+f 6 10 7
+usemtl col_46
+f 7 10 8
+usemtl col_133
+f 8 10 9
+usemtl col_234
+f 5 1 2 3 4
+usemtl col_28
+f 17 19 18
+usemtl col_28
+f 12 11 13
+usemtl col_28
+f 16 14 15

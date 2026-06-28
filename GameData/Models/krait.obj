@@ -1,0 +1,51 @@
+# Krait
+# Exported from DeepspaceOutpost ship data (SHIP id 19).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching krait.json sidecar.
+mtllib elite.mtl
+o krait
+v 0 0 96
+v 0 18 -48
+v 0 -18 -48
+v 90 0 -3
+v -90 0 -3
+v 90 0 87
+v -90 0 87
+v 0 5 53
+v 0 7 38
+v -18 7 19
+v 18 7 19
+v 18 11 -39
+v 18 -11 -39
+v 36 0 -30
+v -18 11 -39
+v -18 -11 -39
+v -36 0 -30
+usemtl col_133
+f 1 4 2
+usemtl col_46
+f 3 4 1
+usemtl col_133
+f 1 5 3
+usemtl col_46
+f 2 5 1
+usemtl col_234
+f 4 3 2
+usemtl col_248
+f 5 2 3
+usemtl col_255
+f 4 6
+usemtl col_255
+f 6 4
+usemtl col_255
+f 5 7
+usemtl col_255
+f 7 5
+usemtl col_49
+f 13 12 14
+usemtl col_49
+f 17 15 16
+usemtl col_255
+f 8 11 9
+usemtl col_255
+f 9 10 8

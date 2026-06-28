@@ -12,6 +12,7 @@ add_executable(GameLogic.Tests
     EconomyTests.cpp
     FlightInputTests.cpp
     FlightTests.cpp
+    MissileSystemTests.cpp
     GalaxyGenTests.cpp
     GalaxyTests.cpp
     MotionTests.cpp
@@ -28,7 +29,6 @@ target_link_libraries(GameLogic.Tests PRIVATE GameLogic GTest::gtest_main)
 
 if(MSVC)
     target_compile_options(GameLogic.Tests PRIVATE /W4)
-    target_compile_definitions(GameLogic.Tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 gtest_discover_tests(GameLogic.Tests)

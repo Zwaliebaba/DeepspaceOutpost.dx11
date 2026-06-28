@@ -703,13 +703,41 @@ void render_replicated_objects (void)
 		draw_ship (&obj);
 		++drawn;
 
+		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) on the
+		// missile-locked ship, centred and SIZED to the ship's on-screen extent so
+		// it sits just around the hull (not a fixed oversized box). The centre is
+		// projected the same way draw_ship projects a vertex at the ship's centre;
+		// the half-size is the ship's bounding radius (ship_data.size is r^2)
+		// projected the same way, with a small margin.
+		if (rec.id == g_missile_lock_target && obj.location.z > 0.0)
+		{
+			const double fx = (obj.location.x * 256.0) / obj.location.z + 128.0;
+			const double fy = -((obj.location.y * 256.0) / obj.location.z) + 96.0;
+			const int sx = (int)(fx * GFX_SCALE);
+			const int sy = (int)(fy * GFX_SCALE);
+
+			const double radius =
+				(obj.type > 0 && obj.type <= NO_OF_SHIPS && ship_list[obj.type] != NULL)
+					? sqrt (ship_list[obj.type]->size) : 80.0;
+			double half = (radius * 256.0 / obj.location.z) * GFX_SCALE * 1.15;
+			if (half < 8.0)  half = 8.0;
+			if (half > 80.0) half = 80.0;
+
+			const int box = (int)(half * 2.0);
+			gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
+		}
+
 		// Docking. Authentic Elite demands a precise slot alignment, but with a
 		// static (non-spinning) station and network lag that is punishing, and a
 		// fresh commander has no docking computer. So we dock forgivingly: fly up
-		// to the station (within ~600 units) with it ahead of you and you dock.
-		// The server still gates on its own proximity check (kDockRange), so this
-		// only ever completes when genuinely at a station.
-		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && obj.distance < 600)
+		// to the station (within ~600 units) with it ahead of you, AT LOW SPEED,
+		// and you dock. The speed gate restores the classic "ease in to dock"
+		// feel - you can't slam into the slot at full throttle. The server still
+		// gates on its own proximity check (DOCK_RANGE), so this only ever
+		// completes when genuinely at a station.
+		const int dockSpeedLimit = (PlayerCaps().maxSpeed > 0) ? (PlayerCaps().maxSpeed / 4) : 10;
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
+			obj.distance < 600 && PlayerFlight().speed <= dockSpeedLimit)
 		{
 			struct vector approach = unit_vector (&obj.location);
 			if (approach.z > 0.5)   // station roughly ahead -> dock
@@ -724,6 +752,45 @@ void render_replicated_objects (void)
 
 	ActiveRenderQueue().FinishRender();
 	FlushRenderQueue();
+}
+
+
+// Pick the missile lock target (T key): the nearest ship in the crosshairs from the
+// replicated view. The server then homes a missile at exactly this entity, so we
+// return its replicated entity index (0xFFFFFFFF when nothing suitable is ahead).
+// Planets, the sun, and other missiles are not lockable.
+unsigned int find_lock_target (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen())
+		return 0xFFFFFFFFu;
+
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords (ents, rc.LocalPlayer());
+
+	unsigned int best = 0xFFFFFFFFu;
+	double bestDist = 1.0e18;
+
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		// Lockable = a ship (not the planet/sun, not another missile) ahead of us...
+		if (rec.type < 0 || rec.type == SHIP_MISSILE)
+			continue;
+		if (rec.location.z <= 0.0)
+			continue;
+		// ...and inside the forward cone (roughly the crosshairs).
+		if (fabs (rec.location.x) > rec.location.z || fabs (rec.location.y) > rec.location.z)
+			continue;
+
+		if (rec.distance < bestDist)
+		{
+			bestDist = rec.distance;
+			best = rec.id;
+		}
+	}
+
+	return best;
 }
 
 
@@ -1349,7 +1416,7 @@ void launch_player (void)
 void engage_docking_computer (void)
 {
 	// Only dock when genuinely within the server's docking range (it will reject
-	// and strand us otherwise). 5000 world units matches the server's kDockRange.
+	// and strand us otherwise). 5000 world units matches the server's DOCK_RANGE.
 	if ((ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC]) &&
 		s_nearest_station_dist < 5000.0)
 	{

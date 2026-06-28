@@ -1,0 +1,56 @@
+# Dodec Space Station
+# Exported from DeepspaceOutpost ship data (SHIP id 33).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching dodec.json sidecar.
+mtllib elite.mtl
+o dodec
+v 0 150 196
+v 143 46 196
+v 88 -121 196
+v -88 -121 196
+v -143 46 196
+v 0 243 46
+v 231 75 46
+v 143 -196 46
+v -143 -196 46
+v -231 75 46
+v 143 196 -46
+v 231 -75 -46
+v 0 -243 -46
+v -231 -75 -46
+v -143 196 -46
+v 88 121 -196
+v 143 -46 -196
+v 0 -150 -196
+v -143 -46 -196
+v -88 121 -196
+v -16 32 196
+v -16 -32 196
+v 16 32 196
+v 16 -32 196
+usemtl col_237
+f 4 3 2 1 5
+usemtl col_248
+f 7 11 6 1 2
+usemtl col_235
+f 8 12 7 2 3
+usemtl col_234
+f 9 13 8 3 4
+usemtl col_248
+f 10 14 9 4 5
+usemtl col_234
+f 6 15 10 5 1
+usemtl col_248
+f 16 20 15 6 11
+usemtl col_235
+f 17 16 11 7 12
+usemtl col_248
+f 18 17 12 8 13
+usemtl col_234
+f 19 18 13 9 14
+usemtl col_235
+f 20 19 14 10 15
+usemtl col_237
+f 20 16 17 18 19
+usemtl col_0
+f 23 21 22 24

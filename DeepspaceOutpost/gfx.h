@@ -103,6 +103,7 @@
 #define IMG_MISSILE_YELLOW	8
 #define IMG_MISSILE_RED		9
 #define IMG_BLAKE			10
+#define IMG_TARGET_LOCK		11
 
 
 int gfx_graphics_startup (void);
@@ -127,6 +128,7 @@ void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
 void gfx_polygon (int num_points, int *poly_list, int face_colour);
 void gfx_draw_sprite (int sprite_no, int x, int y);
+void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
 void gfx_start_render (void);
 void gfx_render_polygon (int num_points, int *point_list, int face_colour, int zavg);
 void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);

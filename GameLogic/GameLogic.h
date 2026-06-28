@@ -25,6 +25,7 @@
 #include "DespawnTracker.h"
 #include "ServerSessions.h"
 #include "CombatSystem.h"
+#include "MissileSystem.h"
 #include "SpawnDirector.h"
 #include "StationServices.h"
 

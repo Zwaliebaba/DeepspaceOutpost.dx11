@@ -12,13 +12,13 @@ using namespace Neuron;
 
 namespace
 {
-  constexpr uint16_t kServerPort = 40000;                 // clients send input here
-  constexpr int64_t kAoiCellSize = 100000;                // interest-management cell size
-  constexpr int kAoiRadiusCells = 1;                      // viewers see +/- 1 cell
-  constexpr uint32_t kSessionTimeoutTicks = 300;          // reap a client idle this long
-  constexpr int64_t kDockRange = 5000;                    // how close a player must be to dock
-  constexpr int64_t kFireRange = 6000;                    // player front-laser reach
-  constexpr double kAimCone = 0.9;                        // ~25deg aiming cone for a hit
+  constexpr uint16_t SERVER_PORT = 40000;            // clients send input here
+  constexpr int64_t AOI_CELL_SIZE = 100000;          // interest-management cell size
+  constexpr int AOI_RADIUS_CELLS = 1;                // viewers see +/- 1 cell
+  constexpr uint32_t SESSION_TIMEOUT_TICKS = 300;    // reap a client idle this long
+  constexpr int64_t DOCK_RANGE = 5000;               // how close a player must be to dock
+  constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
+  constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
 
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
@@ -35,14 +35,14 @@ namespace
 int main()
 {
   printf("Starting DSOServer (GameLogic v%u) on UDP %u...\n",
-         GameLogic::Version(), static_cast<unsigned>(kServerPort));
+         GameLogic::Version(), static_cast<unsigned>(SERVER_PORT));
   CoreEngine::Startup();
 
   Net::NetStartup();
   Net::UdpSocket socket;
-  if (!socket.Open(kServerPort))
+  if (!socket.Open(SERVER_PORT))
   {
-    printf("Failed to bind UDP %u\n", static_cast<unsigned>(kServerPort));
+    printf("Failed to bind UDP %u\n", static_cast<unsigned>(SERVER_PORT));
     return 1;
   }
 
@@ -83,8 +83,9 @@ int main()
   // The procedural galaxy: every system's planet + station, scattered far across
   // the int64 field (reachable by teleport, or a long flight). AOI keeps them off
   // the wire until a player is near one. Each station carries its own market.
-  const GameLogic::GalaxyConfig galaxyCfg{};
-  const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(galaxyCfg);
+  constexpr GameLogic::GalaxyConfig GALAXY_CFG{};
+  const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(GALAXY_CFG);
+
   for (const GameLogic::GalaxySystem& sys : systems)
   {
     const ECS::EntityId pl = world.Create();
@@ -100,7 +101,7 @@ int main()
     GameLogic::GenerateMarket(sys.planet.economy, sys.marketSeed, ss.market);
     world.Add<GameLogic::ServerStation>(stn, ss);
   }
-  printf("Galaxy: %d systems generated.\n", galaxyCfg.planetCount);
+  printf("Galaxy: %d systems generated.\n", GALAXY_CFG.planetCount);
 
   // The chart manifest shipped to every client on connect: the procedural systems
   // plus the hand-placed home system (id -1) so players can always teleport back.
@@ -110,9 +111,10 @@ int main()
     Net::GalaxySystemInfo h;
     h.id = static_cast<uint32_t>(-1);   // matches the home station's systemId (-1)
     h.x = 0; h.y = 0; h.z = 65536;      // the home planet
-    const char* kHomeName = "HOME";
-    for (std::size_t i = 0; kHomeName[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
-      h.name[i] = kHomeName[i];
+
+    const char* HOME_NAME = "HOME";
+    for (std::size_t i = 0; HOME_NAME[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
+      h.name[i] = HOME_NAME[i];
     h.government = static_cast<uint8_t>(home.government);
     h.economy = static_cast<uint8_t>(home.economy);
     h.techLevel = static_cast<uint8_t>(home.techLevel);
@@ -121,7 +123,7 @@ int main()
     manifest.push_back(h);
   }
 
-  GameLogic::AreaOfInterest aoi(kAoiCellSize);
+  GameLogic::AreaOfInterest aoi(AOI_CELL_SIZE);
   GameLogic::ServerSessions sessions;
   sessions.SetManifest(std::move(manifest));   // every client gets the chart on connect
   GameLogic::DespawnTracker despawns;
@@ -153,27 +155,70 @@ int main()
           {
             const ECS::EntityId player = sessions.OnInput(world, from, in, tick);
 
-            // Player fired: resolve a forward shot. Hitting the station or police
-            // is a crime - the first offence summons police to hunt the player.
-            if (in.fire && world.IsValid(player))
+            // Apply a resolved player shot (laser or missile): firing on the
+            // station or police is a crime - the first offence summons police to
+            // hunt the player - and a target driven to zero energy dies.
+            auto applyShot = [&](const GameLogic::FireOutcome& shot)
             {
-              const GameLogic::FireOutcome shot = GameLogic::ResolvePlayerFire(world, player, kFireRange, kAimCone);
-              if (shot.hit)
+              if (!shot.hit)
+                return;
+              if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
               {
-                if (shot.targetTeam == GameLogic::Team::Station || shot.targetTeam == GameLogic::Team::Police)
+                GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
+                if (wnt != nullptr && wnt->level == 0)
                 {
-                  GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(player);
-                  if (wnt != nullptr && wnt->level == 0)
-                    spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
-                  if (wnt != nullptr)
-                    wnt->level++;
+                  spawner.SpawnPolice(world, world.Get<GameLogic::WorldTransform>(player).position, 2);
+                  printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched\n",
+                         tick, player.index, shot.targetTeam);
                 }
-                if (shot.destroyed)
-                {
-                  sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
-                                     Net::EncodeDeath(shot.target.index, player.index));
-                  world.Destroy(shot.target);
-                }
+                if (wnt != nullptr)
+                  wnt->level++;
+              }
+              if (shot.destroyed)
+              {
+                sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                                   Net::EncodeDeath(shot.target.index, player.index));
+                world.Destroy(shot.target);
+                printf("[tick %u] player %u destroyed entity %u with the laser\n",
+                       tick, player.index, shot.target.index);
+              }
+            };
+
+            // Player fired the front laser: resolve a forward shot.
+            if (in.fire && world.IsValid(player))
+              applyShot(GameLogic::ResolvePlayerFire(world, player, FIRE_RANGE, AIM_CONE));
+
+            // Player launched a missile: spawn a homing projectile that chases the
+            // target the player locked (in.missileTarget) and detonates on contact
+            // (its kill is resolved later in the tick loop by StepMissiles). Firing
+            // on the station or police is a crime, exactly like the laser.
+            if (in.fireMissile && world.IsValid(player))
+            {
+              const ECS::EntityId missile = GameLogic::SpawnMissile(world, player, in.missileTarget);
+              const GameLogic::Missile* mc =
+                  world.IsValid(missile) ? world.TryGet<GameLogic::Missile>(missile) : nullptr;
+              if (mc == nullptr)
+              {
+                printf("[tick %u] player %u MISSILE LAUNCH FAILED (missing transform/flight/combatant)\n",
+                       tick, player.index);
+              }
+              else if (world.IsValid(mc->target))
+              {
+                const GameLogic::Combatant* tc = world.TryGet<GameLogic::Combatant>(mc->target);
+                printf("[tick %u] player %u LAUNCHED missile %u -> locked target %u (team %d)\n",
+                       tick, player.index, missile.index, mc->target.index, tc != nullptr ? tc->team : -1);
+
+                GameLogic::FireOutcome lock;
+                lock.hit = true;
+                lock.target = mc->target;
+                lock.targetTeam = tc != nullptr ? tc->team : -1;
+                lock.destroyed = false;   // detonation/kill happens later in StepMissiles
+                applyShot(lock);
+              }
+              else
+              {
+                printf("[tick %u] player %u LAUNCHED missile %u (no target lock - flying straight)\n",
+                       tick, player.index, missile.index);
               }
             }
           }
@@ -196,9 +241,8 @@ int main()
     // 1b. Process station requests (dock/buy/sell/equip) delivered on each
     //     session's reliable channel; dock attaches to the nearest station and
     //     trades hit that station's own market.
-    for (auto& entry : sessions.All())
+    for (auto& s : sessions.All() | std::views::values)
     {
-      GameLogic::Session& s = entry.second;
       Net::ReliableMessage msg;
       while (s.events.Receive(msg))
       {
@@ -206,7 +250,7 @@ int main()
         if (Net::DecodeStationRequest(msg, req))
         {
           const Net::StationResponse resp =
-              GameLogic::ProcessStationRequest(world, s.entity, kDockRange, req);
+              GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
           Net::SendStationResponse(s.events, resp);
         }
       }
@@ -218,25 +262,13 @@ int main()
     ++tick;
     spawner.Step(world, tick);
 
-    // 2a. Heartbeat: roughly every two seconds, log the first player's position
-    //     and flight so a launching client can be confirmed to actually move
-    //     through the world (and steer) server-side.
-    if (tick % 60 == 0 && !sessions.All().empty())
-    {
-      const GameLogic::Session& s = sessions.All().begin()->second;
-      if (world.IsValid(s.entity))
-      {
-        const GameLogic::WorldTransform& t = world.Get<GameLogic::WorldTransform>(s.entity);
-        const GameLogic::Flight& f = world.Get<GameLogic::Flight>(s.entity);
-        printf("Player @ (%lld, %lld, %lld)  speed=%.2f roll=%.3f pitch=%.3f\n",
-               static_cast<long long>(t.position.x), static_cast<long long>(t.position.y),
-               static_cast<long long>(t.position.z), f.speed, f.roll, f.pitch);
-      }
-    }
-
-    // 2b. Realtime combat: resolve hits, broadcast reliable death events, and
-    //     destroy the wrecks (their removal also rides the despawn diff below).
-    for (const GameLogic::Kill& kill : GameLogic::StepCombat(world))
+    // 2b. Advance in-flight missiles (homing + detonation) and realtime combat,
+    //     then resolve every resulting kill: broadcast a death event and destroy
+    //     the wreck (its removal also rides the despawn diff below).
+    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(world);
+    for (const GameLogic::Kill& k : GameLogic::StepCombat(world))
+      kills.push_back(k);
+    for (const GameLogic::Kill& kill : kills)
     {
       // A player "death" is a simple in-place respawn (restore hull, clear record)
       // until persistence/respawn points exist; NPCs are destroyed as wrecks.
@@ -246,31 +278,32 @@ int main()
           c->energy = 255;
         if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(kill.victim))
           wnt->level = 0;
+        printf("[tick %u] player %u was killed by %u -> respawned in place\n",
+               tick, kill.victim.index, kill.killer);
         continue;
       }
 
       sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
                          Net::EncodeDeath(kill.victim.index, kill.killer));
       world.Destroy(kill.victim);
+      printf("[tick %u] entity %u destroyed by %u\n", tick, kill.victim.index, kill.killer);
     }
 
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
     //    as a reliable event to all remaining clients.
-    sessions.Reap(world, tick, kSessionTimeoutTicks);
+    sessions.Reap(world, tick, SESSION_TIMEOUT_TICKS);
     for (uint32_t goneId : despawns.Update(CurrentIds(world)))
       sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(goneId));
 
     // 4. Send each client its own area-of-interest snapshot + reliable event packet.
     aoi.Rebuild(world);
-    for (auto& entry : sessions.All())
+    for (auto& s : sessions.All() | std::views::values)
     {
-      GameLogic::Session& s = entry.second;
-
       Math::Vector3i64 viewerPos{ 0, 0, 0 };
       if (world.IsValid(s.entity))
         viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
 
-      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, kAoiRadiusCells, s.entity.index);
+      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, AOI_RADIUS_CELLS, s.entity.index);
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 

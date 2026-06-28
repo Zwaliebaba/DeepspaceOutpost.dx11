@@ -15,7 +15,6 @@ target_link_libraries(NeuronServer.Tests PRIVATE NeuronServer GTest::gtest_main)
 
 if(MSVC)
     target_compile_options(NeuronServer.Tests PRIVATE /W4)
-    target_compile_definitions(NeuronServer.Tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 gtest_discover_tests(NeuronServer.Tests)

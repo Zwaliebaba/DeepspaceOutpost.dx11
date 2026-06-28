@@ -41,6 +41,38 @@ namespace Neuron::GameLogic
       _v.z = z;
     }
 
+    // Rotate a ship's basis by this tick's roll/pitch about the ship's OWN axes
+    // (side = roll/pitch's pivots), preserving the legacy rotate_vec feel.
+    //
+    // Applying RotateAxis() straight to the world-space basis vectors (as an
+    // earlier version did) rotates them about the WORLD x/z axes, which is only
+    // correct while the ship sits at the identity orientation. Once the ship has
+    // turned, that couples the controls into the wrong axis - e.g. after a roll a
+    // pure pitch also yaws, so an object dead ahead drifts sideways across the
+    // screen instead of moving straight up/down. Instead we express the rotation
+    // in the ship's LOCAL frame: rotate the standard basis (giving the rotation's
+    // columns in local coordinates) and re-project through the current basis,
+    // i.e. B' = B * M. At the identity orientation this is bit-identical to the
+    // legacy world-frame version, so the ported feel and the golden runs are
+    // preserved; for a turned ship it correctly pivots about side/roof/nose.
+    inline void RotateBasis(Flight& _f)
+    {
+      Math::Vector3d localX{ 1.0, 0.0, 0.0 };
+      Math::Vector3d localY{ 0.0, 1.0, 0.0 };
+      Math::Vector3d localZ{ 0.0, 0.0, 1.0 };
+      RotateAxis(localX, _f.roll, _f.pitch);
+      RotateAxis(localY, _f.roll, _f.pitch);
+      RotateAxis(localZ, _f.roll, _f.pitch);
+
+      const Math::Vector3d side = _f.side;
+      const Math::Vector3d roof = _f.roof;
+      const Math::Vector3d nose = _f.nose;
+
+      _f.side = side * localX.x + roof * localX.y + nose * localX.z;
+      _f.roof = side * localY.x + roof * localY.y + nose * localY.z;
+      _f.nose = side * localZ.x + roof * localZ.y + nose * localZ.z;
+    }
+
     // Re-orthonormalize a ship's basis after the incremental rotation has let it
     // drift. Port of tidy_matrix() with nose = mat[2], roof = mat[1],
     // side = mat[0]: renormalize the nose, square the roof against it, then
@@ -71,11 +103,12 @@ namespace Neuron::GameLogic
   // along the nose by `speed`, carrying the sub-unit remainder.
   inline void StepFlight(ECS::Registry& _world)
   {
-    _world.Each<WorldTransform, Flight>([](ECS::EntityId, WorldTransform& _t, Flight& _f)
+    _world.Each<WorldTransform, Flight>([&_world](ECS::EntityId _id, WorldTransform& _t, Flight& _f)
     {
-      Detail::RotateAxis(_f.nose, _f.roll, _f.pitch);
-      Detail::RotateAxis(_f.roof, _f.roll, _f.pitch);
-      Detail::RotateAxis(_f.side, _f.roll, _f.pitch);
+      if (_world.Has<Missile>(_id))
+        return;   // missiles are steered + advanced by StepMissiles, not the flight model
+
+      Detail::RotateBasis(_f);
 
       Detail::Orthonormalize(_f);
 

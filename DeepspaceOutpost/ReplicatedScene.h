@@ -65,12 +65,19 @@ namespace Neuron::Client
                         pRoof.z * pNose.x - pRoof.x * pNose.z,
                         pRoof.x * pNose.y - pRoof.y * pNose.x };
 
-    // Rotate a world-frame vector into the ship's camera frame.
+    // Express a world-frame offset in the ship's view frame using the SAME
+    // convention as the legacy move_local_object() and the locally-rendered
+    // starfield: the world rotates around a fixed cockpit, so the offset is rebuilt
+    // from the ship's basis (x*side + y*roof + z*nose) rather than projected onto it
+    // (x*side, y*roof, z*nose). That is the transpose of a textbook view matrix, but
+    // it is what the starfield uses; matching it keeps replicated objects (planet,
+    // station, ships) rotating WITH the stars instead of counter to them when the
+    // ship rolls or pitches. At the identity orientation the two are identical.
     const auto toCamera = [&](double _x, double _y, double _z) -> Vector
     {
-      return Vector{ _x * pSide.x + _y * pSide.y + _z * pSide.z,
-                     _x * pRoof.x + _y * pRoof.y + _z * pRoof.z,
-                     _x * pNose.x + _y * pNose.y + _z * pNose.z };
+      return Vector{ _x * pSide.x + _y * pRoof.x + _z * pNose.x,
+                     _x * pSide.y + _y * pRoof.y + _z * pNose.y,
+                     _x * pSide.z + _y * pRoof.z + _z * pNose.z };
     };
 
     records.reserve(_entities.size());

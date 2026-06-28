@@ -1,0 +1,128 @@
+# Materials for DeepspaceOutpost ship models.
+# Colours are the scanner.bmp palette entries used by the ships.
+
+newmtl col_0
+Kd 0.0000 0.0000 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_1
+Kd 0.5020 0.0000 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_2
+Kd 0.0000 0.5020 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_4
+Kd 0.0000 0.0000 0.5020
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_17
+Kd 0.3882 0.6784 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_28
+Kd 0.6118 0.0000 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_37
+Kd 0.8078 0.6118 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_39
+Kd 0.8706 0.7098 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_45
+Kd 0.0039 0.2863 0.6392
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_46
+Kd 0.0000 0.0000 0.5490
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_49
+Kd 0.8078 0.0000 0.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_71
+Kd 1.0000 0.2000 0.2000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_86
+Kd 0.4000 0.8000 0.2000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_133
+Kd 0.0000 0.0000 0.6000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_183
+Kd 1.0000 0.6000 0.8000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_234
+Kd 0.3725 0.3725 0.3725
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_235
+Kd 0.4667 0.4667 0.4667
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_237
+Kd 0.5882 0.5882 0.5882
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_242
+Kd 0.8902 0.8902 0.8902
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_248
+Kd 0.5020 0.5020 0.5020
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1
+
+newmtl col_255
+Kd 1.0000 1.0000 1.0000
+Ka 0.0000 0.0000 0.0000
+d 1.0
+illum 1

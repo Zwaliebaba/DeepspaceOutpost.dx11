@@ -773,6 +773,79 @@ void run_escape_sequence (void)
 }
 
 
+// Pending fire-missile intent + the locked target it launches at, for the next
+// input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
+// send_player_input().
+static bool s_fire_missile_intent = false;
+static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
+
+// The entity the missile is currently locked onto (picked from the replicated view
+// with the target key), or 0xFFFFFFFF for none. Drives the HUD lock indicator and
+// the on-target reticle (drawn in render_replicated_objects), and is the target M
+// launches at. Global so the renderer can read it.
+unsigned int g_missile_lock_target = 0xFFFFFFFFu;
+
+// Lock the missile onto the ship in the crosshairs (T key). Thin client: the server
+// is authoritative, so we pick the target from the replicated view and remember its
+// id; M then launches a homing missile at exactly that target. With nothing in the
+// sights, nothing locks. Falls back to the legacy arm when not replicated.
+static void lock_missile_target (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		arm_missile();
+		return;
+	}
+
+	if (cmdr.missiles == 0)
+		return;
+
+	const unsigned int tgt = find_lock_target();
+	if (tgt == 0xFFFFFFFFu)
+		return;   // nothing in the sights to lock
+
+	g_missile_lock_target = tgt;
+	missile_target = 0;   // HUD: a missile is locked (red indicator)
+}
+
+// Clear the missile lock (U key).
+static void unlock_missile_target (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		unarm_missile();
+		return;
+	}
+
+	g_missile_lock_target = 0xFFFFFFFFu;
+	missile_target = MISSILE_UNARMED;   // HUD: no lock
+	snd_play_sample (SND_BOOP);
+}
+
+// Launch a missile (M key). Thin client: only when a target is locked (T) and a
+// round is in the rack; the server spawns a projectile that homes that specific
+// locked target. No lock -> nothing fires. Falls back to the legacy local spawn
+// when not replicated.
+static void launch_missile (void)
+{
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		fire_missile();
+		return;
+	}
+
+	if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
+		return;
+
+	s_fire_missile_intent = true;
+	s_fire_missile_target = g_missile_lock_target;
+	cmdr.missiles--;
+	g_missile_lock_target = 0xFFFFFFFFu;
+	missile_target = MISSILE_UNARMED;   // lock consumed
+	snd_play_sample (SND_MISSILE);
+}
+
+
 void handle_flight_keys (void)
 {
     int keyasc;
@@ -984,10 +1057,11 @@ void handle_flight_keys (void)
 			start_hyperspace();
 	}
 
-	// Docked at a station's "teleport building": the hyperspace key on the galactic
-	// chart jumps to the system under the crosshair (server-validated). Thin-client
-	// only; teleport_to_cursor() is a no-op without a replicated galaxy.
-	if (kbd_hyperspace_pressed && docked && (current_screen == SCR_GALACTIC_CHART))
+	// Docked at a station's "teleport building": the hyperspace key on either chart
+	// jumps to the system under the crosshair (server-validated). Thin-client only;
+	// teleport_to_cursor() is a no-op without a replicated galaxy.
+	if (kbd_hyperspace_pressed && docked &&
+		((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
 		teleport_to_cursor();
 
 	if (kbd_jump_pressed && (!docked) && (!witchspace))
@@ -998,7 +1072,7 @@ void handle_flight_keys (void)
 	if (kbd_fire_missile_pressed)
 	{
 		if (!docked)
-			fire_missile();
+			launch_missile();
 	}
 
 	if (kbd_origin_pressed)
@@ -1010,13 +1084,13 @@ void handle_flight_keys (void)
 	if (kbd_target_missile_pressed)
 	{
 		if (!docked)
-			arm_missile();		
+			lock_missile_target();
 	}
 
 	if (kbd_unarm_missile_pressed)
 	{
 		if (!docked)
-			unarm_missile();
+			unlock_missile_target();
 	}
 	
 	if (kbd_inc_speed_pressed)
@@ -1327,21 +1401,43 @@ void info_message (const char *message)
  * window, Direct3D 11 device and XAudio2 engine have been created.
  */
 
-// Apply authoritative station responses (buy/sell/dock results) to the local
-// display state. Used only in thin-client mode.
-static void apply_station_responses (void)
+// Drain authoritative server events (thin-client mode): station buy/sell/dock
+// results, plus entity despawns and deaths. Removing the entity on despawn/death
+// is what stops destroyed things (a detonated missile, a killed ship) from
+// lingering as motionless ghosts; a death also plays the explosion sound.
+static void process_server_events (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 	Neuron::Net::ReliableMessage msg;
 	while (rc.PollEvent(msg))
 	{
 		Neuron::Net::StationResponse resp;
-		if (Neuron::Net::DecodeStationResponse(msg, resp) &&
-			resp.status == Neuron::Net::StationStatus::Ok)
+		uint32_t entityId = 0;
+		uint32_t killerId = 0;
+
+		if (Neuron::Net::DecodeStationResponse(msg, resp))
 		{
-			cmdr.credits = resp.credits;
-			if (resp.commodity < NO_OF_STOCK_ITEMS)
-				cmdr.current_cargo[resp.commodity] = resp.cargo;
+			if (resp.status == Neuron::Net::StationStatus::Ok)
+			{
+				cmdr.credits = resp.credits;
+				if (resp.commodity < NO_OF_STOCK_ITEMS)
+					cmdr.current_cargo[resp.commodity] = resp.cargo;
+			}
+		}
+		else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
+		{
+			// A kill/detonation: clear the lock if it was on the dead entity, drop
+			// it from the view, and play the explosion.
+			if (entityId == g_missile_lock_target)
+				g_missile_lock_target = 0xFFFFFFFFu;
+			rc.Forget(entityId);
+			snd_play_sample (SND_EXPLODE);
+		}
+		else if (Neuron::Net::DecodeDespawn(msg, entityId))
+		{
+			if (entityId == g_missile_lock_target)
+				g_missile_lock_target = 0xFFFFFFFFu;
+			rc.Forget(entityId);
 		}
 	}
 }
@@ -1365,6 +1461,10 @@ static void send_player_input (void)
 	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
 	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
+	in.fireMissile = s_fire_missile_intent;
+	in.missileTarget = s_fire_missile_intent ? (uint32_t)s_fire_missile_target
+	                                          : Neuron::Net::NO_MISSILE_TARGET;
+	s_fire_missile_intent = false;
 
 	Neuron::Client::ReplicationClientInstance().SendInput(in);
 }
@@ -1435,7 +1535,13 @@ int game_main (void)
 			// server's authoritative snapshots here instead of simulating locally.
 			Neuron::Client::ReplicationClientInstance().Pump();
 			if (Neuron::Client::ReplicationClientInstance().IsOpen())
-				apply_station_responses();
+			{
+				process_server_events();
+				// Backstop: forget entities that silently left our area of interest
+				// (no despawn event is sent for those), so they don't pile up as
+				// ghosts. ~3s at the server's 30 Hz tick.
+				Neuron::Client::ReplicationClientInstance().EvictStale(90);
+			}
 
 			snd_update_sound();
 			gfx_update_screen();

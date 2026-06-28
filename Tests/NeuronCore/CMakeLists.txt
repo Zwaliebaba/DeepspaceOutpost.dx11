@@ -24,7 +24,6 @@ target_link_libraries(NeuronCore.Tests PRIVATE NeuronCore GTest::gtest_main)
 
 if(MSVC)
     target_compile_options(NeuronCore.Tests PRIVATE /W4)
-    target_compile_definitions(NeuronCore.Tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Register every TEST() with CTest so the `ctest` step in CI runs them.

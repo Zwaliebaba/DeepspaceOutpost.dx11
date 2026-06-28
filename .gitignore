@@ -81,6 +81,8 @@ StyleCopReport.xml
 *.meta
 *.obj
 *.iobj
+# ...but Wavefront OBJ ship models are real assets, not build output.
+!GameData/Models/*.obj
 *.pch
 *.pdb
 *.ipdb

@@ -1,0 +1,30 @@
+# Cargo Canister
+# Exported from DeepspaceOutpost ship data (SHIP id 5).
+# Gameplay stats and the vertex/line indices the engine
+# derives are in the matching cargo.json sidecar.
+mtllib elite.mtl
+o cargo
+v 24 16 0
+v 24 5 15
+v 24 -13 9
+v 24 -13 -9
+v 24 5 -15
+v -24 16 0
+v -24 5 15
+v -24 -13 9
+v -24 -13 -9
+v -24 5 -15
+usemtl col_237
+f 5 1 2 3 4
+usemtl col_235
+f 6 7 2 1
+usemtl col_248
+f 7 8 3 2
+usemtl col_234
+f 8 9 4 3
+usemtl col_248
+f 9 10 5 4
+usemtl col_234
+f 10 6 1 5
+usemtl col_237
+f 9 8 7 6 10
