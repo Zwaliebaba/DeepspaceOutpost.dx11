@@ -83,8 +83,9 @@ int main()
   // The procedural galaxy: every system's planet + station, scattered far across
   // the int64 field (reachable by teleport, or a long flight). AOI keeps them off
   // the wire until a player is near one. Each station carries its own market.
-  const GameLogic::GalaxyConfig galaxyCfg{};
-  const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(galaxyCfg);
+  constexpr GameLogic::GalaxyConfig GALAXY_CFG{};
+  const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(GALAXY_CFG);
+
   for (const GameLogic::GalaxySystem& sys : systems)
   {
     const ECS::EntityId pl = world.Create();
@@ -100,7 +101,7 @@ int main()
     GameLogic::GenerateMarket(sys.planet.economy, sys.marketSeed, ss.market);
     world.Add<GameLogic::ServerStation>(stn, ss);
   }
-  printf("Galaxy: %d systems generated.\n", galaxyCfg.planetCount);
+  printf("Galaxy: %d systems generated.\n", GALAXY_CFG.planetCount);
 
   // The chart manifest shipped to every client on connect: the procedural systems
   // plus the hand-placed home system (id -1) so players can always teleport back.
@@ -110,6 +111,7 @@ int main()
     Net::GalaxySystemInfo h;
     h.id = static_cast<uint32_t>(-1);   // matches the home station's systemId (-1)
     h.x = 0; h.y = 0; h.z = 65536;      // the home planet
+
     const char* HOME_NAME = "HOME";
     for (std::size_t i = 0; HOME_NAME[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
       h.name[i] = HOME_NAME[i];
@@ -220,9 +222,8 @@ int main()
     // 1b. Process station requests (dock/buy/sell/equip) delivered on each
     //     session's reliable channel; dock attaches to the nearest station and
     //     trades hit that station's own market.
-    for (auto& entry : sessions.All())
+    for (auto& s : sessions.All() | std::views::values)
     {
-      GameLogic::Session& s = entry.second;
       Net::ReliableMessage msg;
       while (s.events.Receive(msg))
       {
@@ -274,10 +275,8 @@ int main()
 
     // 4. Send each client its own area-of-interest snapshot + reliable event packet.
     aoi.Rebuild(world);
-    for (auto& entry : sessions.All())
+    for (auto& s : sessions.All() | std::views::values)
     {
-      GameLogic::Session& s = entry.second;
-
       Math::Vector3i64 viewerPos{ 0, 0, 0 };
       if (world.IsValid(s.entity))
         viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
