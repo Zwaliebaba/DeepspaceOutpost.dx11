@@ -24,6 +24,27 @@ struct star
 struct star stars[20];
 
 
+/*
+ * Map a star-space coordinate (roughly [-128,128] x [-96,96]) to screen pixels
+ * using the current frame's optics, so the starfield fills the whole window in
+ * full-window flight. At the retro 4:3 viewport this is the old
+ * "(s + centre) * GFX_SCALE" mapping (focal 512 -> scale 2, centre 256,192).
+ */
+static inline void star_to_screen (double sx_in, double sy_in, int *sx, int *sy)
+{
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	const double scale = vm.focal / 256.0;
+	*sx = (int) (sx_in * scale + vm.cx);
+	*sy = (int) (sy_in * scale + vm.cy);
+}
+
+static inline int star_on_screen (int sx, int sy)
+{
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	return (sx >= 1) && (sx <= vm.width - 1) && (sy >= 1) && (sy <= vm.height - 1);
+}
+
+
 void create_new_stars (void)
 {
 	int i;
@@ -67,19 +88,10 @@ void front_starfield (void)
 	{
 		/* Plot the stars in their current locations... */
 
-		sy = stars[i].y;
-		sx = stars[i].x;
 		zz = stars[i].z;
+		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
-		sx += 128;
-		sy += 96;
-
-		sx *= GFX_SCALE;
-		sy *= GFX_SCALE;
-
-		if ((!warp_stars) &&
-			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
-			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
+		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
@@ -115,10 +127,14 @@ void front_starfield (void)
 		stars[i].y = yy;
 		stars[i].x = xx;
 
-		
+
 		if (warp_stars)
-			ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
-		
+		{
+			int ex, ey;
+			star_to_screen (xx, yy, &ex, &ey);
+			ActiveRenderQueue().Line (sx, sy, ex, ey);
+		}
+
 		sx = xx;
 		sy = yy;
 
@@ -163,19 +179,10 @@ void rear_starfield (void)
 	{
 		/* Plot the stars in their current locations... */
 
-		sy = stars[i].y;
-		sx = stars[i].x;
 		zz = stars[i].z;
+		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
-		sx += 128;
-		sy += 96;
-
-		sx *= GFX_SCALE;
-		sy *= GFX_SCALE;
-
-		if ((!warp_stars) &&
-			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
-			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
+		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
@@ -207,21 +214,15 @@ void rear_starfield (void)
 		xx = xx + (tx * tx * 2);
 */
 		yy = yy + beta;
-		
+
 		if (warp_stars)
 		{
-			ey = yy;
-			ex = xx;
-			ex = (ex + 128) * GFX_SCALE;
-			ey = (ey + 96) * GFX_SCALE;
+			star_to_screen (xx, yy, &ex, &ey);
 
-			if ((sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
-			   (sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY) &&
-			   (ex >= GFX_VIEW_TX) && (ex <= GFX_VIEW_BX) &&
-			   (ey >= GFX_VIEW_TY) && (ey <= GFX_VIEW_BY))
-				ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
+			if (star_on_screen (sx, sy) && star_on_screen (ex, ey))
+				ActiveRenderQueue().Line (sx, sy, ex, ey);
 		}
-		
+
 		stars[i].y = yy;
 		stars[i].x = xx;
 
@@ -274,19 +275,10 @@ void side_starfield (void)
 	
 	for (i = 0; i < nstars; i++)
 	{
-		sy = stars[i].y;
-		sx = stars[i].x;
 		zz = stars[i].z;
+		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
-		sx += 128;
-		sy += 96;
-
-		sx *= GFX_SCALE;
-		sy *= GFX_SCALE;
-
-		if ((!warp_stars) &&
-			(sx >= GFX_VIEW_TX) && (sx <= GFX_VIEW_BX) &&
-			(sy >= GFX_VIEW_TY) && (sy <= GFX_VIEW_BY))
+		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
 
@@ -303,23 +295,27 @@ void side_starfield (void)
 		yy = stars[i].y;
 		xx = stars[i].x;
 		zz = stars[i].z;
-		
+
 		delt8 = delta / (zz / 32);
 		xx = xx + delt8;
 
-		xx += (yy * (beta / 256));		
+		xx += (yy * (beta / 256));
 		yy -= (xx * (beta / 256));
 
 		xx += ((yy / 256) * (alpha / 256)) * (-xx);
 		yy += ((yy / 256) * (alpha / 256)) * (yy);
 
-		yy += alpha; 
+		yy += alpha;
 
 		stars[i].y = yy;
 		stars[i].x = xx;
 
 		if (warp_stars)
-			ActiveRenderQueue().Line (sx, sy, (xx + 128) * GFX_SCALE, (yy + 96) * GFX_SCALE);
+		{
+			int ex, ey;
+			star_to_screen (xx, yy, &ex, &ey);
+			ActiveRenderQueue().Line (sx, sy, ex, ey);
+		}
 
 		
 		if (abs((int)stars[i].x) >= 116)

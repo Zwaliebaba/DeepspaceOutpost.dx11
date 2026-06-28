@@ -30,6 +30,21 @@ static struct point point_list[100];
 
 
 /*
+ * Project a camera-space point (x right, y up, z forward) to integer screen
+ * pixels using the current frame's optics (gfx_view_metrics). This replaces the
+ * old fixed "(r*256)/z + 128/96, *GFX_SCALE" inline, so the 3D follows the
+ * window size; at the legacy 4:3 viewport it produces the same pixels.
+ */
+static inline void project_to_screen (double rx, double ry, double rz, int *sx, int *sy)
+{
+	double fx, fy;
+	Neuron::Client::ProjectPoint (gfx_view_metrics(), rx, ry, rz, fx, fy);
+	*sx = (int) fx;
+	*sy = (int) fy;
+}
+
+
+/*
  * The following routine is used to draw a wireframe represtation of a ship.
  *
  * caveat: it is a work in progress.
@@ -106,16 +121,7 @@ void draw_wireframe_ship (struct local_object *obj)
 		ry = vec.y + obj->location.y;
 		rz = vec.z + obj->location.z;
 
-		sx = (rx * 256) / rz;
-		sy = (ry * 256) / rz;
-
-		sy = -sy;
-
-		sx += 128;
-		sy += 96;
-
-		sx *= GFX_SCALE;
-		sy *= GFX_SCALE;
+		project_to_screen (rx, ry, rz, &sx, &sy);
 
 		point_list[i].x = sx;
 		point_list[i].y = sy;
@@ -229,22 +235,13 @@ void draw_solid_ship (struct local_object *obj)
 
 		if (rz <= 0)
 			rz = 1;
-		
-		sx = (rx * 256) / rz;
-		sy = (ry * 256) / rz;
 
-		sy = -sy;
-
-		sx += 128;
-		sy += 96;
-
-		sx *= GFX_SCALE;
-		sy *= GFX_SCALE;
+		project_to_screen (rx, ry, rz, &sx, &sy);
 
 		point_list[i].x = sx;
 		point_list[i].y = sy;
 		point_list[i].z = rz;
-		
+
 	}
 
 	for (i = 0; i < num_faces; i++)
@@ -535,25 +532,30 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 	int ex;
 	int div;
 
+	/* Clip against the live view, not the fixed 512x384 rectangle, so a planet
+	 * that fills a large window is not cut off at the old right/bottom edge. */
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	const int v_right  = vm.width  - 1;
+	const int v_bottom = vm.height - 1;
+
 	sy = y + yo;
-	
-	if ((sy < GFX_VIEW_TY + GFX_Y_OFFSET) ||
-		(sy > GFX_VIEW_BY + GFX_Y_OFFSET))
+
+	if ((sy < 0) || (sy > v_bottom))
 		return;
-					   
+
 	sx = xo - x;
 	ex = xo + x;
-	
+
 	rx = -x * vx - y * vy;
 	ry = -x * vy + y * vx;
 	rx += radius << 16;
 	ry += radius << 16;
 	div = radius << 10;	 /* radius * 2 * LAND_X_MAX >> 16 */
-	
-		
+
+
 	for (; sx <= ex; sx++)
 	{
-		if ((sx >= (GFX_VIEW_TX + GFX_X_OFFSET)) && (sx <= (GFX_VIEW_BX + GFX_X_OFFSET)))
+		if ((sx >= 0) && (sx <= v_right))
 		{
 			lx = rx / div;
 			ly = ry / div;
@@ -630,28 +632,20 @@ void draw_planet (struct local_object *planet)
 {
 	int x,y;
 	int radius;
-	
-	x = (planet->location.x * 256) / planet->location.z;
-	y = (planet->location.y * 256) / planet->location.z;
 
-	y = -y;
-	
-	x += 128;
-	y += 96;
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 
-	x *= GFX_SCALE;
-	y *= GFX_SCALE;
-	
-	radius = 6291456 / planet->distance;
-//	radius = 6291456 / ship_vec.z;   /* Planets are BIG! */
+	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
 
-	radius *= GFX_SCALE;
+	/* On-screen radius scales with the focal length (retro focal 512 == the old
+	 * 6291456/distance * GFX_SCALE), so the planet grows to fill a bigger view. */
+	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
 
 	if ((x + radius <  0) ||
-		(x - radius > 511) ||
+		(x - radius > vm.width) ||
 		(y + radius < 0) ||
-		(y - radius > 383))
-		return; 
+		(y - radius > vm.height))
+		return;
 
 	switch (planet_render_style)
 	{
@@ -682,25 +676,27 @@ void render_sun_line (int xo, int yo, int x, int y, int radius)
 	int inner2;
 	int mix;
 
-	if ((sy < GFX_VIEW_TY + GFX_Y_OFFSET) ||
-		(sy > GFX_VIEW_BY + GFX_Y_OFFSET))
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	const int v_right  = vm.width  - 1;
+	const int v_bottom = vm.height - 1;
+
+	if ((sy < 0) || (sy > v_bottom))
 		return;
-	
+
 	sx = xo - x;
 	ex = xo + x;
 
 	sx -= (radius * (2 + (randint() & 7))) >> 8;
 	ex += (radius * (2 + (randint() & 7))) >> 8;
-	
-	if ((sx > GFX_VIEW_BX + GFX_X_OFFSET) ||
-		(ex < GFX_VIEW_TX + GFX_X_OFFSET))
+
+	if ((sx > v_right) || (ex < 0))
 		return;
-	
-	if (sx < GFX_VIEW_TX + GFX_X_OFFSET)
-		sx = GFX_VIEW_TX + GFX_X_OFFSET;
-	
-	if (ex > GFX_VIEW_BX + GFX_X_OFFSET)
-		ex = GFX_VIEW_BX + GFX_X_OFFSET;
+
+	if (sx < 0)
+		sx = 0;
+
+	if (ex > v_right)
+		ex = v_right;
 
 	inner = (radius * (200 + (randint() & 7))) >> 8;
 	inner *= inner;
@@ -769,27 +765,18 @@ void draw_sun (struct local_object *planet)
 {
 	int x,y;
 	int radius;
-	
-	x = (planet->location.x * 256) / planet->location.z;
-	y = (planet->location.y * 256) / planet->location.z;
 
-	y = -y;
-	
-	x += 128;
-	y += 96;
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 
-	x *= GFX_SCALE;
-	y *= GFX_SCALE;
-	
-	radius = 6291456 / planet->distance;
+	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
 
-	radius *= GFX_SCALE;
+	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
 
 	if ((x + radius <  0) ||
-		(x - radius > 511) ||
+		(x - radius > vm.width) ||
 		(y + radius < 0) ||
-		(y - radius > 383))
-		return; 
+		(y - radius > vm.height))
+		return;
 
 	render_sun (x, y, radius);
 }
@@ -884,16 +871,7 @@ void draw_explosion (struct local_object *obj)
 			ry = vec.y + obj->location.y;
 			rz = vec.z + obj->location.z;
 
-			sx = (rx * 256) / rz;
-			sy = (ry * 256) / rz;
-
-			sy = -sy;
-
-			sx += 128;
-			sy += 96;
-
-			sx *= GFX_SCALE;
-			sy *= GFX_SCALE;
+			project_to_screen (rx, ry, rz, &sx, &sy);
 
 			point_list[np].x = sx;
 			point_list[np].y = sy;
@@ -992,10 +970,13 @@ void draw_ship (struct local_object *ship)
 		return;
 	}
 	
-	if ((fabs(ship->location.x) > ship->location.z) ||	/* Check for field of vision. */
-		(fabs(ship->location.y) > ship->location.z))
+	/* Field-of-vision cull against the real (aspect-aware) frustum, so ships at
+	 * the edges of a wide window are not dropped early. */
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	if ((fabs(ship->location.x) > Neuron::Client::HalfExtentX (vm, ship->location.z)) ||
+		(fabs(ship->location.y) > Neuron::Client::HalfExtentY (vm, ship->location.z)))
 		return;
-		
+
 	if (wireframe)
 		draw_wireframe_ship (ship);
 	else

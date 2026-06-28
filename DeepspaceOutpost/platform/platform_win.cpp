@@ -188,6 +188,10 @@ void gfx_update_screen(void)
 	{
 		gfx_dx11_flush();        /* replay the frame's 2D batch into the canvas */
 		g_renderer.present();    /* blit the canvas to the window */
+		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
+		 * render path re-enables full-window mode each frame it draws. This keeps
+		 * menus/charts/station on the classic 512x514 canvas automatically. */
+		gfx_set_scene_fullwindow(0);
 	}
 	platform_pump_messages();
 

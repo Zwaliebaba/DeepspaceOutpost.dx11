@@ -146,8 +146,8 @@ bool Renderer::createBackBuffer()
 bool Renderer::createCanvasTarget()
 {
 	D3D11_TEXTURE2D_DESC td{};
-	td.Width      = kCanvasWidth;
-	td.Height     = kCanvasHeight;
+	td.Width      = canvas_w_;
+	td.Height     = canvas_h_;
 	td.MipLevels  = 1;
 	td.ArraySize  = 1;
 	td.Format     = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -159,6 +159,31 @@ bool Renderer::createCanvasTarget()
 	if (FAILED(device_->CreateRenderTargetView(canvas_tex_.get(), nullptr, canvas_rtv_.put()))) return false;
 	if (FAILED(device_->CreateShaderResourceView(canvas_tex_.get(), nullptr, canvas_srv_.put()))) return false;
 	return true;
+}
+
+bool Renderer::recreateCanvas(int w, int h)
+{
+	if (w < 1) w = 1;
+	if (h < 1) h = 1;
+
+	/* Release the old views/texture so put() writes into null com_ptr slots. */
+	canvas_srv_ = nullptr;
+	canvas_rtv_ = nullptr;
+	canvas_tex_ = nullptr;
+
+	canvas_w_ = w;
+	canvas_h_ = h;
+	return createCanvasTarget();
+}
+
+void Renderer::ensureCanvasMode(bool fullWindow)
+{
+	const int w = fullWindow ? client_w_ : kCanvasWidth;
+	const int h = fullWindow ? client_h_ : kCanvasHeight;
+	if (fullWindow == canvas_full_ && w == canvas_w_ && h == canvas_h_)
+		return;
+	canvas_full_ = fullWindow;
+	recreateCanvas(w, h);
 }
 
 bool Renderer::createPresentPipeline()
@@ -265,11 +290,13 @@ bool Renderer::loadPalette()
 
 void Renderer::computeLetterbox(D3D11_VIEWPORT& vp) const
 {
-	int scale = std::min(client_w_ / kCanvasWidth, client_h_ / kCanvasHeight);
+	/* Full-window canvas (canvas == client) integer-scales by 1, i.e. fills the
+	 * window with no bars; the retro canvas is letterboxed as before. */
+	int scale = std::min(client_w_ / canvas_w_, client_h_ / canvas_h_);
 	if (scale < 1) scale = 1;   /* tiny window: crop rather than vanish */
 
-	int dstW = kCanvasWidth  * scale;
-	int dstH = kCanvasHeight * scale;
+	int dstW = canvas_w_ * scale;
+	int dstH = canvas_h_ * scale;
 
 	vp.TopLeftX = static_cast<float>((client_w_ - dstW) / 2);
 	vp.TopLeftY = static_cast<float>((client_h_ - dstH) / 2);
@@ -299,8 +326,8 @@ void Renderer::bindCanvasTarget()
 	D3D11_VIEWPORT vp{};
 	vp.TopLeftX = 0.0f;
 	vp.TopLeftY = 0.0f;
-	vp.Width    = static_cast<float>(kCanvasWidth);
-	vp.Height   = static_cast<float>(kCanvasHeight);
+	vp.Width    = static_cast<float>(canvas_w_);
+	vp.Height   = static_cast<float>(canvas_h_);
 	vp.MinDepth = 0.0f;
 	vp.MaxDepth = 1.0f;
 	context_->RSSetViewports(1, &vp);
@@ -350,4 +377,9 @@ void Renderer::resize(int clientWidth, int clientHeight)
 	context_->OMSetRenderTargets(0, nullptr, nullptr);
 	swap_chain_->ResizeBuffers(0, client_w_, client_h_, DXGI_FORMAT_UNKNOWN, 0);
 	createBackBuffer();
+
+	/* In full-window mode the canvas tracks the client area, so grow/shrink it
+	 * with the window. (Retro mode keeps its fixed 512x514 canvas, letterboxed.) */
+	if (canvas_full_)
+		recreateCanvas(client_w_, client_h_);
 }

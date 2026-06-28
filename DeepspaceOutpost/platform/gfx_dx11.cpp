@@ -24,6 +24,7 @@
 
 #include "compat.h"
 #include "gfx.h"
+#include "ViewMetrics.h"
 
 #include <d3d11.h>
 #include <d3d11_1.h>
@@ -89,6 +90,19 @@ std::vector<Cmd>         g_cmds;
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
+/* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
+ * is set for the frame and g_view carries the aspect-aware optics; the HUD is
+ * floated by adding (g_origin_x,g_origin_y) to every emitted coordinate and to
+ * the clip rect. In retro mode all three are inert (origin 0, legacy optics). */
+int                        g_origin_x  = 0;
+int                        g_origin_y  = 0;
+bool                       g_scene_full = false;
+Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
+
+/* Current canvas size, mirrored from the renderer (retro 512x514 or client). */
+int canvasW() { Renderer* r = platform_renderer(); return r ? r->canvasWidth()  : Renderer::kCanvasWidth;  }
+int canvasH() { Renderer* r = platform_renderer(); return r ? r->canvasHeight() : Renderer::kCanvasHeight; }
+
 /* ---- D3D resources (lazy) ---- */
 bool                          g_inited = false;
 com_ptr<ID3D11VertexShader>    g_cvs, g_tvs;
@@ -139,6 +153,8 @@ void pushTexQuad(ID3D11ShaderResourceView* srv,
 				 float x0, float y0, float x1, float y1,
 				 float u0, float v0, float u1, float v1, uint32_t tint)
 {
+	x0 += g_origin_x; x1 += g_origin_x;
+	y0 += g_origin_y; y1 += g_origin_y;
 	TexVertex q[6] = {
 		{ x0, y0, u0, v0, tint }, { x1, y0, u1, v0, tint }, { x1, y1, u1, v1, tint },
 		{ x0, y0, u0, v0, tint }, { x1, y1, u1, v1, tint }, { x0, y1, u0, v1, tint },
@@ -158,9 +174,16 @@ void pushTexQuad(ID3D11ShaderResourceView* srv,
 	g_tverts.insert(g_tverts.end(), q, q + 6);
 }
 
-void addPoint(int x, int y, uint32_t c) { ColorVertex v{ x + 0.5f, y + 0.5f, c }; pushColor(Topo::Points, &v, 1); }
+/* All primitive coordinates pass through the draw-origin so the HUD can be
+ * floated over the full-window 3D without each widget knowing where it sits. */
+void addPoint(int x, int y, uint32_t c)
+{
+	ColorVertex v{ x + g_origin_x + 0.5f, y + g_origin_y + 0.5f, c };
+	pushColor(Topo::Points, &v, 1);
+}
 void addSegment(int x1, int y1, int x2, int y2, uint32_t c)
 {
+	x1 += g_origin_x; x2 += g_origin_x; y1 += g_origin_y; y2 += g_origin_y;
 	ColorVertex v[2] = { { x1 + 0.5f, y1 + 0.5f, c }, { x2 + 0.5f, y2 + 0.5f, c } };
 	pushColor(Topo::Lines, v, 2);
 }
@@ -168,12 +191,15 @@ void addRect(int x1, int y1, int x2, int y2, uint32_t c)
 {
 	if (x2 < x1) std::swap(x1, x2);
 	if (y2 < y1) std::swap(y1, y2);
+	x1 += g_origin_x; x2 += g_origin_x; y1 += g_origin_y; y2 += g_origin_y;
 	float l = (float)x1, t = (float)y1, r = (float)(x2 + 1), b = (float)(y2 + 1);
 	ColorVertex q[6] = { {l,t,c},{r,t,c},{r,b,c}, {l,t,c},{r,b,c},{l,b,c} };
 	pushColor(Topo::Tris, q, 6);
 }
 void addTri(int x1, int y1, int x2, int y2, int x3, int y3, uint32_t c)
 {
+	x1 += g_origin_x; x2 += g_origin_x; x3 += g_origin_x;
+	y1 += g_origin_y; y2 += g_origin_y; y3 += g_origin_y;
 	ColorVertex t[3] = { {x1+0.5f,y1+0.5f,c},{x2+0.5f,y2+0.5f,c},{x3+0.5f,y3+0.5f,c} };
 	pushColor(Topo::Tris, t, 3);
 }
@@ -313,10 +339,12 @@ void initD3D(ID3D11Device* dev)
 	};
 	dev->CreateInputLayout(te, 3, tvs->GetBufferPointer(), tvs->GetBufferSize(), g_tlayout.put());
 
+	/* gInvSize maps pixel coords -> NDC; it tracks the (now dynamic) canvas size,
+	 * so the buffer is DEFAULT-usage and refreshed each flush via UpdateSubresource. */
 	struct Cb { float invW, invH, p0, p1; }
 	cb{ 1.0f / Renderer::kCanvasWidth, 1.0f / Renderer::kCanvasHeight, 0, 0 };
 	D3D11_BUFFER_DESC cbd{};
-	cbd.ByteWidth = sizeof(Cb); cbd.Usage = D3D11_USAGE_IMMUTABLE; cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cbd.ByteWidth = sizeof(Cb); cbd.Usage = D3D11_USAGE_DEFAULT; cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	D3D11_SUBRESOURCE_DATA cbi{}; cbi.pSysMem = &cb;
 	dev->CreateBuffer(&cbd, &cbi, g_cb.put());
 
@@ -406,7 +434,15 @@ void gfx_draw_line(int x1, int y1, int x2, int y2)               { drawLine(x1, 
 void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
 void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int c) { addTri(x1,y1,x2,y2,x3,y3,col_rgba(c)); }
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
-void gfx_clear_display(void)   { addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK)); }
+void gfx_clear_display(void)
+{
+	/* Full-window flight clears the whole canvas (the 3D fills it); retro mode
+	 * keeps clearing just the legacy play area so the dashboard strip persists. */
+	if (g_scene_full)
+		addRect(0, 0, canvasW() - 1, canvasH() - 1, col_rgba(GFX_COL_BLACK));
+	else
+		addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK));
+}
 void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
 void gfx_clear_area(int tx, int ty, int bx, int by) { addRect(tx, ty, bx, by, col_rgba(GFX_COL_BLACK)); }
 
@@ -451,14 +487,74 @@ void gfx_polygon(int num_points, int* poly_list, int face_colour)
 
 void gfx_set_clip_region(int tx, int ty, int bx, int by)
 {
-	LONG l = tx, t = ty, r = bx + 1, b = by + 1;
+	/* Follow the draw-origin so a floated HUD's clip moves with it, and clamp to
+	 * the live canvas (which may be the full client area, not 512x514). */
+	LONG l = tx + g_origin_x, t = ty + g_origin_y, r = bx + 1 + g_origin_x, b = by + 1 + g_origin_y;
 	if (l < 0) l = 0; if (t < 0) t = 0;
-	if (r > Renderer::kCanvasWidth)  r = Renderer::kCanvasWidth;
-	if (b > Renderer::kCanvasHeight) b = Renderer::kCanvasHeight;
+	if (r > canvasW()) r = canvasW();
+	if (b > canvasH()) b = canvasH();
 	g_scissor = { l, t, r, b };
 }
 
 void xor_mode(int on) { g_xor_mode = (on != 0); }
+
+/* ---- full-window scene / floating HUD ---- */
+
+// Select the canvas/projection mode for the frame about to be drawn: full-window
+// (the in-flight 3D fills the client area, aspect-aware optics) or retro (the
+// letterboxed 512x514 canvas for menus/charts/station). Recomputes the optics
+// from the live client size each call, so it is safe to call every frame.
+void gfx_set_scene_fullwindow(int on)
+{
+	Renderer* r = platform_renderer();
+	if (on && r)
+	{
+		g_scene_full = true;
+		g_view = Neuron::Client::MakeViewMetrics(r->clientWidth(), r->clientHeight());
+	}
+	else
+	{
+		g_scene_full = false;
+		g_view = Neuron::Client::MakeViewMetrics(512, 384);   // legacy play-area optics
+	}
+}
+
+// The aspect-aware optics for the current frame (used by the software projection
+// in threed.cpp / stars.cpp).
+const Neuron::Client::ViewMetrics& gfx_view_metrics(void) { return g_view; }
+
+// Offset every subsequent emitted coordinate (and clip rect) by (x,y). Used to
+// float the HUD; pass (0,0) to draw in the canvas's own space again.
+void gfx_set_draw_origin(int x, int y) { g_origin_x = x; g_origin_y = y; }
+
+// Where the legacy 512x514 HUD layout should be anchored this frame. Retro mode
+// keeps it at the origin; full-window mode pins it to the bottom-centre of the
+// client area so the dashboard floats over the 3D.
+void gfx_hud_anchor(int* ox, int* oy)
+{
+	if (g_scene_full)
+	{
+		*ox = (canvasW() - 512) / 2;
+		*oy = canvasH() - 514;
+		if (*ox < 0) *ox = 0;
+		if (*oy < 0) *oy = 0;
+	}
+	else
+	{
+		*ox = 0;
+		*oy = 0;
+	}
+}
+
+// Set the clip rect to the 3D play area for the current mode: the whole canvas
+// in full-window flight, or the legacy 1,1..510,383 rectangle in retro.
+void gfx_set_scene_clip(void)
+{
+	if (g_scene_full)
+		gfx_set_clip_region(0, 0, canvasW() - 1, canvasH() - 1);
+	else
+		gfx_set_clip_region(1, 1, 510, 383);
+}
 
 /* ---- text ---- */
 void gfx_display_text(int x, int y, const char* txt)
@@ -471,15 +567,18 @@ void gfx_display_colour_text(int x, int y, const char* txt, int col)
 }
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
+	/* Centre on the live canvas: 256 in retro, the window middle in full-window
+	 * flight (so in-flight messages stay centred when the 3D fills the screen). */
+	const int mid = g_scene_full ? canvasW() / 2 : 256;
 	if (psize == 140)   /* ELITE_2 colour title font, drawn in its own colours */
 	{
 		int w = g_font[1].loaded() ? g_font[1].textWidth(str) : 0;
-		drawString(1, 256 - w / 2, y, str, 0xFFFFFFFFu);
+		drawString(1, mid - w / 2, y, str, 0xFFFFFFFFu);
 	}
 	else                /* ELITE_1 body font, tinted */
 	{
 		int w = g_font[0].loaded() ? g_font[0].textWidth(str) : 0;
-		drawString(0, 256 - w / 2, y, str, col_rgba(col));
+		drawString(0, mid - w / 2, y, str, col_rgba(col));
 	}
 }
 
@@ -600,12 +699,20 @@ void gfx_dx11_flush(void)
 	ID3D11DeviceContext* ctx = r->context();
 	if (!g_inited) initD3D(dev);
 
+	/* Match the canvas to the mode this batch was authored for (retro vs full
+	 * window), so its size and the gInvSize constant agree with the vertices. */
+	r->ensureCanvasMode(g_scene_full);
+
 	if (g_inited && !g_cmds.empty())
 	{
 		ensureBuf(dev, g_cvb, g_cvb_cap, g_cverts.size() * sizeof(ColorVertex));
 		ensureBuf(dev, g_tvb, g_tvb_cap, g_tverts.size() * sizeof(TexVertex));
 		upload(ctx, g_cvb.get(), g_cverts.data(), g_cverts.size() * sizeof(ColorVertex));
 		upload(ctx, g_tvb.get(), g_tverts.data(), g_tverts.size() * sizeof(TexVertex));
+
+		struct Cb { float invW, invH, p0, p1; }
+		cbData{ 1.0f / (float)r->canvasWidth(), 1.0f / (float)r->canvasHeight(), 0, 0 };
+		ctx->UpdateSubresource(g_cb.get(), 0, nullptr, &cbData, 0, 0);
 
 		r->bindCanvasTarget();
 		ID3D11Buffer* cb = g_cb.get();
