@@ -1,11 +1,11 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "StationProtocol.h"
 #include "ReliableChannel.h"
 
 using namespace Neuron;
 
-TEST(StationProto_RequestRoundTrips)
+TEST(StationProto, RequestRoundTrips)
 {
   Net::StationRequest req;
   req.kind = Net::StationRequestKind::Buy;
@@ -17,14 +17,14 @@ TEST(StationProto_RequestRoundTrips)
                           Net::EncodeStationRequest(req) };
 
   Net::StationRequest out;
-  CHECK(Net::DecodeStationRequest(m, out));
-  CHECK(out.kind == Net::StationRequestKind::Buy);
-  CHECK(out.commodity == 3);
-  CHECK(out.quantity == 12);
-  CHECK(out.stationId == 777);
+  EXPECT_TRUE(Net::DecodeStationRequest(m, out));
+  EXPECT_TRUE(out.kind == Net::StationRequestKind::Buy);
+  EXPECT_TRUE(out.commodity == 3);
+  EXPECT_TRUE(out.quantity == 12);
+  EXPECT_TRUE(out.stationId == 777);
 }
 
-TEST(StationProto_ResponseRoundTrips)
+TEST(StationProto, ResponseRoundTrips)
 {
   Net::StationResponse resp;
   resp.kind = Net::StationRequestKind::Sell;
@@ -37,23 +37,23 @@ TEST(StationProto_ResponseRoundTrips)
                           Net::EncodeStationResponse(resp) };
 
   Net::StationResponse out;
-  CHECK(Net::DecodeStationResponse(m, out));
-  CHECK(out.kind == Net::StationRequestKind::Sell);
-  CHECK(out.status == Net::StationStatus::Ok);
-  CHECK(out.credits == -1234);
-  CHECK(out.commodity == 5);
-  CHECK(out.cargo == 9);
+  EXPECT_TRUE(Net::DecodeStationResponse(m, out));
+  EXPECT_TRUE(out.kind == Net::StationRequestKind::Sell);
+  EXPECT_TRUE(out.status == Net::StationStatus::Ok);
+  EXPECT_TRUE(out.credits == -1234);
+  EXPECT_TRUE(out.commodity == 5);
+  EXPECT_TRUE(out.cargo == 9);
 }
 
-TEST(StationProto_DecodersRejectWrongType)
+TEST(StationProto, DecodersRejectWrongType)
 {
   Net::ReliableMessage resp{ static_cast<uint16_t>(Net::EventType::StationResponse),
                              Net::EncodeStationResponse(Net::StationResponse{}) };
   Net::StationRequest req;
-  CHECK(!Net::DecodeStationRequest(resp, req));   // a response is not a request
+  EXPECT_TRUE(!Net::DecodeStationRequest(resp, req));   // a response is not a request
 }
 
-TEST(StationProto_DeliversOverReliableChannel)
+TEST(StationProto, DeliversOverReliableChannel)
 {
   Net::ReliableChannel client;
   Net::ReliableChannel server;
@@ -64,12 +64,12 @@ TEST(StationProto_DeliversOverReliableChannel)
   Net::SendStationRequest(client, req);
 
   std::vector<uint8_t> pkt = client.WritePacket();
-  CHECK(server.ReadPacket(pkt.data(), pkt.size()));
+  EXPECT_TRUE(server.ReadPacket(pkt.data(), pkt.size()));
 
   Net::ReliableMessage m;
-  CHECK(server.Receive(m));
+  EXPECT_TRUE(server.Receive(m));
   Net::StationRequest got;
-  CHECK(Net::DecodeStationRequest(m, got));
-  CHECK(got.kind == Net::StationRequestKind::Dock);
-  CHECK(got.stationId == 5);
+  EXPECT_TRUE(Net::DecodeStationRequest(m, got));
+  EXPECT_TRUE(got.kind == Net::StationRequestKind::Dock);
+  EXPECT_TRUE(got.stationId == 5);
 }

@@ -128,14 +128,27 @@ There is no vcpkg manifest — C++/WinRT and DirectX come from the Windows SDK.
 | C++/WinRT | From the Windows SDK (`winrt/Windows.*` headers) — **not** vcpkg |
 | Graphics API | Direct3D 11 (with a legacy OpenGL-over-D3D compatibility layer) |
 | Platforms | x64 and x86 (Debug + Release presets for both) |
-| Dependency manager | None (no `vcpkg.json`); Win32/DirectX/Winsock libs auto-linked via `#pragma comment(lib, …)` |
+| Dependency manager | None for shipping code (no `vcpkg.json`); Win32/DirectX/Winsock libs auto-linked via `#pragma comment(lib, …)`. **GoogleTest** is fetched via CMake `FetchContent` for the test binaries only |
 
 ## Testing Instructions
 
-- There is currently **no test project or test framework** in the repository.
-- Manual validation (build + run the client) is expected after rendering or gameplay changes.
-- If unit tests are added later, choose a framework explicitly with the maintainer — do not
-  invent one unprompted.
+- **GoogleTest is the project's standard unit-test framework.** Each engine library has a
+  companion `*.Tests` project under `Tests/<Library>/` (`Tests/NeuronCore`, `Tests/GameLogic`,
+  `Tests/NeuronClient`, `Tests/NeuronServer`). Add new tests to the project for the library
+  whose code they exercise; if a library has no project yet, add one by mirroring an existing
+  `Tests/<Library>/CMakeLists.txt`.
+- Write cases with the standard `TEST(Suite, Name)` macro and `EXPECT_*` / `ASSERT_*`
+  assertions. The former hand-rolled `TestFramework.h` harness (`TEST(name)` / `CHECK`) has
+  been **removed** — do not reintroduce it.
+- GoogleTest is fetched at configure time via CMake `FetchContent` (pinned release tarball,
+  hash-verified). It is the **one sanctioned exception** to the native-first / no-third-party
+  rule: it is a build-time dependency of the test binaries only and never ships in the engine
+  or game executables.
+- Tests self-register with CTest via `gtest_discover_tests`. Run the whole suite with
+  `ctest --output-on-failure` from the build directory (this is exactly what CI runs). Pass
+  `-DBUILD_TESTING=OFF` at configure time to skip the test projects and the GoogleTest fetch.
+- Manual validation (build + run the client) is still expected after rendering or gameplay
+  changes that unit tests cannot cover.
 
 ## Code Style
 

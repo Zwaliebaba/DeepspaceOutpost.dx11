@@ -1,4 +1,4 @@
-#include "TestFramework.h"
+#include <gtest/gtest.h>
 
 #include "CameraFollow.h"
 
@@ -12,26 +12,26 @@ namespace
   const Math::Vector3d kNose{ 0.0, 0.0, 1.0 };
 }
 
-TEST(CameraFollow_CockpitSitsExactlyOnTheShip)
+TEST(CameraFollow, CockpitSitsExactlyOnTheShip)
 {
   Client::CameraPose pose = Client::FollowShip(
     Math::Vector3i64{ 1000, -2000, 3000 }, kSide, kRoof, kNose,
     Client::ViewOffset{ 0.0, 0.0, 0.0 });
 
-  CHECK((pose.eye == Math::Vector3i64{ 1000, -2000, 3000 }));
+  EXPECT_TRUE((pose.eye == Math::Vector3i64{ 1000, -2000, 3000 }));
 }
 
-TEST(CameraFollow_ChaseOffsetsBehindAndAbove)
+TEST(CameraFollow, ChaseOffsetsBehindAndAbove)
 {
   // Up 12, back 45 (forward = -45) with the ship facing +z.
   Client::CameraPose pose = Client::FollowShip(
     Math::Vector3i64{ 0, 0, 0 }, kSide, kRoof, kNose,
     Client::ViewOffset{ /*right*/ 0.0, /*up*/ 12.0, /*forward*/ -45.0 });
 
-  CHECK((pose.eye == Math::Vector3i64{ 0, 12, -45 }));
+  EXPECT_TRUE((pose.eye == Math::Vector3i64{ 0, 12, -45 }));
 }
 
-TEST(CameraFollow_OffsetRotatesWithTheShip)
+TEST(CameraFollow, OffsetRotatesWithTheShip)
 {
   // Ship yawed to face +x: nose=(1,0,0), roof=(0,1,0), side=roof x nose=(0,0,-1).
   const Math::Vector3d nose{ 1.0, 0.0, 0.0 };
@@ -43,27 +43,27 @@ TEST(CameraFollow_OffsetRotatesWithTheShip)
     Client::ViewOffset{ /*right*/ 0.0, /*up*/ 12.0, /*forward*/ -45.0 });
 
   // "Behind" is now along -x, so the eye trails the ship on the x axis.
-  CHECK((pose.eye == Math::Vector3i64{ 55, 12, 0 }));
+  EXPECT_TRUE((pose.eye == Math::Vector3i64{ 55, 12, 0 }));
 }
 
-TEST(CameraFollow_RoundsToNearestWorldUnit)
+TEST(CameraFollow, RoundsToNearestWorldUnit)
 {
   Client::CameraPose pose = Client::FollowShip(
     Math::Vector3i64{ 0, 0, 0 }, kSide, kRoof, kNose,
     Client::ViewOffset{ /*right*/ 0.0, /*up*/ 12.4, /*forward*/ -45.6 });
 
   // llround: 12.4 -> 12, -45.6 -> -46.
-  CHECK((pose.eye == Math::Vector3i64{ 0, 12, -46 }));
+  EXPECT_TRUE((pose.eye == Math::Vector3i64{ 0, 12, -46 }));
 }
 
-TEST(CameraFollow_PoseCarriesShipFacing)
+TEST(CameraFollow, PoseCarriesShipFacing)
 {
   Client::CameraPose pose = Client::FollowShip(
     Math::Vector3i64{ 0, 0, 0 }, kSide, kRoof, kNose,
     Client::ViewOffset{ 0.0, 0.0, 0.0 });
 
   // A rigid follow looks along the ship's nose.
-  CHECK(pose.nose.x == kNose.x);
-  CHECK(pose.nose.y == kNose.y);
-  CHECK(pose.nose.z == kNose.z);
+  EXPECT_TRUE(pose.nose.x == kNose.x);
+  EXPECT_TRUE(pose.nose.y == kNose.y);
+  EXPECT_TRUE(pose.nose.z == kNose.z);
 }
