@@ -1,7 +1,9 @@
-# DeepspaceOutpost - DirectX 11 / XAudio2.
+# DeepspaceOutpost - the game executable.
 #
-# Target: a Win32 GUI executable. Portable game logic (ported from C to C++23)
-# plus the new platform layer (Win32 / Direct3D 11 / XAudio2).
+# This target now contains ONLY the legacy game code (ported C -> C++23) and the
+# pieces that are specific to THIS game. The generic client engine - the render
+# seam, camera/projection math, replication client, and the Win32/Direct3D 11/
+# XAudio2 backend - lives in the NeuronClient library and is linked in.
 
 # ---- Portable game logic (formerly C, now compiled as C++23) ----
 set(GAME_SOURCES
@@ -20,46 +22,35 @@ set(GAME_SOURCES
     missions.cpp
     options.cpp
     trade.cpp
-    vector.cpp
     intro.cpp
     file.cpp
     random.cpp
 )
 
-# ---- Platform layer (Win32 / Direct3D 11 / XAudio2) - idiomatic modern C++23 ----
-# RenderQueue is the new A1 "render seam" (house-style C++23). It is held to the
-# same higher warning bar as the platform layer, not the legacy /permissive tier.
-set(PLATFORM_SOURCES
-    RenderQueue.cpp
-    RenderContext.cpp
-    GameUniverse.cpp
+# ---- Game-specific client glue (kept here; coupled to legacy game state) ----
+# Camera.cpp adapts the legacy local_object render struct + current_screen, and
+# GameUniverse is this game's ECS world. WinMain.cpp is the exe entry point (a
+# static library's entry point would not be pulled in by the linker), which boots
+# the NeuronClient platform layer and calls game_main().
+set(GAME_CLIENT_SOURCES
+    WinMain.cpp
     Camera.cpp
-    ReplicationClient.cpp
-    platform/GfxRenderSink.cpp
-    platform/platform_win.cpp
-    platform/Renderer.cpp
-    platform/gfx_dx11.cpp
-    platform/Image.cpp
-    platform/Font.cpp
-    platform/audio_xa2.cpp
-    platform/input_win.cpp
-    platform/dialog_win.cpp
+    GameUniverse.cpp
 )
 
-add_executable(DeepspaceOutpost WIN32 pch.cpp ${GAME_SOURCES} ${PLATFORM_SOURCES})
+add_executable(DeepspaceOutpost WIN32 pch.cpp ${GAME_SOURCES} ${GAME_CLIENT_SOURCES})
 
 target_compile_features(DeepspaceOutpost PRIVATE cxx_std_23)
 
 # Precompiled header (pch.h / pch.cpp). pch.h pulls in NeuronClient.h ->
 # NeuronCore.h, so the engine core is available to every translation unit.
-# pch.cpp is listed above but kept out of the GAME_SOURCES/PLATFORM_SOURCES
-# conformance tiers below so it builds with the target defaults.
 target_precompile_headers(DeepspaceOutpost PRIVATE pch.h)
 
-# Contract headers (gfx.h, sound.h, ...) live in this dir; platform headers in platform/.
+# Only this target's own (game) headers live here; the engine + presentation
+# contracts (gfx.h, sound.h, Renderer.h, ...) come from NeuronClient's public
+# include dirs via the link below.
 target_include_directories(DeepspaceOutpost PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/platform
 )
 
 if(MSVC)
@@ -71,28 +62,17 @@ if(MSVC)
     # The faithfully ported game logic relies on C-isms (e.g. string literals to
     # char*) that /permissive- rejects, and the shared precompiled header (pch.h)
     # must be built and consumed under the same conformance flags or MSVC raises
-    # C2855. Unifying on /permissive lets every translation unit - ported game
-    # logic and platform layer alike - share one PCH. It still compiles as C++23,
-    # and the whole target now uses the same /W4 warning level.
+    # C2855. It still compiles as C++23, with the same /W4 warning level.
     target_compile_options(DeepspaceOutpost PRIVATE /permissive /W4)
 endif()
 
-# Libraries the platform layer will need across the milestones.
+# Engine modules. NeuronClient pulls in NeuronCore publicly, and now also brings
+# the Win32/Direct3D/XAudio2 system libraries it needs (PUBLIC), so they no
+# longer need to be listed here. NeuronCore is listed explicitly per the module
+# dependency contract.
 target_link_libraries(DeepspaceOutpost PRIVATE
-    # Engine modules for the MMO migration. NeuronClient pulls in NeuronCore
-    # publicly; NeuronCore is listed explicitly per the module dependency contract.
     NeuronClient
     NeuronCore
-
-    d3d11
-    dxgi
-    d3dcompiler
-    dxguid
-    xaudio2
-    winmm        # timing + MIDI (M6)
-    comdlg32     # file dialog (M4)
-    ole32        # COM / WIC
-    windowscodecs # WIC image loading (M3)
 )
 
 # ---- Copy runtime assets next to the executable ----
