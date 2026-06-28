@@ -50,42 +50,44 @@ int hyper_galactic;
 
 
 
-void rotate_x_first (double *a, double *b, int direction)
+// Coupled small attitude rotation of two basis rows (the legacy rotate_x_first
+// applied per component; each component is independent, so this is lane-parallel).
+// direction < 0 / > 0 select the spin sense.
+static void RotateAxisPair (XMVECTOR& a, XMVECTOR& b, int direction)
 {
-	double fx,ux;
-
-	fx = *a;
-	ux = *b;
-
+	const float damp  = 1.0f - 1.0f / 512.0f;
+	const float cross = 1.0f / 19.0f;
+	XMVECTOR na, nb;
 	if (direction < 0)
-	{	
-		*a = fx - (fx / 512) + (ux / 19);
-		*b = ux - (ux / 512) - (fx / 19);
+	{
+		na = XMVectorAdd(XMVectorScale(a, damp), XMVectorScale(b, cross));
+		nb = XMVectorSubtract(XMVectorScale(b, damp), XMVectorScale(a, cross));
 	}
 	else
 	{
-		*a = fx - (fx / 512) - (ux / 19);
-		*b = ux - (ux / 512) + (fx / 19);
+		na = XMVectorSubtract(XMVectorScale(a, damp), XMVectorScale(b, cross));
+		nb = XMVectorAdd(XMVectorScale(b, damp), XMVectorScale(a, cross));
 	}
+	a = na;
+	b = nb;
 }
 
 
-void rotate_vec (struct vector *vec, double alpha, double beta)
+// The Elite per-frame attitude shear (legacy rotate_vec). Each step uses the
+// just-updated component, so it is an inherently sequential scalar recurrence and
+// is reproduced exactly; the basis simply lives in an XMVECTOR around it.
+static XMVECTOR RotateShear (FXMVECTOR v, double alpha, double beta)
 {
-	double x,y,z;
-	
-	x = vec->x;
-	y = vec->y;
-	z = vec->z;
+	double x = XMVectorGetX(v);
+	double y = XMVectorGetY(v);
+	double z = XMVectorGetZ(v);
 
 	y = y - alpha * x;
 	x = x + alpha * y;
 	y = y - beta * z;
 	z = z + beta * y;
-	
-	vec->x = x;
-	vec->y = y;
-	vec->z = z;
+
+	return XMVectorSet((float) x, (float) y, (float) z, 0.0f);
 }
 
 
@@ -101,23 +103,28 @@ void move_local_object (struct local_object *obj)
 	double beta;
 	int rotx,rotz;
 	double speed;
-	
+
 	alpha = PlayerFlight().roll / 256.0;
 	beta = PlayerFlight().climb / 256.0;
-	
+
+	// Load the orientation basis rows (side/roof/nose) into SIMD registers.
+	XMVECTOR side = XMVectorSet((float) obj->rotmat[0].x, (float) obj->rotmat[0].y, (float) obj->rotmat[0].z, 0.0f);
+	XMVECTOR roof = XMVectorSet((float) obj->rotmat[1].x, (float) obj->rotmat[1].y, (float) obj->rotmat[1].z, 0.0f);
+	XMVECTOR nose = XMVectorSet((float) obj->rotmat[2].x, (float) obj->rotmat[2].y, (float) obj->rotmat[2].z, 0.0f);
+
 	x = obj->location.x;
 	y = obj->location.y;
 	z = obj->location.z;
 
 	if (!(obj->flags & FLG_DEAD))
-	{ 
+	{
 		if (obj->velocity != 0)
 		{
 			speed = obj->velocity;
-			speed *= 1.5; 	
-			x += obj->rotmat[2].x * speed; 
-			y += obj->rotmat[2].y * speed; 
-			z += obj->rotmat[2].z * speed; 
+			speed *= 1.5;
+			x += XMVectorGetX(nose) * speed;
+			y += XMVectorGetY(nose) * speed;
+			z += XMVectorGetZ(nose) * speed;
 		}
 
 		if (obj->acceleration != 0)
@@ -126,12 +133,12 @@ void move_local_object (struct local_object *obj)
 			obj->acceleration = 0;
 			if (obj->velocity > ship_list[obj->type]->velocity)
 				obj->velocity = ship_list[obj->type]->velocity;
-			
+
 			if (obj->velocity <= 0)
 				obj->velocity = 1;
 		}
 	}
-	
+
 	k2 = y - alpha * x;
 	z = z + beta * k2;
 	y = k2 - z * beta;
@@ -141,53 +148,50 @@ void move_local_object (struct local_object *obj)
 
 	obj->location.x = x;
 	obj->location.y = y;
-	obj->location.z = z;	
+	obj->location.z = z;
 
 	obj->distance = sqrt (x*x + y*y + z*z);
-	
+
 	if (obj->type == SHIP_PLANET)
 		beta = 0.0;
-	
-	rotate_vec (&obj->rotmat[2], alpha, beta);
-	rotate_vec (&obj->rotmat[1], alpha, beta);
-	rotate_vec (&obj->rotmat[0], alpha, beta);
 
-	if (obj->flags & FLG_DEAD)
-		return;
+	// Per-frame attitude shear on each basis row (legacy rotate_vec order).
+	nose = RotateShear(nose, alpha, beta);
+	roof = RotateShear(roof, alpha, beta);
+	side = RotateShear(side, alpha, beta);
 
-
-	rotx = obj->rotx;
-	rotz = obj->rotz;
-	
-	/* If necessary rotate the object around the X axis... */
-
-	if (rotx != 0)
+	if (!(obj->flags & FLG_DEAD))
 	{
-		rotate_x_first (&obj->rotmat[2].x, &obj->rotmat[1].x, rotx);
-		rotate_x_first (&obj->rotmat[2].y, &obj->rotmat[1].y, rotx);	
-		rotate_x_first (&obj->rotmat[2].z, &obj->rotmat[1].z, rotx);
+		rotx = obj->rotx;
+		rotz = obj->rotz;
 
-		if ((rotx != 127) && (rotx != -127))
-			obj->rotx -= (rotx < 0) ? -1 : 1;
-	}	
+		// If necessary rotate the object around the X axis (nose & roof)...
+		if (rotx != 0)
+		{
+			RotateAxisPair(nose, roof, rotx);
+			if ((rotx != 127) && (rotx != -127))
+				obj->rotx -= (rotx < 0) ? -1 : 1;
+		}
 
-	
-	/* If necessary rotate the object around the Z axis... */
+		// If necessary rotate the object around the Z axis (side & roof)...
+		if (rotz != 0)
+		{
+			RotateAxisPair(side, roof, rotz);
+			if ((rotz != 127) && (rotz != -127))
+				obj->rotz -= (rotz < 0) ? -1 : 1;
+		}
 
-	if (rotz != 0)
-	{	
-		rotate_x_first (&obj->rotmat[0].x, &obj->rotmat[1].x, rotz);
-		rotate_x_first (&obj->rotmat[0].y, &obj->rotmat[1].y, rotz);	
-		rotate_x_first (&obj->rotmat[0].z, &obj->rotmat[1].z, rotz);	
-
-		if ((rotz != 127) && (rotz != -127))
-			obj->rotz -= (rotz < 0) ? -1 : 1;
+		// Orthonormalize the rotation matrix (legacy tidy_matrix).
+		const XMMATRIX basis = Orthonormalize(XMMATRIX(side, roof, nose, g_XMIdentityR3));
+		side = basis.r[0];
+		roof = basis.r[1];
+		nose = basis.r[2];
 	}
 
-
-	/* Orthonormalize the rotation matrix... */
-
-	tidy_matrix (obj->rotmat);
+	// Store the basis rows back to the (still-legacy) rotmat.
+	obj->rotmat[0].x = XMVectorGetX(side); obj->rotmat[0].y = XMVectorGetY(side); obj->rotmat[0].z = XMVectorGetZ(side);
+	obj->rotmat[1].x = XMVectorGetX(roof); obj->rotmat[1].y = XMVectorGetY(roof); obj->rotmat[1].z = XMVectorGetZ(roof);
+	obj->rotmat[2].x = XMVectorGetX(nose); obj->rotmat[2].y = XMVectorGetY(nose); obj->rotmat[2].z = XMVectorGetZ(nose);
 }
 
 
@@ -229,7 +233,6 @@ void dock_player (void)
 // global local_objects[] table to index into.
 int is_docking_obj (struct local_object *obj)
 {
-	struct vector vec;
 	double fz;
 	double ux;
 
@@ -241,9 +244,9 @@ int is_docking_obj (struct local_object *obj)
 	if (fz > -0.90)
 		return 0;
 
-	vec = unit_vector (&obj->location);
+	const XMVECTOR dir = XMVector3Normalize(XMVectorSet((float) obj->location.x, (float) obj->location.y, (float) obj->location.z, 0.0f));
 
-	if (vec.z < 0.927)
+	if (XMVectorGetZ(dir) < 0.927f)
 		return 0;
 
 	ux = obj->rotmat[1].x;
@@ -442,38 +445,36 @@ void make_station_appear (void)
 {
 	double px,py,pz;
 	double sx,sy,sz;
-	Vector vec;
 	Matrix rotmat;
-	
+
 	px = local_objects[0].location.x;
 	py = local_objects[0].location.y;
 	pz = local_objects[0].location.z;
-	
-	vec.x = (rand() & 32767) - 16384;	
-	vec.y = (rand() & 32767) - 16384;	
-	vec.z = rand() & 32767;	
 
-	vec = unit_vector (&vec);
+	const XMVECTOR vec = XMVector3Normalize(XMVectorSet(
+		(float) ((rand() & 32767) - 16384),
+		(float) ((rand() & 32767) - 16384),
+		(float) (rand() & 32767), 0.0f));
+	const double vx = XMVectorGetX(vec);
+	const double vy = XMVectorGetY(vec);
+	const double vz = XMVectorGetZ(vec);
 
-	sx = px - vec.x * 65792;
-	sy = py - vec.y * 65792;
-	sz = pz - vec.z * 65792;
+	sx = px - vx * 65792;
+	sy = py - vy * 65792;
+	sz = pz - vz * 65792;
 
-//	set_init_matrix (rotmat);
-	
-	rotmat[0].x = 1.0;
-	rotmat[0].y = 0.0;
-	rotmat[0].z = 0.0;
+	// Build the station basis from the approach direction and orthonormalize it
+	// (legacy tidy_matrix); the legacy rotmat is handed to add_new_station, which
+	// still takes a Matrix until the storage flip.
+	const XMMATRIX basis = Orthonormalize(XMMATRIX(
+		XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f),
+		XMVectorSet((float) vx, (float) vz, (float) -vy, 0.0f),
+		XMVectorSet((float) vx, (float) vy, (float) vz, 0.0f),
+		g_XMIdentityR3));
 
-	rotmat[1].x = vec.x;
-	rotmat[1].y = vec.z;
-	rotmat[1].z = -vec.y;
-	
-	rotmat[2].x = vec.x;
-	rotmat[2].y = vec.y;
-	rotmat[2].z = vec.z;
-
-	tidy_matrix (rotmat);
+	rotmat[0].x = XMVectorGetX(basis.r[0]); rotmat[0].y = XMVectorGetY(basis.r[0]); rotmat[0].z = XMVectorGetZ(basis.r[0]);
+	rotmat[1].x = XMVectorGetX(basis.r[1]); rotmat[1].y = XMVectorGetY(basis.r[1]); rotmat[1].z = XMVectorGetZ(basis.r[1]);
+	rotmat[2].x = XMVectorGetX(basis.r[2]); rotmat[2].y = XMVectorGetY(basis.r[2]); rotmat[2].z = XMVectorGetZ(basis.r[2]);
 	
 	add_new_station (sx, sy, sz, rotmat);
 }
@@ -744,8 +745,8 @@ void render_replicated_objects (void)
 		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
 			obj.distance < 600 && PlayerFlight().speed <= dockSpeedLimit)
 		{
-			struct vector approach = unit_vector (&obj.location);
-			if (approach.z > 0.5)   // station roughly ahead -> dock
+			const XMVECTOR approach = XMVector3Normalize(XMVectorSet((float) obj.location.x, (float) obj.location.y, (float) obj.location.z, 0.0f));
+			if (XMVectorGetZ(approach) > 0.5f)   // station roughly ahead -> dock
 			{
 				snd_play_sample (SND_DOCK);
 				dock_player ();
@@ -872,7 +873,6 @@ void update_scanner (void)
 
 void update_compass (void)
 {
-	struct vector dest;
 	int compass_x;
 	int compass_y;
 	int un = 0;
@@ -883,12 +883,12 @@ void update_compass (void)
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		un = 1;
 	
-	dest = unit_vector (&local_objects[un].location);
+	const XMVECTOR dest = XMVector3Normalize(XMVectorSet((float) local_objects[un].location.x, (float) local_objects[un].location.y, (float) local_objects[un].location.z, 0.0f));
 	
-	compass_x = compass_centre_x + (dest.x * 16);
-	compass_y = compass_centre_y + (dest.y * -16);
+	compass_x = compass_centre_x + (XMVectorGetX(dest) * 16);
+	compass_y = compass_centre_y + (XMVectorGetY(dest) * -16);
 	
-	if (dest.z < 0)
+	if (XMVectorGetZ(dest) < 0)
 	{
 		gfx_draw_sprite (IMG_RED_DOT, compass_x, compass_y);
 	}
@@ -1290,7 +1290,9 @@ void complete_hyperspace (void)
 	clear_local_objects();
 
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
-	set_init_matrix (rotmat);
+	rotmat[0].x = 1.0; rotmat[0].y = 0.0; rotmat[0].z = 0.0;
+	rotmat[1].x = 0.0; rotmat[1].y = 1.0; rotmat[1].z = 0.0;
+	rotmat[2].x = 0.0; rotmat[2].y = 0.0; rotmat[2].z = -1.0;
 
 	pz = (((docked_planet.b) & 7) + 7) / 2;
 	px = pz / 2;
@@ -1399,7 +1401,9 @@ void launch_player (void)
 	create_new_stars();
 	clear_local_objects();
 	generate_landscape(docked_planet.a * 251 + docked_planet.b);
-	set_init_matrix (rotmat);
+	rotmat[0].x = 1.0; rotmat[0].y = 0.0; rotmat[0].z = 0.0;
+	rotmat[1].x = 0.0; rotmat[1].y = 1.0; rotmat[1].z = 0.0;
+	rotmat[2].x = 0.0; rotmat[2].y = 0.0; rotmat[2].z = -1.0;
 	add_new_ship (SHIP_PLANET, 0, 0, 65536, rotmat, 0, 0);
 
 	rotmat[2].x = -rotmat[2].x;
