@@ -1,7 +1,9 @@
 # Message.md — A Unified Message System for NeuronCore
 
-> **Status:** Design / plan (v2). No code yet. v2 folds in an architecture review aimed at
-> commercial-engine scalability. The settled decisions:
+> **Status:** Design / plan (v2.1). No code yet. v2 folded in a commercial-engine architecture
+> review; v2.1 resolves the four remaining open questions (now §16: one catalog;
+> `DamageApplied` server-internal; validation-now/crypto-deferred; raw-float with on-demand
+> quantization). The plan is ready to implement from Phase 0. The settled decisions:
 >
 > | Decision | Choice |
 > |---|---|
@@ -191,9 +193,10 @@ and a `Fields()`/member mismatch is a compile error rather than silent wire drif
 - Strings UTF-8, **length-prefixed and capped**; `std::vector`/array reads are **bounded**
   (mirror `GALAXY_NAME_MAX`) — no unbounded allocation from a hostile length.
 - `bool` encoded as `u8`; never raw struct layout.
-- **Float policy:** raw IEEE-754 for presentation/intent; **deterministic gameplay values
-  that must replay identically are quantized/fixed-point** (decided per field, documented in
-  the catalog).
+- **Float policy (resolved, §16 Q4):** raw IEEE-754 now for presentation/intent; world
+  position is already `int64` (exact). **Rule:** any float feeding divergence-sensitive
+  authoritative math is promoted to the codec's **fixed-point leaf** per-field *when
+  identified* — not pre-emptively. Documented per field in the catalog.
 - Never serialize pointers, platform/STL-layout-dependent types, or transient handles.
 - Entity references use `NetEntityId` (§9), never a bare recyclable ECS index.
 
@@ -320,10 +323,16 @@ registry; no separate IDL to maintain.
   0x0300–0x03FF   chat / social
   0x0400–0x04FF   station / economy
   0x0F00–0x0FFF   debug / tooling
-  0x1000+         game-specific extensions
+  0x1000–0x7FFF   game-specific extensions (wire)
+  0x8000–0xFFFE   LocalOnly / Tooling (NEVER on the wire)
+  0xFFFF          Invalid (reserved-max)
   ```
+- **High bit = non-wire.** `MessageScope::LocalOnly`/`Tooling` ids set bit 15 (`>= 0x8000`),
+  giving a one-line runtime assert: a `Wire` send of a high-bit id is a bug. Local events
+  still get a stable id (for tracing/metrics) without consuming wire-ABI space.
 - Each id documented with **owner + lifecycle**.
-- **CI test** asserts no duplicate ids and that every `Wire` message has a lane + direction.
+- **CI test** asserts no duplicate ids, that every `Wire` message has a lane + direction, and
+  that no `LocalOnly`/`Tooling` id is `< 0x8000` (nor any `Wire` id `>= 0x8000`).
 
 ---
 
@@ -415,13 +424,17 @@ Handlers (behaviour) live **outside** NeuronCore.
 
 ---
 
-## 13. Security posture (rec 5/“questions” — stated assumption)
-**Assumed now:** the inbound **validation + per-peer rate-limiting** pipeline (§6.3) and
-authority checks (§9) — these are gameplay-integrity essentials and cheap.
-**Deferred (hooks left, not built):** encryption, authentication, connection tokens, replay-
-protection nonces, anti-spoofing crypto. The framing reserves space for a pre-catalog
-security envelope (§6.4) so these can be added below the message layer later **without
-touching the catalog**. *Flag if you want any of these in the near-term scope.*
+## 13. Security posture (resolved — Q3)
+**Now:** the inbound **validation + per-peer rate-limiting** pipeline (§6.3) and authority
+checks (§9). These are gameplay-integrity essentials, cheap, and protect the authoritative
+sim from a buggy/hostile client — so they ship from Phase 2 (the moment untrusted bytes first
+reach the server).
+**Deferred (hooks reserved, not built):** encryption, authentication, connection tokens,
+replay-protection nonces, anti-spoofing crypto. Rationale: the project is pre-account /
+pre-persistence (NeuronServer's MS SQL layer is still a placeholder) and lockstep, so transport
+crypto/auth is premature — there is no identity to protect yet. The framing reserves a
+fixed-size **pre-catalog security envelope** slot (§6.4) so these slot in *below* the message
+layer later **without touching the catalog**. Revisit when accounts/persistence land.
 
 ---
 
@@ -475,15 +488,42 @@ Collapse `PeekMagic` to one branch; update `AGENTS.md`/roadmap.
 
 ---
 
-## 16. Open questions still on the table
-1. **Local vs wire catalogs:** v2 keeps **one catalog** with `MessageScope` separating
-   local/wire (simplest, one registry for tooling). Switch to physically separate
-   local-domain catalogs only if the wire catalog feels polluted — flag if preferred.
-2. **`DamageApplied` to the client?** Kept server-internal for now; promote to `Wire` only if
-   the client needs damage numbers/hit feedback beyond death VFX.
-3. **Security timing (§13):** confirm crypto/auth stays deferred, or pull any forward.
-4. **Quantization policy:** which gameplay floats become fixed-point for deterministic
-   replay? (Position is already `int64`; intent axes likely fine as raw float.)
+## 16. Resolved decisions (were the open questions)
+
+**Q1 — One catalog vs separate local/wire catalogs → ONE catalog.**
+Keep a single registry with `MessageScope` separating local from wire, reinforced by the
+**high-bit id rule** (§7.2): `LocalOnly`/`Tooling` ids are `>= 0x8000` and can never serialize
+onto the wire. One catalog means one registry for the standalone decoder, schema export,
+compat-diff, duplicate-id CI, and metrics — splitting would duplicate all of that for no real
+isolation gain, since scope + high-bit already give hard separation. Revisit only if local
+types balloon into the hundreds, at which point they move to a sub-range/sub-namespace without
+changing the mechanism.
+
+**Q2 — `DamageApplied` to the client → NO; keep it server-internal (LocalOnly).**
+Verified: `Net::EntitySnapshot` replicates position/orientation/speed/type but **not** health,
+so the client has no authoritative health today and no HUD that needs per-hit numbers (Elite
+lineage shows energy/shield *state*, not floating damage). `DamageApplied` stays a `LocalOnly`
+server fact driving crime/death. **When** hit feedback is wanted, prefer **adding a health byte
+to `EntitySnapshot`** (self-superseding state — matches the snapshot-for-state /
+message-for-events split) over a per-hit reliable message. Reserve a `Wire` `DamageApplied`
+`Event` (Gameplay lane) only for feedback that is inherently event-shaped — a one-shot "you
+took N from X" toast a snapshot can't express. Reversible either way.
+
+**Q3 — Security timing → validation + rate-limiting now; crypto/auth deferred.**
+Resolved in §13: ship the inbound validation/rate-limit/authority pipeline from Phase 2;
+defer encryption/auth/tokens/replay-protection (hooks reserved in the framing) until accounts
+and persistence exist. This is the one most open to override — say the word to pull crypto/auth
+into near-term scope.
+
+**Q4 — Float quantization → raw IEEE-754 now; quantize per-field on demand.**
+All peers are same-binary Windows/MSVC under lockstep, so identical-code float ops are
+bit-reproducible for same-version replay — raw float is deterministic enough now. The one value
+that *must* be exact, world position, is already `int64` (no FP). Intent axes (roll/pitch/
+throttle ∈ [-1,1]) and presentation floats stay raw. The codec keeps a **fixed-point leaf**, so
+if a specific gameplay float is ever shown to drive authoritative divergence (cross-compiler
+replay, floating-origin math), it's promoted to a fixed-point wire type per-field — a localized
+change, not a redesign. Rule recorded in §4.4: *any float feeding divergence-sensitive
+authoritative math is quantized when identified.*
 
 ---
 
