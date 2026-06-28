@@ -703,6 +703,18 @@ void render_replicated_objects (void)
 		draw_ship (&obj);
 		++drawn;
 
+		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) centred
+		// on the missile-locked ship, projected to screen the same way draw_ship
+		// projects a vertex at the ship's centre.
+		if (rec.id == g_missile_lock_target && obj.location.z > 0.0)
+		{
+			const double fx = (obj.location.x * 256.0) / obj.location.z + 128.0;
+			const double fy = -((obj.location.y * 256.0) / obj.location.z) + 96.0;
+			const int sx = (int)(fx * GFX_SCALE);
+			const int sy = (int)(fy * GFX_SCALE);
+			gfx_draw_sprite (IMG_TARGET_LOCK, sx - 32, sy - 32);   // 64x64 reticle, centred
+		}
+
 		// Docking. Authentic Elite demands a precise slot alignment, but with a
 		// static (non-spinning) station and network lag that is punishing, and a
 		// fresh commander has no docking computer. So we dock forgivingly: fly up

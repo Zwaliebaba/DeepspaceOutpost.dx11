@@ -229,6 +229,7 @@ const char* spriteFile(int sprite_no)
 		case IMG_MISSILE_YELLOW: return "missyell.bmp";
 		case IMG_MISSILE_RED:    return "missred.bmp";
 		case IMG_BLAKE:          return "blake.bmp";
+		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
 		default:                 return nullptr;
 	}
 }
