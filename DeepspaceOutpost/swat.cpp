@@ -868,17 +868,28 @@ void tactics (int un)
 
 void draw_laser_lines (void)
 {
+	// The beams rise from the bottom corners of the live view and converge on the
+	// aim point (laser_x,laser_y). The four x origins keep their fraction of the
+	// width, and the bottom edge follows the view, so they fire correctly whether
+	// the 3D is the retro play area or the full window.
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	const int by = vm.height - 1;
+	const int x1 = (int)(vm.width * (32.0  / 256.0));
+	const int x2 = (int)(vm.width * (48.0  / 256.0));
+	const int x3 = (int)(vm.width * (208.0 / 256.0));
+	const int x4 = (int)(vm.width * (224.0 / 256.0));
+
 	if (wireframe)
 	{
-		ActiveRenderQueue().ColourLine (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (48 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (224 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (x1, by, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (x2, by, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (x3, by, laser_x, laser_y, GFX_COL_WHITE);
+		ActiveRenderQueue().ColourLine (x4, by, laser_x, laser_y, GFX_COL_WHITE);
 	}
 	else
 	{
-		ActiveRenderQueue().Triangle (32 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y,  48 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
-		ActiveRenderQueue().Triangle (208 * GFX_SCALE, GFX_VIEW_BY, laser_x, laser_y, 224 * GFX_SCALE, GFX_VIEW_BY, GFX_COL_RED);
+		ActiveRenderQueue().Triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
+		ActiveRenderQueue().Triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
 	}
 
 	/* Replay the recorded laser lines at this same point (identical output). */
@@ -923,8 +934,11 @@ int fire_laser (void)
 			if (PlayerDefense().energy > 1)
 				PlayerDefense().energy--;
 			
-			laser_x = ((rand() & 3) + 128 - 2) * GFX_SCALE;
-			laser_y = ((rand() & 3) + 96 - 2) * GFX_SCALE;
+			// Aim point is the view centre (with a little jitter), so it tracks the
+			// cross-hairs whether the 3D fills the window or the retro play area.
+			const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+			laser_x = (int)(vm.cx) + ((rand() & 3) - 2);
+			laser_y = (int)(vm.cy) + ((rand() & 3) - 2);
 			
 			return 2;
 		}

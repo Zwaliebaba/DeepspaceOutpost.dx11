@@ -146,9 +146,10 @@ void draw_wireframe_ship (struct local_object *obj)
 
 	if (obj->flags & FLG_FIRING)
 	{
+		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 		lasv = ship_list[obj->type]->front_laser;
 		ActiveRenderQueue().Line (point_list[lasv].x, point_list[lasv].y,
-					   obj->location.x > 0 ? 0 : 511, rand255() * 2);
+					   obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256);
 	}
 }
 
@@ -312,11 +313,12 @@ void draw_solid_ship (struct local_object *obj)
 
 	if (obj->flags & FLG_FIRING)
 	{
+		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 		lasv = ship_list[obj->type]->front_laser;
-		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE; 
-		
+		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
+
 		ActiveRenderQueue().RenderLine (point_list[lasv].x, point_list[lasv].y,
-						 obj->location.x > 0 ? 0 : 511, rand255() * 2,
+						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
 						 point_list[lasv].z, col);
 	}
 }
