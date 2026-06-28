@@ -161,9 +161,6 @@ void draw_solid_ship (struct local_object *obj)
 	int i;
 	int sx,sy;
 	double rx,ry,rz;
-	struct vector vec;
-	struct vector camera_vec;
-	double tmp;
 	struct ship_face *face_data;
 	int num_faces;
 	int num_points;
@@ -171,65 +168,40 @@ void draw_solid_ship (struct local_object *obj)
 	int zavg;
 	struct ship_solid *solid_data;
 	struct ship_data *ship;
-	Matrix trans_mat;
 	int lasv;
 	int col;
 
 	solid_data = &ship_solids[obj->type];
 	ship = ship_list[obj->type];
 	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
+	// Orientation basis, rows side/roof/nose. The legacy manual transpose +
+	// mult_vector(v, transpose(rotmat)) cancel to v * rotmat, so the per-vertex
+	// transform is just XMVector3TransformNormal by the rotmat rows
+	// (docs/MathMigration.md section 4). The old per-face back-face cull that used
+	// camera_vec was already dead code (its loop is commented out), so it is gone.
+	const XMMATRIX rot(
+		XMVectorSet((float) obj->rotmat[0].x, (float) obj->rotmat[0].y, (float) obj->rotmat[0].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[1].x, (float) obj->rotmat[1].y, (float) obj->rotmat[1].z, 0.0f),
+		XMVectorSet((float) obj->rotmat[2].x, (float) obj->rotmat[2].y, (float) obj->rotmat[2].z, 0.0f),
+		g_XMIdentityR3);
+	const XMVECTOR objLoc = XMVectorSet((float) obj->location.x, (float) obj->location.y, (float) obj->location.z, 0.0f);
 
 	num_faces = solid_data->num_faces;
 	face_data = solid_data->face_data;
 
-/*
-	for (i = 0; i < num_faces; i++)
-	{
-		vec.x = face_data[i].norm_x;
-		vec.y = face_data[i].norm_y;
-		vec.z = face_data[i].norm_z;
-
-		vec = unit_vector (&vec);
-		cos_angle = vector_dot_product (&vec, &camera_vec);
-
-		visible[i] = (cos_angle < -0.13);
-	}
-*/
-
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
-
 	for (i = 0; i < ship->num_points; i++)
 	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
+		const XMVECTOR v = XMVectorSet((float) ship->points[i].x, (float) ship->points[i].y, (float) ship->points[i].z, 0.0f);
+		XMFLOAT3 world;
+		XMStoreFloat3(&world, XMVectorAdd(XMVector3TransformNormal(v, rot), objLoc));
 
-		mult_vector (&vec, trans_mat);
-
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
+		rx = world.x;
+		ry = world.y;
+		rz = world.z;
 
 		if (rz <= 0)
 			rz = 1;
-		
+
 		sx = (rx * 256) / rz;
 		sy = (ry * 256) / rz;
 
@@ -244,7 +216,6 @@ void draw_solid_ship (struct local_object *obj)
 		point_list[i].x = sx;
 		point_list[i].y = sy;
 		point_list[i].z = rz;
-		
 	}
 
 	for (i = 0; i < num_faces; i++)
