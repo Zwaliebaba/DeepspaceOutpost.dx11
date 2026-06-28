@@ -46,7 +46,23 @@ namespace Neuron::GameLogic
     int laserStrength = 10;
     int64_t range = 5000;
     bool autoEngage = true;
+
+    // NPC weapon pacing: an auto-engaging combatant fires at most once every
+    // `fireInterval` ticks (the timer counts down). This stops a single NPC from
+    // being an every-tick damage stream. The timer starts ready (0) so the first
+    // shot lands immediately. Players fire on command and ignore this.
+    int fireInterval = 10;
+    int fireTimer = 0;
+
+    // Post-spawn / post-respawn damage immunity. While > 0 the combatant takes no
+    // damage and it ticks down each combat step, so a respawn-in-place cannot be
+    // instantly re-killed by hostiles that are still in range.
+    int invulnTicks = 0;
   };
+
+  // Ticks of damage-immunity granted on spawn and respawn (~5s at 30 Hz), giving
+  // a respawned player time to flee or fight instead of being re-killed in place.
+  inline constexpr int RESPAWN_GRACE_TICKS = 150;
 
   // Marks an entity controlled by a connected player.
   struct PlayerTag {};
@@ -92,6 +108,12 @@ namespace Neuron::GameLogic
       if (!a.c->autoEngage)
         continue;   // players (and inert objects) don't initiate fire
 
+      if (a.c->fireTimer > 0)
+      {
+        --a.c->fireTimer;   // weapon still cooling down this tick
+        continue;
+      }
+
       const Unit* best = nullptr;
       int64_t bestDist2 = 0;
       for (const Unit& b : units)
@@ -124,13 +146,21 @@ namespace Neuron::GameLogic
       {
         damage[best->id.index] += LaserDamageTo(TargetClass::Normal, a.c->laserStrength);
         attacker[best->id.index] = a.id.index;
+        a.c->fireTimer = a.c->fireInterval;   // begin the cooldown after firing
       }
     }
 
-    // Apply damage, then collect deaths.
+    // Apply damage, then collect deaths. Invulnerable combatants take none (and
+    // their grace ticks down here, once per combat step).
     std::vector<Kill> kills;
     for (const Unit& u : units)
     {
+      if (u.c->invulnTicks > 0)
+      {
+        --u.c->invulnTicks;
+        continue;
+      }
+
       const auto it = damage.find(u.id.index);
       if (it == damage.end())
         continue;
@@ -212,6 +242,9 @@ namespace Neuron::GameLogic
     Combatant* tc = _world.TryGet<Combatant>(best);
     if (tc == nullptr)
       return out;
+
+    if (tc->invulnTicks > 0)
+      return out;   // target is in spawn/respawn grace - the shot passes through
 
     tc->energy -= LaserDamageTo(TargetClass::Normal, sc->laserStrength);
 

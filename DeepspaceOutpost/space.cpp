@@ -711,17 +711,21 @@ void render_replicated_objects (void)
 		// projected the same way, with a small margin.
 		if (rec.id == g_missile_lock_target && obj.location.z > 0.0)
 		{
-			const double fx = (obj.location.x * 256.0) / obj.location.z + 128.0;
-			const double fy = -((obj.location.y * 256.0) / obj.location.z) + 96.0;
-			const int sx = (int)(fx * GFX_SCALE);
-			const int sy = (int)(fy * GFX_SCALE);
+			// Project the ship centre with the current frame's optics so the lock
+			// marker tracks the hull when the 3D fills the window.
+			const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+			double fx, fy;
+			Neuron::Client::ProjectPoint (vm, obj.location.x, obj.location.y, obj.location.z, fx, fy);
+			const int sx = (int)fx;
+			const int sy = (int)fy;
 
 			const double radius =
 				(obj.type > 0 && obj.type <= NO_OF_SHIPS && ship_list[obj.type] != NULL)
 					? sqrt (ship_list[obj.type]->size) : 80.0;
-			double half = (radius * 256.0 / obj.location.z) * GFX_SCALE * 1.15;
-			if (half < 8.0)  half = 8.0;
-			if (half > 80.0) half = 80.0;
+			double half = (radius * vm.focal / obj.location.z) * 1.15;
+			const double clampScale = vm.focal / 512.0;   // keep the box proportional to the view
+			if (half < 8.0  * clampScale) half = 8.0  * clampScale;
+			if (half > 80.0 * clampScale) half = 80.0 * clampScale;
 
 			const int box = (int)(half * 2.0);
 			gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
@@ -1077,9 +1081,17 @@ void display_missiles (void)
 
 void update_console (void)
 {
+	// Float the classic 512x514 dashboard to the bottom-centre of the window when
+	// the 3D fills the screen (no-op offset in retro mode). gfx_set_clip_region
+	// and every draw below pick up this origin, so the layout is unchanged - it
+	// just slides as a unit.
+	int hud_ox, hud_oy;
+	gfx_hud_anchor (&hud_ox, &hud_oy);
+	gfx_set_draw_origin (hud_ox, hud_oy);
+
 	gfx_set_clip_region (0, 0, 512, 512);
 	gfx_draw_scanner();
-	
+
 	display_speed();
 	display_flight_climb();
 	display_flight_roll();
@@ -1090,9 +1102,12 @@ void update_console (void)
 	display_laser_temp();
 	display_fuel();
 	display_missiles();
-	
+
 	if (docked)
+	{
+		gfx_set_draw_origin (0, 0);
 		return;
+	}
 
 	update_scanner();
 	update_compass();
@@ -1102,6 +1117,8 @@ void update_console (void)
 
 	if (ecm_active)
 		gfx_draw_sprite (IMG_BIG_E, 115, 490);
+
+	gfx_set_draw_origin (0, 0);
 }
 
 void increase_flight_roll (void)

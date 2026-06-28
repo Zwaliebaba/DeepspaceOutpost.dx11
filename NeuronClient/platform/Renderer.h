@@ -24,8 +24,11 @@
 class Renderer
 {
 public:
-	/* The logical canvas the whole game is authored against: 512x384 play area
-	 * plus the 512x129 HUD strip starting at y=385 (385 + 129 = 514). */
+	/* The retro logical canvas the 2D UI (menus/charts/station/HUD) is authored
+	 * against: 512x384 play area plus the 512x129 HUD strip at y=385 (=514). The
+	 * canvas is letterboxed onto the window in this mode. In "scene full-window"
+	 * mode the canvas instead tracks the client area so the in-flight 3D fills the
+	 * whole window; the HUD is then floated on top via a draw-origin offset. */
 	static constexpr int kCanvasWidth  = 512;
 	static constexpr int kCanvasHeight = 514;
 
@@ -34,6 +37,19 @@ public:
 
 	/* Resize the swap chain to the new client area (from WM_SIZE). */
 	void resize(int clientWidth, int clientHeight);
+
+	/* Current off-screen canvas size (retro 512x514, or the client area in scene
+	 * full-window mode). The gfx batch's coordinate space and the projection use
+	 * these, not the kCanvas* constants. */
+	int canvasWidth()  const { return canvas_w_; }
+	int canvasHeight() const { return canvas_h_; }
+	int clientWidth()  const { return client_w_; }
+	int clientHeight() const { return client_h_; }
+
+	/* Switch the canvas between retro (letterboxed 512x514) and full-window (sized
+	 * to the client area). Recreates the off-screen target only when the effective
+	 * size changes; cheap to call every frame. */
+	void ensureCanvasMode(bool fullWindow);
 
 	/* Clear the whole off-screen canvas to a palette colour. */
 	void clearCanvas(int palette_index);
@@ -58,6 +74,7 @@ private:
 	bool createDeviceAndSwapChain(HWND hwnd);
 	bool createBackBuffer();
 	bool createCanvasTarget();
+	bool recreateCanvas(int w, int h);
 	bool createPresentPipeline();
 	bool loadPalette();
 	void computeLetterbox(D3D11_VIEWPORT& vp) const;
@@ -79,6 +96,11 @@ private:
 	HWND hwnd_ = nullptr;
 	int  client_w_ = 0;
 	int  client_h_ = 0;
+
+	/* Current canvas size and mode. Defaults to the retro letterboxed canvas. */
+	int  canvas_w_ = kCanvasWidth;
+	int  canvas_h_ = kCanvasHeight;
+	bool canvas_full_ = false;
 
 	uint32_t palette_[256] = {};
 	bool     palette_loaded_ = false;

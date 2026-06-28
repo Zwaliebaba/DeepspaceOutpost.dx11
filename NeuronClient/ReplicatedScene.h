@@ -65,19 +65,29 @@ namespace Neuron::Client
                         pRoof.z * pNose.x - pRoof.x * pNose.z,
                         pRoof.x * pNose.y - pRoof.y * pNose.x };
 
-    // Express a world-frame offset in the ship's view frame using the SAME
-    // convention as the legacy move_local_object() and the locally-rendered
-    // starfield: the world rotates around a fixed cockpit, so the offset is rebuilt
-    // from the ship's basis (x*side + y*roof + z*nose) rather than projected onto it
-    // (x*side, y*roof, z*nose). That is the transpose of a textbook view matrix, but
-    // it is what the starfield uses; matching it keeps replicated objects (planet,
-    // station, ships) rotating WITH the stars instead of counter to them when the
-    // ship rolls or pitches. At the identity orientation the two are identical.
+    // Rotate a world-frame offset into the ship's cockpit (view) frame: the
+    // textbook view transform, which PROJECTS the offset onto each ship axis
+    //   cam = (offset.side, offset.roof, offset.nose)  ==  Bᵀ · offset
+    // where B is the ship basis (columns side/roof/nose). This is the ONLY frame
+    // that stays ship-relative at every orientation: a pitch always slides the
+    // scene along the cockpit vertical and a roll always spins it about the
+    // cockpit nose, no matter how the ship is already banked.
+    //
+    // An earlier version rebuilt the offset FROM the basis instead
+    //   (_x*side + _y*roof + _z*nose  ==  B · offset),
+    // which is B's transpose/inverse. That happens to agree at the identity
+    // orientation, so the level-flight front view looked right, but for a banked
+    // ship it applies the INVERSE rotation: pitching then slid the world along the
+    // *world* vertical (it looked like "up for the universe"), and after a 90° roll
+    // a pure pitch slid the scene sideways. Projecting (Bᵀ) fixes that. The control
+    // sign convention (legacy screen-handed roll/pitch) is reconciled where the
+    // client builds its flight intent (send_player_input), so the felt direction of
+    // roll and level pitch is unchanged while banked pitch is now ship-relative.
     const auto toCamera = [&](double _x, double _y, double _z) -> Vector
     {
-      return Vector{ _x * pSide.x + _y * pRoof.x + _z * pNose.x,
-                     _x * pSide.y + _y * pRoof.y + _z * pNose.y,
-                     _x * pSide.z + _y * pRoof.z + _z * pNose.z };
+      return Vector{ _x * pSide.x + _y * pSide.y + _z * pSide.z,
+                     _x * pRoof.x + _y * pRoof.y + _z * pRoof.z,
+                     _x * pNose.x + _y * pNose.y + _z * pNose.z };
     };
 
     records.reserve(_entities.size());

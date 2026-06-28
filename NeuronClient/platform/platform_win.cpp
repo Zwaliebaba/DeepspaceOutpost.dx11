@@ -26,7 +26,6 @@
 
 #include "compat.h"
 #include "gfx.h"
-#include "main.h"
 
 /* Defined by the game logic (elite.cpp). The platform forces this when the
  * window is closed so the various for(;;) sequence loops unwind cleanly. */
@@ -188,6 +187,10 @@ void gfx_update_screen(void)
 	{
 		gfx_dx11_flush();        /* replay the frame's 2D batch into the canvas */
 		g_renderer.present();    /* blit the canvas to the window */
+		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
+		 * render path re-enables full-window mode each frame it draws. This keeps
+		 * menus/charts/station on the classic 512x514 canvas automatically. */
+		gfx_set_scene_fullwindow(0);
 	}
 	platform_pump_messages();
 
@@ -218,40 +221,7 @@ void gfx_update_screen(void)
 	QueryPerformanceCounter(&prev);
 }
 
-/* ---- Process entry point ---- */
-
-/* The game opens its assets and config (newkind.cfg, scanner.bmp, *.nkc
- * commander files) with relative paths, so anchor the working directory to the
- * executable's folder where CMake stages GameData. */
-static void set_working_dir_to_exe(void)
-{
-	wchar_t path[MAX_PATH];
-	DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
-	if (n == 0 || n >= MAX_PATH)
-		return;
-	for (DWORD i = n; i > 0; --i)
-	{
-		if (path[i - 1] == L'\\' || path[i - 1] == L'/')
-		{
-			path[i - 1] = L'\0';
-			SetCurrentDirectoryW(path);
-			return;
-		}
-	}
-}
-
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
-{
-    CoreEngine::Startup();
-
-	/* Render at native resolution rather than letting Windows bitmap-stretch
-	 * a DPI-unaware window (crisper, correctly-sized canvas). */
-	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-	set_working_dir_to_exe();
-	auto ret = game_main();
-
-    CoreEngine::Shutdown();
-
-    return ret;
-}
+/* The process entry point (wWinMain) lives in the game executable
+ * (DeepspaceOutpost/WinMain.cpp), not here: a static library's entry point is
+ * not pulled in by the linker. It calls game_main(), which drives this layer
+ * through the gfx.h lifecycle hooks above. */

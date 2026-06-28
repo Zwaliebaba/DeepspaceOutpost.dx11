@@ -130,6 +130,33 @@ TEST(CombatSys, PlayersDoNotAutoEngage)
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(pirate).energy == 50);
 }
 
+TEST(CombatSys, InvulnerableTargetTakesNoDamage)
+{
+  ECS::Registry world;
+  ECS::EntityId pirate = Spawn(world, 0, GameLogic::Team::Pirate, 100, 10);
+  ECS::EntityId player = Spawn(world, 1000, GameLogic::Team::Player, 100, /*laser*/ 0);
+  world.Get<GameLogic::Combatant>(player).invulnTicks = 3;   // spawn/respawn grace
+
+  std::vector<GameLogic::Kill> kills = GameLogic::StepCombat(world);
+
+  EXPECT_TRUE(kills.empty());
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).energy == 100);     // immune: no damage
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).invulnTicks == 2);  // grace counted down
+}
+
+TEST(CombatSys, AutoFireRespectsCooldown)
+{
+  ECS::Registry world;
+  ECS::EntityId a = Spawn(world, 0, GameLogic::Team::Pirate, 100, 10);    // fireInterval defaults to 10
+  ECS::EntityId b = Spawn(world, 1000, GameLogic::Team::Player, 100, /*laser*/ 0);
+
+  GameLogic::StepCombat(world);   // first tick: weapon ready, fires
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 90);
+
+  GameLogic::StepCombat(world);   // next tick: still cooling down, no shot
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 90);
+}
+
 TEST(Fire, HitsTheEnemyAhead)
 {
   ECS::Registry w;

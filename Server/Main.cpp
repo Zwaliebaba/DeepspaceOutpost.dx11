@@ -60,7 +60,7 @@ int main()
   const ECS::EntityId pirate = world.Create();
   world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1000, 300, 4000 } });
   world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
-  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 8000, /*autoEngage*/ true });
+  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 5000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
 
   // Home system station, BEHIND the spawn (negative z) so a launching player
@@ -132,6 +132,14 @@ int main()
   uint8_t recv[2048];
   uint32_t tick = 0;
   std::size_t lastSessions = 0;
+
+  // Rate-limit the player-respawn log so a player parked in combat doesn't spam
+  // the console: print at most once per window, with a count of any suppressed
+  // respawns since the last line.
+  constexpr uint32_t kRespawnLogWindow = 300;   // ~10s at 30 Hz
+  uint32_t lastRespawnLogTick = 0;
+  int      suppressedRespawns = 0;
+
   for (;;)
   {
     Timer::Core::Update();
@@ -275,11 +283,30 @@ int main()
       if (world.IsValid(kill.victim) && world.TryGet<GameLogic::PlayerTag>(kill.victim) != nullptr)
       {
         if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(kill.victim))
+        {
           c->energy = 255;
+          // Brief immunity so the in-place respawn isn't instantly re-killed by
+          // hostiles still in range (gives time to flee or fight back).
+          c->invulnTicks = GameLogic::RESPAWN_GRACE_TICKS;
+        }
         if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(kill.victim))
           wnt->level = 0;
-        printf("[tick %u] player %u was killed by %u -> respawned in place\n",
-               tick, kill.victim.index, kill.killer);
+
+        if (tick - lastRespawnLogTick >= kRespawnLogWindow)
+        {
+          if (suppressedRespawns > 0)
+            printf("[tick %u] player %u respawned (killer %u; +%d more respawn(s) since last log)\n",
+                   tick, kill.victim.index, kill.killer, suppressedRespawns);
+          else
+            printf("[tick %u] player %u was killed by %u -> respawned in place\n",
+                   tick, kill.victim.index, kill.killer);
+          lastRespawnLogTick = tick;
+          suppressedRespawns = 0;
+        }
+        else
+        {
+          ++suppressedRespawns;
+        }
         continue;
       }
 

@@ -313,35 +313,44 @@ void draw_laser_sights(void)
 
 	if (laser)
 	{
-		x1 = 128 * GFX_SCALE;
-		y1 = (96-8) * GFX_SCALE;
-		y2 = (96-16) * GFX_SCALE;
-   
-		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1); 
+		// Centre the cross-hairs on the live view (window middle in full-window
+		// flight, 256,192 in retro) with arm lengths that scale with the optics.
+		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+		const int cx = (int) vm.cx;
+		const int cy = (int) vm.cy;
+		const double s = vm.focal / 256.0;   // retro == GFX_SCALE (2)
+		const int in8  = (int)(8  * s);
+		const int in16 = (int)(16 * s);
+
+		x1 = cx;
+		y1 = cy - in8;
+		y2 = cy - in16;
+
+		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1);
 		gfx_draw_colour_line (x1, y1, x1, y2, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1); 
+		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1);
 
-		y1 = (96+8) * GFX_SCALE;
-		y2 = (96+16) * GFX_SCALE;
-		
-		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1); 
+		y1 = cy + in8;
+		y2 = cy + in16;
+
+		gfx_draw_colour_line (x1-1, y1, x1-1, y2, GFX_COL_GREY_1);
 		gfx_draw_colour_line (x1, y1, x1, y2, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1); 
+		gfx_draw_colour_line (x1+1, y1, x1+1, y2, GFX_COL_GREY_1);
 
-		x1 = (128-8) * GFX_SCALE;
-		y1 = 96 * GFX_SCALE;
-		x2 = (128-16) * GFX_SCALE;
-		   
-		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1); 
+		x1 = cx - in8;
+		y1 = cy;
+		x2 = cx - in16;
+
+		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1);
 		gfx_draw_colour_line (x1, y1, x2, y1, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1); 
+		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1);
 
-		x1 = (128+8) * GFX_SCALE;
-		x2 = (128+16) * GFX_SCALE;
+		x1 = cx + in8;
+		x2 = cx + in16;
 
-		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1); 
+		gfx_draw_colour_line (x1, y1-1, x2, y1-1, GFX_COL_GREY_1);
 		gfx_draw_colour_line (x1, y1, x2, y1, GFX_COL_WHITE);
-		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1); 
+		gfx_draw_colour_line (x1, y1+1, x2, y1+1, GFX_COL_GREY_1);
 	}
 }
 
@@ -1443,6 +1452,16 @@ static void process_server_events (void)
 }
 
 
+// The four in-flight cockpit views render the 3D scene full-window; every other
+// screen (charts, station, intro, game-over, save/load) stays on the retro
+// letterboxed canvas.
+static int is_flight_view (int scr)
+{
+	return (scr == SCR_FRONT_VIEW) || (scr == SCR_REAR_VIEW) ||
+	       (scr == SCR_LEFT_VIEW)  || (scr == SCR_RIGHT_VIEW);
+}
+
+
 // Gather the player's flight intent and send it to the server. Driven from the
 // legacy flight state (PlayerFlight roll/climb/speed) that the flight keys and
 // the cockpit HUD already maintain, normalized to axes, so the server moves the
@@ -1457,8 +1476,14 @@ static void send_player_input (void)
 
 	Neuron::Net::ClientInput in;
 	in.sequence = ++seq;
-	in.rollAxis  = (float)PlayerFlight().roll  / (float)maxRoll;
-	in.pitchAxis = (float)PlayerFlight().climb / (float)maxClimb;
+	// The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
+	// whose handedness is the transpose of the world basis the server rotates and
+	// the client renders (BuildRenderRecords projects with Bᵀ). Negating the two
+	// rotation axes maps the screen-handed control into that world frame, so the
+	// felt direction of roll and level pitch is identical to before while a banked
+	// pitch now pivots about the ship's own axes instead of the world's.
+	in.rollAxis  = -(float)PlayerFlight().roll  / (float)maxRoll;
+	in.pitchAxis = -(float)PlayerFlight().climb / (float)maxClimb;
 	in.throttle  = (float)PlayerFlight().speed / (float)maxSpeed;
 	in.fire = (kbd_fire_pressed != 0);
 	in.fireMissile = s_fire_missile_intent;
@@ -1545,7 +1570,10 @@ int game_main (void)
 
 			snd_update_sound();
 			gfx_update_screen();
-			gfx_set_clip_region (1, 1, 510, 383);
+			// Full-window 3D for cockpit views (retro/letterboxed for menus); this
+			// also sets the aspect-aware optics used by the projection below.
+			gfx_set_scene_fullwindow (is_flight_view (current_screen));
+			gfx_set_scene_clip ();
 
 			rolling = 0;
 			climbing = 0;
