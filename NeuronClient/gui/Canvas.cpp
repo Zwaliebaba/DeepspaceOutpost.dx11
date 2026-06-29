@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Canvas.h"
-#include "ClientEngine.h"
+#include "GraphicsCore.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
 
@@ -273,8 +273,8 @@ void Canvas::EclRegisterWindow(GuiWindow* window, const GuiWindow* parent)
   if (parent && window->m_x == 0 && window->m_y == 0)
   {
     // We should place the window in a decent location
-    int left = ClientEngine::OutputSize().Width / 2 - parent->m_x;
-    int above = ClientEngine::OutputSize().Height / 2 - parent->m_y;
+    int left = Neuron::Graphics::Core::GetOutputSize().Width / 2 - parent->m_x;
+    int above = Neuron::Graphics::Core::GetOutputSize().Height / 2 - parent->m_y;
     if (left > window->m_w / 2)
       window->m_x = static_cast<int>(parent->m_x + parent->m_w * static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
     else
@@ -414,7 +414,7 @@ void Canvas::EclMaximizeWindow(std::string_view name)
     maximiseOldW = w->m_w;
     maximiseOldH = w->m_h;
     w->SetPosition(0, 0);
-    w->SetSize(ClientEngine::OutputSize().Width, ClientEngine::OutputSize().Height);
+    w->SetSize(Neuron::Graphics::Core::GetOutputSize().Width, Neuron::Graphics::Core::GetOutputSize().Height);
   }
 }
 

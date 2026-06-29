@@ -83,7 +83,7 @@ triangle) on Windows.
 - **Phase 1 (this):** GraphicsCore + ImmediateRenderer + shaders, build-wired. ✅
 - **Phase 2:** native D3D11 `TextureManager` + DDS loader (full DXTn/BCn);
   point `GameData/Textures/*.dds` + `GameData/Fonts/*.dds` through it.
-- **Phase 3:** text renderer (donor `DX9TextRenderer`, on a `.dds` font sheet) +
+- **Phase 3:** text renderer (`TextRenderer`, on a `.dds` font sheet) +
   `Strings` JSON localization (`GameData/Strings/<lang>/*.json`).
 - **Phase 4:** `Widget` / `GuiButton` / `GuiWindow` / `Canvas`, with input/app
   globals adapted to the target rather than importing `GameApp` wholesale.

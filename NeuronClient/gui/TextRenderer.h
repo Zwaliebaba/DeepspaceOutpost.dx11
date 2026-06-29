@@ -3,7 +3,8 @@
 
 // 2D bitmap-font text renderer (Phase 3 of the GUI/text import).
 //
-// Imported from the donor and trimmed to the screen-space ("overlay") path the
+// Imported from the donor (where it was named DX9TextRenderer) and trimmed to the
+// screen-space ("overlay") path the
 // menus use. The donor's world-space DrawText3D* overloads still rode the legacy
 // gl* path and depended on the camera/app; they are intentionally omitted here.
 // Asset loading is synchronous (the donor's coroutine/ASyncLoader machinery is not
@@ -18,7 +19,7 @@
 
 #define DEF_FONT_SIZE 12.0f
 
-class DX9TextRenderer
+class TextRenderer
 {
   public:
     void Startup(const std::wstring& _filename);
@@ -46,7 +47,7 @@ class DX9TextRenderer
 };
 
 // The two fonts the GUI draws through (window titles / HUD vs. button captions).
-inline DX9TextRenderer g_gameFont;
-inline DX9TextRenderer g_editorFont;
+inline TextRenderer g_gameFont;
+inline TextRenderer g_editorFont;
 
 #endif

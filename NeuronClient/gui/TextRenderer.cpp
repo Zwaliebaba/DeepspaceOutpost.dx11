@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "DX9TextRenderer.h"
+#include "TextRenderer.h"
 #include "ImmediateRenderer.h"
 
 #include <cstdarg> // va_list / va_start / va_end
@@ -19,7 +19,7 @@ constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
 constexpr float TEX_WIDTH = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
 constexpr float TEX_HEIGHT = 1.0f / 14.0f * TEX_STRETCH;
 
-void DX9TextRenderer::Startup(const std::wstring& _filename)
+void TextRenderer::Startup(const std::wstring& _filename)
 {
   m_filename = _filename;
   // Synchronous load (the donor loaded asynchronously via a coroutine + ASyncLoader;
@@ -28,9 +28,9 @@ void DX9TextRenderer::Startup(const std::wstring& _filename)
   m_texture = TextureManager::LoadTexture(_filename);
 }
 
-void DX9TextRenderer::Shutdown() { m_texture = nullptr; }
+void TextRenderer::Shutdown() { m_texture = nullptr; }
 
-void DX9TextRenderer::BeginText2D()
+void TextRenderer::BeginText2D()
 {
   const D3D11_VIEWPORT vp = Core::GetScreenViewport();
 
@@ -54,7 +54,7 @@ void DX9TextRenderer::BeginText2D()
   ImmediateRenderer::SetFogEnabled(false);
 }
 
-void DX9TextRenderer::EndText2D()
+void TextRenderer::EndText2D()
 {
   ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
   ImmediateRenderer::PopMatrix();
@@ -67,7 +67,7 @@ void DX9TextRenderer::EndText2D()
   ImmediateRenderer::SetBlendEnabled(false);
 }
 
-float DX9TextRenderer::GetTexCoordX(unsigned char theChar)
+float TextRenderer::GetTexCoordX(unsigned char theChar)
 {
   constexpr float CHAR_WIDTH = 1.0f / 16.0f;
   const float xPos = theChar % 16;
@@ -75,7 +75,7 @@ float DX9TextRenderer::GetTexCoordX(unsigned char theChar)
   return texX;
 }
 
-float DX9TextRenderer::GetTexCoordY(unsigned char theChar)
+float TextRenderer::GetTexCoordY(unsigned char theChar)
 {
   constexpr float CHAR_HEIGHT = 1.0f / 14.0f;
   const float yPos = (theChar >> 4) - 2;
@@ -83,9 +83,9 @@ float DX9TextRenderer::GetTexCoordY(unsigned char theChar)
   return texY;
 }
 
-void DX9TextRenderer::SetRenderShadow(bool _renderShadow) { m_renderShadow = _renderShadow; }
+void TextRenderer::SetRenderShadow(bool _renderShadow) { m_renderShadow = _renderShadow; }
 
-void DX9TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string_view _text)
+void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string_view _text)
 {
   if (!m_texture || !m_texture->GetShaderResourceView())
     return;
@@ -144,7 +144,7 @@ void DX9TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::str
   ImmediateRenderer::BindTexture(0, nullptr);
 }
 
-void DX9TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text, ...)
 {
   char buf[512];
   va_list ap;
@@ -154,7 +154,7 @@ void DX9TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_vi
   DrawText2DSimple(_x, _y, _size, buf);
 }
 
-void DX9TextRenderer::DrawText2DRight(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2DRight(float _x, float _y, float _size, std::string_view _text, ...)
 {
   char buf[512];
   va_list ap;
@@ -166,7 +166,7 @@ void DX9TextRenderer::DrawText2DRight(float _x, float _y, float _size, std::stri
   DrawText2DSimple(_x - width, _y, _size, buf);
 }
 
-void DX9TextRenderer::DrawText2DCenter(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2DCenter(float _x, float _y, float _size, std::string_view _text, ...)
 {
   char buf[512];
   va_list ap;
@@ -178,4 +178,4 @@ void DX9TextRenderer::DrawText2DCenter(float _x, float _y, float _size, std::str
   DrawText2DSimple(_x - width / 2, _y, _size, buf);
 }
 
-float DX9TextRenderer::GetTextWidth(size_t _numChars, float _size) { return _numChars * _size * HORIZONTAL_SIZE; }
+float TextRenderer::GetTextWidth(size_t _numChars, float _size) { return _numChars * _size * HORIZONTAL_SIZE; }

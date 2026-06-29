@@ -2,13 +2,12 @@
 #include "GuiOverlay.h"
 
 #include "Canvas.h"
-#include "ClientEngine.h"
-#include "DX9TextRenderer.h"
 #include "GameApp.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
 #include "ImmediateRenderer.h"
 #include "Strings.h"
+#include "TextRenderer.h"
 
 #include "GraphicsCore.h"
 #include "Renderer.h"

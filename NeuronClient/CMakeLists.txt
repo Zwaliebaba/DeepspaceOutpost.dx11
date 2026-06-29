@@ -26,9 +26,9 @@ set(NEURONCLIENT_SOURCES
     graphics/TextureManager.cpp
 
     # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
-    # backed by thin native shims (gui/Input.h, gui/Resource.*, gui/GameApp.h,
-    # gui/ClientEngine.h). See docs/phase2-4-gui-text.md.
-    gui/DX9TextRenderer.cpp
+    # backed by thin native shims (gui/Input.h, gui/Resource.*, gui/GameApp.h).
+    # See docs/phase2-4-gui-text.md.
+    gui/TextRenderer.cpp
     gui/Strings.cpp
     gui/Resource.cpp
     gui/GuiButton.cpp
@@ -59,7 +59,7 @@ set(NEURONCLIENT_HEADERS
     graphics/TextureManager.h
 
     # Imported text + GUI menu system headers (+ native shims).
-    gui/DX9TextRenderer.h
+    gui/TextRenderer.h
     gui/Strings.h
     gui/Widget.h
     gui/GuiButton.h
@@ -69,7 +69,6 @@ set(NEURONCLIENT_HEADERS
     gui/Resource.h
     gui/Input.h
     gui/GameApp.h
-    gui/ClientEngine.h
 
     # Generic engine headers.
     ViewMetrics.h

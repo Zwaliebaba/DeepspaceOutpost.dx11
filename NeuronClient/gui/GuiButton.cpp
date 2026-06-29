@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "GuiButton.h"
 #include "Canvas.h"
-#include "DX9TextRenderer.h"
+#include "TextRenderer.h"
 #include "GameApp.h"
 #include "GuiWindow.h"
 #include "ImmediateRenderer.h"

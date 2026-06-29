@@ -56,7 +56,7 @@ exactly as before.
    **Up/Down** move the highlight, **Enter** activates, **Esc**/Close dismiss.
 4. If glyphs look misplaced: `Fonts/SpeccyFontENG.dds` doesn't match the donor text
    renderer's **16×14 ASCII-32 grid** — swap the sheet or adjust
-   `DX9TextRenderer::GetTexCoordX/Y`. (Won't crash.)
+   `TextRenderer::GetTexCoordX/Y`. (Won't crash.)
 
 ## Known limitations
 - **Input isn't captured**: while shown, Up/Down/Enter/Esc drive both the menu and the

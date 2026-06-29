@@ -22,7 +22,8 @@ build to verify.
 
 ## Phase 3 — text rendering + Strings
 
-- `NeuronClient/gui/DX9TextRenderer.{h,cpp}` — the donor's bitmap-font renderer,
+- `NeuronClient/gui/TextRenderer.{h,cpp}` — the donor's bitmap-font renderer (it was
+  named `DX9TextRenderer` in the donor),
   **trimmed to the 2D screen-space path** the menus use. The world-space `DrawText3D*`
   overloads (which still rode the legacy `gl*` path + camera/app) are omitted, and
   the coroutine/`ASyncLoader` async-load machinery is replaced with a synchronous
@@ -38,7 +39,7 @@ build to verify.
 
 Ported `Widget`, `GuiButton` (+ `BorderlessButton`/`CloseButton`/`GameExitButton`/
 `InvertedBox`/`LabelButton`), `GuiWindow`, and `Canvas` (the ECL window manager)
-into `NeuronClient/gui/`, drawing through `ImmediateRenderer` + `DX9TextRenderer`.
+into `NeuronClient/gui/`, drawing through `ImmediateRenderer` + `TextRenderer`.
 
 The donor's heavy dependency web was replaced with **thin native shims** rather than
 imported wholesale (Native-First; the target already has its own input/filesystem):
@@ -48,7 +49,7 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 | `InputManager` + ControlBindings/driver stack | `gui/Input.h` — `g_inputManager` mapping the `ControlMenu*` events onto `keyboard.h` state |
 | `Resource` (Bitmap/Shape/Sound/...) | `gui/Resource.{h,cpp}` — `GetTexture(name)` → `TextureManager` SRV |
 | `GameApp` singleton | `gui/GameApp.h` — just `g_app->m_requestQuit` |
-| `ClientEngine::OutputSize()` | `gui/ClientEngine.h` — `Core::GetOutputSize()` |
+| `ClientEngine::OutputSize()` | direct `Neuron::Graphics::Core::GetOutputSize()` calls (no wrapper) |
 | `darwiniaRandom()` | `rand()` (cosmetic window-placement jitter only) |
 | `Timer::Core::GetTotalSeconds()` | the target's own `Neuron::Timer::Core` (kept) |
 
@@ -61,12 +62,12 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 
 ### Known limitations to verify on Windows
 1. **Nothing renders until Phase 5** (Core isn't initialised; `TextureManager` /
-   `DX9TextRenderer` need `Core::GetD3DDevice()`).
+   `TextRenderer` need `Core::GetD3DDevice()`).
 2. Menu input is **held-key state, not edge-triggered** (the shim reads
    `kbd_*_pressed`); menu navigation may repeat fast. Add edge detection when wiring
    the GUI into the main loop.
 3. **Coordinate space**: the GUI assumes screen/client pixels via
-   `ClientEngine::OutputSize()`; the legacy game draws into a letterboxed 512×514
+   `Neuron::Graphics::Core::GetOutputSize()`; the legacy game draws into a letterboxed 512×514
    canvas. Decide the GUI's space when hooking `Canvas::Render()`/`EclUpdate()` into
    the frame (recommended: draw the GUI in client space on top, after the canvas blit).
 4. `Canvas` must be driven from the main loop (mouse/keyboard feed +

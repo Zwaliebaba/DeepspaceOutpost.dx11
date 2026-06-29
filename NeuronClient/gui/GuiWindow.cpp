@@ -1,12 +1,12 @@
 #include "pch.h"
 #include "GuiWindow.h"
 #include "Canvas.h"
-#include "ClientEngine.h"
-#include "DX9TextRenderer.h"
+#include "GraphicsCore.h"
 #include "GuiButton.h"
 #include "ImmediateRenderer.h"
 #include "Input.h"
 #include "Resource.h"
+#include "TextRenderer.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
@@ -223,8 +223,8 @@ void GuiWindow::SetMovable(bool _movable) { m_movable = _movable; }
 
 void GuiWindow::MakeAllOnScreen()
 {
-  int screenW = ClientEngine::OutputSize().Width;
-  int screenH = ClientEngine::OutputSize().Height;
+  int screenW = Neuron::Graphics::Core::GetOutputSize().Width;
+  int screenH = Neuron::Graphics::Core::GetOutputSize().Height;
   if (m_x < 10)
     m_x = 10;
   if (m_y < 10)
