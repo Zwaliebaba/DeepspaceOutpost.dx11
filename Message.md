@@ -30,6 +30,11 @@
 > the std-only message headers and the winsock-free test suites are built locally with clang++ 18
 > and g++ 13 (`-std=c++23 -Wall -Wextra`), and the MSVC build of the client/server objects is
 > confirmed by CI on the branch.
+>
+> **Consolidation with PR #7 (GUI/GraphicsCore).** That work introduced a second, client-side
+> pub/sub (`NeuronCore/EventManager` + `Event.h`). Per decision, its event pub/sub was removed so
+> `Msg::MessageBus` is the **single** event/pub-sub mechanism; `EventManager` is reduced to its
+> Win32 window-message dispatch (`WndProc`/`AddEventProcessor`), which the platform layer uses.
 
 **Catalog so far** (concrete messages that exist in code today):
 

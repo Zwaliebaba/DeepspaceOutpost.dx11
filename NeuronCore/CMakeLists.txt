@@ -17,7 +17,6 @@ set(NEURONCORE_SOURCES
 
 set(NEURONCORE_HEADERS
     NeuronCore.h
-    Event.h
     EventManager.h
     ECS.h
     Vector3i64.h
