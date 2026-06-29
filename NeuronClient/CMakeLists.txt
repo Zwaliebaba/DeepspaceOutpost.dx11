@@ -28,6 +28,7 @@ set(NEURONCLIENT_SOURCES
     graphics/GraphicsCore.cpp
     graphics/ImmediateRenderer.cpp
     graphics/TextureManager.cpp
+    graphics/DDSTextureLoader.cpp
 
     # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
     # menu navigation reads keyboard.h directly and the exit button calls
@@ -62,6 +63,7 @@ set(NEURONCLIENT_HEADERS
     graphics/ImmediateRenderer.h
     graphics/ConstantBuffers.h
     graphics/TextureManager.h
+    graphics/DDSTextureLoader.h
 
     # Imported text + GUI menu system headers.
     gui/TextRenderer.h
