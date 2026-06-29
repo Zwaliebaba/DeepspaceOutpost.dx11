@@ -4,6 +4,7 @@
 
 #include "GameLogic.h"
 #include "ReliableChannel.h"
+#include "Messages/MessageEndpoint.h"
 
 using namespace Neuron;
 
@@ -100,14 +101,14 @@ TEST(Session, ClientAckClearsTheReliableQueue)
   sessions.OnInput(world, a, Input(1, 0.0f), 1);
 
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
-  EXPECT_TRUE(s.events.PendingOutgoing() == 1);   // AssignPlayer pending
+  EXPECT_TRUE(s.events.PendingOutgoing() == 1);   // AssignPlayer pending (Control lane)
 
-  // Client receives the handshake and acks it back.
-  Net::ReliableChannel client;
-  std::vector<uint8_t> toClient = s.events.WritePacket();
-  EXPECT_TRUE(client.ReadPacket(toClient.data(), toClient.size()));
-  std::vector<uint8_t> ack = client.WritePacket();
-  sessions.OnReliable(a, ack.data(), ack.size());
+  // Client receives the handshake datagram(s) and acks them back.
+  Msg::MessageEndpoint client;
+  for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
+    client.OnDatagram(dg.data(), dg.size());
+  for (const std::vector<uint8_t>& dg : client.WriteDatagrams())
+    sessions.OnReliable(a, dg.data(), dg.size());
 
   EXPECT_TRUE(s.events.PendingOutgoing() == 0);   // handshake acknowledged
 }

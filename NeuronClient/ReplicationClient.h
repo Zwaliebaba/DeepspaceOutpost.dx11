@@ -26,6 +26,7 @@
 #include "StationProtocol.h"
 #include "GalaxyManifest.h"
 #include "Messages/Reliable.h"
+#include "Messages/MessageEndpoint.h"
 
 namespace Neuron::Client
 {
@@ -56,7 +57,7 @@ namespace Neuron::Client
     void SendStationRequest(const Net::StationRequest& _request)
     {
       if (m_open)
-        Msg::SendReliable(m_events, _request);
+        m_events.Send(_request);   // Gameplay lane
     }
 
     // Interpolated state of `_id` at `_alpha` in [0,1], or false if unknown.
@@ -104,7 +105,7 @@ namespace Neuron::Client
   private:
     Net::UdpSocket m_socket;
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
-    Net::ReliableChannel m_events;                 // reliable ordered events
+    Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart manifest (filled on connect)
     Net::Endpoint m_server;

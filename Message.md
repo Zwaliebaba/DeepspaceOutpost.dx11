@@ -24,7 +24,7 @@
 | 2 | Unreliable lane: `InputCommand` on `'NMSG'`, `'NCMD'` deleted (byte-parity proven) | ✅ Landed |
 | 3a | Fold reliable schemas (`GameEvents` + `StationProtocol`) into the catalog, single channel | ✅ Landed |
 | 3b-1 | Fold `GalaxyManifest` onto a catalog id; retire `EventType` / delete `GameEvents.h` | ✅ Landed |
-| 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (transport) | ⏳ Next |
+| 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (`MessageEndpoint`) | ✅ Landed |
 | 4 | Client-side bus + presentation handlers; key→command mapper | ⏳ Pending |
 | 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
 
@@ -53,11 +53,11 @@
 | `Crime` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
 | `EntityKilled` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
 
-The folded reliable messages ride the existing single `ReliableChannel` via `Msg::SendReliable`/
-`Msg::TryDecode`; their lane traits are set but the **physical** Control/Gameplay/Bulk channel
-split is 3b-2. `GalaxyManifest` now carries a reserved catalog `MessageId` (`Net::GALAXY_MANIFEST_ID`,
-Bulk) but keeps its bespoke chunked encode (fixed `char[]` array); `EventType`/`GameEvents.h` are
-**deleted** — every reliable datagram is now identified by a `MessageId`.
+Reliable messages now ride `Msg::MessageEndpoint` — one `ReliableChannel` per **Control/Gameplay/
+Bulk** lane, routed by each message's `Lane` trait (3b-2). `GalaxyManifest` carries a reserved
+catalog `MessageId` (`Net::GALAXY_MANIFEST_ID`, **Bulk** lane) but keeps its bespoke chunked encode
+(fixed `char[]` array); `EventType`/`GameEvents.h` are **deleted** — every client↔server datagram is
+now a catalog message (`InputCommand` on the unreliable lane; everything else on a reliable lane).
 
 ---
 
@@ -532,12 +532,21 @@ lane) instead of `EventType::GalaxyManifest`; the bespoke chunked encode stays (
 `GameEvents.h` and the `EventType` enum are **deleted** — every reliable datagram is identified by
 a `MessageId`. Verified on 63 headless cases (clang++ 18 / g++ 13).
 
-**Phase 3b-2 — Physical lane split. ⏳ Next.**
-Stand up separate Control/Gameplay/Bulk `ReliableChannel`s (lane-tagged datagrams) so a large
-`GalaxyManifest` on Bulk can't head-of-line-block a death/session message. Route sends by the
-message's `Lane` trait and inbound datagrams by a peeked lane byte; keep `ReliableChannel`
-itself unchanged. Replace the client `PollEvent`/switch with bus subscriptions as part of the
-client-bus work (Phase 4).
+**Phase 3b-2 — Physical lane split. ✅ DONE.**
+`Msg::MessageEndpoint` (NeuronCore, header-only) gives each peer one `ReliableChannel` per reliable
+lane (Control/Gameplay/Bulk). Each lane's datagram is `[RELIABLE_MAGIC 'NRLB'][lane]` + that lane's
+packet, so `ReliableChannel` is unchanged. `Send(msg)` routes by the message's `Lane` trait; inbound
+datagrams route by the lane byte; `Receive` drains Control→Gameplay→Bulk so gameplay/control never
+wait behind a bulk backlog; a lane emits a datagram only when it has something to (re)send or a new
+ack to deliver (idle lanes silent). Wired into `ServerSessions` (Session owns a `MessageEndpoint`;
+`AssignPlayer`→Control, manifest→Bulk, `Broadcast` routes by lane) and `ReplicationClient` (`m_events`
+is an endpoint; `RELIABLE_MAGIC` routing both ends). The galaxy manifest now rides **Bulk**, so a
+manifest backlog can't head-of-line-block a death. Headless `MessageEndpointTests` (6 cases incl. HOL
+isolation + lossy-bulk) plus the existing channel/session tests cover it; 69 headless cases pass on
+clang++ 18 / g++ 13. *(Moving the client `PollEvent`/switch onto bus subscriptions stays with the
+Phase 4 client-bus work.)*
+
+**Phase 3 is complete: every client↔server datagram is a catalog message on a typed lane.**
 
 **Phase 4 — Client bus & presentation.**
 Client `MessageBus`; route `ReplicationClient` ingress through it. Convert key polling →

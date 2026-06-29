@@ -68,8 +68,8 @@ namespace Neuron::Client
         case Net::SNAPSHOT_MAGIC:
           m_interp.Apply(buffer, size);        // unreliable bulk state
           break;
-        case Net::EVENT_MAGIC:
-          m_events.ReadPacket(buffer, size);   // reliable ordered events
+        case Msg::RELIABLE_MAGIC:
+          m_events.OnDatagram(buffer, size);   // reliable lanes (Control/Gameplay/Bulk)
           break;
         default:
           break;   // unknown/foreign datagram: ignore
@@ -93,12 +93,13 @@ namespace Neuron::Client
         m_appEvents.push_back(std::move(msg));
     }
 
-    // Send our cumulative ack back so the server stops resending delivered
-    // events (the packet also carries any client->server reliable messages).
+    // Send our cumulative acks back so the server stops resending delivered events
+    // (these datagrams also carry any client->server reliable messages). One per
+    // lane that has something to (re)send or a new ack to deliver.
     if (m_haveServer)
     {
-      const std::vector<uint8_t> ack = m_events.WritePacket();
-      m_socket.SendTo(m_server, ack.data(), ack.size());
+      for (const std::vector<uint8_t>& dg : m_events.WriteDatagrams())
+        m_socket.SendTo(m_server, dg.data(), dg.size());
     }
   }
 

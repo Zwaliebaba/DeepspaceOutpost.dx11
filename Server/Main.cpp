@@ -9,6 +9,7 @@
 #include "Messages/MessageBus.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"
+#include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/CoreEvents.h"
 
 using namespace winrt;
@@ -258,7 +259,7 @@ int main()
           }
           break;
         }
-        case Net::EVENT_MAGIC:
+        case Msg::RELIABLE_MAGIC:
           sessions.OnReliable(from, recv, size);
           break;
         default:
@@ -290,7 +291,7 @@ int main()
         {
           const Net::StationResponse resp =
               GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
-          Msg::SendReliable(s.events, resp);
+          s.events.Send(resp);   // Gameplay lane
         }
       }
     }
@@ -332,8 +333,8 @@ int main()
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 
-      const std::vector<uint8_t> eventPacket = s.events.WritePacket();
-      socket.SendTo(s.endpoint, eventPacket.data(), eventPacket.size());
+      for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
+        socket.SendTo(s.endpoint, dg.data(), dg.size());
     }
 
     Sleep(33);   // ~30 Hz tick

@@ -48,6 +48,7 @@ set(NEURONCORE_HEADERS
     Messages/MessageBus.h
     Messages/Framing.h
     Messages/Reliable.h
+    Messages/MessageEndpoint.h
     Messages/Defs/InputCommand.h
     Messages/Defs/CoreEvents.h
 )
