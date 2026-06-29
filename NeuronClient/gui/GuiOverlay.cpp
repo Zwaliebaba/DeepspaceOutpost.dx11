@@ -18,6 +18,10 @@ namespace
   bool s_shown = false;   // overlay currently visible (F1 toggles)
   bool s_prevF1 = false;  // edge-detect the F1 toggle
 
+  // Game-supplied factory for the real Options window (set via
+  // GuiOverlay::SetOptionsWindowFactory). Null until the game registers it.
+  std::function<GuiWindow*()> s_optionsFactory;
+
   // Centre a window of (w,h) in the current client area.
   void CentreWindow(GuiWindow* w, int width, int height)
   {
@@ -60,14 +64,18 @@ namespace
       }
   };
 
-  // Main-menu "Options" button: opens the Options window.
+  // Main-menu "Options" button: opens the Options window. The game supplies the real
+  // one via the factory; absent that, the built-in placeholder above is shown.
   class OpenOptionsButton : public GuiButton
   {
     public:
       void MouseUp() override
       {
-        if (!Canvas::EclGetWindow(std::string_view("Options")))
-          Canvas::EclRegisterWindow(NEW OptionsWindow());
+        if (Canvas::EclGetWindow(std::string_view("Options")))
+          return;
+        GuiWindow* window = s_optionsFactory ? s_optionsFactory() : static_cast<GuiWindow*>(NEW OptionsWindow());
+        if (window)
+          Canvas::EclRegisterWindow(window);
       }
   };
 
@@ -134,6 +142,11 @@ void GuiOverlay::Shutdown()
 }
 
 bool GuiOverlay::IsReady() { return s_ready; }
+
+void GuiOverlay::SetOptionsWindowFactory(std::function<GuiWindow*()> _factory)
+{
+  s_optionsFactory = std::move(_factory);
+}
 
 void GuiOverlay::Update()
 {

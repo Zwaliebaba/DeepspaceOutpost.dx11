@@ -70,8 +70,19 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   line/column layout should be visually re-checked on Windows.
 
 **Next migration work (Phase 8+):**
-- Convert real game screens (options/prefs, docked/trade/equip, charts) from
-  `gfx_display_*` to `GuiWindow`s with list/grid widgets — wired to actual game state.
+- ✅ **First migrated screen — Game Settings.** `DeepspaceOutpost/SettingsWindow` is a
+  real `GuiWindow` whose rows are value-cycling buttons wired straight to the config
+  globals (`wireframe`, `anti_alias_gfx`, `planet_render_style`, `hoopy_casinos`,
+  `instant_dock`) plus a Save button → `write_config_file()`. It's reached from the F1
+  overlay's main menu. Engine seam: `GuiOverlay::SetOptionsWindowFactory` lets the game
+  hand the overlay a window the engine can't build itself (it knows nothing about game
+  state); `GameApp::Startup` registers it. The engine's old placeholder `OptionsWindow`
+  stays only as the no-factory fallback. The legacy `gfx_display_*`
+  `game_settings_screen` (options.cpp) is untouched for now — it still serves the
+  in-game keyboard options menu until that menu is routed to this window too.
+- Convert the remaining game screens (options menu/quit, docked/trade/equip, charts)
+  from `gfx_display_*` to `GuiWindow`s with list/grid widgets — wired to actual game
+  state, following the SettingsWindow pattern.
 - Migrate the game render into the `GameMain` lifecycle
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);

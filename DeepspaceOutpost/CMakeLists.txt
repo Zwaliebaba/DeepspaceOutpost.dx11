@@ -35,6 +35,8 @@ set(GAME_SOURCES
 set(GAME_CLIENT_SOURCES
     WinMain.cpp
     GameApp.h
+    SettingsWindow.h
+    SettingsWindow.cpp
     Camera.cpp
     GameUniverse.cpp
 )

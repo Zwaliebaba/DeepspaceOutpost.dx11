@@ -9,11 +9,14 @@
 
 #include "GameMain.h"
 #include "ClientEngine.h"
+#include "SettingsWindow.h"
 
 class GameApp : public Neuron::GameMain
 {
   public:
-    void Startup() override {}
+    // Register the game's GUI windows (Settings) with the F1 overlay. The rest of the
+    // GameMain lifecycle is still a stub: the legacy game runs through game_main().
+    void Startup() override { RegisterGameWindows(); }
     void Shutdown() override {}
     void Update(float _deltaSeconds) override {}
     void RenderScene() override {}

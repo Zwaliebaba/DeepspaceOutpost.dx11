@@ -17,6 +17,10 @@
 // Renderer/gfx_dx11/Font is a separate, incremental follow-on (see
 // docs/phase5-graphicscore-live.md).
 
+#include <functional>
+
+class GuiWindow;
+
 namespace GuiOverlay
 {
   void Startup();                          // best-effort; safe to call once after the Renderer is up
@@ -25,4 +29,10 @@ namespace GuiOverlay
 
   void Update();                           // F1 toggle + keyboard menu navigation
   void Render(int canvasWidth, int canvasHeight); // draw into the currently-bound canvas
+
+  // The game supplies the real Options/Settings window: it wires controls to game
+  // state (config globals, save), which this engine layer can't see. The factory must
+  // return a heap GuiWindow named "Options" (Canvas takes ownership). When unset, a
+  // built-in placeholder window is shown instead. Set from GameApp::Startup().
+  void SetOptionsWindowFactory(std::function<GuiWindow*()> _factory);
 }
