@@ -278,6 +278,13 @@ float4 PSMain(VSOut i) : SV_Target
     Append(Topo::Points, s_white.get(), &p, 1);
   }
 
+  void Render2D::Submit(Topo topo, const Vertex* verts, int count, ID3D11ShaderResourceView* srv)
+  {
+    if (count <= 0)
+      return;
+    Append(topo, srv ? srv : s_white.get(), verts, count);
+  }
+
   void Render2D::TexQuad(ID3D11ShaderResourceView* srv, float x0, float y0, float x1, float y1, float u0, float v0,
                          float u1, float v1, uint32_t rgba)
   {
@@ -296,7 +303,7 @@ float4 PSMain(VSOut i) : SV_Target
 
   void Render2D::Flush()
   {
-    if (s_verts.empty() || !s_rtv)
+    if (s_verts.empty())
     {
       s_verts.clear();
       s_cmds.clear();
@@ -323,14 +330,20 @@ float4 PSMain(VSOut i) : SV_Target
     std::memcpy(mapped.pData, s_verts.data(), s_verts.size() * sizeof(Vertex));
     ctx->Unmap(s_vb.get(), 0);
 
-    ID3D11RenderTargetView* rtv = s_rtv;
-    ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    // Bind the target + a matching full viewport, unless the caller passed a null RTV
+    // (Begin with rtv == nullptr) - then draw to whatever is already bound, e.g. the
+    // off-screen canvas the gfx2d HUD batch has just bound via bindCanvasTarget.
+    if (s_rtv)
+    {
+      ID3D11RenderTargetView* rtv = s_rtv;
+      ctx->OMSetRenderTargets(1, &rtv, nullptr);
 
-    D3D11_VIEWPORT vp{};
-    vp.Width = static_cast<float>(s_width);
-    vp.Height = static_cast<float>(s_height);
-    vp.MaxDepth = 1.0f;
-    ctx->RSSetViewports(1, &vp);
+      D3D11_VIEWPORT vp{};
+      vp.Width = static_cast<float>(s_width);
+      vp.Height = static_cast<float>(s_height);
+      vp.MaxDepth = 1.0f;
+      ctx->RSSetViewports(1, &vp);
+    }
 
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;

@@ -5,7 +5,7 @@
  *
  * Hook for the platform layer to flush the accumulated 2D primitive batch into
  * the canvas once per presented frame (called from gfx_update_screen, before
- * Renderer::present()). The batch is replayed through Neuron::Graphics::ImmediateRenderer.
+ * Renderer::present()). The batch is replayed through Neuron::Graphics::Render2D.
  */
 
 #ifndef GFX2D_H

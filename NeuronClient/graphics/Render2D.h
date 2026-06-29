@@ -77,7 +77,7 @@ namespace Neuron::Graphics
       static void TexQuadColored(ID3D11ShaderResourceView* srv, float x0, float y0, float x1, float y1, float u0,
                                  float v0, float u1, float v1, uint32_t cTL, uint32_t cTR, uint32_t cBR, uint32_t cBL);
 
-    private:
+      // One interleaved 2D vertex (target-pixel position, atlas uv, 0xAABBGGRR colour).
       struct Vertex
       {
         float x, y, u, v;
@@ -91,6 +91,13 @@ namespace Neuron::Graphics
         Tris,
       };
 
+      // Lower-level entry for replaying an external batch that already owns its
+      // primitive accumulation (the gfx2d HUD batch). Vertices are in target-pixel
+      // space; srv == nullptr uses the built-in white texture (flat colour). Honours
+      // the current SetClip and appends into the open Begin/End batch.
+      static void Submit(Topo topo, const Vertex* verts, int count, ID3D11ShaderResourceView* srv = nullptr);
+
+    private:
       struct Cmd
       {
         Topo topo;

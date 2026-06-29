@@ -7,8 +7,8 @@
  * (solid-colour and textured) feed a single command list, so lines/polygons,
  * sprites, the HUD bitmap and text all composite in the exact order the game draws
  * them. The batch replays into the persistent 512x514 canvas in gfx2d_flush() -
- * through Neuron::Graphics::ImmediateRenderer - and Renderer::present() then blits it
- * to the window. (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
+ * through Neuron::Graphics::Render2D - and Renderer::present() then blits it to the
+ * window. (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *
  * Colours are palette indices resolved against scanner.bmp. Solid primitives are
  * opaque (index 0 -> opaque black); sprite/HUD art is .dds (alpha baked in). Text is
@@ -21,7 +21,7 @@
 #include "Renderer.h"
 #include "gfx2d.h"
 #include "TextureManager.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 
 #include "gfx.h"
 #include "ViewMetrics.h"
@@ -84,8 +84,8 @@ Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
 int canvasW() { Renderer* r = platform_renderer(); return r ? r->canvasWidth()  : Renderer::kCanvasWidth;  }
 int canvasH() { Renderer* r = platform_renderer(); return r ? r->canvasHeight() : Renderer::kCanvasHeight; }
 
-/* The 2D batch renders through Neuron::Graphics::ImmediateRenderer (see gfx2d_flush),
- * so this layer no longer owns any Direct3D shaders / buffers / pipeline state. */
+/* The 2D batch renders through Neuron::Graphics::Render2D (see gfx2d_flush), so this
+ * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
 std::map<std::string, Texture> g_textures;
 
 /* The shared .dds bitmap font: a 16-column x 14-row grid of cells starting at
@@ -566,10 +566,7 @@ void gfx_finish_render(void)
  * ===================================================================== */
 void gfx2d_flush(void)
 {
-	using Neuron::Graphics::ImmediateRenderer;
-	using Neuron::Graphics::MatrixStackId;
-	using Neuron::Graphics::Primitive;
-	using Neuron::Graphics::ShaderProgram;
+	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
 	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
@@ -580,85 +577,47 @@ void gfx2d_flush(void)
 	if (!g_cmds.empty())
 	{
 		/* Bind the off-screen canvas (RT + full-canvas viewport), then replay the
-		 * submission-ordered command list through ImmediateRenderer. A screen-space
-		 * ortho (Y down) maps the batch's canvas-pixel coordinates straight to clip
-		 * space, exactly as the old bespoke vertex shader did. */
+		 * submission-ordered command list through Render2D. Begin with a null RTV draws
+		 * to the canvas just bound here; a screen-space ortho (Y down) maps the batch's
+		 * canvas-pixel coordinates straight to clip space. Point sampling keeps the
+		 * pixel sprites / HUD / bitmap font crisp. (XOR for the chart cross-hairs is
+		 * dropped - the logic-op path never worked and is slated for a texture.) */
 		r->bindCanvasTarget();
+		Render2D::Begin(nullptr, r->canvasWidth(), r->canvasHeight(), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-		ImmediateRenderer::PushMatrix();
-		ImmediateRenderer::LoadIdentity();
-		ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(r->canvasWidth()), static_cast<float>(r->canvasHeight()), 0.0f);
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-		ImmediateRenderer::PushMatrix();
-		ImmediateRenderer::LoadIdentity();
-
-		ImmediateRenderer::UseProgram(ShaderProgram::Generic);
-		ImmediateRenderer::SetDepthTestEnabled(false);
-		ImmediateRenderer::SetDepthWriteEnabled(false);
-		ImmediateRenderer::SetCullEnabled(false);
-		ImmediateRenderer::SetFogEnabled(false);
-		ImmediateRenderer::SetScissorEnabled(true);
-		/* Point sampling keeps the pixel sprites / HUD / bitmap font crisp, matching
-		 * the old batch's sampler. */
-		ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP);
-
+		std::vector<Render2D::Vertex> scratch;
 		for (const Cmd& c : g_cmds)
 		{
-			ImmediateRenderer::SetScissorRect(c.scissor.left, c.scissor.top, c.scissor.right, c.scissor.bottom);
+			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
+							  c.scissor.bottom - c.scissor.top);
+
+			scratch.clear();
+			scratch.reserve(c.count);
 
 			if (c.kind == Kind::Tex)
 			{
-				/* Sprites / HUD / text: alpha-blended textured triangles. */
-				ImmediateRenderer::SetColorLogicOpXor(false);
-				ImmediateRenderer::SetBlendEnabled(true);
-				ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
-				ImmediateRenderer::BindTexture(0, c.srv);
-				ImmediateRenderer::Begin(Primitive::Triangles);
 				for (uint32_t i = 0; i < c.count; i++)
 				{
 					const TexVertex& v = g_tverts[c.start + i];
-					ImmediateRenderer::Color(v.rgba);
-					ImmediateRenderer::TexCoord(v.u, v.v);
-					ImmediateRenderer::Vertex(v.x, v.y);
+					scratch.push_back({v.x, v.y, v.u, v.v, v.rgba});
 				}
-				ImmediateRenderer::End();
-				ImmediateRenderer::BindTexture(0, nullptr);
+				Render2D::Submit(Render2D::Topo::Tris, scratch.data(), static_cast<int>(scratch.size()), c.srv);
 			}
 			else
 			{
-				/* Solid primitives: opaque, or XOR for the chart cross-hairs. */
-				ImmediateRenderer::SetColorLogicOpXor(c.xorop);
-				ImmediateRenderer::SetBlendEnabled(false);
-
-				const Primitive topo = (c.topo == Topo::Points) ? Primitive::Points
-									 : (c.topo == Topo::Lines)  ? Primitive::Lines
-									 :                            Primitive::Triangles;
-				ImmediateRenderer::Begin(topo);
 				for (uint32_t i = 0; i < c.count; i++)
 				{
 					const ColorVertex& v = g_cverts[c.start + i];
-					ImmediateRenderer::Color(v.rgba);
-					ImmediateRenderer::Vertex(v.x, v.y);
+					scratch.push_back({v.x, v.y, 0.0f, 0.0f, v.rgba});
 				}
-				ImmediateRenderer::End();
+				const Render2D::Topo topo = (c.topo == Topo::Points) ? Render2D::Topo::Points
+										  : (c.topo == Topo::Lines)  ? Render2D::Topo::Lines
+																	 : Render2D::Topo::Tris;
+				Render2D::Submit(topo, scratch.data(), static_cast<int>(scratch.size()), nullptr);
 			}
 		}
 
-		/* Leave ImmediateRenderer in its default state so the GUI overlay (drawn next,
-		 * to the back buffer) and the next frame are unaffected by the batch's settings. */
-		ImmediateRenderer::SetScissorEnabled(false);
-		ImmediateRenderer::SetColorLogicOpXor(false);
-		ImmediateRenderer::SetBlendEnabled(false);
-		ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
-		ImmediateRenderer::BindTexture(0, nullptr);
-		ImmediateRenderer::SetDepthTestEnabled(true);
-		ImmediateRenderer::SetDepthWriteEnabled(true);
-		ImmediateRenderer::SetCullEnabled(true);
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-		ImmediateRenderer::PopMatrix();
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-		ImmediateRenderer::PopMatrix();
+		Render2D::End();
 	}
 
 	g_cverts.clear();
