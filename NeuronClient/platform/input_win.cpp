@@ -16,6 +16,7 @@
 #include "platform_win.h"
 
 #include "keyboard.h"
+#include "EventManager.h"
 
 namespace {
 
@@ -46,6 +47,28 @@ void input_on_key(WPARAM vk, bool d)
 void input_on_char(WPARAM ch)
 {
 	q_push(static_cast<int>(ch));
+}
+
+namespace {
+
+/* Keyboard processor for the EventManager chain. Returns 0 for messages it consumes,
+ * -1 otherwise so the chain / DefWindowProc continue (e.g. Alt+F4). */
+LRESULT CALLBACK InputWndProc(HWND, UINT msg, WPARAM wparam, LPARAM)
+{
+	switch (msg)
+	{
+		case WM_KEYDOWN: input_on_key(wparam, true);  return 0;
+		case WM_KEYUP:   input_on_key(wparam, false); return 0;
+		case WM_CHAR:    input_on_char(wparam);       return 0;
+	}
+	return -1;
+}
+
+} // namespace
+
+void input_register_event_processor(void)
+{
+	EventManager::AddEventProcessor(InputWndProc);
 }
 
 /* ---- keyboard.h contract ---- */

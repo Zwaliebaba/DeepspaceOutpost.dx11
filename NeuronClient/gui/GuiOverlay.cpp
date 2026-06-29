@@ -6,20 +6,16 @@
 #include "GuiWindow.h"
 #include "ImmediateRenderer.h"
 #include "Strings.h"
-#include "TextRenderer.h"
 
-#include "GraphicsCore.h"
 #include "Renderer.h"
-#include "platform_win.h"
 #include "keyboard.h"
 
-using Neuron::Graphics::Core;
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::MatrixStackId;
 
 namespace
 {
-  bool s_ready = false;   // device adopted + renderer/fonts/canvas initialised
+  bool s_ready = false;   // demo window registered (ClientEngine brought up the device/canvas)
   bool s_shown = false;   // overlay currently visible (F1 toggles)
   bool s_prevF1 = false;  // edge-detect the F1 toggle
 
@@ -79,48 +75,17 @@ namespace
 
 void GuiOverlay::Startup()
 {
+  // ClientEngine has already brought up Core / ImmediateRenderer / Canvas / fonts /
+  // Strings by the time this runs; the overlay just registers its demo window.
   if (s_ready)
     return;
-
-  try
-  {
-    Renderer* r = platform_renderer();
-    if (!r || !r->device() || !r->context())
-      return;
-
-    // Device unification: share the platform Renderer's D3D11 device/swap chain.
-    Core::AdoptExisting(r->device(), r->context(), r->swapChain(), platform_window(), r->clientWidth(), r->clientHeight());
-
-    ImmediateRenderer::Startup();
-    ImmediateRenderer::SetSmokeTestEnabled(false);
-
-    Strings::Startup();
-
-    // The donor text renderer expects a 16x14 ASCII-32 glyph grid. SpeccyFontENG.dds
-    // is the closest shipped sheet; if glyph placement looks off, the sheet layout (or
-    // GetTexCoordX/Y) needs adjusting - it will not crash.
-    g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
-    g_editorFont.Startup("Fonts/SpeccyFontENG.dds");
-
-    Canvas::Startup();
-    EnsureDemoWindow();
-
-    s_ready = true;
-  }
-  catch (...)
-  {
-    // Best-effort: if anything in the imported path fails, leave the GUI disabled so
-    // the normal game keeps rendering exactly as before.
-    s_ready = false;
-  }
+  EnsureDemoWindow();
+  s_ready = true;
 }
 
 void GuiOverlay::Shutdown()
 {
-  if (!s_ready)
-    return;
-  Canvas::Shutdown();
-  ImmediateRenderer::Shutdown();
+  // Canvas / ImmediateRenderer are torn down by ClientEngine::Shutdown().
   s_ready = false;
   s_shown = false;
 }

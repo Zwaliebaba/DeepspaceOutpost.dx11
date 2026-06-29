@@ -12,6 +12,9 @@
 set(NEURONCLIENT_SOURCES
     pch.cpp
 
+    # Engine front door: window + native D3D11 device + GameMain dispatch.
+    ClientEngine.cpp
+
     # Render seam + generic client engine (portable C++; no Win32/D3D).
     RenderQueue.cpp
     RenderContext.cpp
@@ -51,6 +54,8 @@ set(NEURONCLIENT_SOURCES
 set(NEURONCLIENT_HEADERS
     NeuronClient.h
     pch.h
+    ClientEngine.h
+    GameMain.h
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h

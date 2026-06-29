@@ -36,15 +36,6 @@ namespace Neuron::Graphics
                       UINT backBufferCount = 2, D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_10_0,
                       unsigned int flags = c_FlipPresent) noexcept;
 
-      // Device unification (Phase 5): instead of creating a second device/swap chain,
-      // adopt the ones the legacy platform Renderer already created so the whole client
-      // shares one Direct3D 11 device. ImmediateRenderer then renders through this Core.
-      // Builds a back-buffer RTV (buffer 0; valid across flip-model presents); depth is
-      // omitted (the GUI overlay is 2D). May throw on a failed QueryInterface - callers
-      // should treat GUI bring-up as best-effort and guard with try/catch.
-      static void AdoptExisting(ID3D11Device* device, ID3D11DeviceContext* context, IDXGISwapChain* swapChain, HWND window,
-                                int width, int height);
-
       static void Shutdown() {}
 
       static void CreateDeviceResources();

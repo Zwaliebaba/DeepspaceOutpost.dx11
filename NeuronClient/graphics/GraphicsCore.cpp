@@ -171,53 +171,6 @@ void Core::CreateDeviceResources()
   // not imported. The native D3D11 texture path is wired in a later phase.)
 }
 
-// Device unification: adopt the platform Renderer's existing device/context/swap chain
-// instead of creating our own, so the whole client shares one Direct3D 11 device.
-void Core::AdoptExisting(ID3D11Device* device, ID3D11DeviceContext* context, IDXGISwapChain* swapChain, HWND window, int width,
-                         int height)
-{
-  m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-  m_depthBufferFormat = DXGI_FORMAT_UNKNOWN; // 2D overlay: no depth buffer
-  m_backBufferCount = 2;
-  m_d3dMinFeatureLevel = D3D_FEATURE_LEVEL_11_0;
-  m_options = c_FlipPresent;
-  m_window = window;
-  m_outputSize = {static_cast<float>(width), static_cast<float>(height)};
-
-  // Take owning references on the existing device objects (the Renderer keeps its own).
-  com_ptr<ID3D11Device> dev;
-  dev.copy_from(device);
-  dev.as(m_d3dDevice); // ID3D11Device1 (11.1 runtime; present on all supported Windows)
-
-  com_ptr<ID3D11DeviceContext> ctx;
-  ctx.copy_from(context);
-  ctx.as(m_d3dContext);
-  ctx.try_as(m_d3dAnnotation); // optional (PIX); ignore if unsupported
-
-  if (swapChain)
-  {
-    com_ptr<IDXGISwapChain> sc;
-    sc.copy_from(swapChain);
-    sc.try_as(m_swapChain);
-  }
-
-  // Back-buffer RTV (buffer 0 stays valid across flip-model presents). Only used by
-  // ImmediateRenderer::BeginFrame at startup; the per-frame GUI overlay renders into the
-  // Renderer's canvas, not here. Throw on failure so the caller's try/catch disables the
-  // GUI cleanly rather than ImmediateRenderer later clearing a null RTV.
-  m_renderTarget = nullptr;
-  m_d3dRenderTargetView = nullptr;
-  if (!m_swapChain || !m_d3dDevice)
-    throw std::runtime_error("Core::AdoptExisting: device or swap chain unavailable");
-  check_hresult(m_swapChain->GetBuffer(0, IID_PPV_ARGS(m_renderTarget.put())));
-  check_hresult(m_d3dDevice->CreateRenderTargetView(m_renderTarget.get(), nullptr, m_d3dRenderTargetView.put()));
-
-  m_depthStencil = nullptr;
-  m_d3dDepthStencilView = nullptr;
-
-  m_screenViewport = CD3D11_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-}
-
 // These resources need to be recreated every time the window size is changed.
 void Core::CreateWindowSizeDependentResources()
 {

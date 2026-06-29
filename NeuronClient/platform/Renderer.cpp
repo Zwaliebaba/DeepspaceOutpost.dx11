@@ -7,6 +7,7 @@
 #include "pch.h"
 
 #include "Renderer.h"
+#include "GraphicsCore.h" // Neuron::Graphics::Core (device unification)
 
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -83,6 +84,33 @@ bool Renderer::init(HWND hwnd)
 	loadPalette();   /* non-fatal: falls back to a synthetic ramp */
 
 	/* Start with an opaque black canvas; the game clears the play area itself. */
+	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	context_->ClearRenderTargetView(canvas_rtv_.get(), black);
+	return true;
+}
+
+bool Renderer::initAdopt()
+{
+	using namespace Neuron::Graphics;
+
+	/* Take references on the device/context/swap chain Core created (ClientEngine owns
+	 * the lifetime; these are non-owning aliases held for the canvas + present path). */
+	device_.copy_from(Core::GetD3DDevice());
+	context_.copy_from(Core::GetD3DDeviceContext());
+	swap_chain_.copy_from(Core::GetSwapChain());
+	if (!device_ || !context_ || !swap_chain_) return false;
+
+	hwnd_ = Core::GetWindow();
+	const auto size = Core::GetOutputSize();
+	client_w_ = std::max<int>(1, static_cast<int>(size.Width));
+	client_h_ = std::max<int>(1, static_cast<int>(size.Height));
+
+	if (!createBackBuffer())      return false;
+	if (!createCanvasTarget())    return false;
+	if (!createPresentPipeline()) return false;
+
+	loadPalette();   /* non-fatal: falls back to a synthetic ramp */
+
 	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 	context_->ClearRenderTargetView(canvas_rtv_.get(), black);
 	return true;

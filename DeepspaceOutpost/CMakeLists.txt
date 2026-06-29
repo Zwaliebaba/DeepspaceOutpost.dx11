@@ -34,6 +34,7 @@ set(GAME_SOURCES
 # the NeuronClient platform layer and calls game_main().
 set(GAME_CLIENT_SOURCES
     WinMain.cpp
+    GameApp.h
     Camera.cpp
     GameUniverse.cpp
 )

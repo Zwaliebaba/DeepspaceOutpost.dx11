@@ -1,0 +1,108 @@
+#include "pch.h"
+#include "ClientEngine.h"
+
+#include "Canvas.h"
+#include "GuiOverlay.h"
+#include "ImmediateRenderer.h"
+#include "Strings.h"
+#include "TextRenderer.h"
+
+#include "EventManager.h"
+#include "input_win.h"
+
+namespace
+{
+  const wchar_t* kWindowClass = L"DeepspaceOutpostWindow";
+
+  // Initial client size: the game is authored against a 512x514 canvas, presented at
+  // an integer multiple. Matches the size the previous bespoke platform window used.
+  constexpr int kClientWidth = 1024;
+  constexpr int kClientHeight = 1026;
+
+  // The engine window procedure. Routes messages to registered processors via
+  // EventManager (input, MIDI loop, ...); WM_DESTROY ends the message loop. Live
+  // window resizing is not handled yet (the swap chain stays at its initial size and
+  // DXGI scales) - see docs/phase6-clientengine.md.
+  LRESULT CALLBACK EngineWndProc(HWND _hWnd, UINT _msg, WPARAM _wParam, LPARAM _lParam)
+  {
+    if (_msg == WM_DESTROY)
+    {
+      PostQuitMessage(0);
+      return 0;
+    }
+
+    if (EventManager::WndProc(_hWnd, _msg, _wParam, _lParam) == -1)
+      return DefWindowProcW(_hWnd, _msg, _wParam, _lParam);
+    return 0;
+  }
+}
+
+namespace Neuron::Client
+{
+  void ClientEngine::Startup(const wchar_t* _gameName, HINSTANCE _hInstance, int _nCmdShow)
+  {
+    CoreEngine::Startup();
+    Strings::Startup();
+
+    // Bring up the native D3D11 device (2D overlay + canvas: no depth buffer).
+    Graphics::Core::Startup(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN);
+
+    m_instance = _hInstance;
+
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wc.lpfnWndProc = EngineWndProc;
+    wc.hInstance = _hInstance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    wc.lpszClassName = kWindowClass;
+    RegisterClassExW(&wc);
+
+    RECT rc{0, 0, kClientWidth, kClientHeight};
+    const DWORD style = WS_OVERLAPPEDWINDOW;
+    AdjustWindowRect(&rc, style, FALSE);
+
+    m_hwnd = CreateWindowExW(0, kWindowClass, _gameName, style, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
+                             nullptr, nullptr, _hInstance, nullptr);
+
+    ShowWindow(m_hwnd, _nCmdShow);
+    UpdateWindow(m_hwnd);
+
+    RECT client{};
+    GetClientRect(m_hwnd, &client);
+    Graphics::Core::SetWindow(m_hwnd, client.right - client.left, client.bottom - client.top);
+    Graphics::Core::CreateWindowSizeDependentResources();
+    Graphics::ImmediateRenderer::Startup();
+
+    Canvas::Startup();
+    g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
+    g_editorFont.Startup("Fonts/SpeccyFontENG.dds");
+
+    input_register_event_processor();
+    GuiOverlay::Startup();
+  }
+
+  void ClientEngine::StartGame(const winrt::com_ptr<GameMain>& _gameMain)
+  {
+    m_main = _gameMain;
+    if (m_main)
+      m_main->Startup();
+  }
+
+  void ClientEngine::Shutdown()
+  {
+    if (m_main)
+    {
+      m_main->Shutdown();
+      m_main = nullptr;
+    }
+
+    GuiOverlay::Shutdown();
+    Canvas::Shutdown();
+    Graphics::ImmediateRenderer::Shutdown();
+    Graphics::Core::Shutdown();
+    Strings::Shutdown();
+    CoreEngine::Shutdown();
+  }
+}

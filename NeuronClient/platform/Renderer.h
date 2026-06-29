@@ -33,6 +33,12 @@ public:
 	static constexpr int kCanvasHeight = 514;
 
 	bool init(HWND hwnd);
+
+	/* Device-unification path: instead of creating its own device/swap chain, adopt
+	 * the ones Neuron::Graphics::Core already created (owned by ClientEngine) and build
+	 * the offscreen canvas + present pipeline on them. */
+	bool initAdopt();
+
 	void shutdown();
 
 	/* Resize the swap chain to the new client area (from WM_SIZE). */

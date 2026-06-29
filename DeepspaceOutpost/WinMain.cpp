@@ -1,52 +1,52 @@
 /*
  * DeepspaceOutpost - process entry point.
  *
- * The Win32 / Direct3D 11 / XAudio2 platform layer now lives in NeuronClient.
- * Only the executable's entry point stays in the game target: an entry point
- * defined inside a static library is not pulled in by the linker, so wWinMain
- * has to live in the exe. It boots the engine, anchors the working directory to
- * the executable's folder (where CMake stages GameData), then hands control to
- * the game via game_main(). All windowing/rendering/audio/input is reached
- * through the engine's gfx.h / sound.h / keyboard contracts.
+ * Boots the client engine (ClientEngine, in NeuronClient), which owns the window and
+ * the native Direct3D 11 device, then hands a GameApp to it and runs the classic
+ * game loop via game_main(). The platform layer's gfx_graphics_startup() adopts the
+ * engine's device for the legacy gfx_* render path. The entry point must live in the
+ * exe: a static library's entry point is not pulled in by the linker.
  */
 
 #include "pch.h"
 
 #include <windows.h>
+#if defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 
-#include "main.h"   /* game_main() */
+#include "GameApp.h"      /* GameApp : Neuron::GameMain, + ClientEngine */
+#include "main.h"         /* game_main() */
 
-/* The game opens its assets and config (newkind.cfg, scanner.bmp, *.nkc
- * commander files) with relative paths, so anchor the working directory to the
- * executable's folder where CMake stages GameData. */
-static void set_working_dir_to_exe(void)
+int WINAPI wWinMain(HINSTANCE _hInstance, HINSTANCE /*_hPrevInstance*/, LPWSTR /*_cmdLine*/, int _iCmdShow)
 {
-	wchar_t path[MAX_PATH];
-	DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
-	if (n == 0 || n >= MAX_PATH)
-		return;
-	for (DWORD i = n; i > 0; --i)
-	{
-		if (path[i - 1] == L'\\' || path[i - 1] == L'/')
-		{
-			path[i - 1] = L'\0';
-			SetCurrentDirectoryW(path);
-			return;
-		}
-	}
-}
+#if defined(_DEBUG)
+  _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
-{
-	CoreEngine::Startup();
+  /* Anchor to the executable's folder. The game opens GameData assets with paths
+   * relative to the current directory (so SetCurrentDirectory is required), and
+   * FileSys uses the home directory for its own reads. */
+  wchar_t filename[MAX_PATH];
+  GetModuleFileNameW(nullptr, filename, MAX_PATH);
+  std::wstring path(filename);
+  path = path.substr(0, path.find_last_of(L'\\'));
+  SetCurrentDirectoryW(path.c_str());
+  FileSys::SetHomeDirectory(path);
 
-	/* Render at native resolution rather than letting Windows bitmap-stretch
-	 * a DPI-unaware window (crisper, correctly-sized canvas). */
-	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  /* Render at native resolution rather than letting Windows bitmap-stretch a
+   * DPI-unaware window. */
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-	set_working_dir_to_exe();
-	int ret = game_main();
+  ClientEngine::Startup(L"Deep Space Outpost", _hInstance, _iCmdShow);
 
-	CoreEngine::Shutdown();
-	return ret;
+  auto main = winrt::make_self<GameApp>();
+  ClientEngine::StartGame(main);
+
+  game_main();
+
+  ClientEngine::Shutdown();
+  main = nullptr;
+
+  return 0;
 }
