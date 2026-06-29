@@ -140,6 +140,17 @@ namespace Neuron::Graphics
       static void SetCullMode(D3D11_CULL_MODE mode) noexcept;
       static void SetFrontFaceCounterClockwise(bool ccw) noexcept;
 
+      // Scissor clip (off by default). When enabled, draws are clipped to the rect, in
+      // render-target pixels. Used by the 2D layer's clip regions.
+      static void SetScissorEnabled(bool enabled) noexcept;
+      static void SetScissorRect(int left, int top, int right, int bottom) noexcept;
+
+      // XOR raster-op (off by default). When enabled, pixels are XOR'd into the target
+      // (RGB only, alpha preserved) instead of blended - the draw/erase trick the 2D
+      // chart cross-hairs use. Silently falls back to normal blending if the device
+      // does not support the output-merger logic op.
+      static void SetColorLogicOpXor(bool enabled) noexcept;
+
       static void SetAlphaTestEnabled(bool enabled) noexcept;
       static void SetAlphaFunc(int func, float ref) noexcept;
 
@@ -241,6 +252,10 @@ namespace Neuron::Graphics
         bool cullEnabled = true;
         D3D11_CULL_MODE cullMode = D3D11_CULL_BACK;
         bool frontCounterClockwise = true; // GL default is GL_CCW
+
+        bool scissorEnabled = false;
+        D3D11_RECT scissorRect = {0, 0, 0, 0};
+        bool logicOpXor = false;
 
         D3D11_FILTER samplerFilter[MAX_TEXTURE_UNITS] = {D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_LINEAR};
         D3D11_TEXTURE_ADDRESS_MODE samplerAddress[MAX_TEXTURE_UNITS] = {D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE_ADDRESS_CLAMP};

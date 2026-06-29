@@ -460,6 +460,8 @@ void ImmediateRenderer::applyProgram()
   ctx->OMSetBlendState(blendState(), blendFactor, 0xFFFFFFFF);
   ctx->OMSetDepthStencilState(depthState(), 0);
   ctx->RSSetState(rasterState());
+  if (s_state.scissorEnabled)
+    ctx->RSSetScissorRects(1, &s_state.scissorRect);
 
   if (wantsTexture)
   {
@@ -598,6 +600,15 @@ void ImmediateRenderer::SetCullMode(D3D11_CULL_MODE mode) noexcept { s_state.cul
 
 void ImmediateRenderer::SetFrontFaceCounterClockwise(bool ccw) noexcept { s_state.frontCounterClockwise = ccw; }
 
+void ImmediateRenderer::SetScissorEnabled(bool enabled) noexcept { s_state.scissorEnabled = enabled; }
+
+void ImmediateRenderer::SetScissorRect(int left, int top, int right, int bottom) noexcept
+{
+  s_state.scissorRect = {left, top, right, bottom};
+}
+
+void ImmediateRenderer::SetColorLogicOpXor(bool enabled) noexcept { s_state.logicOpXor = enabled; }
+
 void ImmediateRenderer::SetAlphaTestEnabled(bool enabled) noexcept
 {
   // Alpha test is a shader feature (ENABLE_ALPHA_TEST permutation). The CPU mirror
@@ -730,14 +741,54 @@ void ImmediateRenderer::SetSampler(unsigned unit, D3D11_FILTER filter, D3D11_TEX
 
 // ----- Pipeline-state object caches -------------------------------------------
 
+// Whether the device supports the output-merger logic op (needed for XOR draw). Cached
+// after the first query.
+static bool LogicOpSupported()
+{
+  static int cached = -1;
+  if (cached < 0)
+  {
+    cached = 0;
+    com_ptr<ID3D11Device1> dev1;
+    if (SUCCEEDED(Core::GetD3DDevice()->QueryInterface(IID_PPV_ARGS(dev1.put()))))
+    {
+      D3D11_FEATURE_DATA_D3D11_OPTIONS opt{};
+      if (SUCCEEDED(Core::GetD3DDevice()->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &opt, sizeof(opt))) &&
+          opt.OutputMergerLogicOp)
+        cached = 1;
+    }
+  }
+  return cached == 1;
+}
+
 ID3D11BlendState* ImmediateRenderer::blendState()
 {
+  const bool xorOp = s_state.logicOpXor && LogicOpSupported();
+
   uint32_t key = (s_state.blendEnabled ? 1u : 0u) | (static_cast<uint32_t>(s_state.blendSrc) << 1) |
-    (static_cast<uint32_t>(s_state.blendDst) << 6);
+    (static_cast<uint32_t>(s_state.blendDst) << 6) | (xorOp ? (1u << 12) : 0u);
 
   auto it = s_blendCache.find(key);
   if (it != s_blendCache.end())
     return it->second.get();
+
+  // XOR raster-op path: a D3D11.1 blend state with the logic op enabled (RGB write
+  // mask only, so the canvas alpha stays opaque), used for the chart cross-hairs.
+  if (xorOp)
+  {
+    com_ptr<ID3D11Device1> dev1;
+    Core::GetD3DDevice()->QueryInterface(IID_PPV_ARGS(dev1.put()));
+    D3D11_BLEND_DESC1 desc{};
+    auto& rt = desc.RenderTarget[0];
+    rt.LogicOpEnable = TRUE;
+    rt.LogicOp = D3D11_LOGIC_OP_XOR;
+    rt.RenderTargetWriteMask =
+      D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+    com_ptr<ID3D11BlendState1> state1;
+    check_hresult(dev1->CreateBlendState1(&desc, state1.put()));
+    com_ptr<ID3D11BlendState> state = state1.as<ID3D11BlendState>();
+    return s_blendCache.emplace(key, std::move(state)).first->second.get();
+  }
 
   D3D11_BLEND_DESC desc{};
   auto& rt = desc.RenderTarget[0];
@@ -778,7 +829,8 @@ ID3D11DepthStencilState* ImmediateRenderer::depthState()
 ID3D11RasterizerState* ImmediateRenderer::rasterState()
 {
   D3D11_CULL_MODE cull = s_state.cullEnabled ? s_state.cullMode : D3D11_CULL_NONE;
-  uint32_t key = static_cast<uint32_t>(cull) | (s_state.frontCounterClockwise ? 4u : 0u);
+  uint32_t key = static_cast<uint32_t>(cull) | (s_state.frontCounterClockwise ? 4u : 0u) |
+    (s_state.scissorEnabled ? 8u : 0u);
 
   auto it = s_rasterCache.find(key);
   if (it != s_rasterCache.end())
@@ -789,6 +841,7 @@ ID3D11RasterizerState* ImmediateRenderer::rasterState()
   desc.CullMode = cull;
   desc.FrontCounterClockwise = s_state.frontCounterClockwise;
   desc.DepthClipEnable = TRUE;
+  desc.ScissorEnable = s_state.scissorEnabled;
 
   com_ptr<ID3D11RasterizerState> state;
   check_hresult(Core::GetD3DDevice()->CreateRasterizerState(&desc, state.put()));
