@@ -18,4 +18,8 @@ HWND platform_window(void);
 /* Drain pending Win32 messages. Terminates the process if the window closed. */
 void platform_pump_messages(void);
 
+/* Request an orderly application quit, exactly as if the user closed the window
+ * (the next message pump unwinds the game loop and exits the process). */
+void platform_request_quit(void);
+
 #endif /* PLATFORM_WIN_H */

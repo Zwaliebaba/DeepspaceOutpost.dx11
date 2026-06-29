@@ -16,11 +16,28 @@
 #include "platform_win.h"
 
 #include "keyboard.h"
+#include "EventManager.h"
+
+#include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
 
 namespace {
 
 bool g_key[256] = {};          /* current held state, VK indexed */
 volatile bool g_any_key = false;
+
+/* When a modal GUI owns input, the game's kbd_* snapshot reports no keys (the GUI
+ * reads raw key state via input_key_down, which ignores this). */
+bool s_suppressGameKeys = false;
+
+/* Rising-edge state for the GUI menu controls (recomputed once per frame). */
+bool s_menuPrev[MenuControlCount] = {};
+bool s_menuEdge[MenuControlCount] = {};
+
+/* Mouse / primary-pointer state, in client pixels (full-window GUI space). */
+int  g_mouseX = 0;
+int  g_mouseY = 0;
+bool g_lmb = false;
+bool g_rmb = false;
 
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
@@ -31,7 +48,9 @@ void q_push(int c) { int n = (g_qtail + 1) % QN; if (n != g_qhead) { g_q[g_qtail
 bool q_empty()     { return g_qhead == g_qtail; }
 int  q_pop()       { if (q_empty()) return 0; int c = g_q[g_qhead]; g_qhead = (g_qhead + 1) % QN; return c; }
 
-inline bool down(int vk) { return (vk >= 0 && vk < 256) && g_key[vk]; }
+/* Game-facing held state: gated by the modal-GUI suppression so the whole kbd_*
+ * snapshot below goes quiet in one place when a menu owns input. */
+inline bool down(int vk) { return !s_suppressGameKeys && (vk >= 0 && vk < 256) && g_key[vk]; }
 
 } // namespace
 
@@ -46,6 +65,100 @@ void input_on_key(WPARAM vk, bool d)
 void input_on_char(WPARAM ch)
 {
 	q_push(static_cast<int>(ch));
+}
+
+namespace {
+
+/* Keyboard processor for the EventManager chain. Returns 0 for messages it consumes,
+ * -1 otherwise so the chain / DefWindowProc continue (e.g. Alt+F4). */
+LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+	switch (msg)
+	{
+		case WM_KEYDOWN: input_on_key(wparam, true);  return 0;
+		case WM_KEYUP:   input_on_key(wparam, false); return 0;
+		case WM_CHAR:    input_on_char(wparam);       return 0;
+
+		case WM_MOUSEMOVE:
+			g_mouseX = GET_X_LPARAM(lparam);
+			g_mouseY = GET_Y_LPARAM(lparam);
+			return 0;
+		case WM_LBUTTONDOWN:
+			g_lmb = true;  SetCapture(hwnd); return 0;
+		case WM_LBUTTONUP:
+			g_lmb = false; ReleaseCapture();  return 0;
+		case WM_RBUTTONDOWN:
+			g_rmb = true;  return 0;
+		case WM_RBUTTONUP:
+			g_rmb = false; return 0;
+
+		// Minimal touch: map the primary pointer to the mouse (no multi-touch yet).
+		case WM_POINTERDOWN:
+		case WM_POINTERUPDATE:
+		case WM_POINTERUP:
+		{
+			POINTER_INFO pi{};
+			if (GetPointerInfo(GET_POINTERID_WPARAM(wparam), &pi))
+			{
+				POINT pt = pi.ptPixelLocation;
+				ScreenToClient(hwnd, &pt);
+				g_mouseX = pt.x;
+				g_mouseY = pt.y;
+				g_lmb = (msg != WM_POINTERUP) && (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
+			}
+			return 0;
+		}
+	}
+	return -1;
+}
+
+} // namespace
+
+void input_register_event_processor(void)
+{
+	EventManager::AddEventProcessor(InputWndProc);
+}
+
+/* ---- GUI menu input (raw key state, independent of the game's kbd_* gate) ---- */
+
+bool input_key_down(int vk)
+{
+	return (vk >= 0 && vk < 256) && g_key[vk];
+}
+
+void input_suppress_game_keys(bool suppress)
+{
+	s_suppressGameKeys = suppress;
+}
+
+void input_update_menu_edges(void)
+{
+	bool cur[MenuControlCount] = {};
+	cur[MenuUp]       = input_key_down(VK_UP)    || input_key_down('S');
+	cur[MenuDown]     = input_key_down(VK_DOWN)  || input_key_down('X');
+	cur[MenuLeft]     = input_key_down(VK_LEFT)  || input_key_down(VK_OEM_COMMA);
+	cur[MenuRight]    = input_key_down(VK_RIGHT) || input_key_down(VK_OEM_PERIOD);
+	cur[MenuActivate] = input_key_down(VK_RETURN);
+	cur[MenuClose]    = input_key_down(VK_ESCAPE);
+
+	for (int i = 0; i < MenuControlCount; ++i)
+	{
+		s_menuEdge[i] = cur[i] && !s_menuPrev[i];
+		s_menuPrev[i] = cur[i];
+	}
+}
+
+bool input_menu_edge(MenuControl control)
+{
+	return control >= 0 && control < MenuControlCount && s_menuEdge[control];
+}
+
+void input_mouse_state(int& x, int& y, bool& lmb, bool& rmb)
+{
+	x = g_mouseX;
+	y = g_mouseY;
+	lmb = g_lmb;
+	rmb = g_rmb;
 }
 
 /* ---- keyboard.h contract ---- */

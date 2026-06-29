@@ -33,6 +33,12 @@ public:
 	static constexpr int kCanvasHeight = 514;
 
 	bool init(HWND hwnd);
+
+	/* Device-unification path: instead of creating its own device/swap chain, adopt
+	 * the ones Neuron::Graphics::Core already created (owned by ClientEngine) and build
+	 * the offscreen canvas + present pipeline on them. */
+	bool initAdopt();
+
 	void shutdown();
 
 	/* Resize the swap chain to the new client area (from WM_SIZE). */
@@ -55,11 +61,23 @@ public:
 	void clearCanvas(int palette_index);
 
 	/* Bind the canvas as the render target with a full-canvas viewport, ready
-	 * for the 2D primitive batch (gfx_dx11) to draw into. */
+	 * for the 2D primitive batch (gfx2d) to draw into. */
 	void bindCanvasTarget();
 
 	/* Blit the canvas to the back buffer (letterboxed) and present it. */
 	void present();
+
+	/* Split form of present() for a full-window GUI overlay: blit the letterboxed
+	 * canvas to the back buffer and leave it bound with a full client-area viewport
+	 * (so an overlay drawn next renders in client space); then swap() presents. */
+	void blitCanvasToBackBuffer();
+	void swap();
+
+	/* Rebuild the back-buffer view after the swap chain was resized (WM_SIZE, via
+	 * Core). Call onResizePre() before Core::WindowSizeChanged (releases the view so
+	 * ResizeBuffers can succeed) and onResizePost() after (recreates it). */
+	void onResizePre();
+	void onResizePost(int clientWidth, int clientHeight);
 
 	/* Master 256-colour palette loaded from scanner.bmp. Index -> 0xAABBGGRR
 	 * (R8G8B8A8_UNORM byte order). Index 0 is forced fully transparent. */
@@ -69,6 +87,9 @@ public:
 	/* Accessors for the 2D primitive layer added in later milestones. */
 	ID3D11Device*        device()  const { return device_.get(); }
 	ID3D11DeviceContext* context() const { return context_.get(); }
+	/* The swap chain, so Neuron::Graphics::Core can adopt the existing device/swap
+	 * chain (device unification) instead of creating a second one. */
+	IDXGISwapChain*      swapChain() const { return swap_chain_.get(); }
 
 private:
 	bool createDeviceAndSwapChain(HWND hwnd);

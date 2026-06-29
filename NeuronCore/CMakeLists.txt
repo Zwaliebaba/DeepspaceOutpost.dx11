@@ -12,10 +12,13 @@ set(NEURONCORE_SOURCES
     Json.cpp
     TasksCore.cpp
     NetLib.cpp
+    EventManager.cpp
 )
 
 set(NEURONCORE_HEADERS
     NeuronCore.h
+    Event.h
+    EventManager.h
     ECS.h
     Vector3i64.h
     Vector3d.h
