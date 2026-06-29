@@ -83,12 +83,11 @@ void GuiWindow::Render(bool hasFocus)
   ImmediateRenderer::BindTexture(0, interfaceTex ? interfaceTex->GetShaderResourceView() : nullptr);
   ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
 
-  // Tile the interface texture at its native pixel size (the WRAP sampler repeats it)
-  // rather than stretching the whole strip across the window.
-  const float texPixW = (interfaceTex && interfaceTex->GetWidth() > 0.0f) ? interfaceTex->GetWidth() : 64.0f;
-  const float texPixH = (interfaceTex && interfaceTex->GetHeight() > 0.0f) ? interfaceTex->GetHeight() : 510.0f;
-  const float texW = m_w / texPixW;
-  const float texH = m_h / texPixH;
+  // Map the whole interface texture across the window: it is a vertical red gradient
+  // (dark edges, bright middle), so this gives every window that panel shading. The
+  // texture's fine scanlines filter away cleanly because it now has a mip chain.
+  const float texW = 1.0f;
+  const float texH = 1.0f;
 
   ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 0.96f);
   ImmediateRenderer::Begin(Primitive::Quads);
