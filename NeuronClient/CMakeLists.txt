@@ -86,7 +86,6 @@ set(NEURONCLIENT_HEADERS
     gfx.h
     sound.h
     keyboard.h
-    compat.h
 
     # Platform backend headers.
     platform/Renderer.h

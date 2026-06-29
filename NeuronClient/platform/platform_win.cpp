@@ -23,7 +23,6 @@
 #include "ClientEngine.h"
 #include "EventManager.h"
 
-#include "compat.h"
 #include "gfx.h"
 
 /* Defined by the game logic (elite.cpp). The platform forces this when the window is

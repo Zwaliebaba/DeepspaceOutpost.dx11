@@ -22,7 +22,6 @@
 #include "Image.h"
 #include "Font.h"
 
-#include "compat.h"
 #include "gfx.h"
 #include "ViewMetrics.h"
 
