@@ -1,5 +1,9 @@
 # GUI / Text / GraphicsCore import — Phase 1 (foundation)
 
+> **Status:** landed and building on Windows. (The shaders were later relocated from a
+> separate `NeuronGame` library into `NeuronClient/shaders`.) For the current overall
+> state and open items, see [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
+
 This is the first phase of importing, from the donor `NeuronClient` (the more
 complete client this project's `AGENTS.md` already names as its target
 architecture), three things requested:

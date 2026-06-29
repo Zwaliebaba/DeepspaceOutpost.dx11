@@ -1,5 +1,14 @@
 # GraphicsCore goes live — Phase 5 (device unification + GUI overlay)
 
+> **Status — partly superseded (kept for history).** This phase had the platform
+> `Renderer` create the device and `Core` *adopt* it (`Core::AdoptExisting`), and
+> `GuiOverlay` do the engine bring-up + render into the 512×514 canvas. Phase 6 reversed
+> ownership (**`ClientEngine`/`Core` create the device; `Renderer` adopts it**;
+> `Core::AdoptExisting` was removed), and Phase 7 moved the GUI to **full-window** client
+> space (no longer the letterboxed canvas). The "device unification" idea is current; the
+> specific mechanics below are not. Current state:
+> [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
+
 Builds on Phases 1–4. This phase makes the imported GraphicsCore / ImmediateRenderer
 / text / GuiWindow stack **actually run**, on the **same Direct3D 11 device** as the
 existing game, without disturbing the working render path. **Not compiled/run here**

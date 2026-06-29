@@ -1,5 +1,10 @@
 # ClientEngine / GameMain bootstrap — Phase 6 (full ownership swap)
 
+> **Status:** landed; builds + boots on Windows. The "live window resize is not handled"
+> limitation noted below was **addressed in Phase 7**, which also made the GUI
+> full-window and mouse-driven. Current state + open items:
+> [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
+
 Adopts the donor's engine front door: a `ClientEngine` that owns the window and the
 native Direct3D 11 device, a `GameMain` application base, a dummy `GameApp`, and an
 `EventManager`-based window-message fan-out. **Not compiled/run here** (Linux, no

@@ -1,5 +1,10 @@
 # GUI / Text / GraphicsCore import — Phases 2–4
 
+> **Status:** landed; builds and renders on Windows. The "nothing renders until Phase 5"
+> note and the mouse/coordinate caveats below are **superseded by Phases 5–7** (the GUI
+> is live, mouse-driven and full-window now). Current state + open items:
+> [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
+
 Builds on Phase 1 (`docs/phase1-graphicscore.md`). Like Phase 1 this is **additive
 and not yet wired into the live frame** — none of it runs until the Phase 5 device
 unification initialises `Neuron::Graphics::Core` and routes the present path through
