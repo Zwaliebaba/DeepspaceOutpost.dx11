@@ -82,7 +82,7 @@ namespace
 
 void GuiOverlay::Startup()
 {
-  // ClientEngine has already brought up Core / ImmediateRenderer / Canvas / fonts /
+  // ClientEngine has already brought up Core / Render2D / Canvas / fonts /
   // Strings by the time this runs. The overlay starts hidden; the game opens it on
   // demand (F8 market, F11 options) via Open() / ShowWindow().
   s_ready = true;
@@ -90,7 +90,7 @@ void GuiOverlay::Startup()
 
 void GuiOverlay::Shutdown()
 {
-  // Canvas / ImmediateRenderer are torn down by ClientEngine::Shutdown().
+  // Canvas / Render2D are torn down by ClientEngine::Shutdown().
   s_ready = false;
   s_shown = false;
 }

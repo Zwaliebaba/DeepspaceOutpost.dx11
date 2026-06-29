@@ -10,9 +10,9 @@
 
 // Native Direct3D 11 batched 2D layer (Neuron::Graphics).
 //
-// This is the shared foundation the 2D drawers are migrating onto, replacing the
-// hand-rolled "set up an ortho pass, draw, tear down" blocks that currently live in
-// GuiOverlay::Render and gfx2d_flush (each driven through ImmediateRenderer).
+// This is the shared foundation for all client 2D drawing - the GUI overlay
+// (GuiOverlay::Render) and the in-game HUD batch (gfx2d_flush) - replacing the
+// retired immediate-mode renderer each previously drove.
 //
 // A frame's 2D work happens inside a Begin/End scope:
 //
@@ -27,9 +27,9 @@
 // glyphs and sprites composite exactly in the order the caller draws them, the way the
 // immediate-mode path did.
 //
-// All-static, mirroring Graphics::Core / ImmediateRenderer so the siblings match. The
-// shaders are compiled at runtime with D3DCompile (as Renderer's present pipeline is),
-// so no fxc / CompiledShaders build step is involved.
+// All-static, mirroring Graphics::Core so the siblings match. The shaders are compiled
+// at runtime with D3DCompile (as Renderer's present pipeline is), so there is no
+// offline fxc / compiled-shader build step.
 
 namespace Neuron::Graphics
 {
@@ -40,7 +40,7 @@ namespace Neuron::Graphics
       static void Shutdown();
 
       // Pack 8-bit channels into the 0xAABBGGRR order the submit calls expect (R in
-      // the low byte), matching the renderer's R8G8B8A8_UNORM vertex colour.
+      // the low byte), matching the R8G8B8A8_UNORM vertex colour and palette byte order.
       static constexpr uint32_t Rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept
       {
         return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(b) << 16) |
@@ -60,8 +60,8 @@ namespace Neuron::Graphics
       static void SetClip(int x, int y, int w, int h);
       static void ClearClip();
 
-      // Colored primitives. rgba is 0xAABBGGRR (R in the low byte) to match
-      // ImmediateRenderer::PackColor and the palette byte order.
+      // Colored primitives. rgba is 0xAABBGGRR (R in the low byte; see Rgba), matching
+      // the R8G8B8A8_UNORM vertex colour and the palette byte order.
       static void FillRect(float x0, float y0, float x1, float y1, uint32_t rgba);
       static void DrawLine(float x0, float y0, float x1, float y1, uint32_t rgba);
       static void DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgba);

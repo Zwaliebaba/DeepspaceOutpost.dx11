@@ -192,8 +192,8 @@ float4 PSMain(VSOut i) : SV_Target
     s_cmds.clear();
     ClearClip();
 
-    // Y-down pixel-space orthographic projection (origin top-left), matching the old
-    // ImmediateRenderer::Ortho2D(0, w, h, 0) the overlay used.
+    // Y-down pixel-space orthographic projection (origin top-left): maps pixel
+    // coordinates straight to clip space.
     const XMMATRIX proj = XMMatrixOrthographicOffCenterRH(0.0f, static_cast<float>(width), static_cast<float>(height),
                                                           0.0f, -1.0f, 1.0f);
     D3D11_MAPPED_SUBRESOURCE mapped;

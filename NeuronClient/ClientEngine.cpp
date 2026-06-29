@@ -3,7 +3,6 @@
 
 #include "Canvas.h"
 #include "GuiOverlay.h"
-#include "ImmediateRenderer.h"
 #include "Render2D.h"
 #include "Strings.h"
 #include "TextRenderer.h"
@@ -82,7 +81,6 @@ namespace Neuron::Client
     GetClientRect(m_hwnd, &client);
     Graphics::Core::SetWindow(m_hwnd, client.right - client.left, client.bottom - client.top);
     Graphics::Core::CreateWindowSizeDependentResources();
-    Graphics::ImmediateRenderer::Startup();
     Graphics::Render2D::Startup();
 
     Canvas::Startup();
@@ -111,7 +109,8 @@ namespace Neuron::Client
     if (r)
       r->onResizePost(_width, _height);
 
-    Graphics::ImmediateRenderer::OnWindowSizeChanged();
+    // Render2D holds no window-size-dependent state (it takes the target + size at
+    // Begin), so there is nothing to rebuild here.
 
     if (m_main)
       m_main->OnWindowSizeChanged(_width, _height);
@@ -135,7 +134,6 @@ namespace Neuron::Client
     GuiOverlay::Shutdown();
     Canvas::Shutdown();
     Graphics::Render2D::Shutdown();
-    Graphics::ImmediateRenderer::Shutdown();
     Graphics::Core::Shutdown();
     Strings::Shutdown();
     CoreEngine::Shutdown();

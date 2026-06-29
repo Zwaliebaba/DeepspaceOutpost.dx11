@@ -2,20 +2,19 @@
 
 // GUI overlay integration (Phase 5).
 //
-// Makes the imported GraphicsCore / ImmediateRenderer / text / GuiWindow stack LIVE
-// without disturbing the existing game render path. It:
+// Makes the imported GraphicsCore / Render2D / text / GuiWindow stack LIVE without
+// disturbing the existing game render path. It:
 //   - unifies the device (Neuron::Graphics::Core adopts the platform Renderer's
-//     device/context/swap chain), then initialises ImmediateRenderer + fonts +
-//     Strings + Canvas;
-//   - renders registered GuiWindows as an overlay INTO the existing 512x514 canvas
-//     (after the game's 2D batch, before the letterboxed present);
+//     device/context/swap chain), then initialises Render2D + fonts + Strings + Canvas;
+//   - renders registered GuiWindows as a full-window overlay on the back buffer (after
+//     the game's 2D canvas has been blitted, before the present);
 //   - is fail-safe (best-effort Startup guarded by try/catch) and hidden by default;
 //     the game opens it on demand (F8 market, F11 options) so the normal game is
 //     unaffected if the new path misbehaves.
 //
-// The game's gfx_* 2D batch (gfx2d) now also renders through ImmediateRenderer, so
-// this overlay and the game share one renderer; Renderer remains only for the
-// off-screen canvas + letterboxed present.
+// The game's gfx_* 2D batch (gfx2d) also renders through Render2D, so the overlay and
+// the game share one 2D layer; Renderer remains only for the off-screen canvas +
+// letterboxed present.
 
 #include <functional>
 #include <string_view>

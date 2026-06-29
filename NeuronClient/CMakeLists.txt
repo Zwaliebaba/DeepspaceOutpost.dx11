@@ -26,12 +26,11 @@ set(NEURONCLIENT_SOURCES
     # Imported from the donor NeuronClient; the foundation the GUI/text/menu import
     # is built on. See docs/phase1-graphicscore.md.
     graphics/GraphicsCore.cpp
-    graphics/ImmediateRenderer.cpp
     graphics/Render2D.cpp
     graphics/TextureManager.cpp
     graphics/DDSTextureLoader.cpp
 
-    # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
+    # Imported text + GUI menu system (Phases 3-4). Drawn through Neuron::Graphics::Render2D;
     # menu navigation reads keyboard.h directly and the exit button calls
     # platform_request_quit(). Textures load directly through
     # Neuron::Graphics::TextureManager. See docs/phase2-4-gui-text.md.
@@ -59,9 +58,7 @@ set(NEURONCLIENT_HEADERS
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h
-    graphics/ImmediateRenderer.h
     graphics/Render2D.h
-    graphics/ConstantBuffers.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 
@@ -119,89 +116,9 @@ target_include_directories(NeuronClient PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gui
 )
 
-# --- Native Direct3D 11 shaders -----------------------------------------------
-# Each shaders/*.hlsl is compiled by fxc into a C++ byte-array header in
-# shaders/CompiledShaders/<name>.h (array g_<name>, with '-' replaced by '_').
-# ImmediateRenderer.cpp #includes those headers, so that directory is on its private
-# include path. The compiled headers are committed to the repo, so a configure
-# without fxc still builds against them; fxc is only needed to *regenerate* them
-# after editing the HLSL. Stage is taken from the file-name suffix: *VS.hlsl ->
-# vs_5_0/VSMain, *PS.hlsl -> ps_5_0/PSMain. Partials (shaders/partials/*.hlsli) are
-# #include-only.
-set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-set(SHADER_OUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/CompiledShaders")
-
-# PRIVATE: only NeuronClient's own sources reach the compiled shaders.
-target_include_directories(NeuronClient PRIVATE ${SHADER_OUT_DIR})
-
-find_program(FXC_EXECUTABLE
-    NAMES fxc
-    HINTS
-        "$ENV{WindowsSdkVerBinPath}x64"
-        "$ENV{WindowsSdkVerBinPath}x86"
-        "$ENV{WindowsSdkDir}bin/x64"
-)
-
-file(GLOB SHADER_SOURCES  CONFIGURE_DEPENDS "${SHADER_SRC_DIR}/*.hlsl")
-file(GLOB SHADER_PARTIALS CONFIGURE_DEPENDS "${SHADER_SRC_DIR}/partials/*.hlsli")
-
-if(NOT FXC_EXECUTABLE)
-    message(WARNING
-        "fxc (the HLSL compiler) was not found - using the committed "
-        "shaders/CompiledShaders/*.h byte arrays as-is. Editing shaders/*.hlsl will "
-        "NOT take effect until you configure from a Visual Studio / Windows SDK "
-        "developer environment (or set FXC_EXECUTABLE).")
-    add_custom_target(NeuronClientShaders SOURCES ${SHADER_SOURCES} ${SHADER_PARTIALS})
-else()
-    file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
-
-    # Per-shader fxc defines. The lit programs bake in a fixed light count + per-vertex
-    # normals; keep MAX_LIGHTS in sync with Neuron::Graphics::MAX_LIGHTS in
-    # graphics/ConstantBuffers.h.
-    set(SHADER_DEFINES_generic-colored-3dVS "MAX_LIGHTS=8" "NORMALS_PROVIDED=1")
-    set(SHADER_DEFINES_generic-colored-3dPS "MAX_LIGHTS=8" "NORMALS_PROVIDED=1")
-
-    set(SHADER_HEADERS "")
-    foreach(SHADER ${SHADER_SOURCES})
-        get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
-
-        if(SHADER_NAME MATCHES "VS$")
-            set(SHADER_PROFILE vs_5_0)
-            set(SHADER_ENTRY VSMain)
-        elseif(SHADER_NAME MATCHES "PS$")
-            set(SHADER_PROFILE ps_5_0)
-            set(SHADER_ENTRY PSMain)
-        else()
-            message(WARNING "Skipping shader with no VS/PS suffix: ${SHADER}")
-            continue()
-        endif()
-
-        string(REPLACE "-" "_" SHADER_VAR "g_${SHADER_NAME}")
-        set(SHADER_HEADER "${SHADER_OUT_DIR}/${SHADER_NAME}.h")
-
-        set(SHADER_DEFINE_ARGS "")
-        foreach(def ${SHADER_DEFINES_${SHADER_NAME}})
-            list(APPEND SHADER_DEFINE_ARGS "/D" "${def}")
-        endforeach()
-
-        add_custom_command(
-            OUTPUT "${SHADER_HEADER}"
-            COMMAND "${FXC_EXECUTABLE}" /nologo /T ${SHADER_PROFILE} /E ${SHADER_ENTRY}
-                    ${SHADER_DEFINE_ARGS}
-                    /Fh "${SHADER_HEADER}" /Vn ${SHADER_VAR} "${SHADER}"
-            DEPENDS "${SHADER}" ${SHADER_PARTIALS} "${CMAKE_CURRENT_LIST_FILE}"
-            MAIN_DEPENDENCY "${SHADER}"
-            COMMENT "fxc ${SHADER_NAME} -> shaders/CompiledShaders/${SHADER_NAME}.h"
-            VERBATIM)
-
-        list(APPEND SHADER_HEADERS "${SHADER_HEADER}")
-    endforeach()
-
-    add_custom_target(NeuronClientShaders DEPENDS ${SHADER_HEADERS}
-        SOURCES ${SHADER_SOURCES} ${SHADER_PARTIALS})
-endif()
-
-add_dependencies(NeuronClient NeuronClientShaders)
+# The 2D renderer (Neuron::Graphics::Render2D) and the present blit compile their
+# shaders at runtime via D3DCompile (d3dcompiler), so there is no offline fxc step
+# or committed shader byte-array headers to build.
 
 # NeuronClient is built on top of NeuronCore; PUBLIC so the core is transitively
 # available to anything that links NeuronClient.
