@@ -33,6 +33,7 @@
 #include "Camera.h"
 #include "ReplicationClient.h"
 #include "GuiOverlay.h"
+#include "GameWindows.h"
 
 int old_cross_x, old_cross_y;
 int cross_timer;
@@ -894,8 +895,10 @@ void handle_flight_keys(void)
 
   if (kbd_F8_pressed && (!witchspace))
   {
+    // Route the in-game market entry to the GUI overlay (Buy/Sell per row, live cash),
+    // replacing the legacy gfx_display_* display_market_prices screen.
     find_input = 0;
-    display_market_prices();
+    OpenMarketWindow();
   }
 
   if (kbd_F9_pressed)

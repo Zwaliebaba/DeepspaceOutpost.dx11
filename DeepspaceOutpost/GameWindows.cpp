@@ -7,6 +7,7 @@
 #include "GuiOverlay.h"
 #include "GraphicsCore.h"
 
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +22,14 @@ extern int planet_render_style;
 extern int hoopy_casinos;
 extern int instant_dock;
 extern void write_config_file(void);
+
+// Render-free market API (docked.h / docked.cpp), declared here to keep this TU off
+// the legacy game headers.
+extern int market_item_count(void);
+extern void market_format_row(int item, char* buf, int buflen);
+extern int market_credits(void);
+extern int market_buy(int item);
+extern int market_sell(int item);
 
 namespace
 {
@@ -240,9 +249,137 @@ namespace
         m_currentButton = 0;
       }
   };
+
+  // ----- Market prices ------------------------------------------------------
+
+  // Per-row Buy/Sell action: trades one unit of its commodity through the render-free
+  // market API. The window refreshes all rows from live state each frame, so this
+  // works for both local and thin-client (server-authoritative) trading.
+  class TradeButton : public GuiButton
+  {
+    public:
+      TradeButton(int _item, bool _buy)
+        : m_item(_item), m_buy(_buy)
+      {
+        m_centered = true;
+      }
+
+      void MouseUp() override
+      {
+        if (m_buy)
+          market_buy(m_item);
+        else
+          market_sell(m_item);
+      }
+
+    private:
+      int m_item;
+      bool m_buy;
+  };
+
+  // The market screen: a row per commodity (product / unit / price / for-sale /
+  // in-hold) with inline Buy and Sell buttons, plus a live cash readout. Replaces the
+  // legacy gfx_display_* display_market_prices.
+  class MarketWindow : public GuiWindow
+  {
+    public:
+      MarketWindow()
+        : GuiWindow("Market")
+      {
+        SetTitle("Market Prices");
+        Centre(this, 560, 360);
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create();
+        m_buttonOrder.clear();
+        m_rows.clear();
+
+        const int infoX = 10;
+        const int infoW = 360;
+        const int buyX = infoX + infoW + 6;   // 376
+        const int sellX = buyX + 86;           // 462
+        const int actW = 80;
+        const int rowH = 16;
+
+        char hdr[128];
+        snprintf(hdr, sizeof(hdr), "%-15s %-2s %7s %6s %6s", "PRODUCT", "U", "PRICE", "SALE", "HOLD");
+        auto* header = new LabelButton();
+        header->SetProperties("MktHeader", infoX, 28, infoW, 14, hdr);
+        RegisterButton(header);
+
+        const int count = market_item_count();
+        int y = 44;
+        for (int i = 0; i < count; ++i)
+        {
+          auto* info = new LabelButton();
+          info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, 14, "");
+          RegisterButton(info);
+          m_rows.push_back(info);
+
+          auto* buy = new TradeButton(i, true);
+          buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, 14, "Buy");
+          RegisterButton(buy);
+          m_buttonOrder.push_back(buy);
+
+          auto* sell = new TradeButton(i, false);
+          sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, 14, "Sell");
+          RegisterButton(sell);
+          m_buttonOrder.push_back(sell);
+
+          y += rowH;
+        }
+
+        y += 6;
+        m_cash = new LabelButton();
+        m_cash->SetProperties("MktCash", infoX, y, infoW, 14, "");
+        RegisterButton(m_cash);
+
+        auto* close = new CloseButton();
+        close->m_centered = true;
+        close->SetProperties("Close", buyX, y, actW + 6 + actW, 16, "Close");
+        RegisterButton(close);
+        m_buttonOrder.push_back(close);
+
+        m_currentButton = 0;
+        Refresh();
+      }
+
+      void Update() override
+      {
+        GuiWindow::Update();
+        Refresh();
+      }
+
+    private:
+      void Refresh()
+      {
+        char buf[128];
+        for (size_t i = 0; i < m_rows.size(); ++i)
+        {
+          market_format_row(static_cast<int>(i), buf, sizeof(buf));
+          m_rows[i]->SetCaption(buf);
+        }
+        if (m_cash)
+        {
+          const int credits = market_credits();
+          snprintf(buf, sizeof(buf), "Cash: %d.%d Cr", credits / 10, credits % 10);
+          m_cash->SetCaption(buf);
+        }
+      }
+
+      std::vector<LabelButton*> m_rows;
+      LabelButton* m_cash = nullptr;
+  };
 }
 
 void RegisterGameWindows()
 {
   GuiOverlay::SetOptionsWindowFactory([]() -> GuiWindow* { return new OptionsMenuWindow(); });
+}
+
+void OpenMarketWindow()
+{
+  GuiOverlay::ShowWindow(std::string_view("Market"), []() -> GuiWindow* { return new MarketWindow(); });
 }

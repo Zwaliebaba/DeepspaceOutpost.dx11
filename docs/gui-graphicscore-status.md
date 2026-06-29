@@ -85,14 +85,27 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   `display_options()` — so the in-game options entry runs through the GUI, floating over
   the running game with input suppressed. The engine's placeholder `OptionsWindow`
   remains only as the no-factory fallback.
-- **Deferred in this slice:** Save/Load Commander (the legacy `gfx_display_*`
-  file-entry screens aren't migrated, so they're omitted from the GUI Options menu for
-  now) and retiring the now-unreached `display_options`/`game_settings_screen`/
-  `quit_screen` + their `current_screen` (`SCR_OPTIONS`/`SCR_SETTINGS`/`SCR_QUIT`)
-  input dispatch in `options.cpp`/`main.cpp` (left intact, harmless).
-- Convert the remaining game screens (docked/trade/equip, charts, market) from
-  `gfx_display_*` to `GuiWindow`s with list/grid widgets — wired to actual game state,
-  following this pattern.
+- ✅ **Removed: Save/Load Commander.** Commander file persistence is gone entirely
+  (`save/load_commander_file` + `checksum`, the two `*_screen` functions, menu entries,
+  and the intro "Load (Y/N)" prompt → now "Press Space to Begin"). The game boots with
+  the compiled-in default commander via `restore_saved_commander()`.
+- ✅ **Migrated: Market Prices (F8).** `MarketWindow` (in `GameWindows`) lists every
+  commodity (product / unit / price / for-sale / in-hold — column-aligned, since the
+  GUI font is monospaced) with inline **Buy**/**Sell** buttons and a live cash readout;
+  it refreshes from game state every frame (so local *and* thin-client/server trades
+  show immediately). Engine seam: `GuiOverlay::ShowWindow(name, factory)` shows the
+  overlay and opens/focuses a game window; **`main.cpp`'s F8 calls `OpenMarketWindow()`**
+  instead of `display_market_prices()`. Trade logic was split into render-free
+  `market_buy`/`market_sell` (+ `market_format_row`/`market_credits`/`market_item_count`)
+  in `docked.cpp`; the legacy `buy_stock`/`sell_stock` now wrap those.
+- **Deferred / dead-but-compiled:** the now-unreached legacy screens
+  (`display_options`/`game_settings_screen`/`quit_screen`, `display_market_prices` +
+  `highlight_stock`/`display_stock_price`) and their `current_screen` keyboard dispatch
+  in `options.cpp`/`docked.cpp`/`main.cpp` are left intact (harmless) until a later
+  cleanup pass retires them.
+- Convert the remaining game screens (equip ship, charts, inventory, commander status)
+  from `gfx_display_*` to `GuiWindow`s wired to actual game state, following this
+  pattern.
 - Migrate the game render into the `GameMain` lifecycle
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);

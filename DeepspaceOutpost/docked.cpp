@@ -1239,13 +1239,15 @@ void select_next_stock (void)
 }
 
 
-void buy_stock (void)
+// Render-free buy: mutates state (or sends a server request in thin-client mode).
+// Returns 1 if an action was taken (so a caller can refresh its display).
+int market_buy (int item)
 {
-	struct stock_item *item;
+	struct stock_item *it;
 	int cargo_held;
-	
+
 	if (!docked)
-		return;
+		return 0;
 
 	// Thin-client mode: trading is server-authoritative. Send a buy request and
 	// let the StationResponse update credits/cargo; skip the local mutation.
@@ -1253,56 +1255,109 @@ void buy_stock (void)
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Buy;
-		req.commodity = (uint16_t) hilite_item;
+		req.commodity = (uint16_t) item;
 		req.quantity = 1;
 		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return;
+		return 1;
 	}
 
-	item = &stock_market[hilite_item];
+	it = &stock_market[item];
 
-	if ((item->current_quantity == 0) ||
-	    (cmdr.credits < item->current_price))
-		return;
+	if ((it->current_quantity == 0) ||
+	    (cmdr.credits < it->current_price))
+		return 0;
 
 	cargo_held = total_cargo();
-	
-	if ((item->units == TONNES) &&
-		(cargo_held == cmdr.cargo_capacity))
-		return;
-	
-	cmdr.current_cargo[hilite_item]++;
-	item->current_quantity--;
-	cmdr.credits -= item->current_price;	
 
-	highlight_stock (hilite_item);
+	if ((it->units == TONNES) &&
+		(cargo_held == cmdr.cargo_capacity))
+		return 0;
+
+	cmdr.current_cargo[item]++;
+	it->current_quantity--;
+	cmdr.credits -= it->current_price;
+
+	return 1;
 }
 
 
-void sell_stock (void)
+// Render-free sell counterpart to market_buy.
+int market_sell (int item)
 {
-	struct stock_item *item;
-	
-	if ((!docked) || (cmdr.current_cargo[hilite_item] == 0))
-		return;
+	struct stock_item *it;
+
+	if ((!docked) || (cmdr.current_cargo[item] == 0))
+		return 0;
 
 	// Thin-client mode: ask the server to sell; the response updates our state.
 	if (Neuron::Client::ReplicationClientInstance().IsOpen())
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Sell;
-		req.commodity = (uint16_t) hilite_item;
+		req.commodity = (uint16_t) item;
 		req.quantity = 1;
 		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return;
+		return 1;
 	}
 
-	item = &stock_market[hilite_item];
+	it = &stock_market[item];
 
-	cmdr.current_cargo[hilite_item]--;
-	item->current_quantity++;
-	cmdr.credits += item->current_price;	
+	cmdr.current_cargo[item]--;
+	it->current_quantity++;
+	cmdr.credits += it->current_price;
 
+	return 1;
+}
+
+
+int market_item_count (void) { return 17; }
+
+int market_credits (void) { return cmdr.credits; }
+
+// Format one stock row as a fixed-width line (the GUI font is monospaced, so the
+// columns line up): "<name> <unit> <price> <for-sale> <in-hold>".
+void market_format_row (int item, char *buf, int buflen)
+{
+	char price[16], sale[16], hold[16];
+
+	sprintf (price, "%d.%d", stock_market[item].current_price / 10,
+							 stock_market[item].current_price % 10);
+
+	if (stock_market[item].current_quantity > 0)
+		sprintf (sale, "%d%s", stock_market[item].current_quantity,
+							  unit_name[stock_market[item].units]);
+	else
+		strcpy (sale, "-");
+
+	if (cmdr.current_cargo[item] > 0)
+		sprintf (hold, "%d%s", cmdr.current_cargo[item],
+							  unit_name[stock_market[item].units]);
+	else
+		strcpy (hold, "-");
+
+	snprintf (buf, buflen, "%-15s %-2s %7s %6s %6s", stock_market[item].name,
+			  unit_name[stock_market[item].units], price, sale, hold);
+}
+
+
+// Legacy gfx_display_* market navigation (still used by the SCR_MARKET_PRICES
+// keyboard dispatch); the trade itself now goes through market_buy/market_sell.
+void buy_stock (void)
+{
+	if (!docked)
+		return;
+
+	market_buy (hilite_item);
+	highlight_stock (hilite_item);
+}
+
+
+void sell_stock (void)
+{
+	if (!docked)
+		return;
+
+	market_sell (hilite_item);
 	highlight_stock (hilite_item);
 }
 

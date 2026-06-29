@@ -164,6 +164,24 @@ void GuiOverlay::Open()
 
 bool GuiOverlay::IsShown() { return s_shown; }
 
+void GuiOverlay::ShowWindow(std::string_view _name, const std::function<GuiWindow*()>& _factory)
+{
+  if (!s_ready)
+    return;
+  s_shown = true;
+  if (Canvas::EclGetWindow(_name))
+  {
+    Canvas::EclBringWindowToFront(_name);
+    return;
+  }
+  if (_factory)
+  {
+    GuiWindow* window = _factory();
+    if (window)
+      Canvas::EclRegisterWindow(window);
+  }
+}
+
 void GuiOverlay::Update()
 {
   if (!s_ready)

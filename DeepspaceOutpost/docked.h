@@ -16,6 +16,14 @@ void select_previous_stock (void);
 void select_next_stock (void);
 void buy_stock (void);
 void sell_stock (void);
+
+/* Render-free market accessors / actions, used by the GUI market window so it can
+ * read and trade without driving the legacy gfx_display_* screen. */
+int  market_item_count (void);
+void market_format_row (int item, char *buf, int buflen); /* "Name  t   12.3   5t    -" */
+int  market_credits (void);                                /* tenths of a credit */
+int  market_buy (int item);                                /* returns 1 if state changed */
+int  market_sell (int item);                               /* returns 1 if state changed */
 void display_inventory (void);
 void equip_ship (void);
 void select_next_equip (void);

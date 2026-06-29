@@ -11,3 +11,7 @@
 // Register the game's GUI windows with the engine overlay. Call once from
 // GameApp::Startup() (after the engine/Canvas are up).
 void RegisterGameWindows();
+
+// Open the market-prices window on the GUI overlay (the F8 in-game entry routes here
+// instead of the legacy gfx_display_* display_market_prices screen).
+void OpenMarketWindow();

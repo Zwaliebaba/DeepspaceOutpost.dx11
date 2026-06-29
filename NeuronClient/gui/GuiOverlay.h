@@ -18,6 +18,7 @@
 // docs/phase5-graphicscore-live.md).
 
 #include <functional>
+#include <string_view>
 
 class GuiWindow;
 
@@ -34,6 +35,12 @@ namespace GuiOverlay
   // entry, e.g. F11, routes here instead of drawing a legacy gfx_display_* screen).
   void Open();
   bool IsShown();
+
+  // Show the overlay and open (or focus, if already present) a game-supplied window.
+  // The factory is only invoked when the named window isn't already registered; the
+  // returned window (Canvas takes ownership) must carry that same name. Used to route
+  // other in-game screens (e.g. F8 market) onto the GUI stack.
+  void ShowWindow(std::string_view _name, const std::function<GuiWindow*()>& _factory);
 
   // The game supplies the real Options/Settings window: it wires controls to game
   // state (config globals, save), which this engine layer can't see. The factory must
