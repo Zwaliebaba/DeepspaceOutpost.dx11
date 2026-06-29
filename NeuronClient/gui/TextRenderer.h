@@ -44,6 +44,9 @@ class TextRenderer
 
     static float GetTexCoordX(unsigned char theChar);
     static float GetTexCoordY(unsigned char theChar);
+
+    // Batch one run of glyph quads (shared by the shadow and text passes).
+    void EmitGlyphs(float _x, float _y, float _size, std::string_view _text);
 };
 
 // The two fonts the GUI draws through (window titles / HUD vs. button captions).

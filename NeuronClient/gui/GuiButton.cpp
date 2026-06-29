@@ -67,20 +67,14 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
     g_editorFont.SetRenderShadow(true);
 
     if (m_disabled)
-      ImmediateRenderer::ColorBytes(128, 128, 75, 30);
+      ImmediateRenderer::ColorBytes(128, 128, 75, 255);
     else
-      ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+      ImmediateRenderer::ColorBytes(255, 255, 150, 255);
 
     if (m_centered)
-    {
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
-      g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
-    }
     else
-    {
       g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
-      g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
-    }
     g_editorFont.SetRenderShadow(false);
   }
   else
@@ -182,17 +176,11 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
     ImmediateRenderer::End();
 
     g_editorFont.SetRenderShadow(true);
-    ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+    ImmediateRenderer::ColorBytes(255, 255, 150, 255);
     if (m_centered)
-    {
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
-      g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
-    }
     else
-    {
       g_editorFont.DrawText2D(realX + 5, realY + 10, m_fontSize, m_caption);
-      g_editorFont.DrawText2D(realX + 5, realY + 10, m_fontSize, m_caption);
-    }
     g_editorFont.SetRenderShadow(false);
   }
   else

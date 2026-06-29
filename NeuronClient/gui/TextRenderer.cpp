@@ -85,32 +85,13 @@ float TextRenderer::GetTexCoordY(unsigned char theChar)
 
 void TextRenderer::SetRenderShadow(bool _renderShadow) { m_renderShadow = _renderShadow; }
 
-void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string_view _text)
+// Batch one run of glyph quads at (_x,_y), tinted by u_Color * the per-vertex colour
+// (the caller's tint, set via ImmediateRenderer::Color before the call). Pulled out of
+// DrawText2DSimple so the shadow and text passes share one code path.
+void TextRenderer::EmitGlyphs(float _x, float _y, float _size, std::string_view _text)
 {
-  if (!m_texture || !m_texture->GetShaderResourceView())
-    return;
-
-  // Compatibility offset matching the original code.
-  _y -= 7.0f;
-  _x -= 3.0f;
-
   const float horiSize = _size * HORIZONTAL_SIZE;
 
-  if (m_renderShadow)
-    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_COLOR);
-  else
-    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_ONE);
-  ImmediateRenderer::SetBlendEnabled(true);
-
-  ImmediateRenderer::BindTexture(0, m_texture->GetShaderResourceView());
-  ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
-
-  // Dedicated text program: u_Color (white here) * per-vertex colour * glyph. The
-  // per-vertex colour carries the tint set by the caller (or white from BeginText2D).
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::TextOverlay);
-  ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
-
-  // Batch the whole string into one draw.
   ImmediateRenderer::Begin(Primitive::Quads);
   const size_t numChars = _text.size();
   for (unsigned int i = 0; i < numChars; ++i)
@@ -138,9 +119,43 @@ void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string
     _x += horiSize;
   }
   ImmediateRenderer::End();
+}
+
+void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string_view _text)
+{
+  if (!m_texture || !m_texture->GetShaderResourceView())
+    return;
+
+  // Compatibility offset matching the original code.
+  _y -= 7.0f;
+  _x -= 3.0f;
+
+  // Straight alpha blend so the glyph colour lands as-is over whatever is behind it.
+  // (The old additive/inverse-colour blends, combined with the call sites drawing the
+  // string twice in "shadow" mode, meant the bright text pass was never composited -
+  // the caption showed only as a dark knockout. Render an explicit drop-shadow here
+  // instead, then the text on top, so it stays readable over the GUI panels.)
+  ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
+  ImmediateRenderer::SetBlendEnabled(true);
+
+  ImmediateRenderer::BindTexture(0, m_texture->GetShaderResourceView());
+  ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
+
+  // Dedicated text program: u_Color * per-vertex colour * glyph. The per-vertex colour
+  // carries the tint set by the caller (or white from BeginText2D).
+  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::TextOverlay);
+
+  if (m_renderShadow)
+  {
+    // Knock u_Color to black so the offset pass is a pure shadow regardless of tint.
+    ImmediateRenderer::SetDrawColor(0.0f, 0.0f, 0.0f, 1.0f);
+    EmitGlyphs(_x + 1.0f, _y + 1.0f, _size, _text);
+  }
+
+  ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
+  EmitGlyphs(_x, _y, _size, _text);
 
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
-  ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
   ImmediateRenderer::BindTexture(0, nullptr);
 }
 

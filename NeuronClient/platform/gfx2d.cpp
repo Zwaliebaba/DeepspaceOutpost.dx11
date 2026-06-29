@@ -243,11 +243,10 @@ ID3D11ShaderResourceView* fontSheetSRV()
 	return (g_font_sheet && g_font_sheet->IsLoaded()) ? g_font_sheet->GetShaderResourceView() : nullptr;
 }
 
-void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
+/* Emit one run of glyph quads at (x,y) in a single tint. Factored out of drawString
+ * so a drop-shadow pass can be laid down before the coloured glyphs. */
+void emitGlyphs(ID3D11ShaderResourceView* srv, const FontSize& fs, float x, float y, const char* s, uint32_t tint)
 {
-	ID3D11ShaderResourceView* srv = fontSheetSRV();
-	if (!srv || !s) return;
-
 	/* Per-glyph tex cell on the 16x14 ASCII-32 grid. These constants mirror
 	 * TextRenderer::GetTexCoordX/Y (gui/TextRenderer.cpp) so the same sheet renders
 	 * identically here; the small margins inset the cell to avoid sampling the
@@ -257,7 +256,7 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 	constexpr float TEX_WIDTH   = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
 	constexpr float TEX_HEIGHT  = 1.0f / 14.0f * TEX_STRETCH;
 
-	float pen = (float)x;
+	float pen = x;
 	for (; *s; s++)
 	{
 		const unsigned char c = (unsigned char)*s;
@@ -265,11 +264,26 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 		{
 			const float u0 = (c % 16) * (1.0f / 16.0f) + TEX_MARGIN + 0.002f;
 			const float v0 = ((c >> 4) - 2) * (1.0f / 14.0f) + TEX_MARGIN + 0.001f;
-			pushTexQuad(srv, pen, (float)y, pen + fs.charW, (float)y + fs.charH,
+			pushTexQuad(srv, pen, y, pen + fs.charW, y + fs.charH,
 						u0, v0, u0 + TEX_WIDTH, v0 + TEX_HEIGHT, tint);
 		}
 		pen += fs.charW;
 	}
+}
+
+void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
+{
+	ID3D11ShaderResourceView* srv = fontSheetSRV();
+	if (!srv || !s) return;
+
+	/* Lay down a 1px-offset opaque-black drop-shadow first, then the coloured glyphs
+	 * on top. The shadow gives the text a hard edge so it stays readable wherever it
+	 * overlaps the busy 3D backdrop (planet wireframe, starfield, ships); on a plain
+	 * black screen it is simply invisible. Black is index 0 in the palette but that is
+	 * the transparent colour key, so emit an explicit opaque black instead. */
+	constexpr uint32_t kShadow = 0xFF000000u;
+	emitGlyphs(srv, fs, (float)x + 1.0f, (float)y + 1.0f, s, kShadow);
+	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
 }
 
 /* ---- depth-sorted 3D render chain (ported from alg_gfx.c) ---- */

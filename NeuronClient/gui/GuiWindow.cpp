@@ -147,10 +147,9 @@ void GuiWindow::Render(bool hasFocus)
   ImmediateRenderer::End();
 
   g_gameFont.SetRenderShadow(true);
-  ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+  ImmediateRenderer::ColorBytes(255, 255, 150, 255);
   int y = m_y + 9;
   int fontSize = 12;
-  g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
   g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
   g_gameFont.SetRenderShadow(false);
 
