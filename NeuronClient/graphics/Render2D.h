@@ -97,6 +97,29 @@ namespace Neuron::Graphics
       // the current SetClip and appends into the open Begin/End batch.
       static void Submit(Topo topo, const Vertex* verts, int count, ID3D11ShaderResourceView* srv = nullptr);
 
+      // --- Shader programs ---------------------------------------------------
+      // Handle to a shader program. DefaultProgram is the built-in col * texture pass.
+      using ProgramId = uint32_t;
+      static constexpr ProgramId DefaultProgram = 0;
+
+      // Register an extra VS+PS pair from one inline HLSL source string, compiled at
+      // runtime (entry points VSMain / vs_5_0 and PSMain / ps_5_0 - same convention as
+      // the built-in shader). Returns a handle for SetProgram.
+      //
+      // The program shares Render2D's pipeline, so it MUST:
+      //   - consume the same vertex input signature (POSITION float2, TEXCOORD0 float2,
+      //     COLOR0) so the one input layout + vertex buffer apply, and
+      //   - keep cbuffer b0 as the row-major orthographic matrix (see the built-in
+      //     shader); bind any extra uniforms in a higher slot of your own.
+      // Call once the device is up (any time after Startup). Returns DefaultProgram if
+      // compilation or shader creation fails (so a bad shader degrades, not crashes).
+      static ProgramId RegisterProgram(const char* hlslSource);
+
+      // Select the program for subsequent submissions until changed. Reset to
+      // DefaultProgram at every Begin. Switching programs starts a new batch command
+      // (one extra draw call), like a texture or scissor change.
+      static void SetProgram(ProgramId program);
+
     private:
       struct Cmd
       {
@@ -105,14 +128,22 @@ namespace Neuron::Graphics
         uint32_t count;
         ID3D11ShaderResourceView* srv; // the 1x1 white texture for colored prims
         D3D11_RECT scissor;
+        ProgramId program;
+      };
+
+      struct Program
+      {
+        winrt::com_ptr<ID3D11VertexShader> vs;
+        winrt::com_ptr<ID3D11PixelShader> ps;
       };
 
       static bool EnsureResources();
       static void Append(Topo topo, ID3D11ShaderResourceView* srv, const Vertex* v, int n);
       static void Flush();
 
-      inline static winrt::com_ptr<ID3D11VertexShader> s_vs;
-      inline static winrt::com_ptr<ID3D11PixelShader> s_ps;
+      // Registered shader programs; index 0 is the built-in default (DefaultProgram).
+      inline static std::vector<Program> s_programs;
+      inline static ProgramId s_program = DefaultProgram; // current selection (sticky)
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
       inline static winrt::com_ptr<ID3D11Buffer> s_vb;
       inline static winrt::com_ptr<ID3D11Buffer> s_cb;

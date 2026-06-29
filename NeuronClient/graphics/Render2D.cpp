@@ -45,20 +45,23 @@ float4 PSMain(VSOut i) : SV_Target
 }
 )";
 
-    com_ptr<ID3DBlob> Compile(const char* entry, const char* target)
+    // Compile one HLSL source/entry/profile. Returns null on failure (logging the
+    // compiler errors) rather than throwing, so a bad caller-supplied program shader
+    // degrades to the default instead of taking down the app.
+    com_ptr<ID3DBlob> CompileHLSL(const char* src, const char* entry, const char* target)
     {
       UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 #ifdef _DEBUG
       flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
       com_ptr<ID3DBlob> code, errors;
-      const HRESULT hr = D3DCompile(kShaderHLSL, std::strlen(kShaderHLSL), nullptr, nullptr, nullptr, entry, target,
-                                    flags, 0, code.put(), errors.put());
+      const HRESULT hr =
+        D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr, entry, target, flags, 0, code.put(), errors.put());
       if (FAILED(hr))
       {
         if (errors)
           OutputDebugStringA(static_cast<const char*>(errors->GetBufferPointer()));
-        check_hresult(hr);
+        return nullptr;
       }
       return code;
     }
@@ -85,8 +88,8 @@ float4 PSMain(VSOut i) : SV_Target
 
   void Render2D::Shutdown()
   {
-    s_vs = nullptr;
-    s_ps = nullptr;
+    s_programs.clear();
+    s_program = DefaultProgram;
     s_layout = nullptr;
     s_vb = nullptr;
     s_cb = nullptr;
@@ -104,18 +107,25 @@ float4 PSMain(VSOut i) : SV_Target
 
   bool Render2D::EnsureResources()
   {
-    if (s_vs)
+    if (!s_programs.empty())
       return true;
 
     ID3D11Device* device = Core::GetD3DDevice();
     if (!device)
       return false;
 
-    com_ptr<ID3DBlob> vs = Compile("VSMain", "vs_5_0");
-    com_ptr<ID3DBlob> ps = Compile("PSMain", "ps_5_0");
-    check_hresult(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, s_vs.put()));
-    check_hresult(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, s_ps.put()));
+    // Program 0: the built-in default (DefaultProgram), col * texture.
+    com_ptr<ID3DBlob> vs = CompileHLSL(kShaderHLSL, "VSMain", "vs_5_0");
+    com_ptr<ID3DBlob> ps = CompileHLSL(kShaderHLSL, "PSMain", "ps_5_0");
+    if (!vs || !ps)
+      return false;
+    Program def;
+    check_hresult(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, def.vs.put()));
+    check_hresult(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, def.ps.put()));
+    s_programs.push_back(std::move(def));
 
+    // The one input layout (built from the default VS) serves every program: each must
+    // share this vertex input signature.
     const D3D11_INPUT_ELEMENT_DESC elems[] = {
       {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
       {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -177,6 +187,31 @@ float4 PSMain(VSOut i) : SV_Target
     return true;
   }
 
+  Render2D::ProgramId Render2D::RegisterProgram(const char* hlslSource)
+  {
+    if (!hlslSource || !EnsureResources())
+      return DefaultProgram;
+
+    ID3D11Device* device = Core::GetD3DDevice();
+    com_ptr<ID3DBlob> vs = CompileHLSL(hlslSource, "VSMain", "vs_5_0");
+    com_ptr<ID3DBlob> ps = CompileHLSL(hlslSource, "PSMain", "ps_5_0");
+    if (!vs || !ps)
+      return DefaultProgram;
+
+    Program p;
+    if (FAILED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, p.vs.put())) ||
+        FAILED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, p.ps.put())))
+      return DefaultProgram;
+
+    s_programs.push_back(std::move(p));
+    return static_cast<ProgramId>(s_programs.size() - 1);
+  }
+
+  void Render2D::SetProgram(ProgramId program)
+  {
+    s_program = (program < s_programs.size()) ? program : DefaultProgram;
+  }
+
   void Render2D::Begin(ID3D11RenderTargetView* rtv, int width, int height, D3D11_FILTER filter)
   {
     if (!EnsureResources())
@@ -190,6 +225,7 @@ float4 PSMain(VSOut i) : SV_Target
 
     s_verts.clear();
     s_cmds.clear();
+    s_program = DefaultProgram;
     ClearClip();
 
     // Y-down pixel-space orthographic projection (origin top-left): maps pixel
@@ -238,7 +274,7 @@ float4 PSMain(VSOut i) : SV_Target
     if (!s_cmds.empty())
     {
       Cmd& back = s_cmds.back();
-      if (back.topo == topo && back.srv == srv && back.scissor.left == s_scissor.left &&
+      if (back.topo == topo && back.srv == srv && back.program == s_program && back.scissor.left == s_scissor.left &&
           back.scissor.top == s_scissor.top && back.scissor.right == s_scissor.right &&
           back.scissor.bottom == s_scissor.bottom)
       {
@@ -247,7 +283,7 @@ float4 PSMain(VSOut i) : SV_Target
         return;
       }
     }
-    s_cmds.push_back({topo, static_cast<uint32_t>(s_verts.size()), static_cast<uint32_t>(n), srv, s_scissor});
+    s_cmds.push_back({topo, static_cast<uint32_t>(s_verts.size()), static_cast<uint32_t>(n), srv, s_scissor, s_program});
     s_verts.insert(s_verts.end(), v, v + n);
   }
 
@@ -351,8 +387,6 @@ float4 PSMain(VSOut i) : SV_Target
     ID3D11Buffer* cb = s_cb.get();
     ctx->IASetInputLayout(s_layout.get());
     ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
-    ctx->VSSetShader(s_vs.get(), nullptr, 0);
-    ctx->PSSetShader(s_ps.get(), nullptr, 0);
     ctx->VSSetConstantBuffers(0, 1, &cb);
 
     const float blendFactor[4] = {0, 0, 0, 0};
@@ -364,8 +398,17 @@ float4 PSMain(VSOut i) : SV_Target
       (s_filter == D3D11_FILTER_MIN_MAG_MIP_POINT) ? s_samplerPoint.get() : s_samplerLinear.get();
     ctx->PSSetSamplers(0, 1, &sampler);
 
+    ProgramId boundProgram = static_cast<ProgramId>(-1); // force a bind on the first command
     for (const Cmd& c : s_cmds)
     {
+      if (c.program != boundProgram)
+      {
+        const Program& pr = s_programs[c.program < s_programs.size() ? c.program : DefaultProgram];
+        ctx->VSSetShader(pr.vs.get(), nullptr, 0);
+        ctx->PSSetShader(pr.ps.get(), nullptr, 0);
+        boundProgram = c.program;
+      }
+
       ctx->RSSetScissorRects(1, &c.scissor);
 
       const D3D11_PRIMITIVE_TOPOLOGY topo = (c.topo == Topo::Points) ? D3D11_PRIMITIVE_TOPOLOGY_POINTLIST
