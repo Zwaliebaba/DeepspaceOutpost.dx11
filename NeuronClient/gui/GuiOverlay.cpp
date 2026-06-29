@@ -4,13 +4,13 @@
 #include "Canvas.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 #include "Strings.h"
 
 #include "input_win.h"
 
-using Neuron::Graphics::ImmediateRenderer;
-using Neuron::Graphics::MatrixStackId;
+using Neuron::Graphics::Core;
+using Neuron::Graphics::Render2D;
 
 namespace
 {
@@ -170,29 +170,10 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   // The back buffer is already bound with a full client-area viewport (the Renderer's
   // blitCanvasToBackBuffer ran just before us), so the GUI draws full-window on top of
   // the letterboxed game - in client-pixel space, matching where Canvas places windows.
-
-  // Screen-space (client-space) orthographic projection, Y down.
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-  ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(clientWidth), static_cast<float>(clientHeight), 0.0f);
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-
-  ImmediateRenderer::SetBlendEnabled(true);
-  ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
-  ImmediateRenderer::SetDepthTestEnabled(false);
-  ImmediateRenderer::SetDepthWriteEnabled(false);
-  ImmediateRenderer::SetCullEnabled(false);
-  ImmediateRenderer::SetFogEnabled(false);
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
-
+  //
+  // Open one native 2D pass (client-space ortho, Y down, alpha blend, no depth/cull)
+  // and let Canvas submit every window/button/glyph into the batch, flushed at End.
+  Render2D::Begin(Core::GetRenderTargetView(), clientWidth, clientHeight);
   Canvas::Render();
-
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PopMatrix();
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PopMatrix();
+  Render2D::End();
 }

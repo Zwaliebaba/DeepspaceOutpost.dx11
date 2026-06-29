@@ -1,13 +1,12 @@
 #include "pch.h"
 #include "TextRenderer.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 
 #include <cstdarg> // va_list / va_start / va_end
+#include <cstring> // strlen
 
-using Neuron::Graphics::Core;
-using Neuron::Graphics::ImmediateRenderer;
-using Neuron::Graphics::MatrixStackId;
-using Neuron::Graphics::Primitive;
+using Neuron::Graphics::Render2D;
+using Neuron::Graphics::Texture;
 using Neuron::Graphics::TextureManager;
 
 // Horizontal size as a proportion of vertical size.
@@ -30,43 +29,6 @@ void TextRenderer::Startup(const std::string& _filename)
 
 void TextRenderer::Shutdown() { m_texture = nullptr; }
 
-void TextRenderer::BeginText2D()
-{
-  const D3D11_VIEWPORT vp = Core::GetScreenViewport();
-
-  // Screen-space orthographic projection (Y down), pushing the prior matrices so
-  // EndText2D can restore them.
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-  ImmediateRenderer::Ortho2D(vp.TopLeftX - 0.325f, vp.TopLeftX + vp.Width - 0.325f, vp.TopLeftY + vp.Height - 0.325f,
-                             vp.TopLeftY - 0.325f);
-
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
-  ImmediateRenderer::SetBlendEnabled(true);
-  ImmediateRenderer::SetCullEnabled(false);
-  ImmediateRenderer::SetDepthTestEnabled(false);
-  ImmediateRenderer::SetDepthWriteEnabled(false);
-  ImmediateRenderer::SetFogEnabled(false);
-}
-
-void TextRenderer::EndText2D()
-{
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PopMatrix();
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PopMatrix();
-
-  ImmediateRenderer::SetDepthWriteEnabled(true);
-  ImmediateRenderer::SetDepthTestEnabled(true);
-  ImmediateRenderer::SetCullEnabled(true);
-  ImmediateRenderer::SetBlendEnabled(false);
-}
-
 float TextRenderer::GetTexCoordX(unsigned char theChar)
 {
   constexpr float CHAR_WIDTH = 1.0f / 16.0f;
@@ -85,40 +47,26 @@ float TextRenderer::GetTexCoordY(unsigned char theChar)
 
 void TextRenderer::SetRenderShadow(bool _renderShadow) { m_renderShadow = _renderShadow; }
 
-// Batch one run of glyph quads at (_x,_y), tinted by u_Color * the per-vertex colour
-// (the caller's tint, set via ImmediateRenderer::Color before the call). Pulled out of
-// DrawText2DSimple so the shadow and text passes share one code path.
-void TextRenderer::EmitGlyphs(float _x, float _y, float _size, std::string_view _text)
+void TextRenderer::SetColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) { m_color = Render2D::Rgba(r, g, b, a); }
+
+// Submit one run of glyph quads from _sheet at (_x,_y) in a single tint, into the open
+// Render2D batch. Shared by the shadow and text passes of DrawText2DSimple.
+void TextRenderer::EmitGlyphs(Texture* _sheet, float _x, float _y, float _size, std::string_view _text, uint32_t _tint)
 {
+  ID3D11ShaderResourceView* srv = _sheet->GetShaderResourceView();
   const float horiSize = _size * HORIZONTAL_SIZE;
 
-  ImmediateRenderer::Begin(Primitive::Quads);
-  const size_t numChars = _text.size();
-  for (unsigned int i = 0; i < numChars; ++i)
+  for (const char ch : _text)
   {
-    const unsigned char thisChar = _text[i];
-
+    const unsigned char thisChar = static_cast<unsigned char>(ch);
     if (thisChar > 32)
     {
       const float texX = GetTexCoordX(thisChar);
       const float texY = GetTexCoordY(thisChar);
-
-      ImmediateRenderer::TexCoord(texX, texY + TEX_HEIGHT);
-      ImmediateRenderer::Vertex(_x, _y + _size);
-
-      ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY + TEX_HEIGHT);
-      ImmediateRenderer::Vertex(_x + horiSize, _y + _size);
-
-      ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY);
-      ImmediateRenderer::Vertex(_x + horiSize, _y);
-
-      ImmediateRenderer::TexCoord(texX, texY);
-      ImmediateRenderer::Vertex(_x, _y);
+      Render2D::TexQuad(srv, _x, _y, _x + horiSize, _y + _size, texX, texY, texX + TEX_WIDTH, texY + TEX_HEIGHT, _tint);
     }
-
     _x += horiSize;
   }
-  ImmediateRenderer::End();
 }
 
 void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string_view _text)
@@ -130,33 +78,14 @@ void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string
   _y -= 7.0f;
   _x -= 3.0f;
 
-  // Straight alpha blend so the glyph colour lands as-is over whatever is behind it.
-  // (The old additive/inverse-colour blends, combined with the call sites drawing the
-  // string twice in "shadow" mode, meant the bright text pass was never composited -
-  // the caption showed only as a dark knockout. Render an explicit drop-shadow here
-  // instead, then the text on top, so it stays readable over the GUI panels.)
-  ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
-  ImmediateRenderer::SetBlendEnabled(true);
-
-  ImmediateRenderer::BindTexture(0, m_texture->GetShaderResourceView());
-  ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
-
-  // Dedicated text program: u_Color * per-vertex colour * glyph. The per-vertex colour
-  // carries the tint set by the caller (or white from BeginText2D).
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::TextOverlay);
-
+  // A 1px-offset black drop-shadow first (when requested), then the glyphs in the
+  // current tint, so text stays readable over the GUI panels. Both passes submit into
+  // the surrounding Render2D::Begin/End scope (alpha-blended, no depth), which the
+  // overlay opens once per frame.
   if (m_renderShadow)
-  {
-    // Knock u_Color to black so the offset pass is a pure shadow regardless of tint.
-    ImmediateRenderer::SetDrawColor(0.0f, 0.0f, 0.0f, 1.0f);
-    EmitGlyphs(_x + 1.0f, _y + 1.0f, _size, _text);
-  }
+    EmitGlyphs(m_texture.get(), _x + 1.0f, _y + 1.0f, _size, _text, 0xFF000000u);
 
-  ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
-  EmitGlyphs(_x, _y, _size, _text);
-
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
-  ImmediateRenderer::BindTexture(0, nullptr);
+  EmitGlyphs(m_texture.get(), _x, _y, _size, _text, m_color);
 }
 
 void TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text, ...)

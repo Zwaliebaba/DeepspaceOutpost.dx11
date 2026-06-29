@@ -39,6 +39,14 @@ namespace Neuron::Graphics
       static void Startup();
       static void Shutdown();
 
+      // Pack 8-bit channels into the 0xAABBGGRR order the submit calls expect (R in
+      // the low byte), matching the renderer's R8G8B8A8_UNORM vertex colour.
+      static constexpr uint32_t Rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept
+      {
+        return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(b) << 16) |
+          (static_cast<uint32_t>(a) << 24);
+      }
+
       // Open a 2D pass targeting rtv with a (width x height) Y-down orthographic
       // projection (pixel coordinates, origin top-left). Resets the scissor to the
       // whole target. Submissions are batched until End. The filter applies to the
