@@ -8,6 +8,7 @@
 #include "TextRenderer.h"
 
 #include "EventManager.h"
+#include "Renderer.h"
 #include "input_win.h"
 
 namespace
@@ -28,6 +29,13 @@ namespace
     if (_msg == WM_DESTROY)
     {
       PostQuitMessage(0);
+      return 0;
+    }
+
+    if (_msg == WM_SIZE)
+    {
+      if (_wParam != SIZE_MINIMIZED)
+        Neuron::Client::ClientEngine::OnResize(LOWORD(_lParam), HIWORD(_lParam));
       return 0;
     }
 
@@ -81,6 +89,30 @@ namespace Neuron::Client
 
     input_register_event_processor();
     GuiOverlay::Startup();
+
+    m_windowReady = true; // device + swap chain are up; WM_SIZE may now rebuild them
+  }
+
+  void ClientEngine::OnResize(int _width, int _height)
+  {
+    if (!m_windowReady || _width <= 0 || _height <= 0)
+      return;
+
+    // Release our back-buffer view, resize the Core swap chain, then rebuild it. The
+    // Renderer may not be adopted yet (it comes up in gfx_graphics_startup); guard it.
+    Renderer* r = platform_renderer();
+    if (r)
+      r->onResizePre();
+
+    Graphics::Core::WindowSizeChanged(_width, _height);
+
+    if (r)
+      r->onResizePost(_width, _height);
+
+    Graphics::ImmediateRenderer::OnWindowSizeChanged();
+
+    if (m_main)
+      m_main->OnWindowSizeChanged(_width, _height);
   }
 
   void ClientEngine::StartGame(const winrt::com_ptr<GameMain>& _gameMain)

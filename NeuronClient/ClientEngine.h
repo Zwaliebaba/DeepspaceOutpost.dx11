@@ -26,6 +26,11 @@ namespace Neuron::Client
       static void StartGame(const winrt::com_ptr<GameMain>& _gameMain);
       static void Shutdown();
 
+      // Handle a client-area resize (from the window procedure's WM_SIZE): rebuild the
+      // Core swap chain + the Renderer back buffer and notify the game. No-op until the
+      // window/device are fully up.
+      static void OnResize(int _width, int _height);
+
       static HINSTANCE Instance() { return m_instance; }
       static HWND Window() { return m_hwnd; }
       static Windows::Foundation::Size OutputSize() { return Graphics::Core::GetOutputSize(); }
@@ -34,6 +39,7 @@ namespace Neuron::Client
       inline static HINSTANCE m_instance{};
       inline static HWND m_hwnd{};
       inline static winrt::com_ptr<GameMain> m_main;
+      inline static bool m_windowReady{}; // device + swap chain created; safe to resize
   };
 }
 

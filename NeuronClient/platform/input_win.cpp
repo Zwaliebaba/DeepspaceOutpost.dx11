@@ -18,6 +18,8 @@
 #include "keyboard.h"
 #include "EventManager.h"
 
+#include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
+
 namespace {
 
 bool g_key[256] = {};          /* current held state, VK indexed */
@@ -30,6 +32,12 @@ bool s_suppressGameKeys = false;
 /* Rising-edge state for the GUI menu controls (recomputed once per frame). */
 bool s_menuPrev[MenuControlCount] = {};
 bool s_menuEdge[MenuControlCount] = {};
+
+/* Mouse / primary-pointer state, in client pixels (full-window GUI space). */
+int  g_mouseX = 0;
+int  g_mouseY = 0;
+bool g_lmb = false;
+bool g_rmb = false;
 
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
@@ -63,13 +71,43 @@ namespace {
 
 /* Keyboard processor for the EventManager chain. Returns 0 for messages it consumes,
  * -1 otherwise so the chain / DefWindowProc continue (e.g. Alt+F4). */
-LRESULT CALLBACK InputWndProc(HWND, UINT msg, WPARAM wparam, LPARAM)
+LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
 	switch (msg)
 	{
 		case WM_KEYDOWN: input_on_key(wparam, true);  return 0;
 		case WM_KEYUP:   input_on_key(wparam, false); return 0;
 		case WM_CHAR:    input_on_char(wparam);       return 0;
+
+		case WM_MOUSEMOVE:
+			g_mouseX = GET_X_LPARAM(lparam);
+			g_mouseY = GET_Y_LPARAM(lparam);
+			return 0;
+		case WM_LBUTTONDOWN:
+			g_lmb = true;  SetCapture(hwnd); return 0;
+		case WM_LBUTTONUP:
+			g_lmb = false; ReleaseCapture();  return 0;
+		case WM_RBUTTONDOWN:
+			g_rmb = true;  return 0;
+		case WM_RBUTTONUP:
+			g_rmb = false; return 0;
+
+		// Minimal touch: map the primary pointer to the mouse (no multi-touch yet).
+		case WM_POINTERDOWN:
+		case WM_POINTERUPDATE:
+		case WM_POINTERUP:
+		{
+			POINTER_INFO pi{};
+			if (GetPointerInfo(GET_POINTERID_WPARAM(wparam), &pi))
+			{
+				POINT pt = pi.ptPixelLocation;
+				ScreenToClient(hwnd, &pt);
+				g_mouseX = pt.x;
+				g_mouseY = pt.y;
+				g_lmb = (msg != WM_POINTERUP) && (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
+			}
+			return 0;
+		}
 	}
 	return -1;
 }
@@ -113,6 +151,14 @@ void input_update_menu_edges(void)
 bool input_menu_edge(MenuControl control)
 {
 	return control >= 0 && control < MenuControlCount && s_menuEdge[control];
+}
+
+void input_mouse_state(int& x, int& y, bool& lmb, bool& rmb)
+{
+	x = g_mouseX;
+	y = g_mouseY;
+	lmb = g_lmb;
+	rmb = g_rmb;
 }
 
 /* ---- keyboard.h contract ---- */

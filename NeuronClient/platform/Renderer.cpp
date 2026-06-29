@@ -361,7 +361,7 @@ void Renderer::bindCanvasTarget()
 	context_->RSSetViewports(1, &vp);
 }
 
-void Renderer::present()
+void Renderer::blitCanvasToBackBuffer()
 {
 	if (!swap_chain_) return;
 
@@ -389,7 +389,43 @@ void Renderer::present()
 	ID3D11ShaderResourceView* nullsrv = nullptr;
 	context_->PSSetShaderResources(0, 1, &nullsrv);
 
-	swap_chain_->Present(1, 0);
+	/* Leave the back buffer bound with a FULL client-area viewport so a full-window
+	 * overlay (the GUI) drawn next renders in client space, not the letterbox. */
+	D3D11_VIEWPORT full{};
+	full.TopLeftX = 0.0f;
+	full.TopLeftY = 0.0f;
+	full.Width    = static_cast<float>(client_w_);
+	full.Height   = static_cast<float>(client_h_);
+	full.MinDepth = 0.0f;
+	full.MaxDepth = 1.0f;
+	context_->RSSetViewports(1, &full);
+}
+
+void Renderer::swap()
+{
+	if (swap_chain_) swap_chain_->Present(1, 0);
+}
+
+void Renderer::present()
+{
+	blitCanvasToBackBuffer();
+	swap();
+}
+
+void Renderer::onResizePre()
+{
+	/* Release our view of the swap-chain back buffer so Core::WindowSizeChanged's
+	 * ResizeBuffers can succeed (no outstanding references to the buffers). */
+	back_rtv_ = nullptr;
+	context_->OMSetRenderTargets(0, nullptr, nullptr);
+}
+
+void Renderer::onResizePost(int clientWidth, int clientHeight)
+{
+	client_w_ = std::max<int>(1, clientWidth);
+	client_h_ = std::max<int>(1, clientHeight);
+	createBackBuffer();   /* recreate back_rtv_ from the resized swap chain */
+	/* The retro 512x514 canvas is fixed and letterboxed, so it does not resize. */
 }
 
 void Renderer::resize(int clientWidth, int clientHeight)

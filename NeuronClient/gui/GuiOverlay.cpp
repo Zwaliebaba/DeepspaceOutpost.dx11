@@ -7,7 +7,6 @@
 #include "ImmediateRenderer.h"
 #include "Strings.h"
 
-#include "Renderer.h"
 #include "input_win.h"
 
 using Neuron::Graphics::ImmediateRenderer;
@@ -19,18 +18,69 @@ namespace
   bool s_shown = false;   // overlay currently visible (F1 toggles)
   bool s_prevF1 = false;  // edge-detect the F1 toggle
 
-  // A small demonstration menu that exercises the imported stack end to end:
-  // a GuiWindow with a title bar (drawn with the interface texture + g_gameFont),
-  // localized button captions (Strings), and keyboard navigation.
-  class DemoMenuWindow : public GuiWindow
+  // Centre a window of (w,h) in the current client area.
+  void CentreWindow(GuiWindow* w, int width, int height)
+  {
+    const auto sz = Neuron::Graphics::Core::GetOutputSize();
+    w->SetSize(width, height);
+    w->SetPosition((static_cast<int>(sz.Width) - width) / 2, (static_cast<int>(sz.Height) - height) / 2);
+  }
+
+  // A modal Options window (the "one real screen" for this phase): a GuiWindow with a
+  // couple of rows and a Close button, opened from the main menu. Wiring its controls
+  // to actual game preferences is the next increment.
+  class OptionsWindow : public GuiWindow
   {
     public:
-      DemoMenuWindow()
-        : GuiWindow("DemoMenu")
+      OptionsWindow()
+        : GuiWindow("Options")
+      {
+        SetTitle("Options");
+        CentreWindow(this, 260, 140);
+        SetMovable(true);
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create(); // iconised close button (top-right)
+
+        auto label = NEW LabelButton();
+        label->SetProperties("OptLabel", 10, 24, 240, 15, Strings::Get(std::string("Menu_Options")));
+        RegisterButton(label);
+
+        // A normal (non-iconised) CloseButton dismisses the window on click/Enter.
+        auto close = NEW CloseButton();
+        close->m_centered = true;
+        close->SetProperties("OptClose", 10, 100, 240, 18, Strings::Get(std::string("Button_Close")));
+        RegisterButton(close);
+
+        m_buttonOrder.clear();
+        m_buttonOrder.push_back(close);
+        m_currentButton = 0;
+      }
+  };
+
+  // Main-menu "Options" button: opens the Options window.
+  class OpenOptionsButton : public GuiButton
+  {
+    public:
+      void MouseUp() override
+      {
+        if (!Canvas::EclGetWindow(std::string_view("Options")))
+          Canvas::EclRegisterWindow(NEW OptionsWindow());
+      }
+  };
+
+  // The main menu: a centred GuiWindow with localized, mouse- and keyboard-driven
+  // buttons. Title bar + panel use the imported interface texture + fonts.
+  class MainMenuWindow : public GuiWindow
+  {
+    public:
+      MainMenuWindow()
+        : GuiWindow("MainMenu")
       {
         SetTitle("Deepspace Outpost");
-        SetSize(240, 150);
-        SetPosition(40, 40);
+        CentreWindow(this, 260, 150);
         SetMovable(true);
       }
 
@@ -39,37 +89,30 @@ namespace
         GuiWindow::Create(); // iconised close button
 
         auto heading = NEW LabelButton();
-        heading->SetProperties("Heading", 10, 22, 220, 15, Strings::Get(std::string("AppName")));
+        heading->SetProperties("Heading", 10, 24, 240, 15, Strings::Get(std::string("AppName")));
         RegisterButton(heading);
 
-        auto start = NEW GuiButton();
-        start->m_centered = true;
-        start->SetProperties("Start", 10, 50, 220, 18, Strings::Get(std::string("Menu_Start")));
-        RegisterButton(start);
-
-        auto options = NEW GuiButton();
+        auto options = NEW OpenOptionsButton();
         options->m_centered = true;
-        options->SetProperties("Options", 10, 74, 220, 18, Strings::Get(std::string("Menu_Options")));
+        options->SetProperties("Options", 10, 74, 240, 18, Strings::Get(std::string("Menu_Options")));
         RegisterButton(options);
 
         auto quit = NEW GameExitButton();
         quit->m_centered = true;
-        quit->SetProperties("Quit", 10, 98, 220, 18, Strings::Get(std::string("Menu_Quit")));
+        quit->SetProperties("Quit", 10, 98, 240, 18, Strings::Get(std::string("Menu_Quit")));
         RegisterButton(quit);
 
-        // Keyboard navigation order (up/down move between these; Enter activates).
         m_buttonOrder.clear();
-        m_buttonOrder.push_back(start);
         m_buttonOrder.push_back(options);
         m_buttonOrder.push_back(quit);
         m_currentButton = 0;
       }
   };
 
-  void EnsureDemoWindow()
+  void EnsureMenu()
   {
-    if (!Canvas::EclGetWindow(std::string_view("DemoMenu")))
-      Canvas::EclRegisterWindow(NEW DemoMenuWindow());
+    if (!Canvas::EclGetWindow(std::string_view("MainMenu")))
+      Canvas::EclRegisterWindow(NEW MainMenuWindow());
   }
 }
 
@@ -79,7 +122,7 @@ void GuiOverlay::Startup()
   // Strings by the time this runs; the overlay just registers its demo window.
   if (s_ready)
     return;
-  EnsureDemoWindow();
+  EnsureMenu();
   s_ready = true;
 }
 
@@ -107,13 +150,14 @@ void GuiOverlay::Update()
   {
     s_shown = !s_shown;
     if (s_shown)
-      EnsureDemoWindow(); // re-create if a previous Esc closed it
+      EnsureMenu(); // re-create if a previous Esc closed it
   }
   s_prevF1 = f1;
 
-  // The window may have been dismissed (Esc / close button) from within EclUpdate last
-  // frame; reflect that so input returns to the game.
-  if (s_shown && !Canvas::EclGetWindow(std::string_view("DemoMenu")))
+  // The main menu may have been dismissed (Esc / close button) from within EclUpdate
+  // last frame; when it's gone, drop out of "shown" so input returns to the game.
+  // (The Options sub-window closing on its own leaves the main menu up.)
+  if (s_shown && !Canvas::EclGetWindow(std::string_view("MainMenu")))
     s_shown = false;
 
   // While the menu is up it owns input: hide the keyboard from the game.
@@ -122,28 +166,31 @@ void GuiOverlay::Update()
   if (!s_shown)
     return;
 
-  Canvas::EclUpdate(); // edge-triggered menu navigation (up/down/enter/esc)
+  // Feed the mouse (client-pixel space, matching the full-window GUI) so Canvas can
+  // hover/click/drag, then run keyboard nav as a transitional fallback.
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+  Canvas::EclUpdateMouse(mx, my, lmb, rmb);
+
+  Canvas::EclUpdate(); // edge-triggered keyboard navigation (transitional)
 }
 
-void GuiOverlay::Render(int canvasWidth, int canvasHeight)
+void GuiOverlay::Render(int clientWidth, int clientHeight)
 {
   if (!s_ready || !s_shown)
     return;
 
-  Renderer* r = platform_renderer();
-  if (!r)
-    return;
+  // The back buffer is already bound with a full client-area viewport (the Renderer's
+  // blitCanvasToBackBuffer ran just before us), so the GUI draws full-window on top of
+  // the letterboxed game - in client-pixel space, matching where Canvas places windows.
 
-  // Draw into the same 512x514 canvas the game's 2D batch just rendered into, so the
-  // overlay is letterboxed identically by the present step.
-  r->bindCanvasTarget();
-
-  // Screen-space (canvas-space) orthographic projection, Y down.
+  // Screen-space (client-space) orthographic projection, Y down.
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
   ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
   ImmediateRenderer::PushMatrix();
   ImmediateRenderer::LoadIdentity();
-  ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(canvasWidth), static_cast<float>(canvasHeight), 0.0f);
+  ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(clientWidth), static_cast<float>(clientHeight), 0.0f);
   ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
   ImmediateRenderer::PushMatrix();
   ImmediateRenderer::LoadIdentity();

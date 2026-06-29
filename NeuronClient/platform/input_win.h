@@ -30,4 +30,7 @@ void input_update_menu_edges(void);          /* recompute edges; call once per f
 bool input_menu_edge(MenuControl control);   /* true on the frame the control is pressed */
 void input_suppress_game_keys(bool suppress);/* hide keys from the game's kbd_* snapshot */
 
+/* Mouse / primary-pointer state in client pixels (full-window GUI space). */
+void input_mouse_state(int& x, int& y, bool& lmb, bool& rmb);
+
 #endif /* INPUT_WIN_H */
