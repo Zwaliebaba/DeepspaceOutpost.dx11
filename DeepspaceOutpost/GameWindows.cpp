@@ -41,6 +41,14 @@ extern int planet_data_line_count(void);
 extern void planet_data_line(int i, char* buf, int buflen);
 extern void planet_data_title(char* buf, int buflen);
 
+// Equip-ship screen (docked.h / docked.cpp).
+extern int equip_do(int index);
+extern void equip_reset(void);
+extern int equip_visible_count(void);
+extern int equip_visible_index(int i);
+extern void equip_row_text(int index, char* buf, int buflen);
+extern int equip_buyable(int index);
+
 namespace
 {
   // Centre a window of (w,h) in the current client area, like the engine overlay does.
@@ -469,6 +477,132 @@ namespace
       LineFn m_line;
       std::vector<LabelButton*> m_labels;
   };
+
+  // ----- Equip Ship ---------------------------------------------------------
+
+  // A row in the equip list: clicking buys the item, or expands a laser sub-menu
+  // (handled render-free by equip_do). The window rebuilds its rows when the visible
+  // set changes (i.e. after a sub-menu expand).
+  class EquipButton : public GuiButton
+  {
+    public:
+      explicit EquipButton(int _index)
+        : m_index(_index)
+      {
+      }
+      void MouseUp() override { equip_do(m_index); }
+
+    private:
+      int m_index;
+  };
+
+  // Equip Ship: the dynamic buy-list (tech-level filtered, with laser sub-menus). Rows
+  // are rebuilt only when the visible set changes; otherwise captions/enabled state
+  // refresh from live state each frame.
+  class EquipWindow : public GuiWindow
+  {
+    public:
+      EquipWindow()
+        : GuiWindow("Equip")
+      {
+        SetTitle("Equip Ship");
+        Centre(this, 360, 460);
+        equip_reset(); // start at the top-level list
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create();
+        BuildContents();
+      }
+
+      void Update() override
+      {
+        // Rebuild at frame start (before clicks are processed) when the visible set
+        // changed last frame, so buttons are never deleted mid-click. Canvas tracks
+        // the clicked button by name, so recreating rows across frames is safe.
+        if (VisibleSetChanged())
+        {
+          Remove();
+          GuiWindow::Create();
+          BuildContents();
+        }
+        GuiWindow::Update();
+        RefreshCaptions();
+      }
+
+    private:
+      void BuildContents()
+      {
+        m_buttonOrder.clear();
+        m_rows.clear();
+        m_shownIndices.clear();
+
+        const int x = 10;
+        const int w = static_cast<int>(m_w) - 20;
+        const int count = equip_visible_count();
+        int y = 28;
+        for (int i = 0; i < count; ++i)
+        {
+          const int idx = equip_visible_index(i);
+          m_shownIndices.push_back(idx);
+
+          auto* row = new EquipButton(idx);
+          row->SetProperties("Eq" + std::to_string(idx), x, y, w, 14, "");
+          RegisterButton(row);
+          m_rows.push_back(row);
+          m_buttonOrder.push_back(row);
+          y += 16;
+        }
+
+        y += 6;
+        m_cash = new LabelButton();
+        m_cash->SetProperties("Cash", x, y, w, 14, "");
+        RegisterButton(m_cash);
+
+        auto* close = new CloseButton();
+        close->m_centered = true;
+        close->SetProperties("CloseBtn", x, y + 18, w, 16, "Close");
+        RegisterButton(close);
+        m_buttonOrder.push_back(close);
+
+        m_currentButton = 0;
+        RefreshCaptions();
+      }
+
+      bool VisibleSetChanged()
+      {
+        const int count = equip_visible_count();
+        if (count != static_cast<int>(m_shownIndices.size()))
+          return true;
+        for (int i = 0; i < count; ++i)
+          if (equip_visible_index(i) != m_shownIndices[i])
+            return true;
+        return false;
+      }
+
+      void RefreshCaptions()
+      {
+        char buf[80];
+        for (size_t i = 0; i < m_rows.size(); ++i)
+        {
+          const int idx = m_shownIndices[i];
+          equip_row_text(idx, buf, sizeof(buf));
+          m_rows[i]->SetCaption(buf);
+          m_rows[i]->SetDisabled(!equip_buyable(idx));
+        }
+        if (m_cash)
+        {
+          const int credits = market_credits();
+          snprintf(buf, sizeof(buf), "Cash: %d.%d Cr", credits / 10, credits % 10);
+          m_cash->SetCaption(buf);
+        }
+      }
+
+      std::vector<EquipButton*> m_rows;
+      std::vector<int> m_shownIndices;
+      LabelButton* m_cash = nullptr;
+  };
 }
 
 void RegisterGameWindows()
@@ -500,4 +634,9 @@ void OpenPlanetDataWindow()
   GuiOverlay::ShowWindow(std::string_view("PlanetData"), []() -> GuiWindow* {
     return new InfoWindow("PlanetData", "Planet Data", planet_data_title, planet_data_line_count, planet_data_line, 440, 440);
   });
+}
+
+void OpenEquipWindow()
+{
+  GuiOverlay::ShowWindow(std::string_view("Equip"), []() -> GuiWindow* { return new EquipWindow(); });
 }

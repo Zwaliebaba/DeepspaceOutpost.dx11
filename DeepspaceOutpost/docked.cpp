@@ -1952,26 +1952,26 @@ int laser_refund (int laser_type)
 }
 
 
-void buy_equip (void)
+// Render-free equip action for a given stock index: expand a laser sub-menu (name
+// beginning '+'), or buy the item if affordable. Mutates show flags / cmdr state but
+// does not draw. Returns 1 if it changed anything.
+int equip_do (int index)
 {
 	int i;
 
-	if (equip_stock[hilite_item].name[0] == '+')
+	if (equip_stock[index].name[0] == '+')
 	{
 		collapse_equip_list();
-		equip_stock[hilite_item].show = 0;
-		hilite_item++;
-		for (i = 0; i < 5; i++)
-			equip_stock[hilite_item + i].show = 1;
-		
-		list_equip_prices();
-		return;		
+		equip_stock[index].show = 0;
+		for (i = 1; i <= 5; i++)
+			equip_stock[index + i].show = 1;
+		return 1;
 	}
 
-	if (equip_stock[hilite_item].canbuy == 0)
-		return;
-	
-	switch (equip_stock[hilite_item].type)
+	if (equip_stock[index].canbuy == 0)
+		return 0;
+
+	switch (equip_stock[index].type)
 	{
 		case EQ_FUEL:
 			cmdr.fuel = PlayerCaps().maxFuel;
@@ -2096,9 +2096,67 @@ void buy_equip (void)
 			break;
 	}
 
-	cmdr.credits -= equip_stock[hilite_item].price;
+	cmdr.credits -= equip_stock[index].price;
+	return 1;
+}
+
+
+// Legacy gfx_display_* equip navigation: act on the keyboard-highlighted item, then
+// redraw. The action itself now goes through equip_do.
+void buy_equip (void)
+{
+	if (equip_stock[hilite_item].name[0] == '+')
+	{
+		equip_do (hilite_item);
+		hilite_item++;          // land the highlight on the first expanded sub-item
+		list_equip_prices();
+		return;
+	}
+
+	equip_do (hilite_item);
 	list_equip_prices();
 }
+
+
+/* ---- Render-free equip accessors for the GUI equip window. The visible set =
+ * items with show && tech-level >= level (the same filter list_equip_prices uses);
+ * it changes when a laser sub-menu is expanded, so the GUI rebuilds its rows then. */
+static int s_equipVisible[NO_OF_EQUIP_ITEMS];
+static int s_equipVisibleCount = 0;
+
+void equip_reset (void) { collapse_equip_list(); }   // back to the top-level list
+
+int equip_visible_count (void)
+{
+	int i, tech_level;
+
+	tech_level = current_planet_data.techlevel + 1;
+	equip_stock[0].price = (70 - cmdr.fuel) * 2;   // fuel price tracks the tank
+
+	s_equipVisibleCount = 0;
+	for (i = 0; i < NO_OF_EQUIP_ITEMS; i++)
+	{
+		equip_stock[i].canbuy = ((equip_present (equip_stock[i].type) == 0) &&
+								 (equip_stock[i].price <= cmdr.credits));
+		if (equip_stock[i].show && (tech_level >= equip_stock[i].level))
+			s_equipVisible[s_equipVisibleCount++] = i;
+	}
+
+	return s_equipVisibleCount;
+}
+
+int equip_visible_index (int i) { return (i >= 0 && i < s_equipVisibleCount) ? s_equipVisible[i] : 0; }
+
+void equip_row_text (int index, char *buf, int buflen)
+{
+	const char *name = &equip_stock[index].name[1];   // strip the ' '/'+'/'-'/'>' prefix
+	if (equip_stock[index].price != 0)
+		snprintf (buf, buflen, "%-22s %d.%d", name, equip_stock[index].price / 10, equip_stock[index].price % 10);
+	else
+		snprintf (buf, buflen, "%s", name);
+}
+
+int equip_buyable (int index) { return (equip_stock[index].name[0] == '+') || equip_stock[index].canbuy; }
 
 
 void equip_ship (void)

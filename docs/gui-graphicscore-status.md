@@ -114,10 +114,17 @@ F1 demo main menu has been removed now that real screens drive the overlay.)
 - **Still legacy (intentionally):** the **charts** (F5 galactic / F6 short-range) stay on
   `gfx_display_*` — they're interactive spatial maps (crosshair nav, fuel circle), not
   list/form screens, so a `GuiWindow` is the wrong fit.
-- **Remaining to migrate: Equip Ship (F4).** It's an interactive buy-list with a dynamic
-  visible set (tech-level/`show` filtering, laser sub-menus, buy mutates the list), so it
-  needs a window that rebuilds its rows — a focused follow-on rather than the read-only
-  `InfoWindow` shape.
+- ✅ **Migrated: Equip Ship (F4).** `EquipWindow` is the interactive buy-list: each row
+  buys its item (or expands a laser sub-menu) via the render-free `equip_do`, and the
+  window **rebuilds its rows when the visible set changes** (tech-level/`show` filtering,
+  laser sub-menu expand) — rebuild happens at frame start, before clicks are processed,
+  and Canvas tracks the clicked button by name, so recreating rows across frames is safe.
+  `docked.cpp` gained `equip_do`/`equip_reset`/`equip_visible_count`/`equip_visible_index`/
+  `equip_row_text`/`equip_buyable` (legacy `buy_equip` now wraps `equip_do`); `main.cpp`
+  routes docked F4 to `OpenEquipWindow()`.
+- **All list/form game screens are now GUI windows.** What remains on `gfx_display_*`:
+  the charts (by design) and the flight HUD / 3D — i.e. the gfx_dx11 backend itself,
+  whose retirement is the separate, larger effort tracked above.
 - Migrate the game render into the `GameMain` lifecycle
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);

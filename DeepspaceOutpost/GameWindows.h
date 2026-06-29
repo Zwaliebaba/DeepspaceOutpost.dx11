@@ -19,3 +19,4 @@ void OpenMarketWindow();
 void OpenCommanderWindow();
 void OpenInventoryWindow();
 void OpenPlanetDataWindow();
+void OpenEquipWindow();

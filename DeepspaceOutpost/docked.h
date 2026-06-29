@@ -41,6 +41,14 @@ void select_next_equip (void);
 void select_previous_equip (void);
 void buy_equip (void);
 
+/* Render-free equip-screen access for the GUI equip window. */
+int  equip_do (int index);          /* expand a laser sub-menu, or buy the item */
+void equip_reset (void);            /* collapse to the top-level list */
+int  equip_visible_count (void);    /* rebuilds the visible set + canbuy flags */
+int  equip_visible_index (int i);   /* equip_stock index of the i-th visible row */
+void equip_row_text (int index, char *buf, int buflen);
+int  equip_buyable (int index);
+
 
 extern int cross_x;
 extern int cross_y;

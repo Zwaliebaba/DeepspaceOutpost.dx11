@@ -862,7 +862,7 @@ void handle_flight_keys(void)
     find_input = 0;
 
     if (docked)
-      equip_ship();
+      OpenEquipWindow();
     else
     {
       if (current_screen != SCR_RIGHT_VIEW)
