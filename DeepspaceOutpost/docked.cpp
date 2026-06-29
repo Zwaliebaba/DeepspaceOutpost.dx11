@@ -3,8 +3,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <math.h>
 #include <ctype.h>
+
+#include <string>
+#include <vector>
 
 #include "config.h"
 #include "gfx.h"
@@ -1431,8 +1435,203 @@ void display_inventory (void)
 
 			gfx_display_text (180, y, str);
 			y += 16;
-		}		
+		}
 	}
+}
+
+
+/* =================================================================================
+ * Render-free accessors for the GUI info windows (Commander Status, Inventory,
+ * Data on Planet). Each rebuilds a list of preformatted text lines the GUI's
+ * InfoWindow renders, reusing the exact field logic above instead of the legacy
+ * gfx_display_* drawing. Declared in docked.h.
+ * ================================================================================= */
+
+namespace {
+
+std::vector<std::string> s_cmdrLines;
+std::vector<std::string> s_invLines;
+std::vector<std::string> s_planetLines;
+
+void info_add (std::vector<std::string>& lines, const char* fmt, ...)
+{
+	char buf[160];
+	va_list ap;
+	va_start (ap, fmt);
+	vsnprintf (buf, sizeof(buf), fmt, ap);
+	va_end (ap);
+	lines.push_back (buf);
+}
+
+// Word-wrap into <= width-char lines (the GUI font is monospaced, so chars == columns).
+void info_add_wrapped (std::vector<std::string>& lines, const char* text, int width)
+{
+	std::string line;
+	const char* p = text;
+	while (*p)
+	{
+		const char* start = p;
+		while (*p && *p != ' ') p++;
+		std::string word (start, p);
+		while (*p == ' ') p++;
+
+		if (!line.empty() && (int)(line.size() + 1 + word.size()) > width)
+		{
+			lines.push_back (line);
+			line.clear();
+		}
+		if (!line.empty()) line += ' ';
+		line += word;
+	}
+	if (!line.empty())
+		lines.push_back (line);
+}
+
+void copy_line (const std::vector<std::string>& lines, int i, char* buf, int buflen)
+{
+	if (buflen <= 0) return;
+	if (i < 0 || i >= (int)lines.size()) { buf[0] = '\0'; return; }
+	int n = (int)lines[i].size();
+	if (n > buflen - 1) n = buflen - 1;
+	memcpy (buf, lines[i].c_str(), n);
+	buf[n] = '\0';
+}
+
+void build_cmdr_status (void)
+{
+	char planet_name[16];
+	int i, condition, type;
+
+	s_cmdrLines.clear();
+
+	if (!witchspace)
+	{
+		current_system_name (planet_name);
+		capitalise_name (planet_name);
+		info_add (s_cmdrLines, "Present System:    %s", planet_name);
+	}
+
+	hyperspace_system_name (planet_name);
+	capitalise_name (planet_name);
+	info_add (s_cmdrLines, "Hyperspace System: %s", planet_name);
+
+	if (docked)
+		condition = 0;
+	else
+	{
+		condition = 1;
+		for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
+		{
+			type = local_objects[i].type;
+			if ((type == SHIP_MISSILE) || ((type > SHIP_ROCK) && (type < SHIP_DODEC)))
+			{
+				condition = 2;
+				break;
+			}
+		}
+		if ((condition == 2) && (PlayerDefense().energy < 128))
+			condition = 3;
+	}
+
+	info_add (s_cmdrLines, "Condition:         %s", condition_txt[condition]);
+	info_add (s_cmdrLines, "Fuel:              %d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
+	info_add (s_cmdrLines, "Cash:              %d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
+
+	const char* legal = (cmdr.legal_status == 0) ? "Clean"
+					   : (cmdr.legal_status > 50 ? "Fugitive" : "Offender");
+	info_add (s_cmdrLines, "Legal Status:      %s", legal);
+
+	const char* title = rating[0].title;
+	for (i = 0; i < NO_OF_RANKS; i++)
+		if (cmdr.score >= rating[i].score)
+			title = rating[i].title;
+	info_add (s_cmdrLines, "Rating:            %s", title);
+
+	info_add (s_cmdrLines, "%s", "");
+	info_add (s_cmdrLines, "%s", "EQUIPMENT:");
+
+	if (cmdr.cargo_capacity > 20)  info_add (s_cmdrLines, "  Large Cargo Bay");
+	if (cmdr.escape_pod)           info_add (s_cmdrLines, "  Escape Pod");
+	if (cmdr.fuel_scoop)           info_add (s_cmdrLines, "  Fuel Scoops");
+	if (cmdr.ecm)                  info_add (s_cmdrLines, "  E.C.M. System");
+	if (cmdr.energy_bomb)          info_add (s_cmdrLines, "  Energy Bomb");
+	if (cmdr.energy_unit)          info_add (s_cmdrLines, "  %s", cmdr.energy_unit == 1 ? "Extra Energy Unit" : "Naval Energy Unit");
+	if (cmdr.docking_computer)     info_add (s_cmdrLines, "  Docking Computers");
+	if (cmdr.galactic_hyperdrive)  info_add (s_cmdrLines, "  Galactic Hyperspace");
+	if (cmdr.front_laser)          info_add (s_cmdrLines, "  Front %s Laser", laser_type (cmdr.front_laser));
+	if (cmdr.rear_laser)           info_add (s_cmdrLines, "  Rear %s Laser", laser_type (cmdr.rear_laser));
+	if (cmdr.left_laser)           info_add (s_cmdrLines, "  Left %s Laser", laser_type (cmdr.left_laser));
+	if (cmdr.right_laser)          info_add (s_cmdrLines, "  Right %s Laser", laser_type (cmdr.right_laser));
+}
+
+void build_inventory (void)
+{
+	int i;
+	bool any = false;
+
+	s_invLines.clear();
+	info_add (s_invLines, "Fuel:  %d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
+	info_add (s_invLines, "Cash:  %d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
+	info_add (s_invLines, "%s", "");
+
+	for (i = 0; i < 17; i++)
+	{
+		if (cmdr.current_cargo[i] > 0)
+		{
+			info_add (s_invLines, "%-20s %d%s", stock_market[i].name,
+					  cmdr.current_cargo[i], unit_name[stock_market[i].units]);
+			any = true;
+		}
+	}
+
+	if (!any)
+		info_add (s_invLines, "%s", "Hold empty.");
+}
+
+void build_planet_data (void)
+{
+	char str[100];
+	struct planet_data pd;
+	int ly;
+
+	s_planetLines.clear();
+
+	generate_planet_data (&pd, hyperspace_planet);
+
+	ly = calc_distance_to_planet (docked_planet, hyperspace_planet);
+	if (ly > 0)
+		info_add (s_planetLines, "Distance: %d.%d Light Years", ly / 10, ly % 10);
+
+	info_add (s_planetLines, "Economy: %s", economy_type[pd.economy]);
+	info_add (s_planetLines, "Government: %s", government_type[pd.government]);
+	info_add (s_planetLines, "Tech Level: %d", pd.techlevel + 1);
+	info_add (s_planetLines, "Population: %d.%d Billion", pd.population / 10, pd.population % 10);
+
+	describe_inhabitants (str, hyperspace_planet);
+	info_add (s_planetLines, "%s", str);
+
+	info_add (s_planetLines, "Gross Productivity: %d M CR", pd.productivity);
+	info_add (s_planetLines, "Average Radius: %d km", pd.radius);
+	info_add (s_planetLines, "%s", "");
+	info_add_wrapped (s_planetLines, describe_planet (hyperspace_planet), 52);
+}
+
+} // namespace
+
+int cmdr_status_line_count (void) { build_cmdr_status(); return (int) s_cmdrLines.size(); }
+void cmdr_status_line (int i, char *buf, int buflen) { copy_line (s_cmdrLines, i, buf, buflen); }
+void cmdr_status_title (char *buf, int buflen) { snprintf (buf, buflen, "Commander %s", cmdr.name); }
+
+int inventory_line_count (void) { build_inventory(); return (int) s_invLines.size(); }
+void inventory_line (int i, char *buf, int buflen) { copy_line (s_invLines, i, buf, buflen); }
+
+int planet_data_line_count (void) { build_planet_data(); return (int) s_planetLines.size(); }
+void planet_data_line (int i, char *buf, int buflen) { copy_line (s_planetLines, i, buf, buflen); }
+void planet_data_title (char *buf, int buflen)
+{
+	char planet_name[16];
+	name_planet (planet_name, hyperspace_planet);
+	snprintf (buf, buflen, "Data on %s", planet_name);
 }
 
 /***********************************************************************************/

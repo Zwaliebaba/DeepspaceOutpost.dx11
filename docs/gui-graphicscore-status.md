@@ -103,9 +103,21 @@ F1 demo main menu has been removed now that real screens drive the overlay.)
   `highlight_stock`/`display_stock_price`) and their `current_screen` keyboard dispatch
   in `options.cpp`/`docked.cpp`/`main.cpp` are left intact (harmless) until a later
   cleanup pass retires them.
-- Convert the remaining game screens (equip ship, charts, inventory, commander status)
-  from `gfx_display_*` to `GuiWindow`s wired to actual game state, following this
-  pattern.
+- ✅ **Migrated: Commander Status (F9), Inventory (F10), Data on Planet (F7).** All three
+  are read-only panels, so they share a generic `InfoWindow` (a list of text lines + a
+  Close button, rebuilt from live game state each frame). `docked.cpp` gained render-free
+  line accessors (`cmdr_status_line_count`/`_line`/`_title`, `inventory_*`, `planet_data_*`)
+  that reuse the exact field logic; `GameWindows` adds `Open{Commander,Inventory,PlanetData}Window`
+  and `main.cpp` routes F9/F10/F7 to them. **F7 caveat:** in thin-client (MMO) mode it
+  still calls the legacy `display_data_on_planet` (server-replicated data + chart-cursor
+  selection); single-player uses the GUI window with locally generated data.
+- **Still legacy (intentionally):** the **charts** (F5 galactic / F6 short-range) stay on
+  `gfx_display_*` — they're interactive spatial maps (crosshair nav, fuel circle), not
+  list/form screens, so a `GuiWindow` is the wrong fit.
+- **Remaining to migrate: Equip Ship (F4).** It's an interactive buy-list with a dynamic
+  visible set (tech-level/`show` filtering, laser sub-menus, buy mutates the list), so it
+  needs a window that rebuilds its rows — a focused follow-on rather than the read-only
+  `InfoWindow` shape.
 - Migrate the game render into the `GameMain` lifecycle
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);

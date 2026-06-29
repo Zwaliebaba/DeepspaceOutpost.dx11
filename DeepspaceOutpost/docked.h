@@ -24,6 +24,17 @@ void market_format_row (int item, char *buf, int buflen); /* "Name  t   12.3   5
 int  market_credits (void);                                /* tenths of a credit */
 int  market_buy (int item);                                /* returns 1 if state changed */
 int  market_sell (int item);                               /* returns 1 if state changed */
+
+/* Render-free read-only info screens for the GUI info windows. Each *_line_count()
+ * rebuilds the line list from current game state; *_line() copies line i. */
+int  cmdr_status_line_count (void);
+void cmdr_status_line (int i, char *buf, int buflen);
+void cmdr_status_title (char *buf, int buflen);
+int  inventory_line_count (void);
+void inventory_line (int i, char *buf, int buflen);
+int  planet_data_line_count (void);
+void planet_data_line (int i, char *buf, int buflen);
+void planet_data_title (char *buf, int buflen);
 void display_inventory (void);
 void equip_ship (void);
 void select_next_equip (void);

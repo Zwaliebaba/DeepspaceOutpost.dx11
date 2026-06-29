@@ -12,6 +12,10 @@
 // GameApp::Startup() (after the engine/Canvas are up).
 void RegisterGameWindows();
 
-// Open the market-prices window on the GUI overlay (the F8 in-game entry routes here
-// instead of the legacy gfx_display_* display_market_prices screen).
+// Open game screens on the GUI overlay, replacing their legacy gfx_display_* versions.
+// The in-game F-key handlers route here (market F8, commander F9, inventory F10,
+// planet data F7).
 void OpenMarketWindow();
+void OpenCommanderWindow();
+void OpenInventoryWindow();
+void OpenPlanetDataWindow();

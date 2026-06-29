@@ -31,6 +31,16 @@ extern int market_credits(void);
 extern int market_buy(int item);
 extern int market_sell(int item);
 
+// Render-free read-only info screens (docked.h / docked.cpp).
+extern int cmdr_status_line_count(void);
+extern void cmdr_status_line(int i, char* buf, int buflen);
+extern void cmdr_status_title(char* buf, int buflen);
+extern int inventory_line_count(void);
+extern void inventory_line(int i, char* buf, int buflen);
+extern int planet_data_line_count(void);
+extern void planet_data_line(int i, char* buf, int buflen);
+extern void planet_data_title(char* buf, int buflen);
+
 namespace
 {
   // Centre a window of (w,h) in the current client area, like the engine overlay does.
@@ -372,6 +382,93 @@ namespace
       std::vector<LabelButton*> m_rows;
       LabelButton* m_cash = nullptr;
   };
+
+  // ----- Generic read-only info window --------------------------------------
+
+  // A scrollless panel of read-only text lines + a Close button, driven by a
+  // game-supplied line source (count + per-line getter, both render-free). Used for
+  // Commander Status / Inventory / Planet Data; the lines are rebuilt from live game
+  // state each frame so values stay current.
+  class InfoWindow : public GuiWindow
+  {
+    public:
+      using CountFn = int (*)();
+      using LineFn = void (*)(int, char*, int);
+      using TitleFn = void (*)(char*, int);
+
+      InfoWindow(std::string_view _name, const char* _staticTitle, TitleFn _titleFn, CountFn _count, LineFn _line, int _w,
+                 int _h)
+        : GuiWindow(_name), m_count(_count), m_line(_line)
+      {
+        if (_titleFn)
+        {
+          char title[64];
+          _titleFn(title, sizeof(title));
+          SetTitle(title);
+        }
+        else
+        {
+          SetTitle(_staticTitle);
+        }
+        Centre(this, _w, _h);
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create();
+        m_buttonOrder.clear();
+        m_labels.clear();
+
+        const int x = 10;
+        const int w = static_cast<int>(m_w) - 20;
+        const int n = m_count ? m_count() : 0;
+        int y = 28;
+        for (int i = 0; i < n; ++i)
+        {
+          auto* label = new LabelButton();
+          label->SetProperties("Info" + std::to_string(i), x, y, w, 14, "");
+          RegisterButton(label);
+          m_labels.push_back(label);
+          y += 15;
+        }
+
+        y += 6;
+        auto* close = new CloseButton();
+        close->m_centered = true;
+        close->SetProperties("Close", x, y, w, 16, "Close");
+        RegisterButton(close);
+        m_buttonOrder.push_back(close);
+
+        m_currentButton = 0;
+        Refresh();
+      }
+
+      void Update() override
+      {
+        GuiWindow::Update();
+        Refresh();
+      }
+
+    private:
+      void Refresh()
+      {
+        if (m_count)
+          m_count(); // rebuild the source cache so values stay live
+        char buf[160];
+        for (size_t i = 0; i < m_labels.size(); ++i)
+        {
+          if (m_line)
+            m_line(static_cast<int>(i), buf, sizeof(buf));
+          else
+            buf[0] = '\0';
+          m_labels[i]->SetCaption(buf);
+        }
+      }
+
+      CountFn m_count;
+      LineFn m_line;
+      std::vector<LabelButton*> m_labels;
+  };
 }
 
 void RegisterGameWindows()
@@ -382,4 +479,25 @@ void RegisterGameWindows()
 void OpenMarketWindow()
 {
   GuiOverlay::ShowWindow(std::string_view("Market"), []() -> GuiWindow* { return new MarketWindow(); });
+}
+
+void OpenCommanderWindow()
+{
+  GuiOverlay::ShowWindow(std::string_view("Commander"), []() -> GuiWindow* {
+    return new InfoWindow("Commander", "Commander", cmdr_status_title, cmdr_status_line_count, cmdr_status_line, 380, 420);
+  });
+}
+
+void OpenInventoryWindow()
+{
+  GuiOverlay::ShowWindow(std::string_view("Inventory"), []() -> GuiWindow* {
+    return new InfoWindow("Inventory", "Inventory", nullptr, inventory_line_count, inventory_line, 360, 380);
+  });
+}
+
+void OpenPlanetDataWindow()
+{
+  GuiOverlay::ShowWindow(std::string_view("PlanetData"), []() -> GuiWindow* {
+    return new InfoWindow("PlanetData", "Planet Data", planet_data_title, planet_data_line_count, planet_data_line, 440, 440);
+  });
 }

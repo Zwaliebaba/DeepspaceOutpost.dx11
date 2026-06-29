@@ -890,7 +890,13 @@ void handle_flight_keys(void)
   if (kbd_F7_pressed)
   {
     find_input = 0;
-    display_data_on_planet();
+    // Single-player: the GUI planet-data window (local generated data). In thin-client
+    // (MMO) mode the legacy screen shows server-replicated system data + chart cursor
+    // selection, so keep it there.
+    if (Neuron::Client::ReplicationClientInstance().IsOpen())
+      display_data_on_planet();
+    else
+      OpenPlanetDataWindow();
   }
 
   if (kbd_F8_pressed && (!witchspace))
@@ -904,13 +910,13 @@ void handle_flight_keys(void)
   if (kbd_F9_pressed)
   {
     find_input = 0;
-    display_commander_status();
+    OpenCommanderWindow();
   }
 
   if (kbd_F10_pressed)
   {
     find_input = 0;
-    display_inventory();
+    OpenInventoryWindow();
   }
 
   if (kbd_F11_pressed)
