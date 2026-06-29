@@ -20,7 +20,6 @@
 
 #include "Renderer.h"
 #include "gfx_dx11.h"
-#include "Image.h"
 #include "TextureManager.h"
 
 #include "gfx.h"
@@ -223,33 +222,23 @@ void drawLine(int x1, int y1, int x2, int y2, uint32_t c)
 }
 
 /* ---- texture helpers ---- */
-Texture makeTexture(ID3D11Device* dev, const Image& img)
-{
-	Texture t;
-	if (!img.ok()) return t;
-	D3D11_TEXTURE2D_DESC td{};
-	td.Width = img.width; td.Height = img.height; td.MipLevels = 1; td.ArraySize = 1;
-	td.Format = DXGI_FORMAT_R8G8B8A8_UNORM; td.SampleDesc.Count = 1;
-	td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	D3D11_SUBRESOURCE_DATA sd{};
-	sd.pSysMem = img.rgba.data();
-	sd.SysMemPitch = img.width * 4;
-	com_ptr<ID3D11Texture2D> tex;
-	if (FAILED(dev->CreateTexture2D(&td, &sd, tex.put()))) return t;
-	if (FAILED(dev->CreateShaderResourceView(tex.get(), nullptr, t.srv.put()))) return t;
-	t.w = img.width; t.h = img.height;
-	return t;
-}
-
-const Texture* getTexture(const char* path, bool key_index0)
+// Sprites and the scanner HUD load through the native Neuron::Graphics::TextureManager
+// (.dds, alpha baked in), so this layer no longer needs the legacy platform/Image
+// decoder. The SRV is borrowed (AddRef'd) from the manager's cached Texture.
+const Texture* getTexture(const char* path)
 {
 	auto it = g_textures.find(path);
 	if (it != g_textures.end())
 		return &it->second;
-	Renderer* r = platform_renderer();
-	if (!r) return nullptr;
-	Image img = load_image_rgba(path, key_index0);
-	Texture t = makeTexture(r->device(), img);
+
+	Texture t;
+	auto managed = Neuron::Graphics::TextureManager::LoadTexture(path);
+	if (managed && managed->IsLoaded())
+	{
+		t.srv.copy_from(managed->GetShaderResourceView());
+		t.w = static_cast<int>(managed->GetWidth());
+		t.h = static_cast<int>(managed->GetHeight());
+	}
 	auto res = g_textures.emplace(path, std::move(t));
 	return &res.first->second;
 }
@@ -258,15 +247,15 @@ const char* spriteFile(int sprite_no)
 {
 	switch (sprite_no)
 	{
-		case IMG_GREEN_DOT:      return "greendot.bmp";
-		case IMG_RED_DOT:        return "reddot.bmp";
-		case IMG_BIG_S:          return "safe.bmp";
-		case IMG_ELITE_TXT:      return "elitetx3.bmp";
-		case IMG_BIG_E:          return "ecm.bmp";
-		case IMG_MISSILE_GREEN:  return "missgrn.bmp";
-		case IMG_MISSILE_YELLOW: return "missyell.bmp";
-		case IMG_MISSILE_RED:    return "missred.bmp";
-		case IMG_BLAKE:          return "blake.bmp";
+		case IMG_GREEN_DOT:      return "greendot.dds";
+		case IMG_RED_DOT:        return "reddot.dds";
+		case IMG_BIG_S:          return "safe.dds";
+		case IMG_ELITE_TXT:      return "elitetx3.dds";
+		case IMG_BIG_E:          return "ecm.dds";
+		case IMG_MISSILE_GREEN:  return "missgrn.dds";
+		case IMG_MISSILE_YELLOW: return "missyell.dds";
+		case IMG_MISSILE_RED:    return "missred.dds";
+		case IMG_BLAKE:          return "blake.dds";
 		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
 		default:                 return nullptr;
 	}
@@ -626,7 +615,7 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 {
 	const char* fn = spriteFile(sprite_no);
 	if (!fn) return;
-	const Texture* t = getTexture(fn, true);
+	const Texture* t = getTexture(fn);
 	if (!t || !t->srv) return;
 	if (x == -1) x = (256 * GFX_SCALE - t->w) / 2;
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + t->w), (float)(y + t->h),
@@ -639,7 +628,7 @@ void gfx_draw_sprite_scaled(int sprite_no, int x, int y, int w, int h)
 {
 	const char* fn = spriteFile(sprite_no);
 	if (!fn) return;
-	const Texture* t = getTexture(fn, true);
+	const Texture* t = getTexture(fn);
 	if (!t || !t->srv) return;
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + w), (float)(y + h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
@@ -647,8 +636,16 @@ void gfx_draw_sprite_scaled(int sprite_no, int x, int y, int w, int h)
 
 void gfx_draw_scanner(void)
 {
-	const char* fn = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";
-	const Texture* t = getTexture(fn, false);
+	/* The configured scanner image (and the default) name a .bmp - Renderer still
+	 * reads scanner.bmp for the master palette - but the HUD sprite itself now loads
+	 * as .dds through the TextureManager, so map the extension across. */
+	const char* cfg = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";
+	std::string fn = cfg;
+	if (const size_t dot = fn.find_last_of('.'); dot != std::string::npos)
+		fn.replace(dot, std::string::npos, ".dds");
+	else
+		fn += ".dds";
+	const Texture* t = getTexture(fn.c_str());
 	if (!t || !t->srv) return;
 	pushTexQuad(t->srv.get(), 0.0f, 385.0f, (float)t->w, (float)(385 + t->h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
