@@ -196,8 +196,8 @@ namespace
   };
 
   // The game's Options menu (named "Options" so the overlay's open/dedup matches).
-  // Mirrors options.cpp's option_list, minus Save/Load Commander for now (those still
-  // route through legacy gfx_display_* file-entry screens not yet migrated).
+  // Mirrors options.cpp's option_list (Game Settings + Quit); the old Save/Load
+  // Commander entries were removed along with that functionality.
   class OptionsMenuWindow : public GuiWindow
   {
     public:

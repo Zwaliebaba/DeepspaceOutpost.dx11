@@ -17,7 +17,7 @@
 
 static int hilite_item;
  
-#define NUM_OPTIONS 4
+#define NUM_OPTIONS 2
 #define NUM_SETTINGS 6
 
 #define OPTION_BAR_WIDTH	(400)
@@ -31,10 +31,8 @@ struct option
 
 static struct option option_list[NUM_OPTIONS] =
 {
-	{"Save Commander",	1},
-	{"Load Commander",	1},
 	{"Game Settings",	0},
-	{"Quit",			0}	
+	{"Quit",			0}
 };
 
 struct setting
@@ -313,19 +311,10 @@ void do_option (void)
 	switch (hilite_item)
 	{
 		case 0:
-			save_commander_screen();
-			break;
-			
-		case 1:
-			load_commander_screen();
-			display_commander_status();
-			break;
-		
-		case 2:
 			game_settings_screen();
 			break;
-		
-		case 3:
+
+		case 1:
 			quit_screen();
 			break;
 	}

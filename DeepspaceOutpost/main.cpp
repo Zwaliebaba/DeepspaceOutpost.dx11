@@ -1102,81 +1102,6 @@ void set_commander_name(char* path)
   *cname = '\0';
 }
 
-void save_commander_screen(void)
-{
-  char path[255];
-  int okay;
-  int rv;
-
-  current_screen = SCR_SAVE_CMDR;
-
-  gfx_clear_display();
-  gfx_display_centre_text(10, "SAVE COMMANDER", 140, GFX_COL_GOLD);
-  gfx_draw_line(0, 36, 511, 36);
-  gfx_update_screen();
-
-  strcpy(path, cmdr.name);
-  strcat(path, ".nkc");
-
-  okay = gfx_request_file("Save Commander", path, "nkc");
-
-  if (!okay)
-  {
-    display_options();
-    return;
-  }
-
-  rv = save_commander_file(path);
-
-  if (rv)
-  {
-    gfx_display_centre_text(175, "Error Saving Commander!", 140, GFX_COL_GOLD);
-    return;
-  }
-
-  gfx_display_centre_text(175, "Commander Saved.", 140, GFX_COL_GOLD);
-
-  set_commander_name(path);
-  saved_cmdr = cmdr;
-  saved_cmdr.ship_x = docked_planet.d;
-  saved_cmdr.ship_y = docked_planet.b;
-}
-
-void load_commander_screen(void)
-{
-  char path[255];
-  int rv;
-
-  gfx_clear_display();
-  gfx_display_centre_text(10, "LOAD COMMANDER", 140, GFX_COL_GOLD);
-  gfx_draw_line(0, 36, 511, 36);
-  gfx_update_screen();
-
-  strcpy(path, "jameson.nkc");
-
-  rv = gfx_request_file("Load Commander", path, "nkc");
-
-  if (rv == 0)
-    return;
-
-  rv = load_commander_file(path);
-
-  if (rv)
-  {
-    saved_cmdr = cmdr;
-    gfx_display_centre_text(175, "Error Loading Commander!", 140, GFX_COL_GOLD);
-    gfx_display_centre_text(200, "Press any key to continue.", 140, GFX_COL_GOLD);
-    gfx_update_screen();
-    kbd_wait_key();
-    return;
-  }
-
-  restore_saved_commander();
-  set_commander_name(path);
-  saved_cmdr = cmdr;
-  update_console();
-}
-
 void run_first_intro_screen(void)
 {
   current_screen = SCR_INTRO_ONE;
@@ -1193,19 +1118,11 @@ void run_first_intro_screen(void)
 
     kbd_poll_keyboard();
 
-    if (kbd_y_pressed)
-    {
-      snd_stop_midi();
-      load_commander_screen();
+    if (kbd_space_pressed)
       break;
-    }
-
-    if (kbd_n_pressed)
-    {
-      snd_stop_midi();
-      break;
-    }
   }
+
+  snd_stop_midi();
 }
 
 void run_second_intro_screen(void)
