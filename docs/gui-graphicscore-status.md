@@ -73,8 +73,38 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);
   the seams are pointed that way.
-- Once every 2D screen is migrated, **retire** the `gfx_dx11` 2D batch and
-  `platform/Font`, and shrink/replace `Renderer`.
+
+## Retiring the legacy platform 2D layer (`gfx_dx11.cpp` / `Image.cpp` / `Font.cpp`)
+
+These three are NOT independently removable; the dependency web (verified by grep):
+
+| File | What it is | Who depends on it |
+|---|---|---|
+| `platform/gfx_dx11.cpp` | Implements the **entire `gfx.h` contract** — 2D primitives (pixel/line/circle/tri/rect/poly), sprites, text (`gfx_display_*`), **depth-sorted 3D** (`gfx_render_polygon/line/start/finish`), the **scanner HUD**, clip regions, `xor_mode`, palette-index colour. | The whole game (`docked/intro/main/missions/options/space`, …) **and** `GfxRenderSink` (the `RenderQueue` replay). |
+| `platform/Font.cpp` | verd2/verd4 PCX grabber font atlas (ELITE_1/2). | **Only** `gfx_dx11.cpp` (its `drawString`). |
+| `platform/Image.cpp` | BMP/PCX/uncompressed-DDS decoders (`load_image_rgba`, `load_indexed`). | `gfx_dx11.cpp` (sprites), `Font.cpp` (PCX) **and the new `graphics/TextureManager.cpp`** (`.dds`). |
+
+**Prerequisites, in order:**
+
+1. **Reimplement the full `gfx_*` contract on the new stack** before `gfx_dx11.cpp` can
+   go. This is the big one — it means moving **all** game rendering (not just menus):
+   - 2D primitives + sprites → `ImmediateRenderer`;
+   - all `gfx_display_*` text → `TextRenderer`;
+   - the **depth-sorted 3D wireframe** path (`gfx_render_polygon/line` + `gfx_start/finish_render`) → an `ImmediateRenderer` equivalent (this is the in-flight ship/scene render);
+   - the **scanner/HUD**, clip-region → scissor, `xor_mode` cross-hairs, and palette-index → RGBA colour resolution.
+   - Then either rewrite `GfxRenderSink` to target the new backend, or replace the `RenderQueue` replay entirely.
+   - The 512×514 canvas + `Renderer` present pipeline exist to host this 2D batch; retiring `gfx_dx11` ties into the "render the world full-window" goal and shrinking/removing `Renderer`.
+2. **`Font.cpp`** can be deleted together with `gfx_dx11.cpp` (it has no other consumer);
+   the GUI already uses `TextRenderer` + a `.dds` font sheet instead.
+3. **`Image.cpp` cannot be deleted with the others** — `TextureManager` still calls
+   `load_image_rgba`. To remove it, first give `TextureManager` (and any new sprite
+   path) a **self-contained image/DDS decoder**, *or* simply **keep `Image.cpp` as the
+   canonical loader** (optionally moved out of `platform/` into the graphics layer) and
+   only drop the BMP/PCX paths once nothing loads those formats.
+
+**Net:** `Font.cpp` is easy (goes with `gfx_dx11`); `gfx_dx11.cpp` is a large,
+whole-renderer migration; `Image.cpp` is a shared dependency that must be re-homed, not
+just deleted. None of this is started yet.
 
 ## Phase index
 - `phase1-graphicscore.md` — GraphicsCore + ImmediateRenderer + shaders.
