@@ -130,45 +130,35 @@ F1 demo main menu has been removed now that real screens drive the overlay.)
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);
   the seams are pointed that way.
 
-## Retiring the legacy platform 2D layer (`gfx_dx11.cpp` / `Image.cpp`)
+## Retiring the legacy platform 2D layer — ✅ done
 
-`Font.cpp` is **gone** (see below). The two remaining files and the dependency web
-(verified by grep):
+`Font.cpp`, `Image.cpp`, **and the bespoke `gfx_dx11` Direct3D 11 renderer are all
+gone.** The whole client now renders through one stack: `Neuron::Graphics::Core` +
+`ImmediateRenderer` (+ `TextureManager` for `.dds`). What was removed, and how:
 
-| File | What it is | Who depends on it |
-|---|---|---|
-| `platform/gfx_dx11.cpp` | Implements the **entire `gfx.h` contract** — 2D primitives (pixel/line/circle/tri/rect/poly), sprites, text (`gfx_display_*`), **depth-sorted 3D** (`gfx_render_polygon/line/start/finish`), the **scanner HUD**, clip regions, `xor_mode`, palette-index colour. | The whole game (`docked/intro/main/missions/options/space`, …) **and** `GfxRenderSink` (the `RenderQueue` replay). |
-| `platform/Image.cpp` | BMP/PCX/uncompressed-DDS decoders (`load_image_rgba`, `load_indexed`). | **Only** `gfx_dx11.cpp` (sprite loading). **No longer used by the new code** — `TextureManager` decodes `.dds` via `graphics/DDSTextureLoader`. |
+- **`Font.cpp`** — the verd2/verd4 PCX grabber atlas. Game text (`gfx_display_*`) now
+  draws monospaced glyph cells from the same `Fonts/SpeccyFontENG.dds` sheet the GUI's
+  `TextRenderer` uses. One font system across menus and game.
+- **`Image.cpp`** — the BMP/PCX decoder. Sprites + the scanner HUD ship as `.dds` and
+  load through `TextureManager`; `Renderer` keeps its own small BMP parser for the
+  `scanner.bmp` master palette, so that file stays.
+- **`gfx_dx11.cpp` → `gfx2d.cpp`** — the file keeps the proven submission-order batch
+  (command list + scissor clip + `xor_mode` + the 512×514 canvas), but its bespoke
+  D3D11 pipeline (inline HLSL, vertex/constant buffers, blend/raster/sampler states,
+  manual draw loop) is deleted. `gfx2d_flush()` now binds the canvas and **replays the
+  batch through `ImmediateRenderer`** under a screen-space ortho, with per-command
+  scissor/blend/texture. The depth-sorted 3D flight wireframe rides along for free (it
+  already reduces to `gfx_polygon`/`gfx_draw_colour_line` → the batch).
+- **`ImmediateRenderer`** gained the two capabilities the batch needs: **scissor clip**
+  (`SetScissorEnabled`/`SetScissorRect`) and an **XOR logic-op** blend
+  (`SetColorLogicOpXor`) for the chart cross-hairs; both default off so the GUI path is
+  unchanged.
+- **`GfxRenderSink`** only ever used the `gfx.h` contract, so it was unaffected.
 
-✅ **Done — `Font.cpp` deleted.** The game's `gfx_display_*` text no longer uses the
-verd2/verd4 PCX grabber atlas. `drawString` now draws monospaced glyph cells from the
-**same `Fonts/SpeccyFontENG.dds` sheet `TextRenderer` uses** (16×14 ASCII-32 grid,
-loaded once via `TextureManager`), still emitted through `gfx_dx11`'s deferred batch so
-in-game text keeps submission-order compositing and scissor clipping. Net effect: one
-font system across menus and game; metrics changed proportional → monospaced (re-verify
-layout on Windows).
-
-**Prerequisites for removing `gfx_dx11.cpp` itself, in order:**
-
-1. **Reimplement the full `gfx_*` contract on the new stack** before `gfx_dx11.cpp` can
-   go. This is the big one — it means moving **all** game rendering (not just menus):
-   - 2D primitives + sprites → `ImmediateRenderer`;
-   - all `gfx_display_*` text → `TextRenderer` (the font sheet is already unified);
-   - the **depth-sorted 3D wireframe** path (`gfx_render_polygon/line` + `gfx_start/finish_render`) → an `ImmediateRenderer` equivalent (this is the in-flight ship/scene render);
-   - the **scanner/HUD**, clip-region → scissor, `xor_mode` cross-hairs, and palette-index → RGBA colour resolution.
-   - Then either rewrite `GfxRenderSink` to target the new backend, or replace the `RenderQueue` replay entirely.
-   - The 512×514 canvas + `Renderer` present pipeline exist to host this 2D batch; retiring `gfx_dx11` ties into the "render the world full-window" goal and shrinking/removing `Renderer`.
-2. **`Image.cpp`** is now used **only** by `gfx_dx11.cpp` (sprite loading) — the new
-   `TextureManager` has its own `graphics/DDSTextureLoader`. So `Image.cpp` can be
-   deleted **together with** `gfx_dx11.cpp`; no re-homing is needed. (Until then it
-   stays for the legacy sprite path. Once the sprites are `.dds` they can load through
-   `TextureManager` instead, dropping the last `Image.cpp` consumer.)
-
-**Net:** `Image.cpp` goes away together with `gfx_dx11.cpp`; the hard part is
-`gfx_dx11.cpp` itself — a large, whole-renderer migration of the `gfx_*` contract onto
-the new stack. ✅ Done so far: `TextureManager` decoupled from `Image.cpp` via the native
-`graphics/DDSTextureLoader`; **`Font.cpp` removed** and game text unified onto the `.dds`
-sheet (this change).
+**Still present (by design):** `Renderer` (the off-screen 512×514 canvas + letterboxed
+present + master palette) and the legacy `gfx.h` contract itself, which the game and
+`GfxRenderSink` still call. Shrinking/removing `Renderer` and rendering the world
+full-window (dropping the letterboxed canvas) is the remaining, separate goal.
 
 ## Phase index
 - `phase1-graphicscore.md` — GraphicsCore + ImmediateRenderer + shaders.

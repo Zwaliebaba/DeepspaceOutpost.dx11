@@ -13,9 +13,9 @@
 //     the game opens it on demand (F8 market, F11 options) so the normal game is
 //     unaffected if the new path misbehaves.
 //
-// Fully porting every gfx_* primitive onto ImmediateRenderer and retiring
-// Renderer/gfx_dx11/Font is a separate, incremental follow-on (see
-// docs/phase5-graphicscore-live.md).
+// The game's gfx_* 2D batch (gfx2d) now also renders through ImmediateRenderer, so
+// this overlay and the game share one renderer; Renderer remains only for the
+// off-screen canvas + letterboxed present.
 
 #include <functional>
 #include <string_view>

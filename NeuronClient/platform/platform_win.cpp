@@ -16,7 +16,7 @@
 
 #include "platform_win.h"
 #include "Renderer.h"
-#include "gfx_dx11.h"
+#include "gfx2d.h"
 #include "audio_win.h"
 #include "GuiOverlay.h"
 
@@ -92,7 +92,7 @@ void platform_pump_messages(void)
 	}
 }
 
-/* ---- gfx.h: screen / lifecycle hooks (drawing primitives live in gfx_dx11) ---- */
+/* ---- gfx.h: screen / lifecycle hooks (drawing primitives live in gfx2d) ---- */
 
 int gfx_graphics_startup(void)
 {
@@ -126,7 +126,7 @@ void gfx_update_screen(void)
 {
 	if (g_renderer_ready)
 	{
-		gfx_dx11_flush();        /* replay the frame's 2D batch into the canvas */
+		gfx2d_flush();           /* replay the frame's 2D batch into the canvas */
 		GuiOverlay::Update();
 		/* Blit the letterboxed game canvas to the back buffer, then draw the GUI
 		 * full-window on top (client space) before presenting. No-op unless shown. */

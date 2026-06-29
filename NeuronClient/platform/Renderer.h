@@ -61,7 +61,7 @@ public:
 	void clearCanvas(int palette_index);
 
 	/* Bind the canvas as the render target with a full-canvas viewport, ready
-	 * for the 2D primitive batch (gfx_dx11) to draw into. */
+	 * for the 2D primitive batch (gfx2d) to draw into. */
 	void bindCanvasTarget();
 
 	/* Blit the canvas to the back buffer (letterboxed) and present it. */

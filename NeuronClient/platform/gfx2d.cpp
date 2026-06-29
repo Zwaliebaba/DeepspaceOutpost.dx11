@@ -1,25 +1,25 @@
 /*
  * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
- * gfx_dx11.cpp  (M2 + M3)
+ * gfx2d.cpp
  *
- * The gfx.h 2D contract on a Direct3D 11 batch renderer. Two vertex streams
- * (solid-colour and textured) feed a single submission-order command list, so
- * lines/polygons, sprites, the HUD bitmap and text all composite in the exact
- * order the game draws them. The batch replays into the persistent 512x514
- * canvas in gfx_dx11_flush(); Renderer::present() then blits it to the window.
+ * The gfx.h 2D contract on a submission-order batch renderer. Two vertex streams
+ * (solid-colour and textured) feed a single command list, so lines/polygons,
+ * sprites, the HUD bitmap and text all composite in the exact order the game draws
+ * them. The batch replays into the persistent 512x514 canvas in gfx2d_flush() -
+ * through Neuron::Graphics::ImmediateRenderer - and Renderer::present() then blits it
+ * to the window. (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *
- * Colours are palette indices resolved against scanner.bmp. Solid primitives
- * are opaque (index 0 -> opaque black); sprites colour-key index 0 to
- * transparent. Text is drawn from the shared .dds bitmap-font sheet (the same
- * one the GUI's TextRenderer uses), batched here so it composites and clips in
- * draw order with the rest of the 2D.
+ * Colours are palette indices resolved against scanner.bmp. Solid primitives are
+ * opaque (index 0 -> opaque black); sprite/HUD art is .dds (alpha baked in). Text is
+ * drawn from the shared .dds bitmap-font sheet (the same one the GUI's TextRenderer
+ * uses), batched here so it composites and clips in draw order with the rest of the 2D.
  */
 
 #include "pch.h"
 
 #include "Renderer.h"
-#include "gfx_dx11.h"
+#include "gfx2d.h"
 #include "TextureManager.h"
 #include "ImmediateRenderer.h"
 
@@ -84,7 +84,7 @@ Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
 int canvasW() { Renderer* r = platform_renderer(); return r ? r->canvasWidth()  : Renderer::kCanvasWidth;  }
 int canvasH() { Renderer* r = platform_renderer(); return r ? r->canvasHeight() : Renderer::kCanvasHeight; }
 
-/* The 2D batch renders through Neuron::Graphics::ImmediateRenderer (see gfx_dx11_flush),
+/* The 2D batch renders through Neuron::Graphics::ImmediateRenderer (see gfx2d_flush),
  * so this layer no longer owns any Direct3D shaders / buffers / pipeline state. */
 std::map<std::string, Texture> g_textures;
 
@@ -550,7 +550,7 @@ void gfx_finish_render(void)
 /* =====================================================================
  *  Flush
  * ===================================================================== */
-void gfx_dx11_flush(void)
+void gfx2d_flush(void)
 {
 	using Neuron::Graphics::ImmediateRenderer;
 	using Neuron::Graphics::MatrixStackId;
