@@ -46,7 +46,6 @@ set(NEURONCLIENT_SOURCES
     platform/gfx_dx11.cpp
     platform/GfxRenderSink.cpp
     platform/Image.cpp
-    platform/Font.cpp
     platform/audio_xa2.cpp
     platform/input_win.cpp
     platform/dialog_win.cpp
@@ -93,7 +92,6 @@ set(NEURONCLIENT_HEADERS
     platform/Renderer.h
     platform/gfx_dx11.h
     platform/Image.h
-    platform/Font.h
     platform/audio_win.h
     platform/input_win.h
     platform/platform_win.h
