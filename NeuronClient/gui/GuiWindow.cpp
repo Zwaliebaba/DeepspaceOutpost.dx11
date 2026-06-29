@@ -79,11 +79,16 @@ void GuiWindow::Render(bool hasFocus)
   // Main body fill
 
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::GuiWindow);
-  ImmediateRenderer::BindTexture(0, Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds")->GetShaderResourceView());
+  const auto interfaceTex = Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds");
+  ImmediateRenderer::BindTexture(0, interfaceTex ? interfaceTex->GetShaderResourceView() : nullptr);
   ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
 
-  float texH = 1.0f;
-  float texW = texH * 512.0f / 64.0f;
+  // Tile the interface texture at its native pixel size (the WRAP sampler repeats it)
+  // rather than stretching the whole strip across the window.
+  const float texPixW = (interfaceTex && interfaceTex->GetWidth() > 0.0f) ? interfaceTex->GetWidth() : 64.0f;
+  const float texPixH = (interfaceTex && interfaceTex->GetHeight() > 0.0f) ? interfaceTex->GetHeight() : 510.0f;
+  const float texW = m_w / texPixW;
+  const float texH = m_h / texPixH;
 
   ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 0.96f);
   ImmediateRenderer::Begin(Primitive::Quads);
