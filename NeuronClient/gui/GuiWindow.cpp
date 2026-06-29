@@ -4,9 +4,9 @@
 #include "GraphicsCore.h"
 #include "GuiButton.h"
 #include "ImmediateRenderer.h"
-#include "Input.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
+#include "keyboard.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
@@ -167,20 +167,20 @@ void GuiWindow::Update()
 
   if (strcmp(Canvas::EclGetCurrentFocus().c_str(), m_name.c_str()) == 0)
   {
-    if (g_inputManager->controlEvent(ControlMenuDown))
+    if (kbd_down_pressed != 0)
     {
       m_buttonChangedThisUpdate = true;
       m_currentButton++;
       m_currentButton = std::min(m_currentButton, static_cast<int>(m_buttonOrder.size()) - 1);
     }
-    if (g_inputManager->controlEvent(ControlMenuUp))
+    if (kbd_up_pressed != 0)
     {
       m_buttonChangedThisUpdate = true;
       m_currentButton--;
       m_currentButton = std::max(0, m_currentButton);
     }
 
-    if (g_inputManager->controlEvent(ControlMenuActivate))
+    if (kbd_enter_pressed != 0)
     {
       if (!m_buttonOrder.empty() && m_currentButton >= 0 && m_currentButton < static_cast<int>(m_buttonOrder.size()))
       {
@@ -190,7 +190,7 @@ void GuiWindow::Update()
       }
     }
 
-    if (g_inputManager->controlEvent(ControlMenuClose))
+    if (kbd_escape_pressed != 0)
       Canvas::EclRemoveWindow(m_name);
   }
 }

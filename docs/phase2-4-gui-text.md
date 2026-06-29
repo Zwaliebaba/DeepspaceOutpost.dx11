@@ -46,7 +46,7 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 
 | Donor dependency | Replaced with |
 |---|---|
-| `InputManager` + ControlBindings/driver stack | `gui/Input.h` — `g_inputManager` mapping the `ControlMenu*` events onto `keyboard.h` state |
+| `InputManager` + ControlBindings/driver stack | `GuiWindow::Update` reads `keyboard.h` state directly (`kbd_up/down/enter/escape_pressed`) |
 | `Resource` (Bitmap/Shape/Sound/...) | direct `Neuron::Graphics::TextureManager::LoadTexture(name)->GetShaderResourceView()` (no wrapper; `LoadTexture` takes a `std::string`) |
 | `GameApp` singleton | `gui/GameApp.h` — just `g_app->m_requestQuit` |
 | `ClientEngine::OutputSize()` | direct `Neuron::Graphics::Core::GetOutputSize()` calls (no wrapper) |
@@ -63,9 +63,9 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 ### Known limitations to verify on Windows
 1. **Nothing renders until Phase 5** (Core isn't initialised; `TextureManager` /
    `TextRenderer` need `Core::GetD3DDevice()`).
-2. Menu input is **held-key state, not edge-triggered** (the shim reads
-   `kbd_*_pressed`); menu navigation may repeat fast. Add edge detection when wiring
-   the GUI into the main loop.
+2. Menu input is **held-key state, not edge-triggered** (`GuiWindow::Update` reads
+   `kbd_*_pressed` directly); menu navigation may repeat fast. Add edge detection when
+   wiring the GUI into the main loop.
 3. **Coordinate space**: the GUI assumes screen/client pixels via
    `Neuron::Graphics::Core::GetOutputSize()`; the legacy game draws into a letterboxed 512×514
    canvas. Decide the GUI's space when hooking `Canvas::Render()`/`EclUpdate()` into
