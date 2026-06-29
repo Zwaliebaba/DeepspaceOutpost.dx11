@@ -8,6 +8,7 @@
 
 #include "Renderer.h"
 #include "GraphicsCore.h" // Neuron::Graphics::Core (device unification)
+#include "scanner_palette.h" // baked master 256-colour palette
 
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -17,10 +18,6 @@
 #include <vector>
 
 using winrt::com_ptr;
-
-/* scanner.bmp supplies both the HUD strip and the master 256-colour palette.
- * Its filename is read from newscan.cfg into this game-side global. */
-extern char scanner_filename[256];
 
 namespace {
 
@@ -245,75 +242,14 @@ bool Renderer::createPresentPipeline()
 
 bool Renderer::loadPalette()
 {
-	palette_loaded_ = false;
-
-	const char* fname = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";
-
-	FILE* fp = std::fopen(fname, "rb");
-	if (!fp)
-	{
-		/* Fallback: greyscale ramp so the build is still usable. */
-		for (int i = 0; i < 256; i++)
-			palette_[i] = static_cast<uint32_t>(i) * 0x00010101u | 0xFF000000u;
-		palette_[0] = 0x00000000u;
-		return false;
-	}
-
-	std::vector<uint8_t> buf;
-	std::fseek(fp, 0, SEEK_END);
-	long sz = std::ftell(fp);
-	std::fseek(fp, 0, SEEK_SET);
-	if (sz > 0)
-	{
-		buf.resize(static_cast<size_t>(sz));
-		if (std::fread(buf.data(), 1, buf.size(), fp) != buf.size())
-			buf.clear();
-	}
-	std::fclose(fp);
-
-	/* BITMAPFILEHEADER (14) + BITMAPINFOHEADER (>=40). Palette follows the
-	 * info header; entries are RGBQUAD (B,G,R,reserved). */
-	if (buf.size() >= 54 && buf[0] == 'B' && buf[1] == 'M')
-	{
-		auto u32 = [&](size_t off) {
-			return static_cast<uint32_t>(buf[off]) | (buf[off + 1] << 8) |
-			       (buf[off + 2] << 16) | (buf[off + 3] << 24);
-		};
-		uint32_t infoSize = u32(14);
-		uint16_t bpp      = static_cast<uint16_t>(buf[28] | (buf[29] << 8));
-		uint32_t clrUsed  = u32(46);
-		if (bpp == 8)
-		{
-			uint32_t count = clrUsed ? clrUsed : 256;
-			count = std::min<uint32_t>(count, 256);
-			size_t pal = 14 + infoSize;
-			if (pal + count * 4 <= buf.size())
-			{
-				for (uint32_t i = 0; i < 256; i++)
-					palette_[i] = 0xFF000000u;   /* default opaque black */
-				for (uint32_t i = 0; i < count; i++)
-				{
-					uint8_t b = buf[pal + i * 4 + 0];
-					uint8_t g = buf[pal + i * 4 + 1];
-					uint8_t r = buf[pal + i * 4 + 2];
-					palette_[i] = static_cast<uint32_t>(r) |
-					              (static_cast<uint32_t>(g) << 8) |
-					              (static_cast<uint32_t>(b) << 16) |
-					              0xFF000000u;
-				}
-				palette_[0] &= 0x00FFFFFFu;   /* index 0 = transparent key */
-				palette_loaded_ = true;
-			}
-		}
-	}
-
-	if (!palette_loaded_)
-	{
-		for (int i = 0; i < 256; i++)
-			palette_[i] = static_cast<uint32_t>(i) * 0x00010101u | 0xFF000000u;
-		palette_[0] = 0x00000000u;
-	}
-	return palette_loaded_;
+	/* The master 256-colour palette is baked into the engine (scanner_palette.h). It
+	 * used to be read from the 8-bit scanner.bmp, but the art now ships as .dds (which
+	 * carries no indexed palette), so there is no longer a file to parse - the table is
+	 * the single source of truth. Entries are already in paletteColour()'s 0xAABBGGRR
+	 * byte order; index 0 is the transparent colour key. */
+	std::memcpy(palette_, kScannerPalette, sizeof(palette_));
+	palette_loaded_ = true;
+	return true;
 }
 
 void Renderer::computeLetterbox(D3D11_VIEWPORT& vp) const

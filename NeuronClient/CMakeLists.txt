@@ -90,6 +90,7 @@ set(NEURONCLIENT_HEADERS
     # Platform backend headers.
     platform/Renderer.h
     platform/gfx2d.h
+    platform/scanner_palette.h
     platform/audio_win.h
     platform/input_win.h
     platform/platform_win.h

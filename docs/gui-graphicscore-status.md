@@ -70,8 +70,12 @@ the client renders through one stack (`Core` + `ImmediateRenderer` + `TextureMan
 - **`Font.cpp`** — verd2/verd4 PCX grabber atlas. Game text draws from the same
   `SpeccyFontENG.dds` sheet as the GUI; one font system everywhere.
 - **`Image.cpp`** — BMP/PCX decoder. Sprites + scanner HUD ship as `.dds` via
-  `TextureManager`; `Renderer` keeps its own small BMP parser for the `scanner.bmp`
-  master palette, so that file stays.
+  `TextureManager`. The master 256-colour palette used to be read from `scanner.bmp`;
+  with all `.bmp` art removed, the palette is now **baked into the engine**
+  (`platform/scanner_palette.h`, generated from the old `scanner.bmp`) and
+  `Renderer::loadPalette()` copies that table — no `.bmp` is read at runtime. (Without
+  this, `loadPalette` fell back to a greyscale ramp, so every palette-indexed colour
+  rendered as grey — see the colour-loss fix.)
 - **`gfx_dx11.cpp` → `gfx2d.cpp`** — keeps the proven submission-order batch (command
   list + scissor + `xor_mode` + 512×514 canvas) but deletes its bespoke D3D11 pipeline
   (inline HLSL, vertex/constant buffers, blend/raster/sampler states, manual draw loop).
