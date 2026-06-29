@@ -9,7 +9,7 @@
 
 #include "GameMain.h"
 #include "ClientEngine.h"
-#include "SettingsWindow.h"
+#include "GameWindows.h"
 
 class GameApp : public Neuron::GameMain
 {

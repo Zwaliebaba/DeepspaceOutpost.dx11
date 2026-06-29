@@ -70,19 +70,29 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   line/column layout should be visually re-checked on Windows.
 
 **Next migration work (Phase 8+):**
-- ✅ **First migrated screen — Game Settings.** `DeepspaceOutpost/SettingsWindow` is a
-  real `GuiWindow` whose rows are value-cycling buttons wired straight to the config
-  globals (`wireframe`, `anti_alias_gfx`, `planet_render_style`, `hoopy_casinos`,
-  `instant_dock`) plus a Save button → `write_config_file()`. It's reached from the F1
-  overlay's main menu. Engine seam: `GuiOverlay::SetOptionsWindowFactory` lets the game
-  hand the overlay a window the engine can't build itself (it knows nothing about game
-  state); `GameApp::Startup` registers it. The engine's old placeholder `OptionsWindow`
-  stays only as the no-factory fallback. The legacy `gfx_display_*`
-  `game_settings_screen` (options.cpp) is untouched for now — it still serves the
-  in-game keyboard options menu until that menu is routed to this window too.
-- Convert the remaining game screens (options menu/quit, docked/trade/equip, charts)
-  from `gfx_display_*` to `GuiWindow`s with list/grid widgets — wired to actual game
-  state, following the SettingsWindow pattern.
+- ✅ **Migrated: the Options menu, Game Settings, and Quit confirmation.**
+  `DeepspaceOutpost/GameWindows` defines, on the engine's `GuiWindow`/`Canvas` stack:
+  - an **Options menu** (`OptionsMenuWindow`, named "Options") → Game Settings / Quit;
+  - **Game Settings** (`SettingsWindow`) — value-cycling rows bound straight to the
+    config globals (`wireframe`, `anti_alias_gfx`, `planet_render_style`,
+    `hoopy_casinos`, `instant_dock`) + a Save button → `write_config_file()`;
+  - a **Quit confirmation** (Yes via the engine `GameExitButton` / No via `CloseButton`).
+
+  Engine seams: `GuiOverlay::SetOptionsWindowFactory` lets the game hand the overlay a
+  window the engine can't build (it knows nothing about game state); `GameApp::Startup`
+  registers it. `GuiOverlay::Open()` shows the overlay straight at the Options menu, and
+  **`main.cpp`'s F11 now calls `GuiOverlay::Open()`** instead of the legacy
+  `display_options()` — so the in-game options entry runs through the GUI, floating over
+  the running game with input suppressed. The engine's placeholder `OptionsWindow`
+  remains only as the no-factory fallback.
+- **Deferred in this slice:** Save/Load Commander (the legacy `gfx_display_*`
+  file-entry screens aren't migrated, so they're omitted from the GUI Options menu for
+  now) and retiring the now-unreached `display_options`/`game_settings_screen`/
+  `quit_screen` + their `current_screen` (`SCR_OPTIONS`/`SCR_SETTINGS`/`SCR_QUIT`)
+  input dispatch in `options.cpp`/`main.cpp` (left intact, harmless).
+- Convert the remaining game screens (docked/trade/equip, charts, market) from
+  `gfx_display_*` to `GuiWindow`s with list/grid widgets — wired to actual game state,
+  following this pattern.
 - Migrate the game render into the `GameMain` lifecycle
   (`Update`/`RenderScene`/`RenderCanvas`) instead of `game_main()` driving everything.
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);

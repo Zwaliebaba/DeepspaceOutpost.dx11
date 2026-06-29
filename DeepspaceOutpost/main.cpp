@@ -32,6 +32,7 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "GuiOverlay.h"
 
 int old_cross_x, old_cross_y;
 int cross_timer;
@@ -911,8 +912,11 @@ void handle_flight_keys(void)
 
   if (kbd_F11_pressed)
   {
+    // Route the in-game options entry to the GUI overlay (Options menu -> Game
+    // Settings / Quit), replacing the legacy gfx_display_* display_options() screen.
+    // The overlay floats over the running game and suppresses game input while open.
     find_input = 0;
-    display_options();
+    GuiOverlay::Open();
   }
 
   // F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-

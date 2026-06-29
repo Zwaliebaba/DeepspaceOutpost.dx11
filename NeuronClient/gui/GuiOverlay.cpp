@@ -64,19 +64,25 @@ namespace
       }
   };
 
-  // Main-menu "Options" button: opens the Options window. The game supplies the real
-  // one via the factory; absent that, the built-in placeholder above is shown.
+  // Open (or focus) the Options window. The game supplies the real one via the factory;
+  // absent that, the built-in placeholder above is shown.
+  void OpenOptions()
+  {
+    if (Canvas::EclGetWindow(std::string_view("Options")))
+    {
+      Canvas::EclBringWindowToFront(std::string_view("Options"));
+      return;
+    }
+    GuiWindow* window = s_optionsFactory ? s_optionsFactory() : static_cast<GuiWindow*>(NEW OptionsWindow());
+    if (window)
+      Canvas::EclRegisterWindow(window);
+  }
+
+  // Main-menu "Options" button.
   class OpenOptionsButton : public GuiButton
   {
     public:
-      void MouseUp() override
-      {
-        if (Canvas::EclGetWindow(std::string_view("Options")))
-          return;
-        GuiWindow* window = s_optionsFactory ? s_optionsFactory() : static_cast<GuiWindow*>(NEW OptionsWindow());
-        if (window)
-          Canvas::EclRegisterWindow(window);
-      }
+      void MouseUp() override { OpenOptions(); }
   };
 
   // The main menu: a centred GuiWindow with localized, mouse- and keyboard-driven
@@ -148,6 +154,16 @@ void GuiOverlay::SetOptionsWindowFactory(std::function<GuiWindow*()> _factory)
   s_optionsFactory = std::move(_factory);
 }
 
+void GuiOverlay::Open()
+{
+  if (!s_ready)
+    return;
+  s_shown = true;
+  OpenOptions();
+}
+
+bool GuiOverlay::IsShown() { return s_shown; }
+
 void GuiOverlay::Update()
 {
   if (!s_ready)
@@ -167,10 +183,13 @@ void GuiOverlay::Update()
   }
   s_prevF1 = f1;
 
-  // The main menu may have been dismissed (Esc / close button) from within EclUpdate
-  // last frame; when it's gone, drop out of "shown" so input returns to the game.
-  // (The Options sub-window closing on its own leaves the main menu up.)
-  if (s_shown && !Canvas::EclGetWindow(std::string_view("MainMenu")))
+  // Windows may have been dismissed (Esc / close button) from within EclUpdate last
+  // frame; when none remain, drop out of "shown" so input returns to the game. This
+  // covers both entry points (F1 opens MainMenu; F11/GuiOverlay::Open opens Options
+  // directly without a MainMenu) and keeps the overlay up while any sub-window (Game
+  // Settings, Quit confirmation) is still open.
+  const auto* windows = Canvas::EclGetWindows();
+  if (s_shown && (!windows || windows->empty()))
     s_shown = false;
 
   // While the menu is up it owns input: hide the keyboard from the game.

@@ -30,6 +30,11 @@ namespace GuiOverlay
   void Update();                           // F1 toggle + keyboard menu navigation
   void Render(int canvasWidth, int canvasHeight); // draw into the currently-bound canvas
 
+  // Show the overlay and open the Options window directly (the game's in-game options
+  // entry, e.g. F11, routes here instead of drawing a legacy gfx_display_* screen).
+  void Open();
+  bool IsShown();
+
   // The game supplies the real Options/Settings window: it wires controls to game
   // state (config globals, save), which this engine layer can't see. The factory must
   // return a heap GuiWindow named "Options" (Canvas takes ownership). When unset, a
