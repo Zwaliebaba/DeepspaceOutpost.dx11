@@ -29,8 +29,9 @@ client's foundation:
   drive `Canvas`; keyboard nav remains as a transitional fallback; opening a modal menu
   suppresses game input.
 
-Demonstration: **F1** opens a centred main menu (Options/Quit) + a modal Options
-sub-window — mouse hover/click/drag/close, rendered through the imported stack.
+In-game entry points: **F11** opens the Options menu (Game Settings / Quit) and **F8**
+opens Market Prices — both as mouse-driven GuiWindows over the running game. (The early
+F1 demo main menu has been removed now that real screens drive the overlay.)
 
 ## Verified vs. unverified
 
@@ -38,12 +39,11 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   of NeuronCore/NeuronClient/DeepspaceOutpost compile; `fxc` regenerates the shader
   headers.
 - ✅ **Boots and renders** through the GuiWindow background fix: window comes up, the
-  game runs, **F1** shows the menu, and the panel/text render correctly (the interface
+  game runs, the overlay menu shows, and the panel/text render correctly (the interface
   texture needed a mip chain — see phase notes).
-- ⏳ **Not yet rebuilt/verified on Windows:** the modal input-ownership + edge-nav change
-  and **all of Phase 7** (mouse input, full-window GUI rendering, live resize, the
-  MainMenu/Options screens) were committed after the last visual confirmation. Build +
-  run still pending.
+- ⏳ **Not yet rebuilt/verified on Windows:** the F1-demo removal and the migrated game
+  screens (Options/Settings via F11, Market via F8) plus the Save/Load Commander
+  removal were committed after the last visual confirmation. Build + run still pending.
 
 ## Open items
 

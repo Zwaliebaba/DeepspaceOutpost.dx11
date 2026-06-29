@@ -14,8 +14,8 @@
 class GameApp : public Neuron::GameMain
 {
   public:
-    // Register the game's GUI windows (Settings) with the F1 overlay. The rest of the
-    // GameMain lifecycle is still a stub: the legacy game runs through game_main().
+    // Register the game's GUI windows (Options/Settings) with the overlay. The rest of
+    // the GameMain lifecycle is still a stub: the legacy game runs through game_main().
     void Startup() override { RegisterGameWindows(); }
     void Shutdown() override {}
     void Update(float _deltaSeconds) override {}

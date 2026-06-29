@@ -9,9 +9,9 @@
 //     Strings + Canvas;
 //   - renders registered GuiWindows as an overlay INTO the existing 512x514 canvas
 //     (after the game's 2D batch, before the letterboxed present);
-//   - is fail-safe (best-effort Startup guarded by try/catch) and opt-in (toggled
-//     with F1, hidden by default) so the normal game is unaffected if the new path
-//     misbehaves.
+//   - is fail-safe (best-effort Startup guarded by try/catch) and hidden by default;
+//     the game opens it on demand (F8 market, F11 options) so the normal game is
+//     unaffected if the new path misbehaves.
 //
 // Fully porting every gfx_* primitive onto ImmediateRenderer and retiring
 // Renderer/gfx_dx11/Font is a separate, incremental follow-on (see
@@ -28,7 +28,7 @@ namespace GuiOverlay
   void Shutdown();
   bool IsReady();
 
-  void Update();                           // F1 toggle + keyboard menu navigation
+  void Update();                           // auto-hide when empty + keyboard/mouse nav
   void Render(int canvasWidth, int canvasHeight); // draw into the currently-bound canvas
 
   // Show the overlay and open the Options window directly (the game's in-game options

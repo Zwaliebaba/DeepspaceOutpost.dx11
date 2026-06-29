@@ -14,9 +14,8 @@ using Neuron::Graphics::MatrixStackId;
 
 namespace
 {
-  bool s_ready = false;   // demo window registered (ClientEngine brought up the device/canvas)
-  bool s_shown = false;   // overlay currently visible (F1 toggles)
-  bool s_prevF1 = false;  // edge-detect the F1 toggle
+  bool s_ready = false;   // overlay initialised (ClientEngine brought up the device/canvas)
+  bool s_shown = false;   // overlay currently visible (opened on demand by F8/F11)
 
   // Game-supplied factory for the real Options window (set via
   // GuiOverlay::SetOptionsWindowFactory). Null until the game registers it.
@@ -30,9 +29,10 @@ namespace
     w->SetPosition((static_cast<int>(sz.Width) - width) / 2, (static_cast<int>(sz.Height) - height) / 2);
   }
 
-  // A modal Options window (the "one real screen" for this phase): a GuiWindow with a
-  // couple of rows and a Close button, opened from the main menu. Wiring its controls
-  // to actual game preferences is the next increment.
+  // Built-in placeholder Options window: shown only as the no-factory fallback for
+  // OpenOptions (the game normally supplies the real Options window via
+  // SetOptionsWindowFactory). Kept so the overlay still does something useful if a
+  // host hasn't registered one.
   class OptionsWindow : public GuiWindow
   {
     public:
@@ -78,65 +78,13 @@ namespace
       Canvas::EclRegisterWindow(window);
   }
 
-  // Main-menu "Options" button.
-  class OpenOptionsButton : public GuiButton
-  {
-    public:
-      void MouseUp() override { OpenOptions(); }
-  };
-
-  // The main menu: a centred GuiWindow with localized, mouse- and keyboard-driven
-  // buttons. Title bar + panel use the imported interface texture + fonts.
-  class MainMenuWindow : public GuiWindow
-  {
-    public:
-      MainMenuWindow()
-        : GuiWindow("MainMenu")
-      {
-        SetTitle("Deepspace Outpost");
-        CentreWindow(this, 260, 150);
-        SetMovable(true);
-      }
-
-      void Create() override
-      {
-        GuiWindow::Create(); // iconised close button
-
-        auto heading = NEW LabelButton();
-        heading->SetProperties("Heading", 10, 24, 240, 15, Strings::Get(std::string("AppName")));
-        RegisterButton(heading);
-
-        auto options = NEW OpenOptionsButton();
-        options->m_centered = true;
-        options->SetProperties("Options", 10, 74, 240, 18, Strings::Get(std::string("Menu_Options")));
-        RegisterButton(options);
-
-        auto quit = NEW GameExitButton();
-        quit->m_centered = true;
-        quit->SetProperties("Quit", 10, 98, 240, 18, Strings::Get(std::string("Menu_Quit")));
-        RegisterButton(quit);
-
-        m_buttonOrder.clear();
-        m_buttonOrder.push_back(options);
-        m_buttonOrder.push_back(quit);
-        m_currentButton = 0;
-      }
-  };
-
-  void EnsureMenu()
-  {
-    if (!Canvas::EclGetWindow(std::string_view("MainMenu")))
-      Canvas::EclRegisterWindow(NEW MainMenuWindow());
-  }
 }
 
 void GuiOverlay::Startup()
 {
   // ClientEngine has already brought up Core / ImmediateRenderer / Canvas / fonts /
-  // Strings by the time this runs; the overlay just registers its demo window.
-  if (s_ready)
-    return;
-  EnsureMenu();
+  // Strings by the time this runs. The overlay starts hidden; the game opens it on
+  // demand (F8 market, F11 options) via Open() / ShowWindow().
   s_ready = true;
 }
 
@@ -190,27 +138,15 @@ void GuiOverlay::Update()
   // Refresh edge state once per frame so menu navigation steps once per keypress.
   input_update_menu_edges();
 
-  // F1 toggles the menu. Read the raw key: while the menu owns input the game's kbd_*
-  // snapshot is suppressed, so it can't be used to toggle back off.
-  const bool f1 = input_key_down(VK_F1);
-  if (f1 && !s_prevF1)
-  {
-    s_shown = !s_shown;
-    if (s_shown)
-      EnsureMenu(); // re-create if a previous Esc closed it
-  }
-  s_prevF1 = f1;
-
   // Windows may have been dismissed (Esc / close button) from within EclUpdate last
   // frame; when none remain, drop out of "shown" so input returns to the game. This
-  // covers both entry points (F1 opens MainMenu; F11/GuiOverlay::Open opens Options
-  // directly without a MainMenu) and keeps the overlay up while any sub-window (Game
-  // Settings, Quit confirmation) is still open.
+  // keeps the overlay up while any window (or sub-window) is still open and closes it
+  // automatically once the last one is dismissed.
   const auto* windows = Canvas::EclGetWindows();
   if (s_shown && (!windows || windows->empty()))
     s_shown = false;
 
-  // While the menu is up it owns input: hide the keyboard from the game.
+  // While the overlay is up it owns input: hide the keyboard from the game.
   input_suppress_game_keys(s_shown);
 
   if (!s_shown)
