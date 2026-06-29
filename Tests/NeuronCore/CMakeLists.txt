@@ -18,6 +18,7 @@ add_executable(NeuronCore.Tests
     MessageBusTests.cpp
     MessageWireTests.cpp
     CatalogGovernanceTests.cpp
+    ReliableEventsTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)

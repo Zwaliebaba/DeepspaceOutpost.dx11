@@ -9,6 +9,8 @@
 #include "CombatMessages.h"
 #include "Messages/MessageBus.h"
 #include "Messages/Framing.h"
+#include "Messages/Reliable.h"
+#include "Messages/Defs/CoreEvents.h"
 
 using namespace winrt;
 using namespace Neuron;
@@ -204,8 +206,7 @@ int main()
       return;
     }
 
-    sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDeath),
-                       Net::EncodeDeath(_k.victim.index, _k.killer));
+    sessions.Broadcast(Msg::EntityDeath{ _k.victim.index, _k.killer });
     world.Destroy(_k.victim);
     printf("[tick %u] entity %u destroyed by %u\n", tick, _k.victim.index, _k.killer);
   });
@@ -286,11 +287,11 @@ int main()
       while (s.events.Receive(msg))
       {
         Net::StationRequest req;
-        if (Net::DecodeStationRequest(msg, req))
+        if (Msg::TryDecode(msg, req))
         {
           const Net::StationResponse resp =
               GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
-          Net::SendStationResponse(s.events, resp);
+          Msg::SendReliable(s.events, resp);
         }
       }
     }
@@ -318,7 +319,7 @@ int main()
     //    as a reliable event to all remaining clients.
     sessions.Reap(world, tick, SESSION_TIMEOUT_TICKS);
     for (uint32_t goneId : despawns.Update(CurrentIds(world)))
-      sessions.Broadcast(static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(goneId));
+      sessions.Broadcast(Msg::EntityDespawn{ goneId });
 
     // 4. Send each client its own area-of-interest snapshot + reliable event packet.
     aoi.Rebuild(world);

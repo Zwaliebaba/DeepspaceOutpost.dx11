@@ -5,6 +5,8 @@
 #include "GameEvents.h"
 #include "GalaxyManifest.h"
 #include "Messages/Framing.h"
+#include "Messages/Reliable.h"
+#include "Messages/Defs/CoreEvents.h"
 
 namespace Neuron::Client
 {
@@ -81,11 +83,11 @@ namespace Neuron::Client
     Net::ReliableMessage msg;
     while (m_events.Receive(msg))
     {
-      uint32_t playerId = 0;
+      Msg::AssignPlayer assign;
       uint32_t total = 0;
       uint32_t base = 0;
-      if (Net::DecodeAssignPlayer(msg, playerId))
-        m_localPlayer = playerId;
+      if (Msg::TryDecode(msg, assign))
+        m_localPlayer = assign.entityId;
       else if (Net::DecodeManifestChunk(msg, total, base, m_galaxy))
         m_galaxy.reserve(total);   // chunks arrive in order; just accumulate
       else

@@ -6,10 +6,11 @@
 #include "DataReader.h"
 #include "ClientInput.h"            // Net::ClientInput == Msg::InputCommand
 #include "ReliableChannel.h"
-#include "GameEvents.h"
 #include "Messages/Serialize.h"
 #include "Messages/Framing.h"
 #include "Messages/Registry.h"
+#include "Messages/Reliable.h"
+#include "Messages/Defs/CoreEvents.h"
 
 using namespace Neuron;
 
@@ -93,16 +94,14 @@ TEST(Input, InputCommandIsRegisteredInTheGlobalCatalog)
 
 TEST(Input, AssignPlayerHandshakeRoundTrips)
 {
-  Net::ReliableMessage m{ static_cast<uint16_t>(Net::EventType::AssignPlayer),
-                          Net::EncodeAssignPlayer(123) };
-  uint32_t id = 0;
-  EXPECT_TRUE(Net::DecodeAssignPlayer(m, id));
-  EXPECT_TRUE(id == 123);
+  Net::ReliableMessage m{ Msg::Raw(Msg::AssignPlayer::Id), Msg::Encode(Msg::AssignPlayer{ 123 }) };
+  Msg::AssignPlayer assign;
+  EXPECT_TRUE(Msg::TryDecode(m, assign));
+  EXPECT_TRUE(assign.entityId == 123);
 
   // A non-assign message is not mistaken for one.
-  Net::ReliableMessage despawn{ static_cast<uint16_t>(Net::EventType::EntityDespawn),
-                                Net::EncodeDespawn(5) };
-  EXPECT_TRUE(!Net::DecodeAssignPlayer(despawn, id));
+  Net::ReliableMessage despawn{ Msg::Raw(Msg::EntityDespawn::Id), Msg::Encode(Msg::EntityDespawn{ 5 }) };
+  EXPECT_TRUE(!Msg::TryDecode(despawn, assign));
 }
 
 TEST(Input, AssignPlayerDeliversOverTheReliableChannel)
@@ -110,13 +109,13 @@ TEST(Input, AssignPlayerDeliversOverTheReliableChannel)
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
-  Net::SendAssignPlayer(server, 42);
+  Msg::SendReliable(server, Msg::AssignPlayer{ 42 });
   std::vector<uint8_t> pkt = server.WritePacket();
   EXPECT_TRUE(client.ReadPacket(pkt.data(), pkt.size()));
 
   Net::ReliableMessage m;
   EXPECT_TRUE(client.Receive(m));
-  uint32_t id = 0;
-  EXPECT_TRUE(Net::DecodeAssignPlayer(m, id));
-  EXPECT_TRUE(id == 42);
+  Msg::AssignPlayer assign;
+  EXPECT_TRUE(Msg::TryDecode(m, assign));
+  EXPECT_TRUE(assign.entityId == 42);
 }

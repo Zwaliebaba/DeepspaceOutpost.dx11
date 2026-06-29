@@ -22,7 +22,8 @@
 | 0 | Mechanism: `NeuronCore/Messages/` (id/traits/`NetEntityId`/codec/registry/bus/framing) + tests | ✅ Landed |
 | 1 | In-process bus on the server: combat effects via `FireWeapon`/`Crime`/`EntityKilled` | ✅ Landed |
 | 2 | Unreliable lane: `InputCommand` on `'NMSG'`, `'NCMD'` deleted (byte-parity proven) | ✅ Landed |
-| 3 | Reliable lanes (Control/Gameplay/Bulk) + fold `GameEvents`/`StationProtocol`/manifest | ⏳ Next |
+| 3a | Fold reliable schemas (`GameEvents` + `StationProtocol`) into the catalog, single channel | ✅ Landed |
+| 3b | Split physical Control/Gameplay/Bulk reliable lanes + fold `GalaxyManifest` (Bulk) | ⏳ Next |
 | 4 | Client-side bus + presentation handlers; key→command mapper | ⏳ Pending |
 | 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
 
@@ -41,12 +42,20 @@
 | Message | Home | Scope / Lane / Dir | Phase |
 |---|---|---|---|
 | `InputCommand` | `NeuronCore/Messages/Defs/` | Wire · Unreliable · C→S | 2 |
+| `AssignPlayer` | `NeuronCore/Messages/Defs/CoreEvents.h` | Control · Control · S→C | 3a |
+| `EntityDespawn` | `NeuronCore/Messages/Defs/CoreEvents.h` | Wire · Gameplay · S→C | 3a |
+| `EntityDeath` | `NeuronCore/Messages/Defs/CoreEvents.h` | Wire · Gameplay · S→C | 3a |
+| `Chat` | `NeuronCore/Messages/Defs/CoreEvents.h` | Wire · Gameplay · both | 3a |
+| `StationRequest` | `NeuronCore/StationProtocol.h` | Wire · Gameplay · C→S | 3a |
+| `StationResponse` | `NeuronCore/StationProtocol.h` | Wire · Gameplay · S→C | 3a |
 | `FireWeapon` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (command) | 1 |
 | `Crime` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
 | `EntityKilled` | `GameLogic/CombatMessages.h` | LocalOnly · — · — (fact) | 1 |
 
-The wire `EntityDeath`/`EntityDespawn`/`Chat`/`AssignPlayer`/`GalaxyManifest`/`Station*` still ride
-the legacy `GameEvents`/`StationProtocol` over `'NEVT'` until Phase 3 folds them into the catalog.
+The folded reliable messages ride the existing single `ReliableChannel` via `Msg::SendReliable`/
+`Msg::TryDecode`; their lane traits are set but the **physical** Control/Gameplay/Bulk channel
+split is 3b. `GalaxyManifest` is the last hold-out on the legacy `EventType` tag (chunked Bulk
+data, folded with the lane split in 3b).
 
 ---
 
@@ -503,11 +512,23 @@ layout**; `missileTarget` stays a bare index (NetEntityId promotion is a later s
 locally on clang++ 18 / g++ 13 (38 message/input/combat cases). *Note: per-peer rate-limiting
 and authority checks land with the reliable lane in Phase 3, when sessions carry more state.*
 
-**Phase 3 — Reliable lanes + fold reliable schemas.**
-Stand up Control/Gameplay/Bulk `ReliableChannel`s. Move `AssignPlayer`(Control),
-`GalaxyManifest`(Bulk), `EntityDespawn`/`EntityDeath`/`Chat`/`Station*`(Gameplay) into the
-catalog with generated codecs + validation. Replace `PollEvent`/switch and the station loop
-with bus subscriptions. Delete legacy encode/decode after parity.
+**Phase 3a — Fold reliable schemas into the catalog. ✅ DONE.**
+`AssignPlayer`, `EntityDespawn`, `EntityDeath`, `Chat` are catalog messages in
+`Messages/Defs/CoreEvents.h`; `StationRequest`/`StationResponse` became catalog messages in
+`StationProtocol.h` (structs aliased into `Net::` so GameLogic/client call sites are unchanged).
+A generic `Msg::SendReliable` / `Msg::TryDecode` carries them over the existing `ReliableChannel`
+(type tag = `MessageId`, payload = generic `Encode`). All call sites migrated — `ServerSessions`
+(AssignPlayer), `Server/Main` (death/despawn broadcast + station loop), `ReplicationClient`
+(AssignPlayer decode + station send), client `main` (`process_server_events`). The bespoke
+`Encode*`/`Decode*`/`Send*` in `GameEvents.h`/`StationProtocol.h` are deleted; golden tests prove
+each payload is **byte-identical to the legacy layout**. Verified locally on clang++ 18 / g++ 13
+(63 headless cases). *Deferred: per-peer rate-limiting/authority still pending (3b/later).*
+
+**Phase 3b — Physical lane split + manifest. ⏳ Next.**
+Stand up separate Control/Gameplay/Bulk `ReliableChannel`s (lane-tagged datagrams) so a large
+`GalaxyManifest` on Bulk can't head-of-line-block a death/session message, and fold
+`GalaxyManifest` (the last `EventType` hold-out) onto the Bulk lane. Replace the client
+`PollEvent`/switch with bus subscriptions as part of the client-bus work.
 
 **Phase 4 — Client bus & presentation.**
 Client `MessageBus`; route `ReplicationClient` ingress through it. Convert key polling →

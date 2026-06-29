@@ -63,7 +63,7 @@ TEST(Manifest, ChunkRoundTrips)
 TEST(Manifest, WrongTypeRejected)
 {
   Net::ReliableMessage m;
-  m.type = static_cast<uint16_t>(Net::EventType::Chat);
+  m.type = 0xABCD;   // any non-GalaxyManifest type tag
   uint32_t total = 0, base = 0;
   std::vector<Net::GalaxySystemInfo> out;
   EXPECT_TRUE(!Net::DecodeManifestChunk(m, total, base, out));

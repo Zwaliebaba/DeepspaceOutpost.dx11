@@ -3,19 +3,20 @@
 // StationProtocol - the docked request/response wire schema (NeuronCore).
 //
 // Docking, trading and equip are turn-based and must be reliable and ordered, so
-// unlike the realtime snapshot stream they ride the ReliableChannel as
-// request->response: the client asks (Dock/Buy/Sell), the server validates
-// against its AUTHORITATIVE wallet/cargo/market and replies with the result.
-// Shared data/protocol only - the structs and their encoding - so both ends agree
-// on the bytes; the actual validation lives server-side (GameLogic StationServices).
+// unlike the realtime snapshot stream they ride a reliable lane as request->response:
+// the client asks (Dock/Buy/Sell), the server validates against its AUTHORITATIVE
+// wallet/cargo/market and replies with the result. Shared data/protocol only - the
+// structs and their encoding - so both ends agree on the bytes; the actual
+// validation lives server-side (GameLogic StationServices).
+//
+// StationRequest/StationResponse are catalog messages (typed structs described once
+// via Fields(); generic Serialize codec). They are also exposed under their historic
+// Net:: names so existing call sites (GameLogic, client) are unchanged. The generic
+// encoding is byte-identical to the old hand-rolled codec (see the parity tests).
 
 #include <cstdint>
-#include <vector>
 
-#include "DataWriter.h"
-#include "DataReader.h"
-#include "ReliableChannel.h"
-#include "GameEvents.h"
+#include "Messages/Registry.h"   // MessageId/Traits/Serialize + REGISTER_MESSAGE
 
 namespace Neuron::Net
 {
@@ -54,83 +55,54 @@ namespace Neuron::Net
     CantDock = 7,
     AlreadyOwned = 8,
   };
+}
 
+namespace Neuron::Msg
+{
+  // client -> server: dock/undock/buy/sell/equip/teleport.
   struct StationRequest
   {
-    StationRequestKind kind = StationRequestKind::Dock;
+    static constexpr MessageId    Id    = static_cast<MessageId>(0x0400);   // station/economy
+    static constexpr MessageScope Scope = MessageScope::Wire;
+    static constexpr MessageKind  Kind  = MessageKind::Command;
+    static constexpr MessageLane  Lane  = MessageLane::Gameplay;
+    static constexpr Direction    Dir   = Direction::ClientToServer;
+
+    Net::StationRequestKind kind = Net::StationRequestKind::Dock;
     uint16_t commodity = 0;
     uint16_t quantity = 0;
     uint32_t stationId = 0;
+
+    auto Fields()       { return std::tie(kind, commodity, quantity, stationId); }
+    auto Fields() const { return std::tie(kind, commodity, quantity, stationId); }
   };
 
+  // server -> client: the authoritative result.
   struct StationResponse
   {
-    StationRequestKind kind = StationRequestKind::Dock;
-    StationStatus status = StationStatus::Ok;
+    static constexpr MessageId    Id    = static_cast<MessageId>(0x0401);
+    static constexpr MessageScope Scope = MessageScope::Wire;
+    static constexpr MessageKind  Kind  = MessageKind::Event;
+    static constexpr MessageLane  Lane  = MessageLane::Gameplay;
+    static constexpr Direction    Dir   = Direction::ServerToClient;
+
+    Net::StationRequestKind kind = Net::StationRequestKind::Dock;
+    Net::StationStatus status = Net::StationStatus::Ok;
     int32_t credits = 0;
     uint16_t commodity = 0;
     uint16_t cargo = 0;     // resulting held quantity of `commodity`
+
+    auto Fields()       { return std::tie(kind, status, credits, commodity, cargo); }
+    auto Fields() const { return std::tie(kind, status, credits, commodity, cargo); }
   };
-
-  // --- Request --------------------------------------------------------------
-
-  [[nodiscard]] inline std::vector<uint8_t> EncodeStationRequest(const StationRequest& _r)
-  {
-    DataWriter w;
-    w.WriteU8(static_cast<uint8_t>(_r.kind));
-    w.WriteU16(_r.commodity);
-    w.WriteU16(_r.quantity);
-    w.WriteU32(_r.stationId);
-    return w.Bytes();
-  }
-
-  [[nodiscard]] inline bool DecodeStationRequest(const ReliableMessage& _m, StationRequest& _out)
-  {
-    if (_m.type != static_cast<uint16_t>(EventType::StationRequest))
-      return false;
-    DataReader r(_m.payload.data(), _m.payload.size());
-    _out.kind = static_cast<StationRequestKind>(r.ReadU8());
-    _out.commodity = r.ReadU16();
-    _out.quantity = r.ReadU16();
-    _out.stationId = r.ReadU32();
-    return r.Ok();
-  }
-
-  // --- Response -------------------------------------------------------------
-
-  [[nodiscard]] inline std::vector<uint8_t> EncodeStationResponse(const StationResponse& _r)
-  {
-    DataWriter w;
-    w.WriteU8(static_cast<uint8_t>(_r.kind));
-    w.WriteU8(static_cast<uint8_t>(_r.status));
-    w.WriteI32(_r.credits);
-    w.WriteU16(_r.commodity);
-    w.WriteU16(_r.cargo);
-    return w.Bytes();
-  }
-
-  [[nodiscard]] inline bool DecodeStationResponse(const ReliableMessage& _m, StationResponse& _out)
-  {
-    if (_m.type != static_cast<uint16_t>(EventType::StationResponse))
-      return false;
-    DataReader r(_m.payload.data(), _m.payload.size());
-    _out.kind = static_cast<StationRequestKind>(r.ReadU8());
-    _out.status = static_cast<StationStatus>(r.ReadU8());
-    _out.credits = r.ReadI32();
-    _out.commodity = r.ReadU16();
-    _out.cargo = r.ReadU16();
-    return r.Ok();
-  }
-
-  // --- Convenience: queue onto a reliable channel ---------------------------
-
-  inline uint32_t SendStationRequest(ReliableChannel& _ch, const StationRequest& _r)
-  {
-    return _ch.Send(static_cast<uint16_t>(EventType::StationRequest), EncodeStationRequest(_r));
-  }
-
-  inline uint32_t SendStationResponse(ReliableChannel& _ch, const StationResponse& _r)
-  {
-    return _ch.Send(static_cast<uint16_t>(EventType::StationResponse), EncodeStationResponse(_r));
-  }
 }
+
+namespace Neuron::Net
+{
+  // Historic names; the structs themselves are catalog messages in Neuron::Msg.
+  using StationRequest = Msg::StationRequest;
+  using StationResponse = Msg::StationResponse;
+}
+
+REGISTER_MESSAGE(StationRequest);
+REGISTER_MESSAGE(StationResponse);

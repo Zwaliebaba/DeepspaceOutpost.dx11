@@ -32,6 +32,7 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "Messages/Defs/CoreEvents.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 
@@ -1255,10 +1256,10 @@ static void process_server_events(void)
   while (rc.PollEvent(msg))
   {
     Net::StationResponse resp;
-    uint32_t entityId = 0;
-    uint32_t killerId = 0;
+    Neuron::Msg::EntityDeath death;
+    Neuron::Msg::EntityDespawn despawn;
 
-    if (Neuron::Net::DecodeStationResponse(msg, resp))
+    if (Neuron::Msg::TryDecode(msg, resp))
     {
       if (resp.status == Net::StationStatus::Ok)
       {
@@ -1267,20 +1268,20 @@ static void process_server_events(void)
           cmdr.current_cargo[resp.commodity] = resp.cargo;
       }
     }
-    else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
+    else if (Neuron::Msg::TryDecode(msg, death))
     {
       // A kill/detonation: clear the lock if it was on the dead entity, drop
       // it from the view, and play the explosion.
-      if (entityId == g_missile_lock_target)
+      if (death.victim == g_missile_lock_target)
         g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(entityId);
+      rc.Forget(death.victim);
       snd_play_sample(SND_EXPLODE);
     }
-    else if (Neuron::Net::DecodeDespawn(msg, entityId))
+    else if (Neuron::Msg::TryDecode(msg, despawn))
     {
-      if (entityId == g_missile_lock_target)
+      if (despawn.entityId == g_missile_lock_target)
         g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(entityId);
+      rc.Forget(despawn.entityId);
     }
   }
 }

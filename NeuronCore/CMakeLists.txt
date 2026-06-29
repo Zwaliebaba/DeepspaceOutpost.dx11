@@ -48,7 +48,9 @@ set(NEURONCORE_HEADERS
     Messages/Registry.h
     Messages/MessageBus.h
     Messages/Framing.h
+    Messages/Reliable.h
     Messages/Defs/InputCommand.h
+    Messages/Defs/CoreEvents.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

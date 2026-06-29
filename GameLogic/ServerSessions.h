@@ -22,6 +22,8 @@
 #include "ReliableChannel.h"
 #include "GameEvents.h"
 #include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
+#include "Messages/Reliable.h"        // Msg::SendReliable
+#include "Messages/Defs/CoreEvents.h" // Msg::AssignPlayer
 
 #include "SimComponents.h"
 #include "StationServices.h"
@@ -61,7 +63,7 @@ namespace Neuron::GameLogic
         Session s;
         s.endpoint = _ep;
         s.entity = SpawnPlayer(_world);
-        Net::SendAssignPlayer(s.events, s.entity.index);
+        Msg::SendReliable(s.events, Msg::AssignPlayer{ s.entity.index });
         Net::SendManifest(s.events, m_manifest);   // the galaxy chart data, once on connect
         it = m_sessions.emplace(key, std::move(s)).first;
       }
@@ -111,8 +113,17 @@ namespace Neuron::GameLogic
       return gone;
     }
 
-    // Queue a reliable event onto every session's channel (e.g. a despawn that
-    // everyone must see exactly once).
+    // Queue a catalog message onto every session's channel (e.g. a despawn or death
+    // that everyone must see exactly once).
+    template <Msg::Message M>
+    void Broadcast(const M& _m)
+    {
+      for (auto& entry : m_sessions)
+        Msg::SendReliable(entry.second.events, _m);
+    }
+
+    // Raw overload (opaque type + payload) - retained for any non-catalog reliable
+    // traffic (e.g. the chunked galaxy manifest until it is folded in).
     void Broadcast(uint16_t _type, const std::vector<uint8_t>& _payload)
     {
       for (auto& entry : m_sessions)

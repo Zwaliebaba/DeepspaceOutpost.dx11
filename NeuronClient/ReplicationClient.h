@@ -25,6 +25,7 @@
 #include "ClientInput.h"
 #include "StationProtocol.h"
 #include "GalaxyManifest.h"
+#include "Messages/Reliable.h"
 
 namespace Neuron::Client
 {
@@ -55,7 +56,7 @@ namespace Neuron::Client
     void SendStationRequest(const Net::StationRequest& _request)
     {
       if (m_open)
-        Net::SendStationRequest(m_events, _request);
+        Msg::SendReliable(m_events, _request);
     }
 
     // Interpolated state of `_id` at `_alpha` in [0,1], or false if unknown.
