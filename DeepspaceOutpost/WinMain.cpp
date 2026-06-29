@@ -15,6 +15,7 @@
 #include <crtdbg.h>
 #endif
 
+#include "FileSys.h"      /* Neuron::FileSys::SetHomeDirectory */
 #include "GameApp.h"      /* GameApp : Neuron::GameMain, + ClientEngine */
 #include "main.h"         /* game_main() */
 
