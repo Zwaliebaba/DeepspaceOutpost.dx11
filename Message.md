@@ -23,7 +23,8 @@
 | 1 | In-process bus on the server: combat effects via `FireWeapon`/`Crime`/`EntityKilled` | ✅ Landed |
 | 2 | Unreliable lane: `InputCommand` on `'NMSG'`, `'NCMD'` deleted (byte-parity proven) | ✅ Landed |
 | 3a | Fold reliable schemas (`GameEvents` + `StationProtocol`) into the catalog, single channel | ✅ Landed |
-| 3b | Split physical Control/Gameplay/Bulk reliable lanes + fold `GalaxyManifest` (Bulk) | ⏳ Next |
+| 3b-1 | Fold `GalaxyManifest` onto a catalog id; retire `EventType` / delete `GameEvents.h` | ✅ Landed |
+| 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (transport) | ⏳ Next |
 | 4 | Client-side bus + presentation handlers; key→command mapper | ⏳ Pending |
 | 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
 
@@ -54,8 +55,9 @@
 
 The folded reliable messages ride the existing single `ReliableChannel` via `Msg::SendReliable`/
 `Msg::TryDecode`; their lane traits are set but the **physical** Control/Gameplay/Bulk channel
-split is 3b. `GalaxyManifest` is the last hold-out on the legacy `EventType` tag (chunked Bulk
-data, folded with the lane split in 3b).
+split is 3b-2. `GalaxyManifest` now carries a reserved catalog `MessageId` (`Net::GALAXY_MANIFEST_ID`,
+Bulk) but keeps its bespoke chunked encode (fixed `char[]` array); `EventType`/`GameEvents.h` are
+**deleted** — every reliable datagram is now identified by a `MessageId`.
 
 ---
 
@@ -524,11 +526,18 @@ A generic `Msg::SendReliable` / `Msg::TryDecode` carries them over the existing 
 each payload is **byte-identical to the legacy layout**. Verified locally on clang++ 18 / g++ 13
 (63 headless cases). *Deferred: per-peer rate-limiting/authority still pending (3b/later).*
 
-**Phase 3b — Physical lane split + manifest. ⏳ Next.**
+**Phase 3b-1 — Manifest onto a catalog id; retire `EventType`. ✅ DONE.**
+`GalaxyManifest` chunks now carry a reserved catalog `MessageId` (`Net::GALAXY_MANIFEST_ID`, Bulk
+lane) instead of `EventType::GalaxyManifest`; the bespoke chunked encode stays (fixed `char[]`).
+`GameEvents.h` and the `EventType` enum are **deleted** — every reliable datagram is identified by
+a `MessageId`. Verified on 63 headless cases (clang++ 18 / g++ 13).
+
+**Phase 3b-2 — Physical lane split. ⏳ Next.**
 Stand up separate Control/Gameplay/Bulk `ReliableChannel`s (lane-tagged datagrams) so a large
-`GalaxyManifest` on Bulk can't head-of-line-block a death/session message, and fold
-`GalaxyManifest` (the last `EventType` hold-out) onto the Bulk lane. Replace the client
-`PollEvent`/switch with bus subscriptions as part of the client-bus work.
+`GalaxyManifest` on Bulk can't head-of-line-block a death/session message. Route sends by the
+message's `Lane` trait and inbound datagrams by a peeked lane byte; keep `ReliableChannel`
+itself unchanged. Replace the client `PollEvent`/switch with bus subscriptions as part of the
+client-bus work (Phase 4).
 
 **Phase 4 — Client bus & presentation.**
 Client `MessageBus`; route `ReplicationClient` ingress through it. Convert key polling →

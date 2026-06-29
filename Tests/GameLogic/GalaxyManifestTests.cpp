@@ -36,7 +36,7 @@ TEST(Manifest, ChunkRoundTrips)
   std::vector<uint8_t> bytes = Net::EncodeManifestChunk(99, 4, in.data(), static_cast<uint16_t>(in.size()));
 
   Net::ReliableMessage m;
-  m.type = static_cast<uint16_t>(Net::EventType::GalaxyManifest);
+  m.type = Msg::Raw(Net::GALAXY_MANIFEST_ID);
   m.payload = bytes;
 
   uint32_t total = 0, base = 0;

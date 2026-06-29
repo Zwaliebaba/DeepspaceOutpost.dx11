@@ -2,7 +2,6 @@
 
 #include "ReplicationClient.h"
 
-#include "GameEvents.h"
 #include "GalaxyManifest.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"

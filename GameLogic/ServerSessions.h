@@ -20,7 +20,6 @@
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
 #include "ClientInput.h"
 #include "ReliableChannel.h"
-#include "GameEvents.h"
 #include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
 #include "Messages/Reliable.h"        // Msg::SendReliable
 #include "Messages/Defs/CoreEvents.h" // Msg::AssignPlayer

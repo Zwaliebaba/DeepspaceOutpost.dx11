@@ -10,11 +10,11 @@
 // subscribers react to (damage/death, crime, presentation), the decoupling the
 // design is built around.
 //
-// These are server-internal facts for now (MessageScope::LocalOnly, ids in the
-// non-wire id half): the wire still carries the existing EntityDeath via
-// GameEvents until the wire-folding phases. FireWeapon is the command the client
-// will eventually send; in Phase 1 the server synthesises it from ClientInput so
-// the same resolution path serves both today and tomorrow.
+// These are server-internal facts (MessageScope::LocalOnly, ids in the non-wire id
+// half): EntityKilled drives the server's death handling, which broadcasts the
+// catalog wire EntityDeath (Messages/Defs/CoreEvents.h) to clients. FireWeapon is
+// the command the client will eventually send; in Phase 1 the server synthesises it
+// from ClientInput so the same resolution path serves both today and tomorrow.
 //
 // Header-only and server-only (GameLogic): it builds on the header-only Msg
 // mechanism in NeuronCore and the existing combat systems; the client links none

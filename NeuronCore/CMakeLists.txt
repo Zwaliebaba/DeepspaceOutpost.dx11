@@ -29,7 +29,6 @@ set(NEURONCORE_HEADERS
     SnapshotReceiver.h
     SnapshotInterpolator.h
     ReliableChannel.h
-    GameEvents.h
     ClientInput.h
     StationProtocol.h
     NetLib.h

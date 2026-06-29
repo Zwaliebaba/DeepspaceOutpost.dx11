@@ -3,7 +3,6 @@
 #include "GameLogic.h"
 #include "NetLib.h"
 #include "SnapshotPacketizer.h"
-#include "GameEvents.h"
 #include "ClientInput.h"
 #include "StationProtocol.h"
 #include "CombatMessages.h"
