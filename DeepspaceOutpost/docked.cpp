@@ -3,8 +3,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <math.h>
 #include <ctype.h>
+
+#include <string>
+#include <vector>
 
 #include "config.h"
 #include "gfx.h"
@@ -1239,13 +1243,15 @@ void select_next_stock (void)
 }
 
 
-void buy_stock (void)
+// Render-free buy: mutates state (or sends a server request in thin-client mode).
+// Returns 1 if an action was taken (so a caller can refresh its display).
+int market_buy (int item)
 {
-	struct stock_item *item;
+	struct stock_item *it;
 	int cargo_held;
-	
+
 	if (!docked)
-		return;
+		return 0;
 
 	// Thin-client mode: trading is server-authoritative. Send a buy request and
 	// let the StationResponse update credits/cargo; skip the local mutation.
@@ -1253,56 +1259,109 @@ void buy_stock (void)
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Buy;
-		req.commodity = (uint16_t) hilite_item;
+		req.commodity = (uint16_t) item;
 		req.quantity = 1;
 		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return;
+		return 1;
 	}
 
-	item = &stock_market[hilite_item];
+	it = &stock_market[item];
 
-	if ((item->current_quantity == 0) ||
-	    (cmdr.credits < item->current_price))
-		return;
+	if ((it->current_quantity == 0) ||
+	    (cmdr.credits < it->current_price))
+		return 0;
 
 	cargo_held = total_cargo();
-	
-	if ((item->units == TONNES) &&
-		(cargo_held == cmdr.cargo_capacity))
-		return;
-	
-	cmdr.current_cargo[hilite_item]++;
-	item->current_quantity--;
-	cmdr.credits -= item->current_price;	
 
-	highlight_stock (hilite_item);
+	if ((it->units == TONNES) &&
+		(cargo_held == cmdr.cargo_capacity))
+		return 0;
+
+	cmdr.current_cargo[item]++;
+	it->current_quantity--;
+	cmdr.credits -= it->current_price;
+
+	return 1;
 }
 
 
-void sell_stock (void)
+// Render-free sell counterpart to market_buy.
+int market_sell (int item)
 {
-	struct stock_item *item;
-	
-	if ((!docked) || (cmdr.current_cargo[hilite_item] == 0))
-		return;
+	struct stock_item *it;
+
+	if ((!docked) || (cmdr.current_cargo[item] == 0))
+		return 0;
 
 	// Thin-client mode: ask the server to sell; the response updates our state.
 	if (Neuron::Client::ReplicationClientInstance().IsOpen())
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Sell;
-		req.commodity = (uint16_t) hilite_item;
+		req.commodity = (uint16_t) item;
 		req.quantity = 1;
 		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return;
+		return 1;
 	}
 
-	item = &stock_market[hilite_item];
+	it = &stock_market[item];
 
-	cmdr.current_cargo[hilite_item]--;
-	item->current_quantity++;
-	cmdr.credits += item->current_price;	
+	cmdr.current_cargo[item]--;
+	it->current_quantity++;
+	cmdr.credits += it->current_price;
 
+	return 1;
+}
+
+
+int market_item_count (void) { return 17; }
+
+int market_credits (void) { return cmdr.credits; }
+
+// Format one stock row as a fixed-width line (the GUI font is monospaced, so the
+// columns line up): "<name> <unit> <price> <for-sale> <in-hold>".
+void market_format_row (int item, char *buf, int buflen)
+{
+	char price[16], sale[16], hold[16];
+
+	sprintf (price, "%d.%d", stock_market[item].current_price / 10,
+							 stock_market[item].current_price % 10);
+
+	if (stock_market[item].current_quantity > 0)
+		sprintf (sale, "%d%s", stock_market[item].current_quantity,
+							  unit_name[stock_market[item].units]);
+	else
+		strcpy (sale, "-");
+
+	if (cmdr.current_cargo[item] > 0)
+		sprintf (hold, "%d%s", cmdr.current_cargo[item],
+							  unit_name[stock_market[item].units]);
+	else
+		strcpy (hold, "-");
+
+	snprintf (buf, buflen, "%-15s %-2s %7s %6s %6s", stock_market[item].name,
+			  unit_name[stock_market[item].units], price, sale, hold);
+}
+
+
+// Legacy gfx_display_* market navigation (still used by the SCR_MARKET_PRICES
+// keyboard dispatch); the trade itself now goes through market_buy/market_sell.
+void buy_stock (void)
+{
+	if (!docked)
+		return;
+
+	market_buy (hilite_item);
+	highlight_stock (hilite_item);
+}
+
+
+void sell_stock (void)
+{
+	if (!docked)
+		return;
+
+	market_sell (hilite_item);
 	highlight_stock (hilite_item);
 }
 
@@ -1376,8 +1435,203 @@ void display_inventory (void)
 
 			gfx_display_text (180, y, str);
 			y += 16;
-		}		
+		}
 	}
+}
+
+
+/* =================================================================================
+ * Render-free accessors for the GUI info windows (Commander Status, Inventory,
+ * Data on Planet). Each rebuilds a list of preformatted text lines the GUI's
+ * InfoWindow renders, reusing the exact field logic above instead of the legacy
+ * gfx_display_* drawing. Declared in docked.h.
+ * ================================================================================= */
+
+namespace {
+
+std::vector<std::string> s_cmdrLines;
+std::vector<std::string> s_invLines;
+std::vector<std::string> s_planetLines;
+
+void info_add (std::vector<std::string>& lines, const char* fmt, ...)
+{
+	char buf[160];
+	va_list ap;
+	va_start (ap, fmt);
+	vsnprintf (buf, sizeof(buf), fmt, ap);
+	va_end (ap);
+	lines.push_back (buf);
+}
+
+// Word-wrap into <= width-char lines (the GUI font is monospaced, so chars == columns).
+void info_add_wrapped (std::vector<std::string>& lines, const char* text, int width)
+{
+	std::string line;
+	const char* p = text;
+	while (*p)
+	{
+		const char* start = p;
+		while (*p && *p != ' ') p++;
+		std::string word (start, p);
+		while (*p == ' ') p++;
+
+		if (!line.empty() && (int)(line.size() + 1 + word.size()) > width)
+		{
+			lines.push_back (line);
+			line.clear();
+		}
+		if (!line.empty()) line += ' ';
+		line += word;
+	}
+	if (!line.empty())
+		lines.push_back (line);
+}
+
+void copy_line (const std::vector<std::string>& lines, int i, char* buf, int buflen)
+{
+	if (buflen <= 0) return;
+	if (i < 0 || i >= (int)lines.size()) { buf[0] = '\0'; return; }
+	int n = (int)lines[i].size();
+	if (n > buflen - 1) n = buflen - 1;
+	memcpy (buf, lines[i].c_str(), n);
+	buf[n] = '\0';
+}
+
+void build_cmdr_status (void)
+{
+	char planet_name[16];
+	int i, condition, type;
+
+	s_cmdrLines.clear();
+
+	if (!witchspace)
+	{
+		current_system_name (planet_name);
+		capitalise_name (planet_name);
+		info_add (s_cmdrLines, "Present System:    %s", planet_name);
+	}
+
+	hyperspace_system_name (planet_name);
+	capitalise_name (planet_name);
+	info_add (s_cmdrLines, "Hyperspace System: %s", planet_name);
+
+	if (docked)
+		condition = 0;
+	else
+	{
+		condition = 1;
+		for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
+		{
+			type = local_objects[i].type;
+			if ((type == SHIP_MISSILE) || ((type > SHIP_ROCK) && (type < SHIP_DODEC)))
+			{
+				condition = 2;
+				break;
+			}
+		}
+		if ((condition == 2) && (PlayerDefense().energy < 128))
+			condition = 3;
+	}
+
+	info_add (s_cmdrLines, "Condition:         %s", condition_txt[condition]);
+	info_add (s_cmdrLines, "Fuel:              %d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
+	info_add (s_cmdrLines, "Cash:              %d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
+
+	const char* legal = (cmdr.legal_status == 0) ? "Clean"
+					   : (cmdr.legal_status > 50 ? "Fugitive" : "Offender");
+	info_add (s_cmdrLines, "Legal Status:      %s", legal);
+
+	const char* title = rating[0].title;
+	for (i = 0; i < NO_OF_RANKS; i++)
+		if (cmdr.score >= rating[i].score)
+			title = rating[i].title;
+	info_add (s_cmdrLines, "Rating:            %s", title);
+
+	info_add (s_cmdrLines, "%s", "");
+	info_add (s_cmdrLines, "%s", "EQUIPMENT:");
+
+	if (cmdr.cargo_capacity > 20)  info_add (s_cmdrLines, "  Large Cargo Bay");
+	if (cmdr.escape_pod)           info_add (s_cmdrLines, "  Escape Pod");
+	if (cmdr.fuel_scoop)           info_add (s_cmdrLines, "  Fuel Scoops");
+	if (cmdr.ecm)                  info_add (s_cmdrLines, "  E.C.M. System");
+	if (cmdr.energy_bomb)          info_add (s_cmdrLines, "  Energy Bomb");
+	if (cmdr.energy_unit)          info_add (s_cmdrLines, "  %s", cmdr.energy_unit == 1 ? "Extra Energy Unit" : "Naval Energy Unit");
+	if (cmdr.docking_computer)     info_add (s_cmdrLines, "  Docking Computers");
+	if (cmdr.galactic_hyperdrive)  info_add (s_cmdrLines, "  Galactic Hyperspace");
+	if (cmdr.front_laser)          info_add (s_cmdrLines, "  Front %s Laser", laser_type (cmdr.front_laser));
+	if (cmdr.rear_laser)           info_add (s_cmdrLines, "  Rear %s Laser", laser_type (cmdr.rear_laser));
+	if (cmdr.left_laser)           info_add (s_cmdrLines, "  Left %s Laser", laser_type (cmdr.left_laser));
+	if (cmdr.right_laser)          info_add (s_cmdrLines, "  Right %s Laser", laser_type (cmdr.right_laser));
+}
+
+void build_inventory (void)
+{
+	int i;
+	bool any = false;
+
+	s_invLines.clear();
+	info_add (s_invLines, "Fuel:  %d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
+	info_add (s_invLines, "Cash:  %d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
+	info_add (s_invLines, "%s", "");
+
+	for (i = 0; i < 17; i++)
+	{
+		if (cmdr.current_cargo[i] > 0)
+		{
+			info_add (s_invLines, "%-20s %d%s", stock_market[i].name,
+					  cmdr.current_cargo[i], unit_name[stock_market[i].units]);
+			any = true;
+		}
+	}
+
+	if (!any)
+		info_add (s_invLines, "%s", "Hold empty.");
+}
+
+void build_planet_data (void)
+{
+	char str[100];
+	struct planet_data pd;
+	int ly;
+
+	s_planetLines.clear();
+
+	generate_planet_data (&pd, hyperspace_planet);
+
+	ly = calc_distance_to_planet (docked_planet, hyperspace_planet);
+	if (ly > 0)
+		info_add (s_planetLines, "Distance: %d.%d Light Years", ly / 10, ly % 10);
+
+	info_add (s_planetLines, "Economy: %s", economy_type[pd.economy]);
+	info_add (s_planetLines, "Government: %s", government_type[pd.government]);
+	info_add (s_planetLines, "Tech Level: %d", pd.techlevel + 1);
+	info_add (s_planetLines, "Population: %d.%d Billion", pd.population / 10, pd.population % 10);
+
+	describe_inhabitants (str, hyperspace_planet);
+	info_add (s_planetLines, "%s", str);
+
+	info_add (s_planetLines, "Gross Productivity: %d M CR", pd.productivity);
+	info_add (s_planetLines, "Average Radius: %d km", pd.radius);
+	info_add (s_planetLines, "%s", "");
+	info_add_wrapped (s_planetLines, describe_planet (hyperspace_planet), 52);
+}
+
+} // namespace
+
+int cmdr_status_line_count (void) { build_cmdr_status(); return (int) s_cmdrLines.size(); }
+void cmdr_status_line (int i, char *buf, int buflen) { copy_line (s_cmdrLines, i, buf, buflen); }
+void cmdr_status_title (char *buf, int buflen) { snprintf (buf, buflen, "Commander %s", cmdr.name); }
+
+int inventory_line_count (void) { build_inventory(); return (int) s_invLines.size(); }
+void inventory_line (int i, char *buf, int buflen) { copy_line (s_invLines, i, buf, buflen); }
+
+int planet_data_line_count (void) { build_planet_data(); return (int) s_planetLines.size(); }
+void planet_data_line (int i, char *buf, int buflen) { copy_line (s_planetLines, i, buf, buflen); }
+void planet_data_title (char *buf, int buflen)
+{
+	char planet_name[16];
+	name_planet (planet_name, hyperspace_planet);
+	snprintf (buf, buflen, "Data on %s", planet_name);
 }
 
 /***********************************************************************************/
@@ -1698,26 +1952,26 @@ int laser_refund (int laser_type)
 }
 
 
-void buy_equip (void)
+// Render-free equip action for a given stock index: expand a laser sub-menu (name
+// beginning '+'), or buy the item if affordable. Mutates show flags / cmdr state but
+// does not draw. Returns 1 if it changed anything.
+int equip_do (int index)
 {
 	int i;
 
-	if (equip_stock[hilite_item].name[0] == '+')
+	if (equip_stock[index].name[0] == '+')
 	{
 		collapse_equip_list();
-		equip_stock[hilite_item].show = 0;
-		hilite_item++;
-		for (i = 0; i < 5; i++)
-			equip_stock[hilite_item + i].show = 1;
-		
-		list_equip_prices();
-		return;		
+		equip_stock[index].show = 0;
+		for (i = 1; i <= 5; i++)
+			equip_stock[index + i].show = 1;
+		return 1;
 	}
 
-	if (equip_stock[hilite_item].canbuy == 0)
-		return;
-	
-	switch (equip_stock[hilite_item].type)
+	if (equip_stock[index].canbuy == 0)
+		return 0;
+
+	switch (equip_stock[index].type)
 	{
 		case EQ_FUEL:
 			cmdr.fuel = PlayerCaps().maxFuel;
@@ -1842,9 +2096,67 @@ void buy_equip (void)
 			break;
 	}
 
-	cmdr.credits -= equip_stock[hilite_item].price;
+	cmdr.credits -= equip_stock[index].price;
+	return 1;
+}
+
+
+// Legacy gfx_display_* equip navigation: act on the keyboard-highlighted item, then
+// redraw. The action itself now goes through equip_do.
+void buy_equip (void)
+{
+	if (equip_stock[hilite_item].name[0] == '+')
+	{
+		equip_do (hilite_item);
+		hilite_item++;          // land the highlight on the first expanded sub-item
+		list_equip_prices();
+		return;
+	}
+
+	equip_do (hilite_item);
 	list_equip_prices();
 }
+
+
+/* ---- Render-free equip accessors for the GUI equip window. The visible set =
+ * items with show && tech-level >= level (the same filter list_equip_prices uses);
+ * it changes when a laser sub-menu is expanded, so the GUI rebuilds its rows then. */
+static int s_equipVisible[NO_OF_EQUIP_ITEMS];
+static int s_equipVisibleCount = 0;
+
+void equip_reset (void) { collapse_equip_list(); }   // back to the top-level list
+
+int equip_visible_count (void)
+{
+	int i, tech_level;
+
+	tech_level = current_planet_data.techlevel + 1;
+	equip_stock[0].price = (70 - cmdr.fuel) * 2;   // fuel price tracks the tank
+
+	s_equipVisibleCount = 0;
+	for (i = 0; i < NO_OF_EQUIP_ITEMS; i++)
+	{
+		equip_stock[i].canbuy = ((equip_present (equip_stock[i].type) == 0) &&
+								 (equip_stock[i].price <= cmdr.credits));
+		if (equip_stock[i].show && (tech_level >= equip_stock[i].level))
+			s_equipVisible[s_equipVisibleCount++] = i;
+	}
+
+	return s_equipVisibleCount;
+}
+
+int equip_visible_index (int i) { return (i >= 0 && i < s_equipVisibleCount) ? s_equipVisible[i] : 0; }
+
+void equip_row_text (int index, char *buf, int buflen)
+{
+	const char *name = &equip_stock[index].name[1];   // strip the ' '/'+'/'-'/'>' prefix
+	if (equip_stock[index].price != 0)
+		snprintf (buf, buflen, "%-22s %d.%d", name, equip_stock[index].price / 10, equip_stock[index].price % 10);
+	else
+		snprintf (buf, buflen, "%s", name);
+}
+
+int equip_buyable (int index) { return (equip_stock[index].name[0] == '+') || equip_stock[index].canbuy; }
 
 
 void equip_ship (void)

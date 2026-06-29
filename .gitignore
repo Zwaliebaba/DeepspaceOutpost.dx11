@@ -377,3 +377,9 @@ erserver.config.json
 erheadless.config.json
 **/erserver.config.json
 **/erheadless.config.json
+
+# NeuronClient ships its fxc-generated shader byte arrays committed, so the build
+# works without a developer-environment fxc (see NeuronClient/CMakeLists.txt). These
+# are the one sanctioned exception to the CompiledShaders/ ignore rule above.
+!NeuronClient/shaders/CompiledShaders/
+!NeuronClient/shaders/CompiledShaders/*.h

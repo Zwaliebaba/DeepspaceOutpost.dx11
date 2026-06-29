@@ -7,6 +7,7 @@
 #include "pch.h"
 
 #include "Renderer.h"
+#include "GraphicsCore.h" // Neuron::Graphics::Core (device unification)
 
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -83,6 +84,33 @@ bool Renderer::init(HWND hwnd)
 	loadPalette();   /* non-fatal: falls back to a synthetic ramp */
 
 	/* Start with an opaque black canvas; the game clears the play area itself. */
+	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	context_->ClearRenderTargetView(canvas_rtv_.get(), black);
+	return true;
+}
+
+bool Renderer::initAdopt()
+{
+	using namespace Neuron::Graphics;
+
+	/* Take references on the device/context/swap chain Core created (ClientEngine owns
+	 * the lifetime; these are non-owning aliases held for the canvas + present path). */
+	device_.copy_from(Core::GetD3DDevice());
+	context_.copy_from(Core::GetD3DDeviceContext());
+	swap_chain_.copy_from(Core::GetSwapChain());
+	if (!device_ || !context_ || !swap_chain_) return false;
+
+	hwnd_ = Core::GetWindow();
+	const auto size = Core::GetOutputSize();
+	client_w_ = std::max<int>(1, static_cast<int>(size.Width));
+	client_h_ = std::max<int>(1, static_cast<int>(size.Height));
+
+	if (!createBackBuffer())      return false;
+	if (!createCanvasTarget())    return false;
+	if (!createPresentPipeline()) return false;
+
+	loadPalette();   /* non-fatal: falls back to a synthetic ramp */
+
 	const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 	context_->ClearRenderTargetView(canvas_rtv_.get(), black);
 	return true;
@@ -333,7 +361,7 @@ void Renderer::bindCanvasTarget()
 	context_->RSSetViewports(1, &vp);
 }
 
-void Renderer::present()
+void Renderer::blitCanvasToBackBuffer()
 {
 	if (!swap_chain_) return;
 
@@ -361,7 +389,43 @@ void Renderer::present()
 	ID3D11ShaderResourceView* nullsrv = nullptr;
 	context_->PSSetShaderResources(0, 1, &nullsrv);
 
-	swap_chain_->Present(1, 0);
+	/* Leave the back buffer bound with a FULL client-area viewport so a full-window
+	 * overlay (the GUI) drawn next renders in client space, not the letterbox. */
+	D3D11_VIEWPORT full{};
+	full.TopLeftX = 0.0f;
+	full.TopLeftY = 0.0f;
+	full.Width    = static_cast<float>(client_w_);
+	full.Height   = static_cast<float>(client_h_);
+	full.MinDepth = 0.0f;
+	full.MaxDepth = 1.0f;
+	context_->RSSetViewports(1, &full);
+}
+
+void Renderer::swap()
+{
+	if (swap_chain_) swap_chain_->Present(1, 0);
+}
+
+void Renderer::present()
+{
+	blitCanvasToBackBuffer();
+	swap();
+}
+
+void Renderer::onResizePre()
+{
+	/* Release our view of the swap-chain back buffer so Core::WindowSizeChanged's
+	 * ResizeBuffers can succeed (no outstanding references to the buffers). */
+	back_rtv_ = nullptr;
+	context_->OMSetRenderTargets(0, nullptr, nullptr);
+}
+
+void Renderer::onResizePost(int clientWidth, int clientHeight)
+{
+	client_w_ = std::max<int>(1, clientWidth);
+	client_h_ = std::max<int>(1, clientHeight);
+	createBackBuffer();   /* recreate back_rtv_ from the resized swap chain */
+	/* The retro 512x514 canvas is fixed and letterboxed, so it does not resize. */
 }
 
 void Renderer::resize(int clientWidth, int clientHeight)

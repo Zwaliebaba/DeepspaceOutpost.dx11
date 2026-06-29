@@ -32,6 +32,8 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "GuiOverlay.h"
+#include "GameWindows.h"
 
 int old_cross_x, old_cross_y;
 int cross_timer;
@@ -860,7 +862,7 @@ void handle_flight_keys(void)
     find_input = 0;
 
     if (docked)
-      equip_ship();
+      OpenEquipWindow();
     else
     {
       if (current_screen != SCR_RIGHT_VIEW)
@@ -888,31 +890,42 @@ void handle_flight_keys(void)
   if (kbd_F7_pressed)
   {
     find_input = 0;
-    display_data_on_planet();
+    // Single-player: the GUI planet-data window (local generated data). In thin-client
+    // (MMO) mode the legacy screen shows server-replicated system data + chart cursor
+    // selection, so keep it there.
+    if (Neuron::Client::ReplicationClientInstance().IsOpen())
+      display_data_on_planet();
+    else
+      OpenPlanetDataWindow();
   }
 
   if (kbd_F8_pressed && (!witchspace))
   {
+    // Route the in-game market entry to the GUI overlay (Buy/Sell per row, live cash),
+    // replacing the legacy gfx_display_* display_market_prices screen.
     find_input = 0;
-    display_market_prices();
+    OpenMarketWindow();
   }
 
   if (kbd_F9_pressed)
   {
     find_input = 0;
-    display_commander_status();
+    OpenCommanderWindow();
   }
 
   if (kbd_F10_pressed)
   {
     find_input = 0;
-    display_inventory();
+    OpenInventoryWindow();
   }
 
   if (kbd_F11_pressed)
   {
+    // Route the in-game options entry to the GUI overlay (Options menu -> Game
+    // Settings / Quit), replacing the legacy gfx_display_* display_options() screen.
+    // The overlay floats over the running game and suppresses game input while open.
     find_input = 0;
-    display_options();
+    GuiOverlay::Open();
   }
 
   // F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
@@ -1098,81 +1111,6 @@ void set_commander_name(char* path)
   *cname = '\0';
 }
 
-void save_commander_screen(void)
-{
-  char path[255];
-  int okay;
-  int rv;
-
-  current_screen = SCR_SAVE_CMDR;
-
-  gfx_clear_display();
-  gfx_display_centre_text(10, "SAVE COMMANDER", 140, GFX_COL_GOLD);
-  gfx_draw_line(0, 36, 511, 36);
-  gfx_update_screen();
-
-  strcpy(path, cmdr.name);
-  strcat(path, ".nkc");
-
-  okay = gfx_request_file("Save Commander", path, "nkc");
-
-  if (!okay)
-  {
-    display_options();
-    return;
-  }
-
-  rv = save_commander_file(path);
-
-  if (rv)
-  {
-    gfx_display_centre_text(175, "Error Saving Commander!", 140, GFX_COL_GOLD);
-    return;
-  }
-
-  gfx_display_centre_text(175, "Commander Saved.", 140, GFX_COL_GOLD);
-
-  set_commander_name(path);
-  saved_cmdr = cmdr;
-  saved_cmdr.ship_x = docked_planet.d;
-  saved_cmdr.ship_y = docked_planet.b;
-}
-
-void load_commander_screen(void)
-{
-  char path[255];
-  int rv;
-
-  gfx_clear_display();
-  gfx_display_centre_text(10, "LOAD COMMANDER", 140, GFX_COL_GOLD);
-  gfx_draw_line(0, 36, 511, 36);
-  gfx_update_screen();
-
-  strcpy(path, "jameson.nkc");
-
-  rv = gfx_request_file("Load Commander", path, "nkc");
-
-  if (rv == 0)
-    return;
-
-  rv = load_commander_file(path);
-
-  if (rv)
-  {
-    saved_cmdr = cmdr;
-    gfx_display_centre_text(175, "Error Loading Commander!", 140, GFX_COL_GOLD);
-    gfx_display_centre_text(200, "Press any key to continue.", 140, GFX_COL_GOLD);
-    gfx_update_screen();
-    kbd_wait_key();
-    return;
-  }
-
-  restore_saved_commander();
-  set_commander_name(path);
-  saved_cmdr = cmdr;
-  update_console();
-}
-
 void run_first_intro_screen(void)
 {
   current_screen = SCR_INTRO_ONE;
@@ -1189,19 +1127,11 @@ void run_first_intro_screen(void)
 
     kbd_poll_keyboard();
 
-    if (kbd_y_pressed)
-    {
-      snd_stop_midi();
-      load_commander_screen();
+    if (kbd_space_pressed)
       break;
-    }
-
-    if (kbd_n_pressed)
-    {
-      snd_stop_midi();
-      break;
-    }
   }
+
+  snd_stop_midi();
 }
 
 void run_second_intro_screen(void)

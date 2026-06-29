@@ -1,0 +1,50 @@
+#pragma once
+
+// GUI overlay integration (Phase 5).
+//
+// Makes the imported GraphicsCore / ImmediateRenderer / text / GuiWindow stack LIVE
+// without disturbing the existing game render path. It:
+//   - unifies the device (Neuron::Graphics::Core adopts the platform Renderer's
+//     device/context/swap chain), then initialises ImmediateRenderer + fonts +
+//     Strings + Canvas;
+//   - renders registered GuiWindows as an overlay INTO the existing 512x514 canvas
+//     (after the game's 2D batch, before the letterboxed present);
+//   - is fail-safe (best-effort Startup guarded by try/catch) and hidden by default;
+//     the game opens it on demand (F8 market, F11 options) so the normal game is
+//     unaffected if the new path misbehaves.
+//
+// The game's gfx_* 2D batch (gfx2d) now also renders through ImmediateRenderer, so
+// this overlay and the game share one renderer; Renderer remains only for the
+// off-screen canvas + letterboxed present.
+
+#include <functional>
+#include <string_view>
+
+class GuiWindow;
+
+namespace GuiOverlay
+{
+  void Startup();                          // best-effort; safe to call once after the Renderer is up
+  void Shutdown();
+  bool IsReady();
+
+  void Update();                           // auto-hide when empty + keyboard/mouse nav
+  void Render(int canvasWidth, int canvasHeight); // draw into the currently-bound canvas
+
+  // Show the overlay and open the Options window directly (the game's in-game options
+  // entry, e.g. F11, routes here instead of drawing a legacy gfx_display_* screen).
+  void Open();
+  bool IsShown();
+
+  // Show the overlay and open (or focus, if already present) a game-supplied window.
+  // The factory is only invoked when the named window isn't already registered; the
+  // returned window (Canvas takes ownership) must carry that same name. Used to route
+  // other in-game screens (e.g. F8 market) onto the GUI stack.
+  void ShowWindow(std::string_view _name, const std::function<GuiWindow*()>& _factory);
+
+  // The game supplies the real Options/Settings window: it wires controls to game
+  // state (config globals, save), which this engine layer can't see. The factory must
+  // return a heap GuiWindow named "Options" (Canvas takes ownership). When unset, a
+  // built-in placeholder window is shown instead. Set from GameApp::Startup().
+  void SetOptionsWindowFactory(std::function<GuiWindow*()> _factory);
+}

@@ -75,7 +75,7 @@ void update_intro1 (void)
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
 
 	gfx_display_centre_text (320, "DEEPSPACE OUTPOST", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (360, "Load New Commander (Y/N)?", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (360, "Press Space to Begin, Commander.", 140, GFX_COL_GOLD);
 }
 
 
