@@ -45,6 +45,60 @@ float4 PSMain(VSOut i) : SV_Target
 }
 )";
 
+    // Built-in text-outline program. Same vertex contract as the default (b0 ortho,
+    // POSITION/TEXCOORD0/COLOR0); the PS reads b1 for the outline colour + atlas texel
+    // size, samples the glyph coverage (alpha) plus an 8-tap ring one outline-width out,
+    // and composites the per-vertex text colour over the outline colour. Straight-alpha
+    // blend: it returns the coverage-normalised colour and total coverage in alpha.
+    const char* kTextOutlineHLSL = R"(
+cbuffer Cb2D : register(b0)
+{
+    row_major float4x4 u_Proj;
+};
+cbuffer TextParams : register(b1)
+{
+    float4 u_OutlineColor;   // rgb + a
+    float4 u_OutlineParams;  // x=texelW, y=texelH, z=widthTexels, w=unused
+};
+
+struct VSIn  { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 col : COLOR0; };
+struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; float4 col : COLOR0; };
+
+VSOut VSMain(VSIn i)
+{
+    VSOut o;
+    o.pos = mul(float4(i.pos, 0.0, 1.0), u_Proj);
+    o.uv  = i.uv;
+    o.col = i.col;
+    return o;
+}
+
+Texture2D    u_Tex : register(t0);
+SamplerState u_Smp : register(s0);
+
+float4 PSMain(VSOut i) : SV_Target
+{
+    float2 d = u_OutlineParams.xy * max(u_OutlineParams.z, 0.0);
+    float c = u_Tex.Sample(u_Smp, i.uv).a;                    // glyph coverage at centre
+    float o = 0.0;                                            // max coverage in the ring
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x, 0.0)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x, 0.0)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(0.0,  d.y)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(0.0, -d.y)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x,  d.y)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x,  d.y)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x, -d.y)).a);
+    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x, -d.y)).a);
+
+    float textA = c * i.col.a;
+    float outA  = saturate(o) * (1.0 - c) * u_OutlineColor.a;
+    float a = textA + outA;
+    if (a <= 0.00390625) discard;                            // < 1/256: nothing to draw
+    float3 rgb = (i.col.rgb * textA + u_OutlineColor.rgb * outA) / a;
+    return float4(rgb, a);
+}
+)";
+
     // Compile one HLSL source/entry/profile. Returns null on failure (logging the
     // compiler errors) rather than throwing, so a bad caller-supplied program shader
     // degrades to the default instead of taking down the app.
@@ -90,9 +144,11 @@ float4 PSMain(VSOut i) : SV_Target
   {
     s_programs.clear();
     s_program = DefaultProgram;
+    s_textOutlineProgram = DefaultProgram;
     s_layout = nullptr;
     s_vb = nullptr;
     s_cb = nullptr;
+    s_paramsCb = nullptr;
     s_blend = nullptr;
     s_depth = nullptr;
     s_raster = nullptr;
@@ -141,6 +197,14 @@ float4 PSMain(VSOut i) : SV_Target
     cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     check_hresult(device->CreateBuffer(&cbd, nullptr, s_cb.put()));
 
+    // b1: shared params for custom programs (e.g. the text-outline colour + texel size).
+    D3D11_BUFFER_DESC pbd{};
+    pbd.ByteWidth = sizeof(s_params);
+    pbd.Usage = D3D11_USAGE_DYNAMIC;
+    pbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    pbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    check_hresult(device->CreateBuffer(&pbd, nullptr, s_paramsCb.put()));
+
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
     bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
@@ -184,15 +248,20 @@ float4 PSMain(VSOut i) : SV_Target
     check_hresult(device->CreateTexture2D(&td, &srd, tex.put()));
     check_hresult(device->CreateShaderResourceView(tex.get(), nullptr, s_white.put()));
 
+    // Built-in program 1: the text-outline shader.
+    s_textOutlineProgram = AddProgram(kTextOutlineHLSL);
+
     return true;
   }
 
-  Render2D::ProgramId Render2D::RegisterProgram(const char* hlslSource)
+  // Compile (VSMain/PSMain) + create a program from one HLSL source and append it.
+  // The device must already be up. Returns DefaultProgram on any failure.
+  Render2D::ProgramId Render2D::AddProgram(const char* hlslSource)
   {
-    if (!hlslSource || !EnsureResources())
+    ID3D11Device* device = Core::GetD3DDevice();
+    if (!device || !hlslSource)
       return DefaultProgram;
 
-    ID3D11Device* device = Core::GetD3DDevice();
     com_ptr<ID3DBlob> vs = CompileHLSL(hlslSource, "VSMain", "vs_5_0");
     com_ptr<ID3DBlob> ps = CompileHLSL(hlslSource, "PSMain", "ps_5_0");
     if (!vs || !ps)
@@ -207,9 +276,38 @@ float4 PSMain(VSOut i) : SV_Target
     return static_cast<ProgramId>(s_programs.size() - 1);
   }
 
+  Render2D::ProgramId Render2D::RegisterProgram(const char* hlslSource)
+  {
+    if (!EnsureResources())
+      return DefaultProgram;
+    return AddProgram(hlslSource);
+  }
+
   void Render2D::SetProgram(ProgramId program)
   {
     s_program = (program < s_programs.size()) ? program : DefaultProgram;
+  }
+
+  Render2D::ProgramId Render2D::TextOutlineProgram() { return s_textOutlineProgram; }
+
+  void Render2D::SetShaderParams(const void* data, size_t bytes)
+  {
+    if (!data)
+      return;
+    const size_t n = (bytes < sizeof(s_params)) ? bytes : sizeof(s_params);
+    std::memcpy(s_params, data, n);
+  }
+
+  void Render2D::SetTextOutline(uint32_t outlineRgba, float texelW, float texelH, float widthTexels)
+  {
+    // b1 layout: float4 outlineColor; float4 params(texelW, texelH, widthTexels, 0).
+    const float params[8] = {
+      (outlineRgba & 0xFFu) / 255.0f,         ((outlineRgba >> 8) & 0xFFu) / 255.0f,
+      ((outlineRgba >> 16) & 0xFFu) / 255.0f, ((outlineRgba >> 24) & 0xFFu) / 255.0f,
+      texelW,                                 texelH,
+      widthTexels,                            0.0f,
+    };
+    SetShaderParams(params, sizeof(params));
   }
 
   void Render2D::Begin(ID3D11RenderTargetView* rtv, int width, int height, D3D11_FILTER filter)
@@ -388,6 +486,16 @@ float4 PSMain(VSOut i) : SV_Target
     ctx->IASetInputLayout(s_layout.get());
     ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
     ctx->VSSetConstantBuffers(0, 1, &cb);
+
+    // b1 params for custom programs (text outline); the default program ignores it.
+    {
+      D3D11_MAPPED_SUBRESOURCE pm;
+      check_hresult(ctx->Map(s_paramsCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &pm));
+      std::memcpy(pm.pData, s_params, sizeof(s_params));
+      ctx->Unmap(s_paramsCb.get(), 0);
+      ID3D11Buffer* pcb = s_paramsCb.get();
+      ctx->PSSetConstantBuffers(1, 1, &pcb);
+    }
 
     const float blendFactor[4] = {0, 0, 0, 0};
     ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);

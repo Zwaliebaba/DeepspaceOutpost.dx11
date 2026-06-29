@@ -120,6 +120,23 @@ namespace Neuron::Graphics
       // (one extra draw call), like a texture or scissor change.
       static void SetProgram(ProgramId program);
 
+      // Upload up to 64 bytes of uniform data to constant buffer b1, shared by all
+      // programs (the default program ignores it). For a custom program's own
+      // parameters. Uploaded at End, so it is one value per pass - set it before End.
+      static void SetShaderParams(const void* data, size_t bytes);
+
+      // --- Built-in text outline -------------------------------------------
+      // A built-in program that gives bitmap-font text a crisp outline in the shader
+      // (no second geometry pass): it samples the glyph coverage plus an 8-tap ring
+      // and composites the per-vertex text colour over the outline colour. Select it
+      // with SetProgram(TextOutlineProgram()) and configure SetTextOutline first.
+      static ProgramId TextOutlineProgram();
+
+      // Configure the text-outline program: outline colour (0xAABBGGRR), the font
+      // atlas texel size (1/width, 1/height), and the outline width in texels. Packs
+      // into the b1 params, so the one-value-per-pass rule above applies.
+      static void SetTextOutline(uint32_t outlineRgba, float texelW, float texelH, float widthTexels);
+
     private:
       struct Cmd
       {
@@ -138,15 +155,19 @@ namespace Neuron::Graphics
       };
 
       static bool EnsureResources();
+      static ProgramId AddProgram(const char* hlslSource); // compile+create+append; device must be up
       static void Append(Topo topo, ID3D11ShaderResourceView* srv, const Vertex* v, int n);
       static void Flush();
 
       // Registered shader programs; index 0 is the built-in default (DefaultProgram).
       inline static std::vector<Program> s_programs;
-      inline static ProgramId s_program = DefaultProgram; // current selection (sticky)
+      inline static ProgramId s_program = DefaultProgram;          // current selection (sticky)
+      inline static ProgramId s_textOutlineProgram = DefaultProgram; // built-in, set in EnsureResources
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
       inline static winrt::com_ptr<ID3D11Buffer> s_vb;
-      inline static winrt::com_ptr<ID3D11Buffer> s_cb;
+      inline static winrt::com_ptr<ID3D11Buffer> s_cb;      // b0: ortho matrix
+      inline static winrt::com_ptr<ID3D11Buffer> s_paramsCb; // b1: custom-program params
+      inline static uint8_t s_params[64] = {};               // CPU mirror, uploaded each Flush
       inline static winrt::com_ptr<ID3D11BlendState> s_blend;
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_depth;
       inline static winrt::com_ptr<ID3D11RasterizerState> s_raster;

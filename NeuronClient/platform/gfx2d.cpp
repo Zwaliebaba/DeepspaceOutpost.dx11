@@ -276,13 +276,10 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 	ID3D11ShaderResourceView* srv = fontSheetSRV();
 	if (!srv || !s) return;
 
-	/* Lay down a 1px-offset opaque-black drop-shadow first, then the coloured glyphs
-	 * on top. The shadow gives the text a hard edge so it stays readable wherever it
-	 * overlaps the busy 3D backdrop (planet wireframe, starfield, ships); on a plain
-	 * black screen it is simply invisible. Black is index 0 in the palette but that is
-	 * the transparent colour key, so emit an explicit opaque black instead. */
-	constexpr uint32_t kShadow = 0xFF000000u;
-	emitGlyphs(srv, fs, (float)x + 1.0f, (float)y + 1.0f, s, kShadow);
+	/* Single pass: the glyphs get a crisp outline in the shader at flush time. Commands
+	 * bound to the font sheet are replayed through Render2D's text-outline program (see
+	 * gfx2d_flush), so the text stays readable over the busy 3D backdrop without an
+	 * extra offset-shadow geometry pass. */
 	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
 }
 
@@ -585,6 +582,15 @@ void gfx2d_flush(void)
 		r->bindCanvasTarget();
 		Render2D::Begin(nullptr, r->canvasWidth(), r->canvasHeight(), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
+		/* Text commands (those bound to the font sheet) replay through the built-in
+		 * text-outline program for a shader-side outline; sprites/HUD and colored prims
+		 * use the default program. Configure the outline from the sheet's texel size. */
+		ID3D11ShaderResourceView* fontSrv = fontSheetSRV();
+		if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
+			g_font_sheet->GetHeight() > 0.0f)
+			Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(), 1.0f / g_font_sheet->GetHeight(),
+									 1.0f);
+
 		std::vector<Render2D::Vertex> scratch;
 		for (const Cmd& c : g_cmds)
 		{
@@ -601,6 +607,7 @@ void gfx2d_flush(void)
 					const TexVertex& v = g_tverts[c.start + i];
 					scratch.push_back({v.x, v.y, v.u, v.v, v.rgba});
 				}
+				Render2D::SetProgram(c.srv == fontSrv ? Render2D::TextOutlineProgram() : Render2D::DefaultProgram);
 				Render2D::Submit(Render2D::Topo::Tris, scratch.data(), static_cast<int>(scratch.size()), c.srv);
 			}
 			else
@@ -613,6 +620,7 @@ void gfx2d_flush(void)
 				const Render2D::Topo topo = (c.topo == Topo::Points) ? Render2D::Topo::Points
 										  : (c.topo == Topo::Lines)  ? Render2D::Topo::Lines
 																	 : Render2D::Topo::Tris;
+				Render2D::SetProgram(Render2D::DefaultProgram);
 				Render2D::Submit(topo, scratch.data(), static_cast<int>(scratch.size()), nullptr);
 			}
 		}

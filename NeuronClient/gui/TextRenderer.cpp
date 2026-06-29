@@ -78,14 +78,23 @@ void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string
   _y -= 7.0f;
   _x -= 3.0f;
 
-  // A 1px-offset black drop-shadow first (when requested), then the glyphs in the
-  // current tint, so text stays readable over the GUI panels. Both passes submit into
-  // the surrounding Render2D::Begin/End scope (alpha-blended, no depth), which the
-  // overlay opens once per frame.
-  if (m_renderShadow)
-    EmitGlyphs(m_texture.get(), _x + 1.0f, _y + 1.0f, _size, _text, 0xFF000000u);
+  // When an outline is requested, draw the glyphs through Render2D's built-in
+  // text-outline program (a crisp black outline produced in the shader) instead of a
+  // second offset geometry pass; otherwise the plain default program. The text colour
+  // rides the per-vertex tint either way.
+  const float w = static_cast<float>(m_texture->GetWidth());
+  const float h = static_cast<float>(m_texture->GetHeight());
+  const bool outline = m_renderShadow && w > 0.0f && h > 0.0f;
+  if (outline)
+  {
+    Render2D::SetProgram(Render2D::TextOutlineProgram());
+    Render2D::SetTextOutline(0xFF000000u, 1.0f / w, 1.0f / h, 1.0f);
+  }
 
   EmitGlyphs(m_texture.get(), _x, _y, _size, _text, m_color);
+
+  if (outline)
+    Render2D::SetProgram(Render2D::DefaultProgram);
 }
 
 void TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text, ...)
