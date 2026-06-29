@@ -103,6 +103,14 @@ Renderer* platform_renderer(void)
 	return g_renderer_ready ? &g_renderer : nullptr;
 }
 
+void platform_request_quit(void)
+{
+	/* Mirror the user closing the window: WM_CLOSE -> DestroyWindow -> WM_DESTROY,
+	 * which sets g_quit so the next platform_pump_messages() unwinds and exits. */
+	if (g_hwnd)
+		PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+}
+
 void platform_pump_messages(void)
 {
 	MSG msg;

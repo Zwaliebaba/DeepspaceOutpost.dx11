@@ -2,9 +2,9 @@
 #include "GuiButton.h"
 #include "Canvas.h"
 #include "TextRenderer.h"
-#include "GameApp.h"
 #include "GuiWindow.h"
 #include "ImmediateRenderer.h"
+#include "platform_win.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
@@ -240,7 +240,7 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
   GuiButton::Render(realX, realY, highlighted, clicked);
 }
 
-void GameExitButton::MouseUp() { g_app->m_requestQuit = true; }
+void GameExitButton::MouseUp() { platform_request_quit(); }
 
 CloseButton::CloseButton()
   : GuiButton(),

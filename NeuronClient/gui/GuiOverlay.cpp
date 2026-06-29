@@ -2,7 +2,6 @@
 #include "GuiOverlay.h"
 
 #include "Canvas.h"
-#include "GameApp.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
 #include "ImmediateRenderer.h"
@@ -145,15 +144,6 @@ void GuiOverlay::Update()
 
   if (!s_shown)
     return;
-
-  // The GameExitButton sets g_app->m_requestQuit; not wired to the game's quit path
-  // yet, so treat it as "close the overlay" for a visible result.
-  if (g_app->m_requestQuit)
-  {
-    g_app->m_requestQuit = false;
-    s_shown = false;
-    return;
-  }
 
   Canvas::EclUpdate(); // keyboard menu navigation (up/down/enter/esc -> keyboard.h)
 }

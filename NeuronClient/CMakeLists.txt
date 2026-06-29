@@ -16,6 +16,7 @@ set(NEURONCLIENT_SOURCES
     RenderQueue.cpp
     RenderContext.cpp
     ReplicationClient.cpp
+    Strings.cpp
     vector.cpp
 
     # Native Direct3D 11 graphics core + immediate-mode renderer (Neuron::Graphics).
@@ -26,11 +27,10 @@ set(NEURONCLIENT_SOURCES
     graphics/TextureManager.cpp
 
     # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
-    # menu navigation reads keyboard.h directly and quit goes through the gui/GameApp.h
-    # shim. Textures load directly through Neuron::Graphics::TextureManager.
-    # See docs/phase2-4-gui-text.md.
+    # menu navigation reads keyboard.h directly and the exit button calls
+    # platform_request_quit(). Textures load directly through
+    # Neuron::Graphics::TextureManager. See docs/phase2-4-gui-text.md.
     gui/TextRenderer.cpp
-    gui/Strings.cpp
     gui/GuiButton.cpp
     gui/GuiWindow.cpp
     gui/Canvas.cpp
@@ -58,17 +58,16 @@ set(NEURONCLIENT_HEADERS
     graphics/ConstantBuffers.h
     graphics/TextureManager.h
 
-    # Imported text + GUI menu system headers (+ native shims).
+    # Imported text + GUI menu system headers.
     gui/TextRenderer.h
-    gui/Strings.h
     gui/Widget.h
     gui/GuiButton.h
     gui/GuiWindow.h
     gui/Canvas.h
     gui/GuiOverlay.h
-    gui/GameApp.h
 
     # Generic engine headers.
+    Strings.h
     ViewMetrics.h
     CameraFollow.h
     ReplicatedScene.h

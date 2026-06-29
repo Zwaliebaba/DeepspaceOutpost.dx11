@@ -64,8 +64,8 @@ exactly as before.
   from a demo to real menus.
 - **No mouse**: the platform layer is keyboard-only, so `Canvas` mouse features (drag,
   click, hover tooltips) are dormant; navigation is keyboard-only.
-- **`GameExitButton`** sets `g_app->m_requestQuit`, which is treated as "close the
-  overlay" (not wired to the game's quit path).
+- **`GameExitButton`** calls `platform_request_quit()`, which posts `WM_CLOSE` and
+  exits the game the same way closing the window does.
 
 ## Running plan
 - Phases 1–4: GraphicsCore + ImmediateRenderer + shaders; TextureManager; text +

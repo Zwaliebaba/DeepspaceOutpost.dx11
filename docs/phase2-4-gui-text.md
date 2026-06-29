@@ -29,7 +29,7 @@ build to verify.
   the coroutine/`ASyncLoader` async-load machinery is replaced with a synchronous
   `TextureManager::LoadTexture`. Renders through the `TextOverlay` program. Exposes
   `g_gameFont` / `g_editorFont`. Point it at a `GameData/Fonts/*.dds` sheet at startup.
-- `NeuronClient/gui/Strings.{h,cpp}` — JSON string table, adapted to the target:
+- `NeuronClient/Strings.{h,cpp}` — JSON string table, adapted to the target:
   reads `GameData/Strings/<lang>/<class>.json` (CWD-relative, staged with GameData)
   via `std::ifstream` + `Neuron::Json`, with **no WinRT MRT / Globalization**
   dependency (donor used `Windows::Globalization`). Defaults to `en-US`.
@@ -48,7 +48,7 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 |---|---|
 | `InputManager` + ControlBindings/driver stack | `GuiWindow::Update` reads `keyboard.h` state directly (`kbd_up/down/enter/escape_pressed`) |
 | `Resource` (Bitmap/Shape/Sound/...) | direct `Neuron::Graphics::TextureManager::LoadTexture(name)->GetShaderResourceView()` (no wrapper; `LoadTexture` takes a `std::string`) |
-| `GameApp` singleton | `gui/GameApp.h` — just `g_app->m_requestQuit` |
+| `GameApp` singleton (`m_requestQuit`) | the exit button calls `platform_request_quit()` (mirrors closing the window) |
 | `ClientEngine::OutputSize()` | direct `Neuron::Graphics::Core::GetOutputSize()` calls (no wrapper) |
 | `darwiniaRandom()` | `rand()` (cosmetic window-placement jitter only) |
 | `Timer::Core::GetTotalSeconds()` | the target's own `Neuron::Timer::Core` (kept) |
