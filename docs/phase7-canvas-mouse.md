@@ -1,11 +1,12 @@
 # Phase 7 — Full-window, mouse + touch driven Canvas
 
-> **Status:** implemented and committed; **awaiting a Windows build/run** (live resize is
-> the riskiest part to verify). Decisions taken: minimal/future-proof touch, OS cursor,
-> foundation **+ one real screen** (a centred MainMenu + modal Options window), and the
-> world stays letterboxed for now while the design points at eventually rendering it
-> full-window. The sections below were the plan; what actually shipped matches it. Current
-> state + open items: [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
+> **Status — landed and built on Windows.** Decisions taken: minimal/future-proof touch,
+> OS cursor, full-window + mouse-driven Canvas; the world stays letterboxed for now. The
+> demo **MainMenu + placeholder Options window** this phase introduced have since been
+> **superseded** — real game screens (Options/Settings/Market/Equip/Commander/Inventory/
+> Planet Data) now drive the overlay and the F1 demo menu was removed. The sections below
+> are the original plan, kept for history. Current state + open items:
+> [`gui-graphicscore-status.md`](gui-graphicscore-status.md).
 
 ## Goal
 Move the GUI `Canvas` out of the letterboxed 512×514 game canvas and into **full
