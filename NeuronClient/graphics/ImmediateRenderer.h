@@ -10,7 +10,7 @@
 //
 // This is the replacement for the deleted OpenGL-on-D3D9 layer: a genuine
 // fixed-function-style pipeline implemented on top of Neuron::Graphics::Core and the
-// HLSL shaders in NeuronGame/Shaders. Game code drives it with begin/vertex/end plus
+// HLSL shaders in NeuronClient/shaders. Game code drives it with begin/vertex/end plus
 // matrix and render-state calls (the native successors to glBegin/glVertex/glEnd,
 // the matrix stack, glBlendFunc, glEnable, ...). It is not a wrapper: it batches
 // geometry, owns the matrix/light/fog/texenv state, selects shader permutations, and

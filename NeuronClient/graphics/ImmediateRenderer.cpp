@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "ImmediateRenderer.h"
 
-// Compiled shader byte arrays (fxc /Fh /Vn). Generated into NeuronGame/CompiledShaders
-// by the NeuronGameShaders build target; that directory is on the include path.
+// Compiled shader byte arrays (fxc /Fh /Vn). Generated into shaders/CompiledShaders
+// by the NeuronClientShaders build target; that directory is on the include path.
 #include "generic-coloredVS.h"
 #include "generic-coloredPS.h"
 #include "generic-texturedVS.h"

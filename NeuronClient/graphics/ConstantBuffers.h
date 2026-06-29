@@ -3,7 +3,7 @@
 // GPU constant-buffer ABI for the native Direct3D 11 renderer.
 //
 // Each struct here is the CPU mirror of an HLSL `cbuffer` declared in
-// NeuronGame/Shaders/partials. The layouts are flattened (no nested structs) and
+// NeuronClient/shaders/partials. The layouts are flattened (no nested structs) and
 // padded explicitly so the C++ size and field offsets match the HLSL constant-buffer
 // packing rules exactly:
 //   - a scalar/vector never straddles a 16-byte boundary,
@@ -82,7 +82,7 @@ namespace Neuron::Graphics
   static_assert(sizeof(ClipConstants) == 32, "ClipConstants must match cbuffer b5");
 
   // Max directional lights. MUST equal the MAX_LIGHTS macro the lit shaders are
-  // compiled with (see NeuronGame/CMakeLists.txt).
+  // compiled with (see NeuronClient/CMakeLists.txt).
   inline constexpr int MAX_LIGHTS = 8;
 
   // b6 : fixed-function directional lighting. lightEnable uses a 16-byte stride per

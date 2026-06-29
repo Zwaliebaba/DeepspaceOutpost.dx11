@@ -21,19 +21,21 @@ the game keeps running exactly as before while the new stack compiles alongside 
 
 | Added | From | Notes |
 |---|---|---|
-| `NeuronGame/Shaders/*.hlsl` + `partials/*.hlsli` | donor `NeuronGame` | The 6 immediate-mode programs (generic colored/textured, colored-3d lit, text, text-overlay, gui-window). |
-| `NeuronGame/CompiledShaders/*.h` | donor `NeuronGame` | `fxc /Fh /Vn` byte arrays (`g_<name>`), committed so the build works without a dev-env fxc. |
-| `NeuronGame/CMakeLists.txt` | donor | `NeuronGameShaders` target; regenerates the headers via `fxc` when available. |
+| `NeuronClient/shaders/*.hlsl` + `partials/*.hlsli` | donor `NeuronGame` | The 6 immediate-mode programs (generic colored/textured, colored-3d lit, text, text-overlay, gui-window). |
+| `NeuronClient/shaders/CompiledShaders/*.h` | donor `NeuronGame` | `fxc /Fh /Vn` byte arrays (`g_<name>`), committed so the build works without a dev-env fxc. |
 | `NeuronClient/graphics/GraphicsCore.{h,cpp}` | donor `NeuronClient` | Device / swap chain / RTV+DSV / present. **Adapted** — see below. |
 | `NeuronClient/graphics/ImmediateRenderer.{h,cpp}` | donor `NeuronClient` | glBegin/glVertex-style immediate renderer over D3D11; `#include`s the compiled shaders. Imported verbatim. |
 | `NeuronClient/graphics/ConstantBuffers.h` | donor `NeuronClient` | GPU constant-buffer ABI (b0/b3/b6/b7/b8/b9); `static_assert`-guarded. Verbatim. |
 
 ### Build wiring
-- Top-level `CMakeLists.txt`: `add_subdirectory("NeuronGame")` **before** `NeuronClient`.
+> Note: the shaders originally landed in a separate `NeuronGame` library and were
+> later moved into `NeuronClient/shaders/` (the `NeuronGame` library was removed to
+> keep the libraries clean). The description below reflects the current layout.
 - `NeuronClient/CMakeLists.txt`: new sources/headers; `graphics/` on the public
-  include path; `NeuronGame/CompiledShaders` on the private include path;
-  `add_dependencies(NeuronClient NeuronGameShaders)`.
-- `NeuronGame/CMakeLists.txt`: relaxed the "fxc not found" case from `FATAL_ERROR`
+  include path; `shaders/CompiledShaders` on the private include path; an inline
+  `fxc` shader-compile step producing a `NeuronClientShaders` target with
+  `add_dependencies(NeuronClient NeuronClientShaders)`.
+- The shader step: relaxed the "fxc not found" case from `FATAL_ERROR`
   to a warning + no-op target, since the compiled headers are committed (a clean
   configure without the Windows SDK dev-env still builds against them).
 
@@ -63,7 +65,7 @@ Windows-SDK-only dependency policy:
 Linux with no MSVC / Windows SDK / DirectX, so a Windows build is required to
 verify it. Highest-risk items to check first on Windows:
 
-1. It builds: `NeuronGameShaders` runs (or the committed headers are picked up),
+1. It builds: `NeuronClientShaders` runs (or the committed headers are picked up),
    and `ImmediateRenderer.cpp` resolves all 12 `g_*` byte arrays.
 2. `ConstantBuffers.h` `static_assert`s hold under this toolchain.
 
