@@ -7,23 +7,22 @@ namespace Neuron::Graphics
 {
   namespace
   {
-    std::string NarrowPath(const std::wstring& _w)
+    // Normalize '\\' to '/' so "Textures\\X.dds" and "Textures/X.dds" share one cache
+    // entry (and one disk load).
+    std::string NormalizePath(std::string _path)
     {
-      if (_w.empty())
-        return {};
-      const int n = ::WideCharToMultiByte(CP_UTF8, 0, _w.data(), static_cast<int>(_w.size()), nullptr, 0, nullptr, nullptr);
-      std::string s(static_cast<size_t>(n), '\0');
-      ::WideCharToMultiByte(CP_UTF8, 0, _w.data(), static_cast<int>(_w.size()), s.data(), n, nullptr, nullptr);
-      for (char& c : s)
+      for (char& c : _path)
         if (c == '\\')
           c = '/';
-      return s;
+      return _path;
     }
   }
 
-  std::shared_ptr<Texture> TextureManager::LoadTexture(const std::wstring& _name)
+  std::shared_ptr<Texture> TextureManager::LoadTexture(const std::string& _name)
   {
-    if (const auto it = sm_textures.find(_name); it != sm_textures.end())
+    const std::string key = NormalizePath(_name);
+
+    if (const auto it = sm_textures.find(key); it != sm_textures.end())
       return it->second;
 
     auto texture = std::make_shared<Texture>();
@@ -31,8 +30,7 @@ namespace Neuron::Graphics
     ID3D11Device* device = Core::GetD3DDevice();
     if (device)
     {
-      const std::string path = NarrowPath(_name);
-      const Image img = load_image_rgba(path.c_str(), /*key_index0*/ false);
+      const Image img = load_image_rgba(key.c_str(), /*key_index0*/ false);
       if (img.ok())
       {
         D3D11_TEXTURE2D_DESC td{};
@@ -67,7 +65,7 @@ namespace Neuron::Graphics
       }
     }
 
-    sm_textures.emplace(_name, texture);
+    sm_textures.emplace(key, texture);
     return texture;
   }
 

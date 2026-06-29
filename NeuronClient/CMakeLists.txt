@@ -26,11 +26,10 @@ set(NEURONCLIENT_SOURCES
     graphics/TextureManager.cpp
 
     # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
-    # backed by thin native shims (gui/Input.h, gui/Resource.*, gui/GameApp.h).
-    # See docs/phase2-4-gui-text.md.
+    # backed by thin native shims (gui/Input.h, gui/GameApp.h). Textures load directly
+    # through Neuron::Graphics::TextureManager. See docs/phase2-4-gui-text.md.
     gui/TextRenderer.cpp
     gui/Strings.cpp
-    gui/Resource.cpp
     gui/GuiButton.cpp
     gui/GuiWindow.cpp
     gui/Canvas.cpp
@@ -66,7 +65,6 @@ set(NEURONCLIENT_HEADERS
     gui/GuiWindow.h
     gui/Canvas.h
     gui/GuiOverlay.h
-    gui/Resource.h
     gui/Input.h
     gui/GameApp.h
 

@@ -100,8 +100,8 @@ void GuiOverlay::Startup()
     // The donor text renderer expects a 16x14 ASCII-32 glyph grid. SpeccyFontENG.dds
     // is the closest shipped sheet; if glyph placement looks off, the sheet layout (or
     // GetTexCoordX/Y) needs adjusting - it will not crash.
-    g_gameFont.Startup(L"Fonts/SpeccyFontENG.dds");
-    g_editorFont.Startup(L"Fonts/SpeccyFontENG.dds");
+    g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
+    g_editorFont.Startup("Fonts/SpeccyFontENG.dds");
 
     Canvas::Startup();
     EnsureDemoWindow();

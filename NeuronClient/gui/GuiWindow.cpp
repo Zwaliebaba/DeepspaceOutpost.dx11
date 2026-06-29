@@ -5,8 +5,8 @@
 #include "GuiButton.h"
 #include "ImmediateRenderer.h"
 #include "Input.h"
-#include "Resource.h"
 #include "TextRenderer.h"
+#include "TextureManager.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
@@ -79,7 +79,7 @@ void GuiWindow::Render(bool hasFocus)
   // Main body fill
 
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::GuiWindow);
-  ImmediateRenderer::BindTexture(0, Resource::GetTexture("Textures\\InterfaceRed.dds"));
+  ImmediateRenderer::BindTexture(0, Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds")->GetShaderResourceView());
   ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
 
   float texH = 1.0f;

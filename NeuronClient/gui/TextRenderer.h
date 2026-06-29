@@ -22,7 +22,7 @@
 class TextRenderer
 {
   public:
-    void Startup(const std::wstring& _filename);
+    void Startup(const std::string& _filename);
     void Shutdown();
 
     void BeginText2D();
@@ -38,7 +38,7 @@ class TextRenderer
     static float GetTextWidth(size_t _numChars, float _size = 13.0f);
 
   protected:
-    std::wstring m_filename;
+    std::string m_filename;
     std::shared_ptr<Neuron::Graphics::Texture> m_texture;
     bool m_renderShadow = {};
 

@@ -160,7 +160,7 @@ namespace Neuron::Graphics
 
       // Bind a texture (or nullptr) to a unit and configure its environment/sampler.
       static void BindTexture(unsigned unit, ID3D11ShaderResourceView* srv) noexcept;
-      // Bind by integer handle (as returned by Resource::GetTexture / ConvertToTexture).
+      // Bind by integer handle (registered via RegisterTexture).
       static void BindTexture(unsigned unit, int textureHandle) noexcept;
       // Associate an integer texture handle with its shader-resource view. Called by the
       // texture loaders so handle-based call sites resolve to the native SRV.

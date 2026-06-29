@@ -43,12 +43,12 @@ namespace Neuron::Graphics
       static void Shutdown();
 
       // Load (or return the cached) texture by asset-relative name, using either
-      // '/' or '\\' separators, e.g. L"Textures/InterfaceRed.dds". Always returns a
+      // '/' or '\\' separators, e.g. "Textures/InterfaceRed.dds". Always returns a
       // non-null Texture; if the device is not yet up or the file is missing, the
       // returned Texture is simply not loaded (GetShaderResourceView() == nullptr).
-      static std::shared_ptr<Texture> LoadTexture(const std::wstring& _name);
+      static std::shared_ptr<Texture> LoadTexture(const std::string& _name);
 
     private:
-      inline static std::unordered_map<std::wstring, std::shared_ptr<Texture>> sm_textures;
+      inline static std::unordered_map<std::string, std::shared_ptr<Texture>> sm_textures;
   };
 }

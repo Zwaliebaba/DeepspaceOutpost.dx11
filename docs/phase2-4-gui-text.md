@@ -47,7 +47,7 @@ imported wholesale (Native-First; the target already has its own input/filesyste
 | Donor dependency | Replaced with |
 |---|---|
 | `InputManager` + ControlBindings/driver stack | `gui/Input.h` — `g_inputManager` mapping the `ControlMenu*` events onto `keyboard.h` state |
-| `Resource` (Bitmap/Shape/Sound/...) | `gui/Resource.{h,cpp}` — `GetTexture(name)` → `TextureManager` SRV |
+| `Resource` (Bitmap/Shape/Sound/...) | direct `Neuron::Graphics::TextureManager::LoadTexture(name)->GetShaderResourceView()` (no wrapper; `LoadTexture` takes a `std::string`) |
 | `GameApp` singleton | `gui/GameApp.h` — just `g_app->m_requestQuit` |
 | `ClientEngine::OutputSize()` | direct `Neuron::Graphics::Core::GetOutputSize()` calls (no wrapper) |
 | `darwiniaRandom()` | `rand()` (cosmetic window-placement jitter only) |

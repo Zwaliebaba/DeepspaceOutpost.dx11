@@ -19,7 +19,7 @@ constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
 constexpr float TEX_WIDTH = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
 constexpr float TEX_HEIGHT = 1.0f / 14.0f * TEX_STRETCH;
 
-void TextRenderer::Startup(const std::wstring& _filename)
+void TextRenderer::Startup(const std::string& _filename)
 {
   m_filename = _filename;
   // Synchronous load (the donor loaded asynchronously via a coroutine + ASyncLoader;
