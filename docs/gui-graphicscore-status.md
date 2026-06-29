@@ -15,7 +15,7 @@ client's foundation:
   + glBegin/glVertex-style immediate renderer; HLSL shaders in `NeuronClient/shaders`
   (fxc → `CompiledShaders/*.h`, committed).
 - **TextureManager** — native D3D11 textures with a generated mip chain; loads the
-  game's uncompressed `.dds` via the platform image loader.
+  game's `.dds` via its own native `graphics/DDSTextureLoader` (no platform image dep).
 - **Text + Strings** (`gui/TextRenderer`, `Strings`) — bitmap-font 2D text + JSON
   localization (`GameData/Strings/<lang>/*.json`).
 - **GUI** (`gui/Widget|GuiButton|GuiWindow|Canvas|GuiOverlay`) — the ECL window/menu
@@ -63,8 +63,11 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
   `ImmediateRenderer` if value controls are needed.
 - **Keyboard GUI nav** is transitional; retire it once mouse-driven menus cover the real
   screens (then simplify `GuiWindow::Update`).
-- **Font sheet**: `Fonts/SpeccyFontENG.dds` is assumed to match the renderer's 16×14
-  ASCII-32 grid; confirm glyph placement and adjust `TextRenderer::GetTexCoordX/Y` if not.
+- **Font sheet**: `Fonts/SpeccyFontENG.dds` is assumed to match the 16×14 ASCII-32
+  grid used by both `TextRenderer` (menus) and now the game's `gfx_display_*` text;
+  confirm glyph placement and adjust the grid math if not. The game text switched
+  from the old proportional verd font to this monospaced sheet (~8px advance), so
+  line/column layout should be visually re-checked on Windows.
 
 **Next migration work (Phase 8+):**
 - Convert real game screens (options/prefs, docked/trade/equip, charts) from
@@ -74,37 +77,45 @@ sub-window — mouse hover/click/drag/close, rendered through the imported stack
 - **Eventually render the world full-window** (drop the 512×514 letterboxed canvas);
   the seams are pointed that way.
 
-## Retiring the legacy platform 2D layer (`gfx_dx11.cpp` / `Image.cpp` / `Font.cpp`)
+## Retiring the legacy platform 2D layer (`gfx_dx11.cpp` / `Image.cpp`)
 
-These three are NOT independently removable; the dependency web (verified by grep):
+`Font.cpp` is **gone** (see below). The two remaining files and the dependency web
+(verified by grep):
 
 | File | What it is | Who depends on it |
 |---|---|---|
 | `platform/gfx_dx11.cpp` | Implements the **entire `gfx.h` contract** — 2D primitives (pixel/line/circle/tri/rect/poly), sprites, text (`gfx_display_*`), **depth-sorted 3D** (`gfx_render_polygon/line/start/finish`), the **scanner HUD**, clip regions, `xor_mode`, palette-index colour. | The whole game (`docked/intro/main/missions/options/space`, …) **and** `GfxRenderSink` (the `RenderQueue` replay). |
-| `platform/Font.cpp` | verd2/verd4 PCX grabber font atlas (ELITE_1/2). | **Only** `gfx_dx11.cpp` (its `drawString`). |
-| `platform/Image.cpp` | BMP/PCX/uncompressed-DDS decoders (`load_image_rgba`, `load_indexed`). | `gfx_dx11.cpp` (sprites), `Font.cpp` (PCX) **and the new `graphics/TextureManager.cpp`** (`.dds`). |
+| `platform/Image.cpp` | BMP/PCX/uncompressed-DDS decoders (`load_image_rgba`, `load_indexed`). | **Only** `gfx_dx11.cpp` (sprite loading). **No longer used by the new code** — `TextureManager` decodes `.dds` via `graphics/DDSTextureLoader`. |
 
-**Prerequisites, in order:**
+✅ **Done — `Font.cpp` deleted.** The game's `gfx_display_*` text no longer uses the
+verd2/verd4 PCX grabber atlas. `drawString` now draws monospaced glyph cells from the
+**same `Fonts/SpeccyFontENG.dds` sheet `TextRenderer` uses** (16×14 ASCII-32 grid,
+loaded once via `TextureManager`), still emitted through `gfx_dx11`'s deferred batch so
+in-game text keeps submission-order compositing and scissor clipping. Net effect: one
+font system across menus and game; metrics changed proportional → monospaced (re-verify
+layout on Windows).
+
+**Prerequisites for removing `gfx_dx11.cpp` itself, in order:**
 
 1. **Reimplement the full `gfx_*` contract on the new stack** before `gfx_dx11.cpp` can
    go. This is the big one — it means moving **all** game rendering (not just menus):
    - 2D primitives + sprites → `ImmediateRenderer`;
-   - all `gfx_display_*` text → `TextRenderer`;
+   - all `gfx_display_*` text → `TextRenderer` (the font sheet is already unified);
    - the **depth-sorted 3D wireframe** path (`gfx_render_polygon/line` + `gfx_start/finish_render`) → an `ImmediateRenderer` equivalent (this is the in-flight ship/scene render);
    - the **scanner/HUD**, clip-region → scissor, `xor_mode` cross-hairs, and palette-index → RGBA colour resolution.
    - Then either rewrite `GfxRenderSink` to target the new backend, or replace the `RenderQueue` replay entirely.
    - The 512×514 canvas + `Renderer` present pipeline exist to host this 2D batch; retiring `gfx_dx11` ties into the "render the world full-window" goal and shrinking/removing `Renderer`.
-2. **`Font.cpp`** can be deleted together with `gfx_dx11.cpp` (it has no other consumer);
-   the GUI already uses `TextRenderer` + a `.dds` font sheet instead.
-3. **`Image.cpp` cannot be deleted with the others** — `TextureManager` still calls
-   `load_image_rgba`. To remove it, first give `TextureManager` (and any new sprite
-   path) a **self-contained image/DDS decoder**, *or* simply **keep `Image.cpp` as the
-   canonical loader** (optionally moved out of `platform/` into the graphics layer) and
-   only drop the BMP/PCX paths once nothing loads those formats.
+2. **`Image.cpp`** is now used **only** by `gfx_dx11.cpp` (sprite loading) — the new
+   `TextureManager` has its own `graphics/DDSTextureLoader`. So `Image.cpp` can be
+   deleted **together with** `gfx_dx11.cpp`; no re-homing is needed. (Until then it
+   stays for the legacy sprite path. Once the sprites are `.dds` they can load through
+   `TextureManager` instead, dropping the last `Image.cpp` consumer.)
 
-**Net:** `Font.cpp` is easy (goes with `gfx_dx11`); `gfx_dx11.cpp` is a large,
-whole-renderer migration; `Image.cpp` is a shared dependency that must be re-homed, not
-just deleted. None of this is started yet.
+**Net:** `Image.cpp` goes away together with `gfx_dx11.cpp`; the hard part is
+`gfx_dx11.cpp` itself — a large, whole-renderer migration of the `gfx_*` contract onto
+the new stack. ✅ Done so far: `TextureManager` decoupled from `Image.cpp` via the native
+`graphics/DDSTextureLoader`; **`Font.cpp` removed** and game text unified onto the `.dds`
+sheet (this change).
 
 ## Phase index
 - `phase1-graphicscore.md` — GraphicsCore + ImmediateRenderer + shaders.

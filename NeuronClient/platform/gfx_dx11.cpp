@@ -11,8 +11,9 @@
  *
  * Colours are palette indices resolved against scanner.bmp. Solid primitives
  * are opaque (index 0 -> opaque black); sprites colour-key index 0 to
- * transparent. Text uses the verd2/verd4 font sheets (ELITE_1 tinted, ELITE_2
- * colour).
+ * transparent. Text is drawn from the shared .dds bitmap-font sheet (the same
+ * one the GUI's TextRenderer uses), batched here so it composites and clips in
+ * draw order with the rest of the 2D.
  */
 
 #include "pch.h"
@@ -20,7 +21,7 @@
 #include "Renderer.h"
 #include "gfx_dx11.h"
 #include "Image.h"
-#include "Font.h"
+#include "TextureManager.h"
 
 #include "gfx.h"
 #include "ViewMetrics.h"
@@ -115,9 +116,21 @@ com_ptr<ID3D11SamplerState>    g_sampler;
 size_t                        g_cvb_cap = 0, g_tvb_cap = 0;
 
 std::map<std::string, Texture> g_textures;
-Font     g_font[2];          /* 0 = ELITE_1 (mono), 1 = ELITE_2 (colour) */
-Texture  g_font_tex[2];
-bool     g_fonts_ready = false;
+
+/* The shared .dds bitmap font: a 16-column x 14-row grid of cells starting at
+ * ASCII 32, identical to the sheet the GUI's TextRenderer draws (so game text and
+ * menu text match). It is loaded once at engine start via TextureManager; we just
+ * borrow its SRV and feed glyph quads through this batch. Replaces the old
+ * verd2/verd4 grabber-font atlas (platform/Font). */
+std::shared_ptr<Neuron::Graphics::Texture> g_font_sheet;
+
+/* Monospaced cell metrics in canvas pixels. The body advance (~8px) matches the
+ * layout the game already assumes (e.g. gfx_display_pretty_text wraps at width/8),
+ * and the ~0.6 w:h ratio matches TextRenderer so the sheet looks the same here and
+ * in the menus. The title size is the larger heading font (psize 140). */
+struct FontSize { float charW, charH; };
+constexpr FontSize kBodyFont  { 8.0f, 13.0f };
+constexpr FontSize kTitleFont { 12.0f, 20.0f };
 
 inline uint32_t col_rgba(int index)
 {
@@ -259,39 +272,42 @@ const char* spriteFile(int sprite_no)
 	}
 }
 
-void ensureFonts(ID3D11Device* dev)
+ID3D11ShaderResourceView* fontSheetSRV()
 {
-	if (g_fonts_ready) return;
-	g_fonts_ready = true;   /* attempt once */
-	g_font[0].load("verd2.pcx", false);
-	g_font[1].load("verd4.pcx", true);
-	for (int i = 0; i < 2; i++)
-		if (g_font[i].loaded())
-			g_font_tex[i] = makeTexture(dev, g_font[i].atlas());
+	/* TextureManager caches, so this is a hash lookup after the first call.
+	 * ClientEngine loads this sheet at start-up (once the device is up), so by the
+	 * time the game draws text it is resident. */
+	if (!g_font_sheet)
+		g_font_sheet = Neuron::Graphics::TextureManager::LoadTexture("Fonts/SpeccyFontENG.dds");
+	return (g_font_sheet && g_font_sheet->IsLoaded()) ? g_font_sheet->GetShaderResourceView() : nullptr;
 }
 
-void drawString(int which, int x, int y, const char* s, uint32_t tint)
+void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 {
-	Renderer* r = platform_renderer();
-	if (!r || !s) return;
-	ensureFonts(r->device());
-	Font& f = g_font[which];
-	if (!f.loaded() || !g_font_tex[which].srv)
-		return;
+	ID3D11ShaderResourceView* srv = fontSheetSRV();
+	if (!srv || !s) return;
 
-	float aw = (float)g_font_tex[which].w;
-	float ah = (float)g_font_tex[which].h;
-	int pen = x;
+	/* Per-glyph tex cell on the 16x14 ASCII-32 grid. These constants mirror
+	 * TextRenderer::GetTexCoordX/Y (gui/TextRenderer.cpp) so the same sheet renders
+	 * identically here; the small margins inset the cell to avoid sampling the
+	 * neighbouring glyph. chars <= 32 (space + control) advance without drawing. */
+	constexpr float TEX_MARGIN  = 0.003f;
+	constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
+	constexpr float TEX_WIDTH   = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
+	constexpr float TEX_HEIGHT  = 1.0f / 14.0f * TEX_STRETCH;
+
+	float pen = (float)x;
 	for (; *s; s++)
 	{
-		const Glyph& g = f.glyph((unsigned char)*s);
-		if (*s != ' ' && g.w > 0 && g.h > 0)
+		const unsigned char c = (unsigned char)*s;
+		if (c > 32)
 		{
-			pushTexQuad(g_font_tex[which].srv.get(),
-						(float)pen, (float)y, (float)(pen + g.w), (float)(y + g.h),
-						g.x / aw, g.y / ah, (g.x + g.w) / aw, (g.y + g.h) / ah, tint);
+			const float u0 = (c % 16) * (1.0f / 16.0f) + TEX_MARGIN + 0.002f;
+			const float v0 = ((c >> 4) - 2) * (1.0f / 14.0f) + TEX_MARGIN + 0.001f;
+			pushTexQuad(srv, pen, (float)y, pen + fs.charW, (float)y + fs.charH,
+						u0, v0, u0 + TEX_WIDTH, v0 + TEX_HEIGHT, tint);
 		}
-		pen += g.w + 1;
+		pen += fs.charW;
 	}
 }
 
@@ -558,27 +574,23 @@ void gfx_set_scene_clip(void)
 /* ---- text ---- */
 void gfx_display_text(int x, int y, const char* txt)
 {
-	drawString(0, x, y, txt, col_rgba(GFX_COL_WHITE));
+	drawString(kBodyFont, x, y, txt, col_rgba(GFX_COL_WHITE));
 }
 void gfx_display_colour_text(int x, int y, const char* txt, int col)
 {
-	drawString(0, x, y, txt, col_rgba(col));
+	drawString(kBodyFont, x, y, txt, col_rgba(col));
 }
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
 	/* Centre on the live canvas: 256 in retro, the window middle in full-window
 	 * flight (so in-flight messages stay centred when the 3D fills the screen). */
 	const int mid = g_scene_full ? canvasW() / 2 : 256;
-	if (psize == 140)   /* ELITE_2 colour title font, drawn in its own colours */
-	{
-		int w = g_font[1].loaded() ? g_font[1].textWidth(str) : 0;
-		drawString(1, mid - w / 2, y, str, 0xFFFFFFFFu);
-	}
-	else                /* ELITE_1 body font, tinted */
-	{
-		int w = g_font[0].loaded() ? g_font[0].textWidth(str) : 0;
-		drawString(0, mid - w / 2, y, str, col_rgba(col));
-	}
+	/* psize 140 selects the larger heading font; both are the one .dds sheet now
+	 * (the old ELITE_2 multicolour title sheet is gone), tinted by the caller's
+	 * colour. Monospaced, so the width is simply chars * cell width. */
+	const FontSize& fs = (psize == 140) ? kTitleFont : kBodyFont;
+	const int w = static_cast<int>(std::strlen(str) * fs.charW);
+	drawString(fs, mid - w / 2, y, str, col_rgba(col));
 }
 
 void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt)
@@ -604,7 +616,7 @@ void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt
 			*bp++ = *str++;
 		*bp = '\0';
 
-		drawString(0, tx, ty, strbuf, col_rgba(GFX_COL_WHITE));
+		drawString(kBodyFont, tx, ty, strbuf, col_rgba(GFX_COL_WHITE));
 		ty += 8 * GFX_SCALE;
 	}
 }

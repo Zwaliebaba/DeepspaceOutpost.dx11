@@ -8,9 +8,9 @@
 // native D3D11-only replacement that satisfies the same call sites the text
 // renderer and GUI use: LoadTexture(name) -> Texture::GetShaderResourceView().
 //
-// All of the game's .dds assets are uncompressed 32-bpp (no DXTn/BCn), so loading
-// goes through the existing platform image loader (platform/Image.h::load_image_rgba)
-// rather than a dedicated block-compressed DDS path.
+// Textures load through this layer's own native DDS loader (graphics/DDSTextureLoader),
+// so TextureManager has no dependency on the legacy platform/Image loader. A full mip
+// chain is generated for non-block-compressed formats.
 
 #include "GraphicsCore.h"
 
