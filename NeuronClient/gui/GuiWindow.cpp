@@ -6,7 +6,7 @@
 #include "ImmediateRenderer.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
-#include "keyboard.h"
+#include "input_win.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::Primitive;
@@ -171,20 +171,20 @@ void GuiWindow::Update()
 
   if (strcmp(Canvas::EclGetCurrentFocus().c_str(), m_name.c_str()) == 0)
   {
-    if (kbd_down_pressed != 0)
+    if (input_menu_edge(MenuDown))
     {
       m_buttonChangedThisUpdate = true;
       m_currentButton++;
       m_currentButton = std::min(m_currentButton, static_cast<int>(m_buttonOrder.size()) - 1);
     }
-    if (kbd_up_pressed != 0)
+    if (input_menu_edge(MenuUp))
     {
       m_buttonChangedThisUpdate = true;
       m_currentButton--;
       m_currentButton = std::max(0, m_currentButton);
     }
 
-    if (kbd_enter_pressed != 0)
+    if (input_menu_edge(MenuActivate))
     {
       if (!m_buttonOrder.empty() && m_currentButton >= 0 && m_currentButton < static_cast<int>(m_buttonOrder.size()))
       {
@@ -194,7 +194,7 @@ void GuiWindow::Update()
       }
     }
 
-    if (kbd_escape_pressed != 0)
+    if (input_menu_edge(MenuClose))
       Canvas::EclRemoveWindow(m_name);
   }
 }

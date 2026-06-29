@@ -8,7 +8,7 @@
 #include "Strings.h"
 
 #include "Renderer.h"
-#include "keyboard.h"
+#include "input_win.h"
 
 using Neuron::Graphics::ImmediateRenderer;
 using Neuron::Graphics::MatrixStackId;
@@ -97,8 +97,12 @@ void GuiOverlay::Update()
   if (!s_ready)
     return;
 
-  // Edge-detected F1 toggle (kbd_F1_pressed is level state).
-  const bool f1 = kbd_F1_pressed != 0;
+  // Refresh edge state once per frame so menu navigation steps once per keypress.
+  input_update_menu_edges();
+
+  // F1 toggles the menu. Read the raw key: while the menu owns input the game's kbd_*
+  // snapshot is suppressed, so it can't be used to toggle back off.
+  const bool f1 = input_key_down(VK_F1);
   if (f1 && !s_prevF1)
   {
     s_shown = !s_shown;
@@ -107,10 +111,18 @@ void GuiOverlay::Update()
   }
   s_prevF1 = f1;
 
+  // The window may have been dismissed (Esc / close button) from within EclUpdate last
+  // frame; reflect that so input returns to the game.
+  if (s_shown && !Canvas::EclGetWindow(std::string_view("DemoMenu")))
+    s_shown = false;
+
+  // While the menu is up it owns input: hide the keyboard from the game.
+  input_suppress_game_keys(s_shown);
+
   if (!s_shown)
     return;
 
-  Canvas::EclUpdate(); // keyboard menu navigation (up/down/enter/esc -> keyboard.h)
+  Canvas::EclUpdate(); // edge-triggered menu navigation (up/down/enter/esc)
 }
 
 void GuiOverlay::Render(int canvasWidth, int canvasHeight)

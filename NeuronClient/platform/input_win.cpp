@@ -23,6 +23,14 @@ namespace {
 bool g_key[256] = {};          /* current held state, VK indexed */
 volatile bool g_any_key = false;
 
+/* When a modal GUI owns input, the game's kbd_* snapshot reports no keys (the GUI
+ * reads raw key state via input_key_down, which ignores this). */
+bool s_suppressGameKeys = false;
+
+/* Rising-edge state for the GUI menu controls (recomputed once per frame). */
+bool s_menuPrev[MenuControlCount] = {};
+bool s_menuEdge[MenuControlCount] = {};
+
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
 int  g_q[QN];
@@ -32,7 +40,9 @@ void q_push(int c) { int n = (g_qtail + 1) % QN; if (n != g_qhead) { g_q[g_qtail
 bool q_empty()     { return g_qhead == g_qtail; }
 int  q_pop()       { if (q_empty()) return 0; int c = g_q[g_qhead]; g_qhead = (g_qhead + 1) % QN; return c; }
 
-inline bool down(int vk) { return (vk >= 0 && vk < 256) && g_key[vk]; }
+/* Game-facing held state: gated by the modal-GUI suppression so the whole kbd_*
+ * snapshot below goes quiet in one place when a menu owns input. */
+inline bool down(int vk) { return !s_suppressGameKeys && (vk >= 0 && vk < 256) && g_key[vk]; }
 
 } // namespace
 
@@ -69,6 +79,40 @@ LRESULT CALLBACK InputWndProc(HWND, UINT msg, WPARAM wparam, LPARAM)
 void input_register_event_processor(void)
 {
 	EventManager::AddEventProcessor(InputWndProc);
+}
+
+/* ---- GUI menu input (raw key state, independent of the game's kbd_* gate) ---- */
+
+bool input_key_down(int vk)
+{
+	return (vk >= 0 && vk < 256) && g_key[vk];
+}
+
+void input_suppress_game_keys(bool suppress)
+{
+	s_suppressGameKeys = suppress;
+}
+
+void input_update_menu_edges(void)
+{
+	bool cur[MenuControlCount] = {};
+	cur[MenuUp]       = input_key_down(VK_UP)    || input_key_down('S');
+	cur[MenuDown]     = input_key_down(VK_DOWN)  || input_key_down('X');
+	cur[MenuLeft]     = input_key_down(VK_LEFT)  || input_key_down(VK_OEM_COMMA);
+	cur[MenuRight]    = input_key_down(VK_RIGHT) || input_key_down(VK_OEM_PERIOD);
+	cur[MenuActivate] = input_key_down(VK_RETURN);
+	cur[MenuClose]    = input_key_down(VK_ESCAPE);
+
+	for (int i = 0; i < MenuControlCount; ++i)
+	{
+		s_menuEdge[i] = cur[i] && !s_menuPrev[i];
+		s_menuPrev[i] = cur[i];
+	}
+}
+
+bool input_menu_edge(MenuControl control)
+{
+	return control >= 0 && control < MenuControlCount && s_menuEdge[control];
 }
 
 /* ---- keyboard.h contract ---- */
