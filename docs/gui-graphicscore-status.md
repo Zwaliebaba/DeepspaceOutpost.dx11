@@ -113,9 +113,17 @@ the GUI never touches the legacy gfx drawing.
 - **Whole game on the GameMain lifecycle** — the nested blocking screen loops in `game_main()`
   became an engine-driven state machine (intro → flight → game-over); the engine owns the
   frame (`ClientEngine::Frame`: lifecycle + present + pump + pace).
-- **Legacy gfx_display_* screens removed** — `options.cpp` (Options/Settings/Quit) and the
-  unreachable `display_market_prices` / `display_inventory` / `equip_ship` (all replaced by
-  GUI windows). `display_data_on_planet` is kept (F7 in MMO mode by design).
+- **Chart crosshair as a texture** — the F5/F6 charts redraw every frame (the replicated
+  chart builders are idempotent) with the crosshair drawn as a `Textures/Crosshair.dds`
+  sprite (`IMG_CROSSHAIR`) on top, replacing the dropped XOR-erase toggle.
+- **Legacy gfx_display_* screens removed** — `options.cpp` (Options/Settings/Quit), the
+  unreachable `display_market_prices` / `display_inventory` / `equip_ship`, and the whole
+  dead-by-guard cluster behind them: the `SCR_MARKET_PRICES` / `SCR_EQUIP_SHIP` / `SCR_QUIT`
+  keyboard cases, the `return_pressed` / `y_pressed` / `n_pressed` handlers + `finish_game`,
+  the legacy market/equip nav functions (`buy_stock`, `select_*_stock`, `highlight_stock`,
+  `buy_equip`, `select_*_equip`, …), and the matching `SCR_*` defines. The render-free GUI
+  accessors (`market_*`, `equip_do`/`equip_reset`/`equip_row_text`/`equip_buyable`) are kept;
+  `display_data_on_planet` is kept (F7 in MMO mode by design).
 - **Review hardening** — `vsnprintf` bounds (+ no `string_view`-as-format), the present
   binds its own opaque/no-depth OM state, `gfx_display_pretty_text` wrap bounded, the GUI
   panel SRV cached, and topology/shader asserts.
@@ -124,39 +132,35 @@ the GUI never touches the legacy gfx drawing.
 ## Windows verification
 
 Confirmed on Windows: intro screens, the letterboxed menu/station screens (no black-flash),
-crisp outlined text, and in-flight 3D (planet/ships render steady after the server landmark
-AOI fix — see `MIGRATION_ROADMAP.md`). GUI menus, the Options/Settings/Quit + Market
+crisp outlined text, the **charts** (F5/F6, scissor-clipped at scale ≠ 1), in-flight 3D
+(planet/ships render steady after the server landmark AOI fix — see `MIGRATION_ROADMAP.md`),
+and the **GameMain state-machine arc** (intro → launch → flight → death → game-over →
+respawn, incl. the docking break pattern). GUI menus, the Options/Settings/Quit + Market
 migrations, and palette colour were confirmed earlier.
 
 Still wants a Windows pass (compile-gated by CI, not yet exercised end-to-end):
 
-- the **GameMain state machine** full arc: intro → launch → flight → death → game-over →
-  back to intro, plus the nested blocking sequences (docking break pattern, mission briefs)
-  that ride the `Frame()` re-entrancy guard;
-- **scissor-clipped charts** at scale ≠ 1 (F5/F6) landing correctly;
+- the new **chart crosshair sprite** (sized/centred correctly over F5/F6);
+- **mission briefs** (the other nested blocking sequence that rides the `Frame()`
+  re-entrancy guard);
 - **live window resize** (`WM_SIZE` → Core swap-chain rebuild) — no crash, correct layout
   (note: resizing while parked on a static menu can briefly drop the image — no retained
   canvas; cosmetic).
 
 ## Next steps (in order)
 
-1. **Windows smoke test** of the state-machine arc + charts + resize (see above) — the
-   validation gate before building further on this stack.
-2. **Chart cross-hair as a texture** — the XOR logic-op path was dropped in the Render2D
-   move (it never worked reliably); draw the crosshair as a sprite/quad instead.
-3. **Finish the sim/draw split in the flight state** — `game_render_scene`'s flight path
+1. **Finish the sim/draw split in the flight state** — `game_render_scene`'s flight path
    still runs fused simulation-and-draw steps (the `mcount` bookkeeping, `update_local_objects`,
    `render_replicated_objects`). Separating pure simulation into `game_update` is blocked by
    the `mcount` interleaving; a deliberate pass could untangle it.
-4. **A4 render-seam ownership** — give a client per-frame render context the `RenderQueue`
+2. **A4 render-seam ownership** — give a client per-frame render context the `RenderQueue`
    + `GfxRenderSink`, retiring the `ActiveRenderQueue()` / `g_gfxSink` globals
    (`RenderContext.h`). Tied to the GameLogic split.
-5. **Retire the dead-by-guard keyboard cases** — the `SCR_MARKET_PRICES` / `SCR_EQUIP_SHIP`
-   / `SCR_QUIT` cases (and their handlers) are now unreachable; remove them once their last
-   uses are confirmed gone, and prune the matching `SCR_*` defines.
-6. **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
+3. **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
    simplify `GuiWindow::Update`).
-7. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
+4. **Tidy the now-dead chart bookkeeping** — the crosshair rewrite left `old_cross_x/y` and
+   `cross_timer` write-only (the XOR-erase + debounce are gone); drop them when convenient.
+5. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
    `WM_POINTER` touch is wired but dormant (`EnableMouseInPointer` left off); re-check the
    monospaced font metrics on the charts / dense screens.
 
