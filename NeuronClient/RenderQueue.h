@@ -36,6 +36,7 @@ namespace Neuron::Render
     Triangle,
     RenderPolygon,   // depth-sorted 3D polygon (gfx_render_polygon)
     RenderLine,      // depth-sorted 3D line (gfx_render_line)
+    DrawModel,       // GPU 3D model instance (camera-space transform; see ModelDraw)
     Sprite,
     Text,
     CentreText,
@@ -63,6 +64,25 @@ namespace Neuron::Render
     uint32_t textCount{};     // text length (excluding the trailing '\0')
   };
 
+  // A 3D model instance for the GPU scene pass - the successor to the
+  // CPU-projected RenderPolygon stream. Instead of pre-projected 2D points, it
+  // carries the object's identity and its camera-space transform (orientation
+  // basis + position) plus presentation options; the client's Scene3D renderer
+  // turns one of these into an indexed draw with a real perspective + z-buffer.
+  // POD (no D3D, no game headers) so the seam stays portable and the sim stays
+  // headless. Records live in the owning RenderQueue's model arena, referenced by
+  // a DrawModel Command's dataOffset.
+  struct ModelDraw
+  {
+    int      type = 0;        // legacy SHIP_* model id
+    int      style = 0;       // render style: 0 = solid, 1 = wireframe
+    int      colour = -1;     // palette override; < 0 keeps the model's own face colours
+    uint32_t flags = 0;       // legacy local_object flags (e.g. FLG_FIRING)
+    double   location[3] = {};         // camera-space position (x right, y up, z forward)
+    double   rotmat[3][3] = {};        // orientation basis: row 0 = side, 1 = roof, 2 = nose
+    double   distance = 0.0;  // camera distance (LOD / tie-break)
+  };
+
   // Consumer contract. A backend implements this to execute recorded commands;
   // the method set mirrors the RenderQueue recording API one-to-one. The D3D11
   // platform sink forwards to gfx_*; the null sink (headless) is all no-ops.
@@ -81,6 +101,7 @@ namespace Neuron::Render
     virtual void Triangle(int _x0, int _y0, int _x1, int _y1, int _x2, int _y2, int _colour) = 0;
     virtual void RenderPolygon(int _numPoints, const int* _points, int _colour, int _dist) = 0;
     virtual void RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour) = 0;
+    virtual void DrawModel(const ModelDraw& _model) = 0;
     virtual void Sprite(int _spriteId, int _x, int _y) = 0;
     virtual void Text(int _x, int _y, const char* _text) = 0;
     virtual void CentreText(int _y, const char* _text, int _pointSize, int _colour) = 0;
@@ -106,6 +127,7 @@ namespace Neuron::Render
     void Triangle(int, int, int, int, int, int, int) override {}
     void RenderPolygon(int, const int*, int, int) override {}
     void RenderLine(int, int, int, int, int, int) override {}
+    void DrawModel(const ModelDraw&) override {}
     void Sprite(int, int, int) override {}
     void Text(int, int, const char*) override {}
     void CentreText(int, const char*, int, int) override {}
@@ -134,6 +156,7 @@ namespace Neuron::Render
     void Triangle(int _x0, int _y0, int _x1, int _y1, int _x2, int _y2, int _colour);
     void RenderPolygon(int _numPoints, const int* _points, int _intCount, int _colour, int _dist);
     void RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour);
+    void DrawModel(const ModelDraw& _model);
     void Sprite(int _spriteId, int _x, int _y);
     void Text(int _x, int _y, std::string_view _text);
     void CentreText(int _y, std::string_view _text, int _pointSize, int _colour);
@@ -155,7 +178,8 @@ namespace Neuron::Render
     uint32_t AppendText(std::string_view _text);
 
     std::vector<Command> m_commands;
-    std::vector<int> m_points;   // arena: 3D polygon point lists
-    std::vector<char> m_text;    // arena: NUL-terminated text bytes
+    std::vector<int> m_points;       // arena: 3D polygon point lists
+    std::vector<char> m_text;        // arena: NUL-terminated text bytes
+    std::vector<ModelDraw> m_models; // arena: 3D model instances (DrawModel)
   };
 }

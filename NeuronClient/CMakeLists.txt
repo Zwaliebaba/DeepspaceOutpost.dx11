@@ -72,6 +72,8 @@ set(NEURONCLIENT_HEADERS
     # Generic engine headers.
     Strings.h
     ViewMetrics.h
+    SceneProjection.h
+    Mesh.h
     CameraFollow.h
     ReplicatedScene.h
     RenderQueue.h

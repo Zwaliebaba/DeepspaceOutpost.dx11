@@ -53,6 +53,13 @@ void GfxRenderSink::RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, in
   gfx_render_line(_x0, _y0, _x1, _y1, _dist, _colour);
 }
 
+void GfxRenderSink::DrawModel(const Neuron::Render::ModelDraw& /*_model*/)
+{
+  // No-op until the GPU scene pass lands (Phase 2): the live path still emits the
+  // CPU-projected RenderPolygon stream, so no DrawModel commands are recorded yet.
+  // Phase 2 forwards this to the Scene3D renderer.
+}
+
 void GfxRenderSink::Sprite(int _spriteId, int _x, int _y)
 {
   gfx_draw_sprite(_spriteId, _x, _y);

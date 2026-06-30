@@ -10,6 +10,7 @@ namespace Neuron::Render
     m_commands.clear();
     m_points.clear();
     m_text.clear();
+    m_models.clear();
   }
 
   Command& RenderQueue::Push(CommandType _type)
@@ -93,6 +94,15 @@ namespace Neuron::Render
     c.x0 = _x0; c.y0 = _y0; c.x1 = _x1; c.y1 = _y1; c.dist = _dist; c.colour = _colour;
   }
 
+  void RenderQueue::DrawModel(const ModelDraw& _model)
+  {
+    Command& c = Push(CommandType::DrawModel);
+    // The fixed-size payload lives in the model arena; reference it by index
+    // through the command's int-arena offset slot (no separate index field needed).
+    c.dataOffset = static_cast<uint32_t>(m_models.size());
+    m_models.push_back(_model);
+  }
+
   void RenderQueue::Sprite(int _spriteId, int _x, int _y)
   {
     Command& c = Push(CommandType::Sprite);
@@ -150,6 +160,7 @@ namespace Neuron::Render
           _sink.RenderPolygon(c.param, m_points.data() + c.dataOffset, c.colour, c.dist);
           break;
         case CommandType::RenderLine:   _sink.RenderLine(c.x0, c.y0, c.x1, c.y1, c.dist, c.colour); break;
+        case CommandType::DrawModel:    _sink.DrawModel(m_models[c.dataOffset]); break;
         case CommandType::Sprite:       _sink.Sprite(c.param, c.x0, c.y0); break;
         case CommandType::Text:         _sink.Text(c.x0, c.y0, m_text.data() + c.textOffset); break;
         case CommandType::CentreText:   _sink.CentreText(c.y0, m_text.data() + c.textOffset, c.param, c.colour); break;
