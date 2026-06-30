@@ -126,11 +126,22 @@ void gfx_update_screen(void)
 {
 	if (g_renderer_ready)
 	{
-		gfx2d_flush();           /* draw the frame's 2D batch (letterboxed) to the back buffer */
 		GuiOverlay::Update();
-		/* The GUI draws full-window on top (client space), then present. No-op unless shown. */
-		GuiOverlay::Render(g_renderer.clientWidth(), g_renderer.clientHeight());
-		g_renderer.swap();
+		const bool overlayShown = GuiOverlay::IsShown();
+
+		/* Draw the frame's 2D batch (letterboxed) to the back buffer. An idle frame
+		 * (empty batch, no overlay) paints nothing and is not presented, so the last
+		 * presented frame stays on screen - the menu/station screens repaint on demand,
+		 * not every frame, and FLIP_DISCARD keeps no retained content. The overlay forces
+		 * a fresh (cleared) frame to composite onto. */
+		const bool painted = gfx2d_flush(overlayShown);
+		if (painted)
+		{
+			/* The GUI draws full-window on top (client space). No-op unless shown. */
+			GuiOverlay::Render(g_renderer.clientWidth(), g_renderer.clientHeight());
+			g_renderer.swap();
+		}
+
 		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
 		 * render path re-enables full-window mode each frame it draws. */
 		gfx_set_scene_fullwindow(0);

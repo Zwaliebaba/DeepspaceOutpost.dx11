@@ -6,9 +6,10 @@
  * The gfx.h 2D contract on a submission-order batch renderer. Two vertex streams
  * (solid-colour and textured) feed a single command list, so lines/polygons,
  * sprites, the HUD bitmap and text all composite in the exact order the game draws
- * them. The batch replays into the persistent 512x514 canvas in gfx2d_flush() -
- * through Neuron::Graphics::Render2D - and Renderer::present() then blits it to the
- * window. (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
+ * them. In gfx2d_flush() the batch replays through Neuron::Graphics::Render2D straight
+ * onto the back buffer (letterboxed), and Renderer::swap() then presents it. An idle
+ * frame with an empty batch is left unpresented so the last frame persists (see
+ * gfx2d_flush). (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *
  * Colours are palette indices resolved against scanner.bmp. Solid primitives are
  * opaque (index 0 -> opaque black); sprite/HUD art is .dds (alpha baked in). Text is
@@ -566,13 +567,23 @@ void gfx_finish_render(void)
 /* =====================================================================
  *  Flush
  * ===================================================================== */
-void gfx2d_flush(void)
+bool gfx2d_flush(bool forcePresent)
 {
 	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return false; }
+
+	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
+	 * previously presented frame stays on screen. The menu/station screens repaint only
+	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
+	 * empty batch here is what made those screens flash to black on idle frames. */
+	if (g_cmds.empty() && !forcePresent)
+	{
+		g_cverts.clear(); g_tverts.clear(); g_cmds.clear();
+		return false;
+	}
 
 	/* The batch is authored in the virtual space (retro 512x514, or the client area in
 	 * full-window flight). Letterbox it onto the back buffer with an integer scale so the
@@ -655,4 +666,5 @@ void gfx2d_flush(void)
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
+	return true;
 }
