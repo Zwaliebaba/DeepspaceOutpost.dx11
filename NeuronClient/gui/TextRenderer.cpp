@@ -9,11 +9,12 @@ using Neuron::Graphics::TextureManager;
 // Horizontal size as a proportion of vertical size.
 constexpr float HORIZONTAL_SIZE = 0.6f;
 
-constexpr float TEX_MARGIN = 0.003f;
-constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
-
-constexpr float TEX_WIDTH = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
-constexpr float TEX_HEIGHT = 1.0f / 14.0f * TEX_STRETCH;
+// One glyph cell on the 16-col x 14-row grid (16x16 px cells in the 256x224 sheet).
+// Cells are sampled whole, on exact texel boundaries, so point sampling reconstructs
+// the native glyph pixels cleanly at any size (the former 0.9 crop + sub-texel margins
+// pushed sampling off the texel grid and softened small text).
+constexpr float TEX_WIDTH = 1.0f / 16.0f;
+constexpr float TEX_HEIGHT = 1.0f / 14.0f;
 
 void TextRenderer::Startup(const std::string& _filename)
 {
@@ -28,18 +29,16 @@ void TextRenderer::Shutdown() { m_texture = nullptr; }
 
 float TextRenderer::GetTexCoordX(unsigned char theChar)
 {
-  constexpr float CHAR_WIDTH = 1.0f / 16.0f;
+  // Left edge of the glyph's column cell, aligned to the texel grid.
   const float xPos = theChar % 16;
-  const float texX = xPos * CHAR_WIDTH + TEX_MARGIN + 0.002f;
-  return texX;
+  return xPos * TEX_WIDTH;
 }
 
 float TextRenderer::GetTexCoordY(unsigned char theChar)
 {
-  constexpr float CHAR_HEIGHT = 1.0f / 14.0f;
+  // Top edge of the glyph's row cell, aligned to the texel grid.
   const float yPos = (theChar >> 4) - 2;
-  const float texY = yPos * CHAR_HEIGHT + TEX_MARGIN + 0.001f;
-  return texY;
+  return yPos * TEX_HEIGHT;
 }
 
 void TextRenderer::SetRenderShadow(bool _renderShadow) { m_renderShadow = _renderShadow; }

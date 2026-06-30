@@ -252,14 +252,15 @@ ID3D11ShaderResourceView* fontSheetSRV()
  * so a drop-shadow pass can be laid down before the coloured glyphs. */
 void emitGlyphs(ID3D11ShaderResourceView* srv, const FontSize& fs, float x, float y, const char* s, uint32_t tint)
 {
-	/* Per-glyph tex cell on the 16x14 ASCII-32 grid. These constants mirror
-	 * TextRenderer::GetTexCoordX/Y (gui/TextRenderer.cpp) so the same sheet renders
-	 * identically here; the small margins inset the cell to avoid sampling the
-	 * neighbouring glyph. chars <= 32 (space + control) advance without drawing. */
-	constexpr float TEX_MARGIN  = 0.003f;
-	constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
-	constexpr float TEX_WIDTH   = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
-	constexpr float TEX_HEIGHT  = 1.0f / 14.0f * TEX_STRETCH;
+	/* Per-glyph tex cell on the 16-col x 14-row grid (16x16 px cells in the 256x224
+	 * sheet) starting at ASCII 32. Sample the WHOLE cell on exact texel boundaries:
+	 * with point sampling that reconstructs the native glyph pixels cleanly at any
+	 * destination size. (The old fudged UVs - a 0.9 width crop plus sub-texel margins -
+	 * pushed the sample window off the texel grid, so small body text sampled between
+	 * source pixels and lost crispness; see TextRenderer::GetTexCoord* for the GUI's
+	 * matching cells.) chars <= 32 (space + control) advance without drawing. */
+	constexpr float CELL_W = 1.0f / 16.0f;   // 16 columns
+	constexpr float CELL_H = 1.0f / 14.0f;   // 14 rows
 
 	float pen = x;
 	for (; *s; s++)
@@ -267,10 +268,10 @@ void emitGlyphs(ID3D11ShaderResourceView* srv, const FontSize& fs, float x, floa
 		const unsigned char c = (unsigned char)*s;
 		if (c > 32)
 		{
-			const float u0 = (c % 16) * (1.0f / 16.0f) + TEX_MARGIN + 0.002f;
-			const float v0 = ((c >> 4) - 2) * (1.0f / 14.0f) + TEX_MARGIN + 0.001f;
+			const float u0 = (c % 16) * CELL_W;
+			const float v0 = ((c >> 4) - 2) * CELL_H;
 			pushTexQuad(srv, pen, y, pen + fs.charW, y + fs.charH,
-						u0, v0, u0 + TEX_WIDTH, v0 + TEX_HEIGHT, tint);
+						u0, v0, u0 + CELL_W, v0 + CELL_H, tint);
 		}
 		pen += fs.charW;
 	}
