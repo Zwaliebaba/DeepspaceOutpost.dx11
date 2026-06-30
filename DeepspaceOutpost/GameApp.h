@@ -11,6 +11,7 @@
 #include "GameMain.h"
 #include "ClientEngine.h"
 #include "GameWindows.h"
+#include "SceneMeshes.h"
 #include "main.h"
 
 #include "GuiOverlay.h"
@@ -19,8 +20,13 @@
 class GameApp : public Neuron::GameMain
 {
   public:
-    // Register the game's GUI windows (Options/Settings) with the overlay.
-    void Startup() override { RegisterGameWindows(); }
+    // Register the game's GUI windows (Options/Settings) with the overlay, and wire the
+    // ship geometry into the 3D scene renderer (Scene3D builds the GPU meshes lazily).
+    void Startup() override
+    {
+      RegisterGameWindows();
+      register_scene_meshes();
+    }
     void Shutdown() override {}
 
     // Per-frame in-flight/docked logic and scene draw. Both no-op unless the game's main

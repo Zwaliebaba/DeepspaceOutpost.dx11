@@ -23,6 +23,7 @@
 #include "gfx2d.h"
 #include "TextureManager.h"
 #include "Render2D.h"
+#include "Scene3D.h"
 
 #include "gfx.h"
 #include "ViewMetrics.h"
@@ -46,7 +47,7 @@ namespace {
 struct ColorVertex { float x, y;          uint32_t rgba; };
 struct TexVertex   { float x, y, u, v;    uint32_t rgba; };
 
-enum class Kind { Color, Tex };
+enum class Kind { Color, Tex, Scene };
 enum class Topo { Points, Lines, Tris };
 
 struct Cmd
@@ -70,6 +71,13 @@ struct Texture
 std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
+
+/* 3D scene models for this frame (ships), collected via gfx2d_submit_model and
+ * rendered through Scene3D at each scene marker (see gfx_finish_render / gfx2d_flush).
+ * g_models_marked is the count already covered by a marker, so a second
+ * StartRender/FinishRender bracket in the same frame renders only its own models. */
+std::vector<Neuron::Render::ModelDraw> g_models;
+uint32_t                               g_models_marked = 0;
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -557,16 +565,42 @@ void gfx_render_line(int x1, int y1, int x2, int y2, int dist, int col)
 	gfx_render_polygon(2, pl, col, dist);
 }
 
+void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
+{
+	g_models.push_back(_model);
+}
+
 void gfx_finish_render(void)
 {
-	if (g_total_polys == 0) return;
-	for (int i = g_start_poly; i != -1; i = g_poly_chain[i].next)
+	/* Draw any remaining 2D painter-sorted polygons (legacy path; empty now that ships
+	 * render through Scene3D, but kept for any other RenderPolygon user). */
+	if (g_total_polys > 0)
 	{
-		int n = g_poly_chain[i].no_points;
-		int* pl = g_poly_chain[i].point_list;
-		int col = g_poly_chain[i].face_colour;
-		if (n == 2) gfx_draw_colour_line(pl[0], pl[1], pl[2], pl[3], col);
-		else        gfx_polygon(n, pl, col);
+		for (int i = g_start_poly; i != -1; i = g_poly_chain[i].next)
+		{
+			int n = g_poly_chain[i].no_points;
+			int* pl = g_poly_chain[i].point_list;
+			int col = g_poly_chain[i].face_colour;
+			if (n == 2) gfx_draw_colour_line(pl[0], pl[1], pl[2], pl[3], col);
+			else        gfx_polygon(n, pl, col);
+		}
+	}
+
+	/* Mark where the GPU 3D scene renders in submission order: the models collected
+	 * since the last marker draw here - after the 2D background just emitted, before the
+	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point. */
+	if (g_models.size() > g_models_marked)
+	{
+		Cmd c{};
+		c.kind = Kind::Scene;
+		c.topo = Topo::Tris;
+		c.start = g_models_marked;
+		c.count = static_cast<uint32_t>(g_models.size()) - g_models_marked;
+		c.scissor = g_scissor;
+		c.srv = nullptr;
+		c.xorop = false;
+		g_cmds.push_back(c);
+		g_models_marked = static_cast<uint32_t>(g_models.size());
 	}
 }
 
@@ -579,7 +613,7 @@ bool gfx2d_flush(bool forcePresent)
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0; return false; }
 
 	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
 	 * previously presented frame stays on screen. The menu/station screens repaint only
@@ -587,7 +621,7 @@ bool gfx2d_flush(bool forcePresent)
 	 * empty batch here is what made those screens flash to black on idle frames. */
 	if (g_cmds.empty() && !forcePresent)
 	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear();
+		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0;
 		return false;
 	}
 
@@ -635,6 +669,23 @@ bool gfx2d_flush(bool forcePresent)
 		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
+			if (c.kind == Kind::Scene)
+			{
+				/* End the 2D background batch drawn so far, run the depth-tested 3D scene
+				 * pass (ships), then resume a fresh 2D batch for the HUD that follows -
+				 * same target, no re-clear, so it composites on top. */
+				Render2D::End();
+				Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
+														vw * scale, vh * scale, g_models.data() + c.start,
+														static_cast<int>(c.count));
+				Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
+				if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
+					g_font_sheet->GetHeight() > 0.0f)
+					Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(),
+											 1.0f / g_font_sheet->GetHeight(), 1.0f);
+				continue;
+			}
+
 			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
 							  c.scissor.bottom - c.scissor.top);
 
@@ -672,5 +723,7 @@ bool gfx2d_flush(bool forcePresent)
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
+	g_models.clear();
+	g_models_marked = 0;
 	return true;
 }

@@ -65,6 +65,23 @@ namespace Neuron::Client
     return p;
   }
 
+  // Matrix product _a * _b (row-major, column-vector convention): the result maps a
+  // column vector as (_a * _b) * v == _a * (_b * v). Used to fold a model->view
+  // matrix into the projection (MVP = proj * modelView).
+  [[nodiscard]] inline Matrix4 Mul(const Matrix4& _a, const Matrix4& _b)
+  {
+    Matrix4 out; // zero
+    for (int r = 0; r < 4; ++r)
+      for (int c = 0; c < 4; ++c)
+      {
+        double sum = 0.0;
+        for (int k = 0; k < 4; ++k)
+          sum += _a(r, k) * _b(k, c);
+        out(r, c) = sum;
+      }
+    return out;
+  }
+
   // Project a camera-space point through _proj and the assumed D3D11 viewport,
   // yielding pixel (_outSx, _outSy) and NDC depth (_outDepth). This mirrors what
   // the GPU does; tests compare _outSx/_outSy against ProjectPoint. Caller ensures

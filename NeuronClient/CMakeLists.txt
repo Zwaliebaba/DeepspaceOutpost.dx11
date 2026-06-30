@@ -27,6 +27,7 @@ set(NEURONCLIENT_SOURCES
     # is built on. See docs/phase1-graphicscore.md.
     graphics/GraphicsCore.cpp
     graphics/Render2D.cpp
+    graphics/Scene3D.cpp
     graphics/TextureManager.cpp
     graphics/DDSTextureLoader.cpp
 
@@ -58,6 +59,7 @@ set(NEURONCLIENT_HEADERS
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h
     graphics/Render2D.h
+    graphics/Scene3D.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 

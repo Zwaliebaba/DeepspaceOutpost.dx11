@@ -165,161 +165,68 @@ void draw_wireframe_ship (struct local_object *obj)
 
 void draw_solid_ship (struct local_object *obj)
 {
-	int i;
-	int sx,sy;
-	double rx,ry,rz;
-	struct vector vec;
-	struct vector camera_vec;
-	double tmp;
-	struct ship_face *face_data;
-	int num_faces;
-	int num_points;
-	int poly_list[16];
-	int zavg;
-	struct ship_solid *solid_data;
-	struct ship_data *ship;
-	Matrix trans_mat;
-	int lasv;
-	int col;
+	struct ship_data *ship = ship_list[obj->type];
 
-	solid_data = &ship_solids[obj->type];
-	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-
-	num_faces = solid_data->num_faces;
-	face_data = solid_data->face_data;
-
-/*
-	for (i = 0; i < num_faces; i++)
+	/* Emit the ship as a GPU 3D model. Scene3D applies the model->camera rotation
+	 * (transpose of obj->rotmat) + translation, projects it with a real perspective and
+	 * resolves visibility with the hardware z-buffer - replacing the old CPU vertex
+	 * projection, signed-area backface test and painter's-sorted 2D polygons. */
+	Neuron::Render::ModelDraw md;
+	md.type = obj->type;
+	md.style = 0;
+	md.colour = -1;
+	md.flags = obj->flags;
+	md.location[0] = obj->location.x;
+	md.location[1] = obj->location.y;
+	md.location[2] = obj->location.z;
+	for (int i = 0; i < 3; i++)
 	{
-		vec.x = face_data[i].norm_x;
-		vec.y = face_data[i].norm_y;
-		vec.z = face_data[i].norm_z;
-
-		vec = unit_vector (&vec);
-		cos_angle = vector_dot_product (&vec, &camera_vec);
-
-		visible[i] = (cos_angle < -0.13);
+		md.rotmat[i][0] = obj->rotmat[i].x;
+		md.rotmat[i][1] = obj->rotmat[i].y;
+		md.rotmat[i][2] = obj->rotmat[i].z;
 	}
-*/
+	md.distance = obj->distance;
+	ActiveRenderQueue().DrawModel (md);
 
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
-
-	for (i = 0; i < ship->num_points; i++)
+	/* The laser bolt stays on the 2D path for now: project just the muzzle vertex
+	 * through the same transform the GPU uses and draw the depth-sorted 2D line. */
+	if (obj->flags & FLG_FIRING)
 	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
+		Matrix trans_mat;
+		double tmp;
+		struct vector vec;
+		double rx, ry, rz;
+		int sx, sy;
+		int lasv;
+		int col;
 
+		for (int i = 0; i < 3; i++)
+			trans_mat[i] = obj->rotmat[i];
+
+		tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
+		tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
+		tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
+
+		lasv = ship->front_laser;
+		vec.x = ship->points[lasv].x;
+		vec.y = ship->points[lasv].y;
+		vec.z = ship->points[lasv].z;
 		mult_vector (&vec, trans_mat);
 
 		rx = vec.x + obj->location.x;
 		ry = vec.y + obj->location.y;
 		rz = vec.z + obj->location.z;
-
 		if (rz <= 0)
 			rz = 1;
 
 		project_to_screen (rx, ry, rz, &sx, &sy);
 
-		point_list[i].x = sx;
-		point_list[i].y = sy;
-		point_list[i].z = rz;
-
-	}
-
-	for (i = 0; i < num_faces; i++)
-	{
-		if (((point_list[face_data[i].p1].x - point_list[face_data[i].p2].x) * 
-		     (point_list[face_data[i].p3].y - point_list[face_data[i].p2].y) -
-			 (point_list[face_data[i].p1].y - point_list[face_data[i].p2].y) *
-			 (point_list[face_data[i].p3].x - point_list[face_data[i].p2].x)) <= 0)
-		{
-			num_points = face_data[i].points;
-
-			poly_list[0] = point_list[face_data[i].p1].x;
-			poly_list[1] = point_list[face_data[i].p1].y;
-			zavg = point_list[face_data[i].p1].z;
-
-			poly_list[2] = point_list[face_data[i].p2].x;
-			poly_list[3] = point_list[face_data[i].p2].y;
-			zavg = MAX(zavg,point_list[face_data[i].p2].z);
-
-			if (num_points > 2)
-			{
-				poly_list[4] = point_list[face_data[i].p3].x;
-				poly_list[5] = point_list[face_data[i].p3].y;
-				zavg = MAX(zavg,point_list[face_data[i].p3].z);
-			}
-
-			if (num_points > 3)
-			{
-				poly_list[6] = point_list[face_data[i].p4].x;
-				poly_list[7] = point_list[face_data[i].p4].y;
-				zavg = MAX(zavg,point_list[face_data[i].p4].z);
-			}
-
-			if (num_points > 4)
-			{
-				poly_list[8] = point_list[face_data[i].p5].x;
-				poly_list[9] = point_list[face_data[i].p5].y;
-				zavg = MAX(zavg,point_list[face_data[i].p5].z);
-			}
-
-			if (num_points > 5)
-			{
-				poly_list[10] = point_list[face_data[i].p6].x;
-				poly_list[11] = point_list[face_data[i].p6].y;
-				zavg = MAX(zavg,point_list[face_data[i].p6].z);
-			}
-														 
-			if (num_points > 6)
-			{
-				poly_list[12] = point_list[face_data[i].p7].x;
-				poly_list[13] = point_list[face_data[i].p7].y;
-				zavg = MAX(zavg,point_list[face_data[i].p7].z);
-			}
-
-			if (num_points > 7)
-			{
-				poly_list[14] = point_list[face_data[i].p8].x;
-				poly_list[15] = point_list[face_data[i].p8].y;
-				zavg = MAX(zavg,point_list[face_data[i].p8].z);
-			}
-			
-
-			/* poly_list holds 2 ints (x,y) per point. */
-			ActiveRenderQueue().RenderPolygon (face_data[i].points, poly_list, 2 * face_data[i].points, face_data[i].colour, zavg);
-			
-		}
-	}
-
-	if (obj->flags & FLG_FIRING)
-	{
 		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		lasv = ship_list[obj->type]->front_laser;
 		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
 
-		ActiveRenderQueue().RenderLine (point_list[lasv].x, point_list[lasv].y,
+		ActiveRenderQueue().RenderLine (sx, sy,
 						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
-						 point_list[lasv].z, col);
+						 (int) rz, col);
 	}
 }
 
