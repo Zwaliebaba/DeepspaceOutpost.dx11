@@ -130,14 +130,28 @@ namespace Neuron::Client
     if (!m_main)
       return;
 
-    // Per-frame logic hook. The classic game_main() loop still drives gameplay, so this
-    // is a stub for now; a real delta will be threaded through once the loop inverts.
-    m_main->Update(0.0f);
+    // Re-entrancy guard. The classic game drives nested blocking sequences (the break
+    // pattern, mission briefs) that call gfx_update_screen() -> Tick() from inside the
+    // frame. Those nested ticks must only present the inner sequence's drawing, not
+    // re-run this frame's Update/RenderScene (which would recurse / draw the flight scene
+    // over them). The outer tick runs the lifecycle once; nested ticks fall through to the
+    // present below.
+    static bool s_inLifecycle = false;
+    if (!s_inLifecycle)
+    {
+      s_inLifecycle = true;
 
-    // Scene hook: draw the 3D + HUD into the 2D batch. Still a stub - the legacy gfx_*
-    // path already populated the batch this iteration - so this must run before the flush
-    // so it composites correctly once it does draw.
-    m_main->RenderScene();
+      // Per-frame logic hook (GameApp::Update -> game_update): network, sound, input,
+      // bookkeeping. Inert outside the game's in-flight/docked loop.
+      m_main->Update(0.0f);
+
+      // Scene hook (GameApp::RenderScene -> game_render_scene): draw the 3D + HUD into the
+      // 2D batch before the flush so it composites correctly. Inert outside that loop, in
+      // which case the active screen's own loop already filled the batch.
+      m_main->RenderScene();
+
+      s_inLifecycle = false;
+    }
 
     // Replay the frame's 2D batch (letterboxed) to the back buffer. An idle frame (empty
     // batch, overlay hidden) paints nothing and is not presented, so the last presented

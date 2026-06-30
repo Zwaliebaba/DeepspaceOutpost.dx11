@@ -1324,6 +1324,173 @@ static void send_player_input(void)
   Client::ReplicationClientInstance().SendInput(in);
 }
 
+// True only while the in-flight/docked loop below is running. The intro, game-over and
+// mission sequences drive their own blocking frame loops, so the lifecycle hooks must
+// stay inert during them; this gate keeps game_update/game_render_scene no-ops outside
+// the main loop (where they would otherwise run flight logic over those screens).
+static bool s_flightActive = false;
+
+// Per-frame logic for the in-flight/docked loop: drain replicated state, advance sound,
+// choose the scene/clip mode, read input, and run the per-frame bookkeeping. Split out of
+// the old monolithic loop so the engine drives it through GameApp::Update (see main.h).
+void game_update(void)
+{
+  if (!s_flightActive)
+    return;
+
+  // Drain any replicated world state that arrived since last frame. This is a no-op
+  // until ReplicationClientInstance().Open() is called, so the single-player path is
+  // unchanged; once open, the client consumes the server's authoritative snapshots here
+  // instead of simulating locally.
+  Client::ReplicationClientInstance().Pump();
+  if (Client::ReplicationClientInstance().IsOpen())
+  {
+    process_server_events();
+    // Backstop: forget entities that silently left our area of interest (no despawn
+    // event is sent for those), so they don't pile up as ghosts. ~3s at 30 Hz.
+    Client::ReplicationClientInstance().EvictStale(90);
+  }
+
+  snd_update_sound();
+
+  // Full-window 3D for cockpit views (retro/letterboxed for menus); this also sets the
+  // aspect-aware optics used by the projection in the render pass.
+  gfx_set_scene_fullwindow(is_flight_view(current_screen));
+  gfx_set_scene_clip();
+
+  rolling = 0;
+  climbing = 0;
+
+  handle_flight_keys();
+
+  // In thin-client mode, the player's intent goes to the server.
+  if (Client::ReplicationClientInstance().IsOpen())
+    send_player_input();
+
+  if (game_paused)
+    return;
+
+  if (message_count > 0)
+    message_count--;
+
+  if (!rolling)
+    centre_flight_roll();
+
+  if (!climbing)
+    centre_flight_climb();
+}
+
+// Per-frame draw for the in-flight/docked loop: the 3D scene, HUD and overlays the old
+// loop body emitted (with the simulation-and-draw steps that are still fused). Runs after
+// game_update each frame, driven by the engine through GameApp::RenderScene.
+void game_render_scene(void)
+{
+  if (!s_flightActive || game_paused)
+    return;
+
+  if (!docked)
+  {
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+      == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+    {
+      gfx_clear_display();
+      update_starfield();
+    }
+
+    if (auto_pilot)
+    {
+      auto_dock();
+      if ((mcount & 127) == 0)
+        info_message("Docking Computers On");
+    }
+
+    // In thin-client mode the server owns the world: render the replicated, interpolated
+    // state instead of simulating locally.
+    if (Client::ReplicationClientInstance().IsOpen())
+      render_replicated_objects();
+    else
+      update_local_objects();
+
+    if (docked)
+    {
+      update_console();
+      return;
+    }
+
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+      == SCR_RIGHT_VIEW))
+    {
+      if (draw_lasers)
+      {
+        draw_laser_lines();
+        draw_lasers--;
+      }
+
+      draw_laser_sights();
+    }
+
+    if (message_count > 0)
+      gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
+
+    if (hyper_ready)
+    {
+      display_hyper_status();
+      if ((mcount & 3) == 0)
+        countdown_hyperspace();
+    }
+
+    mcount--;
+    if (mcount < 0)
+      mcount = 255;
+
+    if ((mcount & 7) == 0)
+      regenerate_shields();
+
+    if ((mcount & 31) == 10)
+    {
+      if (PlayerDefense().energy < 50)
+      {
+        info_message("ENERGY LOW");
+        snd_play_sample(SND_BEEP);
+      }
+
+      update_altitude();
+    }
+
+    if ((mcount & 31) == 20)
+      update_cabin_temp();
+
+    if ((mcount == 0) && (!witchspace))
+      random_encounter();
+
+    cool_laser();
+    time_ecm();
+
+    update_console();
+  }
+
+  if (current_screen == SCR_BREAK_PATTERN)
+    display_break_pattern();
+
+  if (cross_timer > 0)
+  {
+    cross_timer--;
+    if (cross_timer == 0)
+      show_distance_to_planet();
+  }
+
+  if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
+  {
+    if (old_cross_x != -1)
+      draw_cross(old_cross_x, old_cross_y);
+
+    old_cross_x = cross_x;
+    old_cross_y = cross_y;
+
+    draw_cross(old_cross_x, old_cross_y);
+  }
+}
+
 int game_main(void)
 {
   read_config_file();
@@ -1380,152 +1547,15 @@ int game_main(void)
     dock_player();
     display_commander_status();
 
+    // The in-flight/docked frame now runs through the GameMain lifecycle: each
+    // gfx_update_screen() drives ClientEngine::Tick(), which calls GameApp::Update ->
+    // game_update() and GameApp::RenderScene -> game_render_scene(), then presents. The
+    // gate keeps those hooks live only for this loop (the intro/game-over/mission
+    // sequences below drive their own frames with the hooks inert).
+    s_flightActive = true;
     while (!game_over)
-    {
-      // Drain any replicated world state that arrived since last frame. This
-      // is a no-op until ReplicationClientInstance().Open() is called, so the
-      // single-player path is unchanged; once open, the client consumes the
-      // server's authoritative snapshots here instead of simulating locally.
-      Client::ReplicationClientInstance().Pump();
-      if (Client::ReplicationClientInstance().IsOpen())
-      {
-        process_server_events();
-        // Backstop: forget entities that silently left our area of interest
-        // (no despawn event is sent for those), so they don't pile up as
-        // ghosts. ~3s at the server's 30 Hz tick.
-        Client::ReplicationClientInstance().EvictStale(90);
-      }
-
-      snd_update_sound();
       gfx_update_screen();
-      // Full-window 3D for cockpit views (retro/letterboxed for menus); this
-      // also sets the aspect-aware optics used by the projection below.
-      gfx_set_scene_fullwindow(is_flight_view(current_screen));
-      gfx_set_scene_clip();
-
-      rolling = 0;
-      climbing = 0;
-
-      handle_flight_keys();
-
-      // In thin-client mode, the player's intent goes to the server.
-      if (Client::ReplicationClientInstance().IsOpen())
-        send_player_input();
-
-      if (game_paused)
-        continue;
-
-      if (message_count > 0)
-        message_count--;
-
-      if (!rolling)
-        centre_flight_roll();
-
-      if (!climbing)
-        centre_flight_climb();
-
-      if (!docked)
-      {
-        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-          == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
-        {
-          gfx_clear_display();
-          update_starfield();
-        }
-
-        if (auto_pilot)
-        {
-          auto_dock();
-          if ((mcount & 127) == 0)
-            info_message("Docking Computers On");
-        }
-
-        // In thin-client mode the server owns the world: render the
-        // replicated, interpolated state instead of simulating locally.
-        if (Client::ReplicationClientInstance().IsOpen())
-          render_replicated_objects();
-        else
-          update_local_objects();
-
-        if (docked)
-        {
-          update_console();
-          continue;
-        }
-
-        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-          == SCR_RIGHT_VIEW))
-        {
-          if (draw_lasers)
-          {
-            draw_laser_lines();
-            draw_lasers--;
-          }
-
-          draw_laser_sights();
-        }
-
-        if (message_count > 0)
-          gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
-
-        if (hyper_ready)
-        {
-          display_hyper_status();
-          if ((mcount & 3) == 0)
-            countdown_hyperspace();
-        }
-
-        mcount--;
-        if (mcount < 0)
-          mcount = 255;
-
-        if ((mcount & 7) == 0)
-          regenerate_shields();
-
-        if ((mcount & 31) == 10)
-        {
-          if (PlayerDefense().energy < 50)
-          {
-            info_message("ENERGY LOW");
-            snd_play_sample(SND_BEEP);
-          }
-
-          update_altitude();
-        }
-
-        if ((mcount & 31) == 20)
-          update_cabin_temp();
-
-        if ((mcount == 0) && (!witchspace))
-          random_encounter();
-
-        cool_laser();
-        time_ecm();
-
-        update_console();
-      }
-
-      if (current_screen == SCR_BREAK_PATTERN)
-        display_break_pattern();
-
-      if (cross_timer > 0)
-      {
-        cross_timer--;
-        if (cross_timer == 0)
-          show_distance_to_planet();
-      }
-
-      if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
-      {
-        if (old_cross_x != -1)
-          draw_cross(old_cross_x, old_cross_y);
-
-        old_cross_x = cross_x;
-        old_cross_y = cross_y;
-
-        draw_cross(old_cross_x, old_cross_y);
-      }
-    }
+    s_flightActive = false;
 
     if (!finish)
       run_game_over_screen();

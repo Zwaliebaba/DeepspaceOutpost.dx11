@@ -11,6 +11,7 @@
 #include "GameMain.h"
 #include "ClientEngine.h"
 #include "GameWindows.h"
+#include "main.h"
 
 #include "GuiOverlay.h"
 #include "Renderer.h"
@@ -22,8 +23,11 @@ class GameApp : public Neuron::GameMain
     void Startup() override { RegisterGameWindows(); }
     void Shutdown() override {}
 
-    void Update(float _deltaSeconds) override {}
-    void RenderScene() override {}
+    // Per-frame in-flight/docked logic and scene draw. Both no-op unless the game's main
+    // loop is active (game_main gates them), so the intro/game-over/mission sequences keep
+    // driving their own frames.
+    void Update(float _deltaSeconds) override { game_update(); }
+    void RenderScene() override { game_render_scene(); }
 
     // 2D UI on top of the scene: the GUI overlay (windows/menus), full-window in client
     // pixels. No-op unless the overlay is shown.
