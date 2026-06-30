@@ -1111,67 +1111,65 @@ void set_commander_name(char* path)
   *cname = '\0';
 }
 
-void run_first_intro_screen(void)
+// ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
+//
+// The classic intro -> flight -> game-over sequence used to be a stack of blocking
+// for(;;) loops inside game_main(). It now runs as an explicit state machine stepped one
+// frame at a time by the engine: each gfx_update_screen() runs ClientEngine::Frame() ->
+// GameApp::Update/RenderScene -> game_update()/game_render_scene(), which dispatch on
+// s_state. Each enter_*() does a state's one-time setup; the per-frame work and the
+// transition tests live in game_update()/game_render_scene().
+//
+// The deeply nested blocking sequences the game still spins up from inside a frame (the
+// docking break pattern, mission briefs) keep working through the re-entrancy guard in
+// ClientEngine::Frame: those nested gfx_update_screen() calls only present, they do not
+// re-enter the state step.
+
+enum class GameState
+{
+  Intro1,   // "DEEPSPACE OUTPOST" title (Elite theme)
+  Intro2,   // ship parade (Blue Danube)
+  Flight,   // in-flight / docked - the live game
+  GameOver, // the death animation, then a fresh game
+};
+
+static GameState s_state = GameState::Intro1;
+static int s_gameOverFrame = 0;   // game-over frames rendered (the animation runs 100)
+
+// Enter the first intro screen (title + Elite theme).
+static void enter_intro1(void)
 {
   current_screen = SCR_INTRO_ONE;
-
   snd_play_midi(SND_ELITE_THEME, TRUE);
-
   initialise_intro1();
-
-  for (;;)
-  {
-    update_intro1();
-
-    gfx_update_screen();
-
-    kbd_poll_keyboard();
-
-    if (kbd_space_pressed)
-      break;
-  }
-
-  snd_stop_midi();
+  s_state = GameState::Intro1;
 }
 
-void run_second_intro_screen(void)
+// Enter the second intro screen (ship parade + Blue Danube).
+static void enter_intro2(void)
 {
   current_screen = SCR_INTRO_TWO;
-
   snd_play_midi(SND_BLUE_DANUBE, TRUE);
-
   initialise_intro2();
-
   PlayerFlight().speed = 3;
   PlayerFlight().roll = 0;
   PlayerFlight().climb = 0;
-
-  for (;;)
-  {
-    update_intro2();
-
-    gfx_update_screen();
-
-    kbd_poll_keyboard();
-
-    if (kbd_space_pressed)
-      break;
-  }
-
-  snd_stop_midi();
+  s_state = GameState::Intro2;
 }
 
-/*
- * Draw the game over sequence. 
- */
-
-void run_game_over_screen()
+// Enter live flight (and the docked menus); start on the commander status screen.
+static void enter_flight(void)
 {
-  int i;
-  int newship;
-  Matrix rotmat;
-  int type;
+  old_cross_x = -1;
+  old_cross_y = -1;
+  dock_player();
+  display_commander_status();
+  s_state = GameState::Flight;
+}
 
+// Enter the game-over animation: a dead Cobra tumbling through wreckage for 100 frames.
+static void enter_game_over(void)
+{
   current_screen = SCR_GAME_OVER;
   gfx_set_clip_region(1, 1, 510, 383);
 
@@ -1180,28 +1178,34 @@ void run_game_over_screen()
   PlayerFlight().climb = 0;
   clear_local_objects();
 
+  Matrix rotmat;
   set_init_matrix(rotmat);
 
-  newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
+  int newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
   local_objects[newship].flags |= FLG_DEAD;
 
-  for (i = 0; i < 5; i++)
+  for (int i = 0; i < 5; i++)
   {
-    type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
+    const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
     newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, -400, rotmat, 0, 0);
     local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
     local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
     local_objects[newship].velocity = rand255() & 15;
   }
 
-  for (i = 0; i < 100; i++)
-  {
-    gfx_clear_display();
-    update_starfield();
-    update_local_objects();
-    gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
-    gfx_update_screen();
-  }
+  s_gameOverFrame = 0;
+  s_state = GameState::GameOver;
+}
+
+// Begin a fresh game: reset the world, dock, then roll into the intro sequence.
+static void start_new_game(void)
+{
+  game_over = 0;
+  initialise_game();
+  dock_player();
+  update_console();
+  current_screen = SCR_FRONT_VIEW;
+  enter_intro1();
 }
 
 /*
@@ -1324,19 +1328,16 @@ static void send_player_input(void)
   Client::ReplicationClientInstance().SendInput(in);
 }
 
-// True only while the in-flight/docked loop below is running. The intro, game-over and
-// mission sequences drive their own blocking frame loops, so the lifecycle hooks must
-// stay inert during them; this gate keeps game_update/game_render_scene no-ops outside
-// the main loop (where they would otherwise run flight logic over those screens).
-static bool s_flightActive = false;
-
-// Per-frame logic for the in-flight/docked loop: drain replicated state, advance sound,
+// Per-frame logic for the in-flight/docked state: drain replicated state, advance sound,
 // choose the scene/clip mode, read input, and run the per-frame bookkeeping. Split out of
-// the old monolithic loop so the engine drives it through GameApp::Update (see main.h).
-void game_update(void)
+// the old monolithic loop. Transitions to the game-over animation when the player dies.
+static void game_update_flight(void)
 {
-  if (!s_flightActive)
+  if (game_over)
+  {
+    enter_game_over();
     return;
+  }
 
   // Drain any replicated world state that arrived since last frame. This is a no-op
   // until ReplicationClientInstance().Open() is called, so the single-player path is
@@ -1380,12 +1381,11 @@ void game_update(void)
     centre_flight_climb();
 }
 
-// Per-frame draw for the in-flight/docked loop: the 3D scene, HUD and overlays the old
-// loop body emitted (with the simulation-and-draw steps that are still fused). Runs after
-// game_update each frame, driven by the engine through GameApp::RenderScene.
-void game_render_scene(void)
+// Per-frame draw for the in-flight/docked state: the 3D scene, HUD and overlays the old
+// loop body emitted (with the simulation-and-draw steps that are still fused).
+static void game_render_flight(void)
 {
-  if (!s_flightActive || game_paused)
+  if (game_paused)
     return;
 
   if (!docked)
@@ -1491,6 +1491,72 @@ void game_render_scene(void)
   }
 }
 
+// Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on
+// Space; flight runs the live game; the game-over animation plays out then restarts.
+void game_update(void)
+{
+  switch (s_state)
+  {
+    case GameState::Intro1:
+      kbd_poll_keyboard();
+      if (kbd_space_pressed)
+      {
+        snd_stop_midi();
+        enter_intro2();
+      }
+      break;
+
+    case GameState::Intro2:
+      kbd_poll_keyboard();
+      if (kbd_space_pressed)
+      {
+        snd_stop_midi();
+        enter_flight();
+      }
+      break;
+
+    case GameState::Flight:
+      game_update_flight();
+      break;
+
+    case GameState::GameOver:
+      if (s_gameOverFrame >= 100)
+      {
+        start_new_game();   // animation done -> fresh game (back to the intro)
+        break;
+      }
+      s_gameOverFrame++;
+      break;
+  }
+}
+
+// Per-frame draw hook (GameApp::RenderScene): draw the active state's scene into the 2D
+// batch (the engine flushes it to the back buffer after this).
+void game_render_scene(void)
+{
+  switch (s_state)
+  {
+    case GameState::Intro1:
+      update_intro1();
+      break;
+
+    case GameState::Intro2:
+      update_intro2();
+      break;
+
+    case GameState::Flight:
+      game_render_flight();
+      break;
+
+    case GameState::GameOver:
+      gfx_clear_display();
+      update_starfield();
+      update_local_objects();
+      gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
+      break;
+  }
+}
+
 int game_main(void)
 {
   read_config_file();
@@ -1529,37 +1595,14 @@ int game_main(void)
   finish = 0;
   auto_pilot = 0;
 
+  // The whole game now runs through the GameMain lifecycle: each gfx_update_screen()
+  // drives ClientEngine::Frame() -> GameApp::Update/RenderScene -> game_update()/
+  // game_render_scene(), which step the state machine (intro -> flight -> game-over ->
+  // new game). game_main() just boots the first game and pumps frames until the window
+  // closes (the message pump exits the process on close).
+  start_new_game();
   while (!finish)
-  {
-    game_over = 0;
-    initialise_game();
-    dock_player();
-
-    update_console();
-
-    current_screen = SCR_FRONT_VIEW;
-    run_first_intro_screen();
-    run_second_intro_screen();
-
-    old_cross_x = -1;
-    old_cross_y = -1;
-
-    dock_player();
-    display_commander_status();
-
-    // The in-flight/docked frame now runs through the GameMain lifecycle: each
-    // gfx_update_screen() drives ClientEngine::Frame(), which calls GameApp::Update ->
-    // game_update() and GameApp::RenderScene -> game_render_scene(), then presents. The
-    // gate keeps those hooks live only for this loop (the intro/game-over/mission
-    // sequences below drive their own frames with the hooks inert).
-    s_flightActive = true;
-    while (!game_over)
-      gfx_update_screen();
-    s_flightActive = false;
-
-    if (!finish)
-      run_game_over_screen();
-  }
+    gfx_update_screen();
 
   snd_sound_shutdown();
 

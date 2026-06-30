@@ -4,11 +4,10 @@
 void info_message (const char *message);
 void update_screen (void);
 
-/* Per-frame hooks for the in-flight/docked loop, driven through the GameMain lifecycle
- * (GameApp::Update/RenderScene -> ClientEngine::Frame). game_update() advances the frame's
- * logic (network, sound, input, bookkeeping); game_render_scene() draws the scene + HUD.
- * Both are no-ops unless the main game loop is active (game_main gates them), so the
- * intro/game-over/mission blocking sequences still drive their own frames. */
+/* Per-frame hooks driven through the GameMain lifecycle (GameApp::Update/RenderScene ->
+ * ClientEngine::Frame). They step the top-level game state machine (intro -> flight ->
+ * game-over -> new game): game_update() advances the active state's logic and transitions;
+ * game_render_scene() draws the active state's scene. */
 void game_update (void);
 void game_render_scene (void);
 
