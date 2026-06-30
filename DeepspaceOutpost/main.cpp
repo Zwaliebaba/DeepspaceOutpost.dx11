@@ -1175,6 +1175,30 @@ static void start_new_game(void)
   enter_intro1();
 }
 
+// After the game-over animation. In thin-client mode the server has already respawned us
+// in place (it keeps no permadeath yet), so clear the death and drop straight back into
+// flight - the replicated snapshots drive the view again. The degraded single-player
+// fallback has no server to respawn us, so it starts a fresh game (intro).
+static void respawn_after_death(void)
+{
+  if (Client::ReplicationClientInstance().IsOpen())
+  {
+    game_over = 0;
+    docked = 0;
+    PlayerFlight().speed = 0;
+    PlayerFlight().roll = 0;
+    PlayerFlight().climb = 0;
+    old_cross_x = -1;
+    old_cross_y = -1;
+    current_screen = SCR_FRONT_VIEW;
+    s_state = GameState::Flight;
+  }
+  else
+  {
+    start_new_game();
+  }
+}
+
 /*
  * Draw a break pattern (for launching, docking and hyperspacing).
  * Just draw a very simple one for the moment.
@@ -1240,12 +1264,23 @@ static void process_server_events(void)
     }
     else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
     {
-      // A kill/detonation: clear the lock if it was on the dead entity, drop
-      // it from the view, and play the explosion.
-      if (entityId == g_missile_lock_target)
-        g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(entityId);
-      snd_play_sample(SND_EXPLODE);
+      if (entityId == rc.LocalPlayer())
+      {
+        // We were killed. Trigger the game-over sequence (game_update_flight picks this
+        // up next frame). The server respawns us in place, so after the animation we
+        // resume flight rather than restart - see respawn_after_death().
+        game_over = 1;
+        snd_play_sample(SND_EXPLODE);
+      }
+      else
+      {
+        // Another entity died: clear the lock if it was on it, drop it from the view,
+        // and play the explosion.
+        if (entityId == g_missile_lock_target)
+          g_missile_lock_target = 0xFFFFFFFFu;
+        rc.Forget(entityId);
+        snd_play_sample(SND_EXPLODE);
+      }
     }
     else if (Neuron::Net::DecodeDespawn(msg, entityId))
     {
@@ -1489,7 +1524,7 @@ void game_update(void)
     case GameState::GameOver:
       if (s_gameOverFrame >= 100)
       {
-        start_new_game();   // animation done -> fresh game (back to the intro)
+        respawn_after_death();   // animation done -> resume flight (MMO) or fresh game
         break;
       }
       s_gameOverFrame++;

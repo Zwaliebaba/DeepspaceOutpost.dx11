@@ -333,6 +333,19 @@ int main()
       // until persistence/respawn points exist; NPCs are destroyed as wrecks.
       if (world.IsValid(kill.victim) && world.TryGet<GameLogic::PlayerTag>(kill.victim) != nullptr)
       {
+        // Tell the dying player it died so its client plays the game-over sequence; we
+        // still respawn it in place below. Sent only to that one session, so other
+        // clients don't briefly drop the (still-alive, respawned) ship from their view.
+        for (auto& entry : sessions.All())
+        {
+          if (entry.second.entity.index == kill.victim.index)
+          {
+            entry.second.events.Send(static_cast<uint16_t>(Net::EventType::EntityDeath),
+                                     Net::EncodeDeath(kill.victim.index, kill.killer));
+            break;
+          }
+        }
+
         if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(kill.victim))
         {
           c->energy = 255;
