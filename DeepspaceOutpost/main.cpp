@@ -34,9 +34,6 @@
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 
-int old_cross_x, old_cross_y;
-int cross_timer;
-
 int draw_lasers;
 int mcount;
 int message_count;
@@ -173,7 +170,6 @@ void initialise_game(void)
 
   cross_x = -1;
   cross_y = -1;
-  cross_timer = 0;
 
   PlayerCaps().maxSpeed = 40; /* 0.27 Light Mach */
   PlayerCaps().maxRoll = 31;
@@ -187,8 +183,6 @@ void initialise_game(void)
 
 void move_cross(int dx, int dy)
 {
-  cross_timer = 5;
-
   if (current_screen == SCR_SHORT_RANGE)
   {
     cross_x += (dx * 4);
@@ -781,14 +775,12 @@ void handle_flight_keys(void)
   if (kbd_F5_pressed)
   {
     find_input = 0;
-    old_cross_x = -1;
     display_galactic_chart();
   }
 
   if (kbd_F6_pressed)
   {
     find_input = 0;
-    old_cross_x = -1;
     display_short_range_chart();
   }
 
@@ -1056,8 +1048,6 @@ static void enter_intro2(void)
 // Enter live flight (and the docked menus); start on the commander status screen.
 static void enter_flight(void)
 {
-  old_cross_x = -1;
-  old_cross_y = -1;
   dock_player();
   display_commander_status();
   s_state = GameState::Flight;
@@ -1117,8 +1107,6 @@ static void respawn_after_death(void)
     PlayerFlight().speed = 0;
     PlayerFlight().roll = 0;
     PlayerFlight().climb = 0;
-    old_cross_x = -1;
-    old_cross_y = -1;
     current_screen = SCR_FRONT_VIEW;
     s_state = GameState::Flight;
   }

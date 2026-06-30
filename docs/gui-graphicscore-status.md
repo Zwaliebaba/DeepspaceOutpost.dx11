@@ -158,9 +158,7 @@ Still wants a Windows pass (compile-gated by CI, not yet exercised end-to-end):
    (`RenderContext.h`). Tied to the GameLogic split.
 3. **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
    simplify `GuiWindow::Update`).
-4. **Tidy the now-dead chart bookkeeping** — the crosshair rewrite left `old_cross_x/y` and
-   `cross_timer` write-only (the XOR-erase + debounce are gone); drop them when convenient.
-5. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
+4. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
    `WM_POINTER` touch is wired but dormant (`EnableMouseInPointer` left off); re-check the
    monospaced font metrics on the charts / dense screens.
 
