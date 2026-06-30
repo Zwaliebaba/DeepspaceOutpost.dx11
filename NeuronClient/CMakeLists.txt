@@ -115,9 +115,74 @@ target_include_directories(NeuronClient PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gui
 )
 
-# The 2D renderer (Neuron::Graphics::Render2D) and the present blit compile their
-# shaders at runtime via D3DCompile (d3dcompiler), so there is no offline fxc step
-# or committed shader byte-array headers to build.
+# --- Native Direct3D 11 shaders -----------------------------------------------
+# Each shaders/*.hlsl is compiled by fxc into a C++ byte-array header in
+# shaders/CompiledShaders/<name>.h (array g_<name>, with '-' replaced by '_').
+# Render2D.cpp #includes those headers, so that directory is on its private include
+# path. Stage is taken from the file-name suffix: *VS.hlsl -> vs_5_0/VSMain,
+# *PS.hlsl -> ps_5_0/PSMain. Partials (shaders/partials/*.hlsli) are #include-only.
+set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_OUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/CompiledShaders")
+
+# PRIVATE: only NeuronClient's own sources reach the compiled shaders.
+target_include_directories(NeuronClient PRIVATE ${SHADER_OUT_DIR})
+
+find_program(FXC_EXECUTABLE
+    NAMES fxc
+    HINTS
+        "$ENV{WindowsSdkVerBinPath}x64"
+        "$ENV{WindowsSdkVerBinPath}x86"
+        "$ENV{WindowsSdkDir}bin/x64"
+)
+
+file(GLOB SHADER_SOURCES  CONFIGURE_DEPENDS "${SHADER_SRC_DIR}/*.hlsl")
+file(GLOB SHADER_PARTIALS CONFIGURE_DEPENDS "${SHADER_SRC_DIR}/partials/*.hlsli")
+
+if(NOT FXC_EXECUTABLE)
+    message(WARNING
+        "fxc (the HLSL compiler) was not found. The shaders/CompiledShaders/*.h byte "
+        "arrays are produced by fxc; without it (and without committed headers) the "
+        "build cannot resolve them. Configure from a Visual Studio / Windows SDK "
+        "developer environment (or set FXC_EXECUTABLE).")
+    add_custom_target(NeuronClientShaders SOURCES ${SHADER_SOURCES} ${SHADER_PARTIALS})
+else()
+    file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
+
+    set(SHADER_HEADERS "")
+    foreach(SHADER ${SHADER_SOURCES})
+        get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
+
+        if(SHADER_NAME MATCHES "VS$")
+            set(SHADER_PROFILE vs_5_0)
+            set(SHADER_ENTRY VSMain)
+        elseif(SHADER_NAME MATCHES "PS$")
+            set(SHADER_PROFILE ps_5_0)
+            set(SHADER_ENTRY PSMain)
+        else()
+            message(WARNING "Skipping shader with no VS/PS suffix: ${SHADER}")
+            continue()
+        endif()
+
+        string(REPLACE "-" "_" SHADER_VAR "g_${SHADER_NAME}")
+        set(SHADER_HEADER "${SHADER_OUT_DIR}/${SHADER_NAME}.h")
+
+        add_custom_command(
+            OUTPUT "${SHADER_HEADER}"
+            COMMAND "${FXC_EXECUTABLE}" /nologo /T ${SHADER_PROFILE} /E ${SHADER_ENTRY}
+                    /Fh "${SHADER_HEADER}" /Vn ${SHADER_VAR} "${SHADER}"
+            DEPENDS "${SHADER}" ${SHADER_PARTIALS} "${CMAKE_CURRENT_LIST_FILE}"
+            MAIN_DEPENDENCY "${SHADER}"
+            COMMENT "fxc ${SHADER_NAME} -> shaders/CompiledShaders/${SHADER_NAME}.h"
+            VERBATIM)
+
+        list(APPEND SHADER_HEADERS "${SHADER_HEADER}")
+    endforeach()
+
+    add_custom_target(NeuronClientShaders DEPENDS ${SHADER_HEADERS}
+        SOURCES ${SHADER_SOURCES} ${SHADER_PARTIALS})
+endif()
+
+add_dependencies(NeuronClient NeuronClientShaders)
 
 # NeuronClient is built on top of NeuronCore; PUBLIC so the core is transitively
 # available to anything that links NeuronClient.

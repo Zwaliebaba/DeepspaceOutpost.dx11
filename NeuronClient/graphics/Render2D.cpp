@@ -7,6 +7,15 @@
 #include <cassert>
 #include <cstring>
 
+// Offline-compiled (fxc) byte arrays for the built-in programs. Each shaders/*.hlsl is
+// compiled to shaders/CompiledShaders/<name>.h (array g_<name>) by the CMake build, and
+// that directory is on this target's private include path. See NeuronClient/CMakeLists.txt
+// and the sources under shaders/. Caller-supplied custom programs (RegisterProgram) are
+// still compiled at runtime with D3DCompile.
+#include "render2dVS.h"     // g_render2dVS  - shared vertex shader (all programs)
+#include "render2dPS.h"     // g_render2dPS  - default pixel shader (col * texture)
+#include "text-outlinePS.h" // g_text_outlinePS - built-in text-outline pixel shader
+
 using winrt::com_ptr;
 using winrt::check_hresult;
 using namespace DirectX;
@@ -15,76 +24,6 @@ namespace Neuron::Graphics
 {
   namespace
   {
-    // Shared 2D vertex stage + texture/sampler. Every Render2D program is this prelude
-    // plus its own pixel shader (and any extra cbuffers): one interleaved vertex
-    // (POSITION/TEXCOORD0/COLOR0), b0 = the row-major ortho (mul(pos, M)), one texture at
-    // t0/s0. Colored primitives bind a 1x1 white texture, so col*tex is just the colour.
-#define RENDER2D_PRELUDE R"(
-cbuffer Cb2D : register(b0)
-{
-    row_major float4x4 u_Proj;
-};
-
-struct VSIn  { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 col : COLOR0; };
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; float4 col : COLOR0; };
-
-VSOut VSMain(VSIn i)
-{
-    VSOut o;
-    o.pos = mul(float4(i.pos, 0.0, 1.0), u_Proj);
-    o.uv  = i.uv;
-    o.col = i.col;
-    return o;
-}
-
-Texture2D    u_Tex : register(t0);
-SamplerState u_Smp : register(s0);
-)"
-
-    // Default program: per-vertex colour times the bound texture.
-    const char* kShaderHLSL = RENDER2D_PRELUDE R"(
-float4 PSMain(VSOut i) : SV_Target
-{
-    return i.col * u_Tex.Sample(u_Smp, i.uv);
-}
-)";
-
-    // Built-in text-outline program. b1 carries the outline colour + atlas texel size;
-    // the PS samples the glyph coverage (alpha) plus an 8-tap ring one outline-width out
-    // and composites the per-vertex text colour over the outline colour. Straight-alpha
-    // blend: it returns the coverage-normalised colour and total coverage in alpha.
-    const char* kTextOutlineHLSL = RENDER2D_PRELUDE R"(
-cbuffer TextParams : register(b1)
-{
-    float4 u_OutlineColor;   // rgb + a
-    float4 u_OutlineParams;  // x=texelW, y=texelH, z=widthTexels, w=unused
-};
-
-float4 PSMain(VSOut i) : SV_Target
-{
-    float2 d = u_OutlineParams.xy * max(u_OutlineParams.z, 0.0);
-    float c = u_Tex.Sample(u_Smp, i.uv).a;                    // glyph coverage at centre
-    float o = 0.0;                                            // max coverage in the ring
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x, 0.0)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x, 0.0)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(0.0,  d.y)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(0.0, -d.y)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x,  d.y)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x,  d.y)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2( d.x, -d.y)).a);
-    o = max(o, u_Tex.Sample(u_Smp, i.uv + float2(-d.x, -d.y)).a);
-
-    float textA = c * i.col.a;
-    float outA  = saturate(o) * (1.0 - c) * u_OutlineColor.a;
-    float a = textA + outA;
-    if (a <= 0.00390625) discard;                            // < 1/256: nothing to draw
-    float3 rgb = (i.col.rgb * textA + u_OutlineColor.rgb * outA) / a;
-    return float4(rgb, a);
-}
-)";
-
-#undef RENDER2D_PRELUDE
-
     // Compile one HLSL source/entry/profile. Returns null on failure (logging the
     // compiler errors) rather than throwing, so a bad caller-supplied program shader
     // degrades to the default instead of taking down the app.
@@ -156,25 +95,24 @@ float4 PSMain(VSOut i) : SV_Target
     if (!device)
       return false;
 
-    // Program 0: the built-in default (DefaultProgram), col * texture.
-    com_ptr<ID3DBlob> vs = CompileHLSL(kShaderHLSL, "VSMain", "vs_5_0");
-    com_ptr<ID3DBlob> ps = CompileHLSL(kShaderHLSL, "PSMain", "ps_5_0");
-    if (!vs || !ps)
-      return false;
+    // Program 0: the built-in default (DefaultProgram), col * texture. The shared vertex
+    // shader (g_render2dVS) is reused by every built-in program, so keep it in a com_ptr
+    // we can hand to the text-outline program below.
+    com_ptr<ID3D11VertexShader> sharedVs;
+    check_hresult(device->CreateVertexShader(g_render2dVS, sizeof(g_render2dVS), nullptr, sharedVs.put()));
     Program def;
-    check_hresult(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, def.vs.put()));
-    check_hresult(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, def.ps.put()));
+    def.vs = sharedVs;
+    check_hresult(device->CreatePixelShader(g_render2dPS, sizeof(g_render2dPS), nullptr, def.ps.put()));
     s_programs.push_back(std::move(def));
 
-    // The one input layout (built from the default VS) serves every program: each must
-    // share this vertex input signature.
+    // The one input layout (built from the shared VS bytecode) serves every program: each
+    // must share this vertex input signature.
     const D3D11_INPUT_ELEMENT_DESC elems[] = {
       {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
       {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
       {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    check_hresult(device->CreateInputLayout(elems, _countof(elems), vs->GetBufferPointer(), vs->GetBufferSize(),
-                                            s_layout.put()));
+    check_hresult(device->CreateInputLayout(elems, _countof(elems), g_render2dVS, sizeof(g_render2dVS), s_layout.put()));
 
     D3D11_BUFFER_DESC cbd{};
     cbd.ByteWidth = sizeof(XMFLOAT4X4);
@@ -234,8 +172,14 @@ float4 PSMain(VSOut i) : SV_Target
     check_hresult(device->CreateTexture2D(&td, &srd, tex.put()));
     check_hresult(device->CreateShaderResourceView(tex.get(), nullptr, s_white.put()));
 
-    // Built-in program 1: the text-outline shader.
-    s_textOutlineProgram = AddProgram(kTextOutlineHLSL);
+    // Built-in program 1: the text-outline shader. It reuses the shared vertex shader and
+    // adds the offline-compiled outline pixel shader (g_text_outlinePS).
+    Program outline;
+    outline.vs = sharedVs;
+    check_hresult(
+      device->CreatePixelShader(g_text_outlinePS, sizeof(g_text_outlinePS), nullptr, outline.ps.put()));
+    s_programs.push_back(std::move(outline));
+    s_textOutlineProgram = static_cast<ProgramId>(s_programs.size() - 1);
 
     return true;
   }

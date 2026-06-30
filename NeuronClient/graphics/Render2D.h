@@ -27,9 +27,10 @@
 // glyphs and sprites composite exactly in the order the caller draws them, the way the
 // immediate-mode path did.
 //
-// All-static, mirroring Graphics::Core so the siblings match. The shaders are compiled
-// at runtime with D3DCompile (as Renderer's present pipeline is), so there is no
-// offline fxc / compiled-shader build step.
+// All-static, mirroring Graphics::Core so the siblings match. The built-in programs
+// (default + text outline) live in shaders/*.hlsl and are compiled offline by fxc into
+// shaders/CompiledShaders/*.h byte arrays at build time (the project's shader standard);
+// only caller-supplied custom programs (RegisterProgram) are compiled at runtime.
 
 namespace Neuron::Graphics
 {
