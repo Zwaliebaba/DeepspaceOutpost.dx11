@@ -33,6 +33,7 @@
 #include "ReplicationClient.h"
 #include "Messages/MessageBus.h"
 #include "Messages/Defs/CoreEvents.h"
+#include "Messages/Defs/InputActions.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 
@@ -1168,6 +1169,13 @@ void info_message(const char* message)
 // (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
 static Neuron::Msg::MessageBus g_clientBus;
 
+// This frame's discrete combat input, accumulated from ActionTriggered messages and
+// consumed by send_player_input. Continuous flight (roll/pitch/throttle) is NOT here -
+// it stays the legacy rate-based PlayerFlight state, normalized to axes at send time.
+static bool     s_frameFire = false;
+static bool     s_frameMissile = false;
+static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
+
 static void register_client_event_handlers(void)
 {
   static bool registered = false;
@@ -1211,6 +1219,22 @@ static void register_client_event_handlers(void)
     if (_ds.entityId == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
     Client::ReplicationClientInstance().Forget(_ds.entityId);
+  });
+
+  // Input command-builder: a discrete combat action sets this frame's intent, which
+  // send_player_input folds into the outgoing InputCommand.
+  g_clientBus.Subscribe<Neuron::Msg::ActionTriggered>([](const Neuron::Msg::ActionTriggered& _a)
+  {
+    switch (_a.action)
+    {
+      case Neuron::Msg::InputAction::Fire:
+        s_frameFire = true;
+        break;
+      case Neuron::Msg::InputAction::LaunchMissile:
+        s_frameMissile = true;
+        s_frameMissileTarget = _a.param;
+        break;
+    }
   });
 }
 
@@ -1269,10 +1293,26 @@ static void send_player_input(void)
   in.rollAxis = -static_cast<float>(PlayerFlight().roll) / static_cast<float>(maxRoll);
   in.pitchAxis = -static_cast<float>(PlayerFlight().climb) / static_cast<float>(maxClimb);
   in.throttle = static_cast<float>(PlayerFlight().speed) / static_cast<float>(maxSpeed);
-  in.fire = (kbd_fire_pressed != 0);
-  in.fireMissile = s_fire_missile_intent;
-  in.missileTarget = s_fire_missile_intent ? s_fire_missile_target : Net::NO_MISSILE_TARGET;
-  s_fire_missile_intent = false;
+
+  // Discrete combat actions flow as LocalOnly ActionTriggered messages through the
+  // client bus into this frame's intent (the command-builder pattern): the input
+  // layer publishes what the player did, the subscriber accumulates it here.
+  register_client_event_handlers();
+  s_frameFire = false;
+  s_frameMissile = false;
+  s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  if (kbd_fire_pressed)
+    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
+  if (s_fire_missile_intent)
+  {
+    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::LaunchMissile, s_fire_missile_target });
+    s_fire_missile_intent = false;
+  }
+  g_clientBus.Dispatch();
+
+  in.fire = s_frameFire;
+  in.fireMissile = s_frameMissile;
+  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
 
   Client::ReplicationClientInstance().SendInput(in);
 }

@@ -26,7 +26,7 @@
 | 3b-1 | Fold `GalaxyManifest` onto a catalog id; retire `EventType` / delete `GameEvents.h` | ✅ Landed |
 | 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (`MessageEndpoint`) | ✅ Landed |
 | 4a | Client-side `MessageBus`; route inbound facts through it (symmetric with server) | ✅ Landed |
-| 4b | Key polling → `KeyPressed`/`ActionTriggered` → `InputCommand` mapper | ⏳ Deferred |
+| 4b | Key polling → `ActionTriggered` (LocalOnly) → command-builder → `InputCommand` | ✅ Landed |
 | 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
 
 > **Verification note.** The project targets MSVC; this environment has no Windows toolchain, so
@@ -559,11 +559,16 @@ editing one switch — this is the "subscribe VFX/audio/camera/UI to inbound fac
 The decode→publish→dispatch→subscriber path is covered headlessly by the bus + reliable-event
 tests; the client wiring builds under MSVC (CI).
 
-**Phase 4b — Key → `InputCommand` mapper. ⏳ Deferred.**
-Converting the legacy `kbd_*` polling into `KeyPressed`/`ActionTriggered` (LocalOnly) → a
-command-builder → `InputCommand` is lower-value decoupling over churn-heavy, actively-changing
-flight-input code, so it is deferred (the input path already rides the catalog as `InputCommand`
-since Phase 2). Pick it up when the input layer is next touched.
+**Phase 4b — Key → `InputCommand` mapper. ✅ DONE.**
+`ActionTriggered` (`Messages/Defs/InputActions.h`, LocalOnly, `Fire`/`LaunchMissile`) is the
+client-local input-intent message. `send_player_input` publishes it from the polled keys
+(`kbd_fire_pressed`, the missile-launch edge), a command-builder subscriber accumulates the
+frame's actions, and the send folds them into the outgoing `InputCommand` — the
+"key polling → `ActionTriggered` (LocalOnly) → command-builder → `InputCommand`" path, end to
+end, decoupling *what the player did* from *how the command is built* (rebinding/record/replay
+all drive the same path). Continuous flight (roll/pitch/throttle) stays the legacy rate-based
+`PlayerFlight` state, normalized to axes at send time — it isn't key-event-shaped. Behaviour is
+unchanged. Covered by `InputActionsTests` (codec + command-builder + LocalOnly/non-wire checks).
 
 **Phase 5 — Tooling & hardening.**
 Standalone packet-dump decoder, schema-doc + catalog-diff generators, message/bandwidth/CPU

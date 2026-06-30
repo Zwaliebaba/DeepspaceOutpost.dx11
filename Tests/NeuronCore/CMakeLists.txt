@@ -20,6 +20,7 @@ add_executable(NeuronCore.Tests
     CatalogGovernanceTests.cpp
     ReliableEventsTests.cpp
     MessageEndpointTests.cpp
+    InputActionsTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)
