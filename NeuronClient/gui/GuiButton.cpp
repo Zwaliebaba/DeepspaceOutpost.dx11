@@ -23,7 +23,7 @@ namespace
 }
 
 GuiButton::GuiButton()
-  : m_fontSize(11.0f),
+  : m_fontSize(13.0f),
     m_centered(false),
     m_disabled(false),
     m_highlightedThisFrame(false),
@@ -291,7 +291,7 @@ void LabelButton::Render(int realX, int realY, bool highlighted, bool clicked)
   else
     ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
 
-  g_editorFont.DrawText2D(realX + 5, realY + 10, 11.0f, m_caption);
+  g_editorFont.DrawText2D(realX + 5, realY + 10, 13.0f, m_caption);
 }
 
 void InvertedBox::Render(int realX, int realY, bool highlighted, bool clicked)
