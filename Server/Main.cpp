@@ -104,11 +104,14 @@ int main()
   world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
   landmarks.push_back(planet);
 
-  // One pirate ahead-right of the spawn, close enough to be clearly visible.
+  // One pirate ahead-right, out toward the planet. Placed well beyond its own engage
+  // range from the spawn (and station behind), so a fresh launch isn't sniped/farmed at
+  // the spawn point; you meet it as an opt-in fight on the way to the planet. Its range
+  // is shortened too, so it only opens fire at close quarters rather than from afar.
   const ECS::EntityId pirate = world.Create();
-  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1000, 300, 4000 } });
+  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1500, 400, 14000 } });
   world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
-  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 5000, /*autoEngage*/ true });
+  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
 
   // Home system station, BEHIND the spawn (negative z) so a launching player
