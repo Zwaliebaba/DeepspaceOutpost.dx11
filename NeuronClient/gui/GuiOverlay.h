@@ -28,7 +28,7 @@ namespace GuiOverlay
   bool IsReady();
 
   void Update();                           // auto-hide when empty + keyboard/mouse nav
-  void Render(int canvasWidth, int canvasHeight); // draw into the currently-bound canvas
+  void Render(int clientWidth, int clientHeight); // draw the overlay full-window on the back buffer
 
   // Show the overlay and open the Options window directly (the game's in-game options
   // entry, e.g. F11, routes here instead of drawing a legacy gfx_display_* screen).

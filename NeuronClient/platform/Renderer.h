@@ -3,14 +3,11 @@
  *
  * Renderer.h
  *
- * Direct3D 11 renderer. The game draws into a fixed 512x513 logical canvas
- * (play area 512x384 plus the 512x129 HUD strip). That canvas is an off-screen
- * render target which is presented to the swap chain back buffer, aspect
- * preserved and centred (letterboxed), so the OS window can be any size.
- *
- * M1 scope: device/swapchain, off-screen RT, palette load, letterboxed present
- * and a coloured clear. The 2D primitive batch (lines/polys/sprites/text) is
- * layered on in M2/M3 via the accessors at the bottom.
+ * Thin owner of the window's device/context/swap chain (adopted from
+ * Neuron::Graphics::Core) plus the master palette. The 2D layer (Render2D) draws
+ * straight to Core's back-buffer render target - the game's virtual 512x514 space
+ * (or the client area in full-window flight) is letterboxed onto it by the viewport
+ * in gfx2d_flush - so the renderer keeps no render targets of its own.
  */
 
 #ifndef RENDERER_H
@@ -25,103 +22,48 @@ class Renderer
 {
 public:
 	/* The retro logical canvas the 2D UI (menus/charts/station/HUD) is authored
-	 * against: 512x384 play area plus the 512x129 HUD strip at y=385 (=514). The
-	 * canvas is letterboxed onto the window in this mode. In "scene full-window"
-	 * mode the canvas instead tracks the client area so the in-flight 3D fills the
-	 * whole window; the HUD is then floated on top via a draw-origin offset. */
+	 * against: a 512x384 play area plus the 512x129 HUD strip at y=385 (=514 tall).
+	 * gfx2d draws in this virtual space (or the client area when the in-flight 3D
+	 * fills the window) and letterboxes it straight onto the back buffer. */
 	static constexpr int kCanvasWidth  = 512;
 	static constexpr int kCanvasHeight = 514;
 
-	bool init(HWND hwnd);
-
-	/* Device-unification path: instead of creating its own device/swap chain, adopt
-	 * the ones Neuron::Graphics::Core already created (owned by ClientEngine) and build
-	 * the offscreen canvas + present pipeline on them. */
+	/* Adopt the device/context/swap chain Neuron::Graphics::Core created (ClientEngine
+	 * owns the lifetime) and load the palette. */
 	bool initAdopt();
-
 	void shutdown();
 
-	/* Resize the swap chain to the new client area (from WM_SIZE). */
-	void resize(int clientWidth, int clientHeight);
-
-	/* Current off-screen canvas size (retro 512x514, or the client area in scene
-	 * full-window mode). The gfx batch's coordinate space and the projection use
-	 * these, not the kCanvas* constants. */
-	int canvasWidth()  const { return canvas_w_; }
-	int canvasHeight() const { return canvas_h_; }
 	int clientWidth()  const { return client_w_; }
 	int clientHeight() const { return client_h_; }
 
-	/* Switch the canvas between retro (letterboxed 512x514) and full-window (sized
-	 * to the client area). Recreates the off-screen target only when the effective
-	 * size changes; cheap to call every frame. */
-	void ensureCanvasMode(bool fullWindow);
-
-	/* Clear the whole off-screen canvas to a palette colour. */
-	void clearCanvas(int palette_index);
-
-	/* Bind the canvas as the render target with a full-canvas viewport, ready
-	 * for the 2D primitive batch (gfx2d) to draw into. */
-	void bindCanvasTarget();
-
-	/* Blit the canvas to the back buffer (letterboxed) and present it. */
-	void present();
-
-	/* Split form of present() for a full-window GUI overlay: blit the letterboxed
-	 * canvas to the back buffer and leave it bound with a full client-area viewport
-	 * (so an overlay drawn next renders in client space); then swap() presents. */
-	void blitCanvasToBackBuffer();
+	/* Present the current back buffer. */
 	void swap();
 
-	/* Rebuild the back-buffer view after the swap chain was resized (WM_SIZE, via
-	 * Core). Call onResizePre() before Core::WindowSizeChanged (releases the view so
-	 * ResizeBuffers can succeed) and onResizePost() after (recreates it). */
+	/* Around Core::WindowSizeChanged (WM_SIZE): unbind render targets before it runs,
+	 * update the cached client size after. Core owns the back-buffer view and recreates
+	 * it on resize, so there is nothing of ours to rebuild. */
 	void onResizePre();
 	void onResizePost(int clientWidth, int clientHeight);
 
-	/* Master 256-colour palette loaded from scanner.bmp. Index -> 0xAABBGGRR
-	 * (R8G8B8A8_UNORM byte order). Index 0 is forced fully transparent. */
+	/* Master 256-colour palette (baked in scanner_palette.h). Index -> 0xAABBGGRR
+	 * (R8G8B8A8_UNORM byte order); index 0 is the transparent colour key. */
 	uint32_t paletteColour(int index) const { return palette_[index & 0xff]; }
 	bool paletteLoaded() const { return palette_loaded_; }
 
-	/* Accessors for the 2D primitive layer added in later milestones. */
-	ID3D11Device*        device()  const { return device_.get(); }
-	ID3D11DeviceContext* context() const { return context_.get(); }
-	/* The swap chain, so Neuron::Graphics::Core can adopt the existing device/swap
-	 * chain (device unification) instead of creating a second one. */
+	ID3D11Device*        device()    const { return device_.get(); }
+	ID3D11DeviceContext* context()   const { return context_.get(); }
 	IDXGISwapChain*      swapChain() const { return swap_chain_.get(); }
 
 private:
-	bool createDeviceAndSwapChain(HWND hwnd);
-	bool createBackBuffer();
-	bool createCanvasTarget();
-	bool recreateCanvas(int w, int h);
-	bool createPresentPipeline();
 	bool loadPalette();
-	void computeLetterbox(D3D11_VIEWPORT& vp) const;
 
-	winrt::com_ptr<ID3D11Device>           device_;
-	winrt::com_ptr<ID3D11DeviceContext>    context_;
-	winrt::com_ptr<IDXGISwapChain>         swap_chain_;
-	winrt::com_ptr<ID3D11RenderTargetView> back_rtv_;
-
-	winrt::com_ptr<ID3D11Texture2D>          canvas_tex_;
-	winrt::com_ptr<ID3D11RenderTargetView>   canvas_rtv_;
-	winrt::com_ptr<ID3D11ShaderResourceView> canvas_srv_;
-
-	winrt::com_ptr<ID3D11VertexShader>   present_vs_;
-	winrt::com_ptr<ID3D11PixelShader>    present_ps_;
-	winrt::com_ptr<ID3D11SamplerState>   present_sampler_;
-	winrt::com_ptr<ID3D11RasterizerState> present_raster_;
+	winrt::com_ptr<ID3D11Device>        device_;
+	winrt::com_ptr<ID3D11DeviceContext> context_;
+	winrt::com_ptr<IDXGISwapChain>      swap_chain_;
 
 	HWND hwnd_ = nullptr;
 	int  client_w_ = 0;
 	int  client_h_ = 0;
-
-	/* Current canvas size and mode. Defaults to the retro letterboxed canvas. */
-	int  canvas_w_ = kCanvasWidth;
-	int  canvas_h_ = kCanvasHeight;
-	bool canvas_full_ = false;
 
 	uint32_t palette_[256] = {};
 	bool     palette_loaded_ = false;

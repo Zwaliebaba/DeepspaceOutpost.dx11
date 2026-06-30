@@ -493,9 +493,9 @@ float4 PSMain(VSOut i) : SV_Target
     std::memcpy(mapped.pData, s_verts.data(), s_verts.size() * sizeof(Vertex));
     ctx->Unmap(s_vb.get(), 0);
 
-    // Bind the target + a matching full viewport, unless the caller passed a null RTV
-    // (Begin with rtv == nullptr) - then draw to whatever is already bound, e.g. the
-    // off-screen canvas the gfx2d HUD batch has just bound via bindCanvasTarget.
+    // Bind the target and place the virtual space on it (offset + scale), unless the
+    // caller passed a null RTV (Begin with rtv == nullptr) - then draw to whatever is
+    // already bound, leaving its viewport as-is.
     if (s_rtv)
     {
       ID3D11RenderTargetView* rtv = s_rtv;

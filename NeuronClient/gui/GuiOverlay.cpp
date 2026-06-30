@@ -167,12 +167,11 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   if (!s_ready || !s_shown)
     return;
 
-  // The back buffer is already bound with a full client-area viewport (the Renderer's
-  // blitCanvasToBackBuffer ran just before us), so the GUI draws full-window on top of
-  // the letterboxed game - in client-pixel space, matching where Canvas places windows.
-  //
-  // Open one native 2D pass (client-space ortho, Y down, alpha blend, no depth/cull)
-  // and let Canvas submit every window/button/glyph into the batch, flushed at End.
+  // gfx2d_flush has already drawn the (letterboxed) game to the back buffer this frame;
+  // the GUI draws full-window on top in client-pixel space, matching where Canvas places
+  // windows. Open one native 2D pass (client-space ortho, Y down, alpha blend, no
+  // depth/cull, 1:1 mapping) and let Canvas submit every window/button/glyph into the
+  // batch, flushed at End.
   Render2D::Begin(Core::GetRenderTargetView(), clientWidth, clientHeight);
   Canvas::Render();
   Render2D::End();
