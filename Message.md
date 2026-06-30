@@ -25,7 +25,8 @@
 | 3a | Fold reliable schemas (`GameEvents` + `StationProtocol`) into the catalog, single channel | ✅ Landed |
 | 3b-1 | Fold `GalaxyManifest` onto a catalog id; retire `EventType` / delete `GameEvents.h` | ✅ Landed |
 | 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (`MessageEndpoint`) | ✅ Landed |
-| 4 | Client-side bus + presentation handlers; key→command mapper | ⏳ Pending |
+| 4a | Client-side `MessageBus`; route inbound facts through it (symmetric with server) | ✅ Landed |
+| 4b | Key polling → `KeyPressed`/`ActionTriggered` → `InputCommand` mapper | ⏳ Deferred |
 | 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
 
 > **Verification note.** The project targets MSVC; this environment has no Windows toolchain, so
@@ -548,10 +549,21 @@ Phase 4 client-bus work.)*
 
 **Phase 3 is complete: every client↔server datagram is a catalog message on a typed lane.**
 
-**Phase 4 — Client bus & presentation.**
-Client `MessageBus`; route `ReplicationClient` ingress through it. Convert key polling →
-`KeyPressed`/`ActionTriggered` (LocalOnly) → command-builder → `InputCommand`. Subscribe
-VFX/audio/camera/UI to inbound facts (enables the roadmap's Death-driven explosion VFX).
+**Phase 4a — Client bus & presentation. ✅ DONE.**
+The client now owns a `Msg::MessageBus` (`DeepspaceOutpost/main.cpp`), mirroring the server.
+`process_server_events` decodes each inbound reliable fact to its catalog type and **publishes**
+it onto the bus; independent subscribers react — commerce (`StationResponse`→commander),
+death (`EntityDeath`→game-over for self, else forget + explosion), despawn (`EntityDespawn`→
+forget). New presentation reactions (camera shake, kill feed, …) just `Subscribe<>` instead of
+editing one switch — this is the "subscribe VFX/audio/camera/UI to inbound facts" capability.
+The decode→publish→dispatch→subscriber path is covered headlessly by the bus + reliable-event
+tests; the client wiring builds under MSVC (CI).
+
+**Phase 4b — Key → `InputCommand` mapper. ⏳ Deferred.**
+Converting the legacy `kbd_*` polling into `KeyPressed`/`ActionTriggered` (LocalOnly) → a
+command-builder → `InputCommand` is lower-value decoupling over churn-heavy, actively-changing
+flight-input code, so it is deferred (the input path already rides the catalog as `InputCommand`
+since Phase 2). Pick it up when the input layer is next touched.
 
 **Phase 5 — Tooling & hardening.**
 Standalone packet-dump decoder, schema-doc + catalog-diff generators, message/bandwidth/CPU

@@ -31,6 +31,7 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "Messages/MessageBus.h"
 #include "Messages/Defs/CoreEvents.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
@@ -1161,8 +1162,64 @@ void info_message(const char* message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
+// The client's in-process event bus. Inbound reliable facts (decoded from the
+// server) are published here and independent subscribers (commerce, audio/VFX,
+// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
+// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
+static Neuron::Msg::MessageBus g_clientBus;
+
+static void register_client_event_handlers(void)
+{
+  static bool registered = false;
+  if (registered)
+    return;
+  registered = true;
+
+  // Commerce: apply the authoritative station result to the local commander.
+  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  {
+    if (_resp.status != Net::StationStatus::Ok)
+      return;
+    cmdr.credits = _resp.credits;
+    if (_resp.commodity < NO_OF_STOCK_ITEMS)
+      cmdr.current_cargo[_resp.commodity] = _resp.cargo;
+  });
+
+  // Death: our own death triggers the game-over sequence; any other entity's death
+  // drops it from the view, clears a missile lock on it, and plays the explosion.
+  g_clientBus.Subscribe<Neuron::Msg::EntityDeath>([](const Neuron::Msg::EntityDeath& _death)
+  {
+    Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+    if (_death.victim == rc.LocalPlayer())
+    {
+      // We were killed. Trigger the game-over sequence (game_update_flight picks this
+      // up next frame). The server respawns us in place, so after the animation we
+      // resume flight rather than restart - see respawn_after_death().
+      game_over = 1;
+      snd_play_sample(SND_EXPLODE);
+      return;
+    }
+    if (_death.victim == g_missile_lock_target)
+      g_missile_lock_target = 0xFFFFFFFFu;
+    rc.Forget(_death.victim);
+    snd_play_sample(SND_EXPLODE);
+  });
+
+  // Despawn: drop the entity from the view and clear a missile lock on it.
+  g_clientBus.Subscribe<Neuron::Msg::EntityDespawn>([](const Neuron::Msg::EntityDespawn& _ds)
+  {
+    if (_ds.entityId == g_missile_lock_target)
+      g_missile_lock_target = 0xFFFFFFFFu;
+    Client::ReplicationClientInstance().Forget(_ds.entityId);
+  });
+}
+
 static void process_server_events(void)
 {
+  register_client_event_handlers();
+
+  // Decode each inbound reliable fact to its catalog type and publish it onto the
+  // client bus; the subscribers above react. Dispatch once after draining.
   Client::ReplicationClient& rc = Client::ReplicationClientInstance();
   Net::ReliableMessage msg;
   while (rc.PollEvent(msg))
@@ -1172,41 +1229,13 @@ static void process_server_events(void)
     Neuron::Msg::EntityDespawn despawn;
 
     if (Neuron::Msg::TryDecode(msg, resp))
-    {
-      if (resp.status == Net::StationStatus::Ok)
-      {
-        cmdr.credits = resp.credits;
-        if (resp.commodity < NO_OF_STOCK_ITEMS)
-          cmdr.current_cargo[resp.commodity] = resp.cargo;
-      }
-    }
+      g_clientBus.Publish(resp);
     else if (Neuron::Msg::TryDecode(msg, death))
-    {
-      if (death.victim == rc.LocalPlayer())
-      {
-        // We were killed. Trigger the game-over sequence (game_update_flight picks this
-        // up next frame). The server respawns us in place, so after the animation we
-        // resume flight rather than restart - see respawn_after_death().
-        game_over = 1;
-        snd_play_sample(SND_EXPLODE);
-      }
-      else
-      {
-        // Another entity died: clear the lock if it was on it, drop it from the view,
-        // and play the explosion.
-        if (death.victim == g_missile_lock_target)
-          g_missile_lock_target = 0xFFFFFFFFu;
-        rc.Forget(death.victim);
-        snd_play_sample(SND_EXPLODE);
-      }
-    }
+      g_clientBus.Publish(death);
     else if (Neuron::Msg::TryDecode(msg, despawn))
-    {
-      if (despawn.entityId == g_missile_lock_target)
-        g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(despawn.entityId);
-    }
+      g_clientBus.Publish(despawn);
   }
+  g_clientBus.Dispatch();
 }
 
 // The four in-flight cockpit views render the 3D scene full-window; every other
