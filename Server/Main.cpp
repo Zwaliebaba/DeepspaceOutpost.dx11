@@ -375,6 +375,7 @@ int main()
     // Each kill is an EntityKilled fact; the subscriber respawns a player in place
     // or broadcasts the death and destroys the wreck (whose removal also rides the
     // despawn diff below).
+    for (const GameLogic::Kill& kill : kills)
       bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     bus.Dispatch();
 
