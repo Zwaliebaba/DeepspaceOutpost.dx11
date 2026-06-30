@@ -1367,79 +1367,6 @@ void sell_stock (void)
 
 
 
-void display_market_prices (void)
-{
-	char str[100];
-    char planet_name[16];
-	int i;
-
-	current_screen = SCR_MARKET_PRICES;
-
-	gfx_clear_display();
-
-	current_system_name (planet_name);
-	capitalise_name (planet_name);
-	sprintf (str, "%s MARKET PRICES", planet_name);
-	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
-
-	gfx_draw_line (0, 36, 511, 36);
-
-	gfx_display_colour_text (16,  40, "PRODUCT", GFX_COL_GREEN_1);
-	gfx_display_colour_text (166, 40, "UNIT", GFX_COL_GREEN_1);
-	gfx_display_colour_text (246, 40, "PRICE", GFX_COL_GREEN_1);
-	gfx_display_colour_text (314, 40, "FOR SALE", GFX_COL_GREEN_1);
-	gfx_display_colour_text (420, 40, "IN HOLD", GFX_COL_GREEN_1);
-
-	for (i = 0; i < 17; i++)
-	{
-		display_stock_price (i);
-	}
-
-	if (docked)
-	{
-		hilite_item = -1;
-		highlight_stock (0);
-	}
-}
-
-
-void display_inventory (void)
-{
-	int i;
-	int y;
-	char str[80];
-	
-	current_screen = SCR_INVENTORY;
-
-	gfx_clear_display();
-	gfx_display_centre_text (10, "INVENTORY", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-	
-	sprintf (str, "%d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
-	gfx_display_colour_text (16, 50, "Fuel:", GFX_COL_GREEN_1);
-	gfx_display_text (70, 50, str);
-
-	sprintf (str, "%d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
-	gfx_display_colour_text (16, 66, "Cash:", GFX_COL_GREEN_1);
-	gfx_display_text (70, 66, str);
-	
-	y = 98;
-	for (i = 0; i < 17; i++)
-	{
-		if (cmdr.current_cargo[i] > 0)
-		{
-			gfx_display_text (16, y, stock_market[i].name);
-
-			sprintf (str, "%d%s", cmdr.current_cargo[i],
-							  unit_name[stock_market[i].units]);
-
-			gfx_display_text (180, y, str);
-			y += 16;
-		}
-	}
-}
-
-
 /* =================================================================================
  * Render-free accessors for the GUI info windows (Commander Status, Inventory,
  * Data on Planet). Each rebuilds a list of preformatted text lines the GUI's
@@ -2157,19 +2084,3 @@ void equip_row_text (int index, char *buf, int buflen)
 }
 
 int equip_buyable (int index) { return (equip_stock[index].name[0] == '+') || equip_stock[index].canbuy; }
-
-
-void equip_ship (void)
-{
-	current_screen = SCR_EQUIP_SHIP;
-
-	gfx_clear_display();
-	gfx_display_centre_text (10, "EQUIP SHIP", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-
-	collapse_equip_list();
-	
-	hilite_item = 0;
-	
-	list_equip_prices();
-}

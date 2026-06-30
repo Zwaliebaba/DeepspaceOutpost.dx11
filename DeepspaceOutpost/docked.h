@@ -8,7 +8,6 @@ void show_distance_to_planet (void);
 void teleport_to_cursor (void);   // thin-client: teleport to the system at the chart crosshair
 void move_cursor_to_origin (void);
 void find_planet_by_name (char *find_name);
-void display_market_prices (void);
 void display_commander_status (void);
 int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed to_planet);
 void highlight_stock (int i);
@@ -35,8 +34,6 @@ void inventory_line (int i, char *buf, int buflen);
 int  planet_data_line_count (void);
 void planet_data_line (int i, char *buf, int buflen);
 void planet_data_title (char *buf, int buflen);
-void display_inventory (void);
-void equip_ship (void);
 void select_next_equip (void);
 void select_previous_equip (void);
 void buy_equip (void);

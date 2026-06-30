@@ -24,7 +24,6 @@
 #include "sound.h"
 #include "swat.h"
 #include "random.h"
-#include "options.h"
 #include "stars.h"
 #include "missions.h"
 #include "pilot.h"
@@ -329,10 +328,6 @@ void arrow_right(void)
     buy_stock();
     break;
 
-  case SCR_SETTINGS:
-    select_right_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(1, 0);
@@ -359,10 +354,6 @@ void arrow_left(void)
   {
   case SCR_MARKET_PRICES:
     sell_stock();
-    break;
-
-  case SCR_SETTINGS:
-    select_left_setting();
     break;
 
   case SCR_SHORT_RANGE:
@@ -397,14 +388,6 @@ void arrow_up(void)
     select_previous_equip();
     break;
 
-  case SCR_OPTIONS:
-    select_previous_option();
-    break;
-
-  case SCR_SETTINGS:
-    select_up_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, -1);
@@ -435,14 +418,6 @@ void arrow_down(void)
     select_next_equip();
     break;
 
-  case SCR_OPTIONS:
-    select_next_option();
-    break;
-
-  case SCR_SETTINGS:
-    select_down_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, 1);
@@ -467,14 +442,6 @@ void return_pressed(void)
   {
   case SCR_EQUIP_SHIP:
     buy_equip();
-    break;
-
-  case SCR_OPTIONS:
-    do_option();
-    break;
-
-  case SCR_SETTINGS:
-    toggle_setting();
     break;
   }
 }

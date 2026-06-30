@@ -20,7 +20,6 @@ set(GAME_SOURCES
     planet.cpp
     pilot.cpp
     missions.cpp
-    options.cpp
     trade.cpp
     intro.cpp
     file.cpp
