@@ -1,42 +1,61 @@
-# GUI / GraphicsCore import — status & open items
+# Client GUI / 2D renderer — status & next steps
 
-Single source of truth for the GraphicsCore + GUI/text import and the retirement of the
-legacy platform 2D layer. The per-phase docs (`phase1`…`phase7`) are the historical
-record of the early steps; this file tracks the **current** state and what's left.
+Single source of truth for the native Direct3D 11 client rendering stack: the
+GraphicsCore + GUI/text import, the retirement of the legacy platform 2D layer, and the
+consolidation of all 2D onto one batched renderer. The early step-by-step history
+(`phase1`…`phase7`) lived here as separate docs; those phases are complete and several
+described systems that have since been retired, so they were removed — the history is in
+git.
 
-_Last updated: after retiring `gfx_dx11` + `Image` — the whole client now renders through
-one stack._
+_Last updated: after consolidating all 2D onto `Render2D` and rendering the game
+directly to the back buffer (off-screen canvas, `ImmediateRenderer`, and the fxc shader
+pipeline all removed)._
 
-## Where we are
+## The stack today
 
-The donor `NeuronClient` native Direct3D 11 stack is the client's foundation, and the
-game now renders **entirely** through it — there is no longer a second, bespoke 2D
-renderer.
+The whole client renders through one native D3D11 stack, with a **single 2D layer**
+(`Render2D`) shared by the game and the GUI.
 
-- **GraphicsCore + ImmediateRenderer** (`NeuronClient/graphics/`) — native D3D11 device +
-  glBegin/glVertex-style immediate renderer; HLSL in `NeuronClient/shaders` (fxc →
-  committed `CompiledShaders/*.h`). Now also exposes **scissor clip** and an **XOR
-  logic-op** blend (both default off).
-- **TextureManager + DDSTextureLoader** — native D3D11 `.dds` loading with a generated
-  mip chain. All game art (sprites, scanner HUD, fonts, interface) loads through here.
-- **Text + Strings** (`gui/TextRenderer`, `Strings`) — one bitmap-font system
+- **`Neuron::Graphics::Core`** (`graphics/GraphicsCore`) — owns the D3D11 device, swap
+  chain and back-buffer RTV. Brought up by `ClientEngine`.
+- **`Neuron::Graphics::Render2D`** (`graphics/Render2D`) — **the** native 2D batched
+  renderer. A `Begin(rtv, virtualW, virtualH, dstX, dstY, scale, filter) … End` scope
+  sets the pipeline once and batches colored + textured primitives in submission order
+  (keyed by topology / texture / scissor / program). One interleaved vertex format and
+  one shader serve both (colored prims sample a built-in 1×1 white texture). Features: a
+  virtual→target **letterbox transform** (placement + scissor mapping), a runtime
+  **shader-program registry** (`RegisterProgram`/`SetProgram`, compiled via `D3DCompile`
+  — no fxc/offline step), and a built-in **text-outline** program (with a `b1` params
+  cbuffer). Used by the GUI overlay (→ back buffer, 1:1) and the in-game batch
+  (→ back buffer, letterboxed).
+- **`TextureManager` + `DDSTextureLoader`** — native `.dds` loading with a generated mip
+  chain; all game art (sprites, scanner HUD, fonts, interface) loads through here.
+- **Text + Strings** (`gui/TextRenderer`, `Strings`) — one bitmap font
   (`Fonts/SpeccyFontENG.dds`) shared by the menus and in-game `gfx_display_*` text; JSON
-  localization (`GameData/Strings/<lang>/*.json`).
+  localization (`GameData/Strings/<lang>/*.json`). Text gets a **shader-side outline**
+  (Render2D's built-in program); tint via `SetColor`; the printf overloads were removed
+  (plain strings — no format-string / buffer-overflow hazard).
 - **GUI** (`gui/Widget|GuiButton|GuiWindow|Canvas|GuiOverlay`) — the ECL window/menu
-  system, drawn through ImmediateRenderer, full-window + mouse-driven (keyboard nav is a
-  transitional fallback). Opening a window suppresses game input; the overlay auto-hides
-  when the last window closes.
+  system, full-window + mouse-driven (keyboard nav is a transitional fallback), drawn
+  through Render2D. Opening a window suppresses game input; the overlay auto-hides when
+  the last window closes.
+- **`gfx.h` 2D contract** — `platform/gfx2d.cpp`: a submission-order batch (primitives /
+  sprites / text / depth-sorted 3D / scanner / clip) replayed **directly to the back
+  buffer** each frame through Render2D, letterboxed by the viewport (integer scale, point
+  sampled — pixel-exact retro). The depth-sorted 3D flight wireframe rides along
+  (`gfx_polygon` / `gfx_draw_colour_line`).
+- **`platform/Renderer`** — now a thin adopter of Core's device/context/swap chain plus
+  the master palette (`scanner_palette.h`); it owns no render targets and just `swap()`s.
+  (The off-screen 512×514 canvas, the letterboxed-present pipeline, and its own
+  back-buffer RTV are gone.)
+- **`GfxRenderSink`** replays the `RenderQueue` (the A1 render seam) through the `gfx.h`
+  contract — the in-flight 3D wireframe path. Client-only; the queue/sink become a client
+  per-frame render context in A4 (see `RenderContext.h`).
 - **Engine bootstrap** (`ClientEngine`, `GameMain`, `DeepspaceOutpost/GameApp`,
-  `NeuronCore/EventManager`) — `ClientEngine` owns the window + the one D3D11 device
-  (`Neuron::Graphics::Core`). `wWinMain` boots `ClientEngine` → `make_self<GameApp>` →
-  `game_main()`.
-- **`gfx.h` 2D contract** — implemented by `platform/gfx2d.cpp` (formerly `gfx_dx11.cpp`):
-  a submission-order batch (primitives / sprites / text / depth-sorted 3D / scanner / clip
-  / xor) **replayed each frame through ImmediateRenderer** into the off-screen 512×514
-  canvas. `platform/Renderer` still owns that canvas + the letterboxed present + the
-  master palette. `GfxRenderSink` replays the `RenderQueue` through the same contract.
+  `NeuronCore/EventManager`) — `ClientEngine` owns the window + Core; `wWinMain` boots it
+  → `make_self<GameApp>` → `game_main()`.
 
-## Game screens — all list/form screens are GUI windows
+## Game screens — list/form screens are GUI windows
 
 Reached over the running game via the overlay. `DeepspaceOutpost/GameWindows.{h,cpp}`
 holds the game-specific windows, handed to the engine through `GuiOverlay` seams
@@ -49,84 +68,70 @@ holds the game-specific windows, handed to the engine through `GuiOverlay` seams
 | F8 | Market Prices | `MarketWindow` | inline Buy/Sell + live cash; local *and* server trades |
 | F9 | Commander Status | `InfoWindow` | read-only panel |
 | F10 | Inventory | `InfoWindow` | read-only panel |
-| F11 | Options → Game Settings / Quit | `OptionsMenuWindow` + `SettingsWindow` + Quit confirm | Settings bound to config globals + Save |
+| F11 | Options → Game Settings / Quit | `OptionsMenuWindow` + `SettingsWindow` + Quit confirm | Settings bound to config globals |
 
 The trade / equip / read-only logic was split into **render-free accessors** in
 `docked.cpp` (`market_*`, `equip_*`, `cmdr_status_*` / `inventory_*` / `planet_data_*`) so
-the GUI never touches the legacy gfx drawing; the legacy `buy_stock`/`buy_equip` now wrap
-those.
+the GUI never touches the legacy gfx drawing.
 
 - **Still legacy, by design:** the **charts** (F5 galactic / F6 short-range) — interactive
   spatial maps (crosshair nav, fuel circle), not list/form screens, so a `GuiWindow` is
   the wrong fit.
-- **Removed:** Save/Load Commander (file persistence gone; boots the compiled-in default
-  commander). The early **F1 demo main menu** (real screens drive the overlay now).
+- **Removed:** Save/Load Commander (boots the compiled-in default commander); the early
+  F1 demo main menu.
 
-## Retired: the legacy platform 2D layer — ✅ done
+## Done (was "open"; now retired/shipped)
 
-`Font.cpp`, `Image.cpp`, and the bespoke `gfx_dx11` Direct3D 11 renderer are all gone;
-the client renders through one stack (`Core` + `ImmediateRenderer` + `TextureManager`).
+- **Legacy platform 2D layer** (`Font.cpp`, `Image.cpp`, the bespoke `gfx_dx11`) — gone;
+  the master palette is baked into the engine (`scanner_palette.h`).
+- **`ImmediateRenderer` + the fxc / HLSL / `CompiledShaders` pipeline** — removed. All 2D
+  goes through `Render2D`, which compiles its (inline) shaders at runtime.
+- **Off-screen canvas + letterboxed present** — removed. The game renders full-window
+  straight to the back buffer (letterbox via the viewport); `Renderer` shrank to a thin
+  device/palette adopter.
+- **Shader-side text outline** — replaces the old two-pass offset drop-shadow, for both
+  GUI and in-game text.
+- **Review hardening** — `vsnprintf` bounds (+ no `string_view`-as-format), the present
+  binds its own opaque/no-depth OM state, `gfx_display_pretty_text` wrap bounded, the GUI
+  panel SRV cached, and topology/shader asserts.
+- **`dialog_win.cpp`** (dead save/load file picker) — removed.
 
-- **`Font.cpp`** — verd2/verd4 PCX grabber atlas. Game text draws from the same
-  `SpeccyFontENG.dds` sheet as the GUI; one font system everywhere.
-- **`Image.cpp`** — BMP/PCX decoder. Sprites + scanner HUD ship as `.dds` via
-  `TextureManager`. The master 256-colour palette used to be read from `scanner.bmp`;
-  with all `.bmp` art removed, the palette is now **baked into the engine**
-  (`platform/scanner_palette.h`, generated from the old `scanner.bmp`) and
-  `Renderer::loadPalette()` copies that table — no `.bmp` is read at runtime. (Without
-  this, `loadPalette` fell back to a greyscale ramp, so every palette-indexed colour
-  rendered as grey — see the colour-loss fix.)
-- **`gfx_dx11.cpp` → `gfx2d.cpp`** — keeps the proven submission-order batch (command
-  list + scissor + `xor_mode` + 512×514 canvas) but deletes its bespoke D3D11 pipeline
-  (inline HLSL, vertex/constant buffers, blend/raster/sampler states, manual draw loop).
-  `gfx2d_flush()` binds the canvas and replays the batch through ImmediateRenderer under
-  a screen-space ortho with per-command scissor/blend/texture. The depth-sorted 3D flight
-  wireframe rides along for free (it reduces to `gfx_polygon`/`gfx_draw_colour_line`).
-- **`ImmediateRenderer`** gained scissor clip + the XOR logic-op blend the batch needs.
-- **`GfxRenderSink`** only used the `gfx.h` contract, so it was unaffected.
+## Not yet verified on Windows ⏳
 
-## Verified vs. unverified
+This 2D consolidation has only been **compile-gated by CI**; it has **not** been run on
+Windows. The arc most likely to hide a visual regression:
 
-- ✅ **Builds + boots on Windows**, GUI menus render correctly (the interface texture
-  needed a mip chain). The Options/Settings/Quit and Market migrations were visually
-  confirmed.
-- ⏳ **Committed but not yet re-verified on Windows:**
-  - the remaining screen migrations — Equip (F4), Data on Planet (F7), Commander (F9),
-    Inventory (F10);
-  - **the `gfx_dx11 → gfx2d` backend swap + `Image` retirement** — this is the big one: it
-    touches **all** game rendering (flight 3D wireframe, HUD, scanner, sprites, the chart
-    XOR cross-hairs, text). Most-likely failure points: the ortho / Y-orientation and the
-    per-command blend in `gfx2d_flush`, and the XOR path on GPUs lacking the output-merger
-    logic op (silent fallback to opaque).
-- ⏳ **Live window resize** (`WM_SIZE` → Core swap-chain + Renderer back-buffer rebuild) —
-  confirm no crash and correct layout.
+- the **direct-to-back-buffer + letterbox/scissor transform** (gfx2d → Render2D): confirm
+  the letterboxed retro screens (status / charts / station / intro) center at the right
+  integer scale with black bars, scissor-clipped charts land correctly at scale ≠ 1, and
+  full-window flight fills the window with the HUD floated;
+- the **GUI overlay** draws correctly on top of the letterboxed game;
+- **outlined text** over busy backgrounds;
+- **live window resize** (`WM_SIZE` → Core swap-chain rebuild) — no crash, correct layout.
 
-## Open items / next
+(Older, previously confirmed on Windows: GUI menus render; the Options/Settings/Quit and
+Market migrations; palette colour.)
 
-- **Shrink/remove `Renderer` and render the world full-window** — drop the 512×514
-  letterboxed canvas. The seams point this way; the next big architectural step.
-- **Move the game render into the `GameMain` lifecycle** (`Update`/`RenderScene`/
-  `RenderCanvas`) instead of `game_main()` driving everything.
-- **Dead-code cleanup:** the now-unreachable legacy screens (`display_options`/
-  `game_settings_screen`/`quit_screen`, `display_market_prices`,
-  `display_commander_status`/`display_inventory`/`display_data_on_planet`, `equip_ship`)
-  and their `SCR_*` keyboard dispatch are left compiled but unreached via the F-keys
-  (`display_commander_status` also still serves the docked backdrop) — delete in a pass.
-- **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
-  simplify `GuiWindow::Update`).
-- **Touch** is wired but dormant — `WM_POINTER` only fires if `EnableMouseInPointer(TRUE)`
-  is called (left off so the mouse keeps using `WM_MOUSE*`).
-- **`InputField`/`InputScroller`** value-slider widgets were not imported
-  (`GuiWindow::CreateValueControl` omitted); port onto ImmediateRenderer if needed.
-- **Font metrics:** in-game text switched proportional → monospaced (~8px advance);
-  re-check column/line layout on the charts and any dense screens.
+## Next steps (in order)
 
-## Phase index (historical)
-- `phase1-graphicscore.md` — GraphicsCore + ImmediateRenderer + shaders.
-- `phase2-4-gui-text.md` — TextureManager; TextRenderer + Strings; GuiWindow/GuiButton/Canvas.
-- `phase5-graphicscore-live.md` — first device-unified GUI overlay *(superseded by 6–7)*.
-- `phase6-clientengine.md` — ClientEngine/GameMain/EventManager bootstrap; device/window ownership.
-- `phase7-canvas-mouse.md` — full-window, mouse + touch Canvas; live resize; first real menu.
+1. **Windows smoke test** of the items above — the validation gate before building
+   further on this stack.
+2. **Chart cross-hair as a texture** — the XOR logic-op path was dropped in the Render2D
+   move (it never worked reliably); draw the crosshair as a sprite/quad instead.
+3. **Move the game render onto the `GameMain` lifecycle** (`Update` / `RenderScene` /
+   `RenderCanvas`) instead of `game_main()` driving everything.
+4. **Dead-code cleanup** — the unreachable legacy screens (`display_options` /
+   `game_settings_screen` / `quit_screen`, `display_market_prices`, `display_inventory` /
+   `display_data_on_planet`, `equip_ship`) and their `SCR_*` keyboard dispatch (note
+   `display_commander_status` still serves the docked backdrop).
+5. **A4 render-seam ownership** — give a client per-frame render context the `RenderQueue`
+   + `GfxRenderSink`, retiring the `ActiveRenderQueue()` / `g_gfxSink` globals
+   (`RenderContext.h`). Tied to the GameLogic split.
+6. **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
+   simplify `GuiWindow::Update`).
+7. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
+   `WM_POINTER` touch is wired but dormant (`EnableMouseInPointer` left off); re-check the
+   monospaced font metrics on the charts / dense screens.
 
-> Note: the MMO/server migration is tracked separately in `MIGRATION_ROADMAP.md`; this
-> file only covers the client GUI/GraphicsCore import.
+> The MMO/server migration is tracked separately in `MIGRATION_ROADMAP.md`; this file
+> covers only the client GUI / 2D-renderer stack.

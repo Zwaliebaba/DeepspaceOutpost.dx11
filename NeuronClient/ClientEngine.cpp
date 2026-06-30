@@ -21,9 +21,8 @@ namespace
   constexpr int kClientHeight = 1026;
 
   // The engine window procedure. Routes messages to registered processors via
-  // EventManager (input, MIDI loop, ...); WM_DESTROY ends the message loop. Live
-  // window resizing is not handled yet (the swap chain stays at its initial size and
-  // DXGI scales) - see docs/phase6-clientengine.md.
+  // EventManager (input, MIDI loop, ...); WM_DESTROY ends the message loop and WM_SIZE
+  // drives the swap-chain + renderer resize via ClientEngine::OnResize.
   LRESULT CALLBACK EngineWndProc(HWND _hWnd, UINT _msg, WPARAM _wParam, LPARAM _lParam)
   {
     if (_msg == WM_DESTROY)
