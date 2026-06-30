@@ -20,10 +20,48 @@ namespace
 {
   const wchar_t* kWindowClass = L"DeepspaceOutpostWindow";
 
-  // Initial client size: the game is authored against a 512x514 canvas, presented at
-  // an integer multiple. Matches the size the previous bespoke platform window used.
-  constexpr int kClientWidth = 1024;
-  constexpr int kClientHeight = 1026;
+  // Initial client size: a standard Full-HD 1920x1080 back buffer. The GUI windows and
+  // the in-flight 3D render at this native resolution (so they're crisp); the retro
+  // 512x514 pixel-art canvas (menus / charts / station text) is letterboxed onto it at a
+  // whole-number scale, staying pixel-exact. The 16:9 aspect is locked on resize (see the
+  // WM_SIZING handler) so shrinking the window keeps the same shape - no stretching.
+  constexpr int kClientWidth = 1920;
+  constexpr int kClientHeight = 1080;
+
+  // Lock the window's client area to this aspect ratio while the user drags an edge.
+  // Anchored to the default size above so the 3D scene never stretches.
+  constexpr double kAspect = static_cast<double>(kClientWidth) / static_cast<double>(kClientHeight);
+
+  // During an interactive resize, clamp the proposed window rect so the *client* area keeps
+  // kAspect. _wParam tells us which edge/corner is being dragged: a horizontal edge drives
+  // the height from the width, a vertical edge drives the width from the height, and a
+  // corner drives the height from the width.
+  void LockAspectDuringResize(WPARAM _wParam, RECT* _rect, DWORD _style)
+  {
+    // Non-client border (title bar + frame): adjust a zero client rect to measure it.
+    RECT frame{0, 0, 0, 0};
+    AdjustWindowRect(&frame, _style, FALSE);
+    const int borderW = (frame.right - frame.left);
+    const int borderH = (frame.bottom - frame.top);
+
+    int clientW = (_rect->right - _rect->left) - borderW;
+    int clientH = (_rect->bottom - _rect->top) - borderH;
+    if (clientW < 1) clientW = 1;
+    if (clientH < 1) clientH = 1;
+
+    switch (_wParam)
+    {
+      case WMSZ_TOP:
+      case WMSZ_BOTTOM:
+        clientW = static_cast<int>(clientH * kAspect + 0.5);
+        _rect->right = _rect->left + clientW + borderW;
+        break;
+      default: // left / right edges and all four corners: width drives height
+        clientH = static_cast<int>(clientW / kAspect + 0.5);
+        _rect->bottom = _rect->top + clientH + borderH;
+        break;
+    }
+  }
 
   // The engine window procedure. Routes messages to registered processors via
   // EventManager (input, MIDI loop, ...); WM_DESTROY ends the message loop and WM_SIZE
@@ -34,6 +72,12 @@ namespace
     {
       PostQuitMessage(0);
       return 0;
+    }
+
+    if (_msg == WM_SIZING)
+    {
+      LockAspectDuringResize(_wParam, reinterpret_cast<RECT*>(_lParam), static_cast<DWORD>(GetWindowLongW(_hWnd, GWL_STYLE)));
+      return TRUE;
     }
 
     if (_msg == WM_SIZE)

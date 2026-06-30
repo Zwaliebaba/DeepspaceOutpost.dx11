@@ -113,6 +113,13 @@ the GUI never touches the legacy gfx drawing.
 - **Whole game on the GameMain lifecycle** — the nested blocking screen loops in `game_main()`
   became an engine-driven state machine (intro → flight → game-over); the engine owns the
   frame (`ClientEngine::Frame`: lifecycle + present + pump + pace).
+- **Full-HD back buffer + aspect-locked resize** — the default window/back buffer is now
+  **1920×1080** (was 1024×1026), so the GUI overlay windows (drawn 1:1) and the in-flight 3D
+  (fills the window) render at native HD instead of ~1024px. The retro 512×514 pixel-art
+  canvas (menus / charts / station text) is still whole-number letterboxed onto it (caps at
+  2× at 1080p — a centred island with side bars, pixel-exact by design). A `WM_SIZING`
+  handler (`LockAspectDuringResize`) clamps the client area to 16:9 while dragging, so
+  shrinking the window keeps the same shape and the 3D never stretches.
 - **Chart crosshair as a texture** — the F5/F6 charts redraw every frame (the replicated
   chart builders are idempotent) with the crosshair drawn as a `Textures/Crosshair.dds`
   sprite (`IMG_CROSSHAIR`) on top, replacing the dropped XOR-erase toggle.
@@ -145,7 +152,10 @@ Still wants a Windows pass (compile-gated by CI, not yet exercised end-to-end):
   re-entrancy guard);
 - **live window resize** (`WM_SIZE` → Core swap-chain rebuild) — no crash, correct layout
   (note: resizing while parked on a static menu can briefly drop the image — no retained
-  canvas; cosmetic).
+  canvas; cosmetic);
+- the **1920×1080 default + 16:9 aspect lock** (`WM_SIZING`) — window opens at Full-HD,
+  edge-drag keeps 16:9, GUI windows + 3D crisp at native res (maximise/snap go through
+  `WM_SIZE` and are not aspect-clamped — letterbox handles any ratio).
 
 ## Next steps (in order)
 
