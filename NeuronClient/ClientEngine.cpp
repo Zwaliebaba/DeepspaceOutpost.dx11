@@ -6,6 +6,7 @@
 #include "Render2D.h"
 #include "Strings.h"
 #include "TextRenderer.h"
+#include "TextureManager.h"
 
 #include "EventManager.h"
 #include "Renderer.h"
@@ -209,6 +210,9 @@ namespace Neuron::Client
     }
 
     GuiOverlay::Shutdown();
+    g_editorFont.Shutdown();
+    g_gameFont.Shutdown();
+    Graphics::TextureManager::Shutdown();
     Canvas::Shutdown();
     Graphics::Render2D::Shutdown();
     Graphics::Core::Shutdown();

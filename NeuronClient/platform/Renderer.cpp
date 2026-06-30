@@ -39,7 +39,9 @@ bool Renderer::initAdopt()
 void Renderer::shutdown()
 {
 	if (context_) context_->ClearState();
-	/* com_ptr members release automatically. */
+	context_ = nullptr;
+	swap_chain_ = nullptr;
+	device_ = nullptr;
 }
 
 bool Renderer::loadPalette()

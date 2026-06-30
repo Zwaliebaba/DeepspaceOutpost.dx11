@@ -534,7 +534,11 @@ void gfx_render_polygon(int num_points, int* point_list, int face_colour, int za
 	g_poly_chain[x].face_colour = face_colour;
 	g_poly_chain[x].z = zavg;
 	g_poly_chain[x].next = -1;
-	for (int i = 0; i < 16; i++) g_poly_chain[x].point_list[i] = point_list[i];
+	int ints_to_copy = num_points * 2;
+	if (ints_to_copy < 0) ints_to_copy = 0;
+	if (ints_to_copy > 16) ints_to_copy = 16;
+	for (int i = 0; i < ints_to_copy; i++) g_poly_chain[x].point_list[i] = point_list[i];
+	for (int i = ints_to_copy; i < 16; i++) g_poly_chain[x].point_list[i] = 0;
 	if (x == 0) return;
 	if (zavg > g_poly_chain[g_start_poly].z) { g_poly_chain[x].next = g_start_poly; g_start_poly = x; return; }
 	int i = g_start_poly;

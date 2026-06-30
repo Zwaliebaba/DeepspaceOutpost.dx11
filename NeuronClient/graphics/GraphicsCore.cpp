@@ -50,6 +50,33 @@ void Core::Startup(DXGI_FORMAT backBufferFormat, DXGI_FORMAT depthBufferFormat, 
   CreateDeviceResources();
 }
 
+void Core::Shutdown()
+{
+  if (m_d3dContext)
+  {
+    m_d3dContext->OMSetRenderTargets(0, nullptr, nullptr);
+    m_d3dContext->ClearState();
+    m_d3dContext->Flush();
+  }
+
+  m_d3dDepthStencilView = nullptr;
+  m_d3dRenderTargetView = nullptr;
+  m_renderTarget = nullptr;
+  m_depthStencil = nullptr;
+  m_swapChain = nullptr;
+  m_d3dAnnotation = nullptr;
+  m_d3dContext = nullptr;
+  m_d3dDevice = nullptr;
+  m_dxgiOutput = nullptr;
+  m_dxgiFactory = nullptr;
+
+  m_window = nullptr;
+  m_outputSize = {};
+  m_screenViewport = {};
+  m_colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+  m_d3dFeatureLevel = D3D_FEATURE_LEVEL_9_1;
+}
+
 // Configures the Direct3D device, and stores handles to it and the device context.
 void Core::CreateDeviceResources()
 {
