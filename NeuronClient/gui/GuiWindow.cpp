@@ -78,8 +78,13 @@ void GuiWindow::Render(bool hasFocus)
   // Main body fill: map the whole interface texture across the window (a vertical red
   // gradient, dark edges / bright middle) for the panel shading, at 0.96 alpha. If the
   // texture is missing, Render2D falls back to its white texture (a flat panel).
-  const auto interfaceTex = Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds");
-  ID3D11ShaderResourceView* interfaceSRV = interfaceTex ? interfaceTex->GetShaderResourceView() : nullptr;
+  // Cached after it first loads (TextureManager caches too, but this skips the
+  // per-window, per-frame name hash once the panel texture is resident).
+  static std::shared_ptr<Neuron::Graphics::Texture> s_interfaceTex;
+  if (!s_interfaceTex || !s_interfaceTex->IsLoaded())
+    s_interfaceTex = Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds");
+  ID3D11ShaderResourceView* interfaceSRV =
+    (s_interfaceTex && s_interfaceTex->IsLoaded()) ? s_interfaceTex->GetShaderResourceView() : nullptr;
   Render2D::TexQuad(interfaceSRV, m_x, m_y, m_x + m_w, m_y + m_h, 0.0f, 0.0f, 1.0f, 1.0f,
                     Render2D::Rgba(255, 255, 255, 245));
 

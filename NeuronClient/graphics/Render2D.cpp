@@ -4,6 +4,7 @@
 #include <d3dcompiler.h>
 #include <DirectXMath.h>
 
+#include <cassert>
 #include <cstring>
 
 using winrt::com_ptr;
@@ -265,12 +266,20 @@ float4 PSMain(VSOut i) : SV_Target
     com_ptr<ID3DBlob> vs = CompileHLSL(hlslSource, "VSMain", "vs_5_0");
     com_ptr<ID3DBlob> ps = CompileHLSL(hlslSource, "PSMain", "ps_5_0");
     if (!vs || !ps)
+    {
+      // CompileHLSL already logged the compiler errors.
+      assert(false && "Render2D::AddProgram: shader compile failed");
       return DefaultProgram;
+    }
 
     Program p;
     if (FAILED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, p.vs.put())) ||
         FAILED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, p.ps.put())))
+    {
+      OutputDebugStringA("Render2D: shader program creation failed; falling back to the default program.\n");
+      assert(false && "Render2D::AddProgram: shader creation failed");
       return DefaultProgram;
+    }
 
     s_programs.push_back(std::move(p));
     return static_cast<ProgramId>(s_programs.size() - 1);
@@ -416,6 +425,9 @@ float4 PSMain(VSOut i) : SV_Target
   {
     if (count <= 0)
       return;
+    assert(verts && "Render2D::Submit: null vertices");
+    assert((topo != Topo::Lines || count % 2 == 0) && "Render2D::Submit: line list needs an even vertex count");
+    assert((topo != Topo::Tris || count % 3 == 0) && "Render2D::Submit: triangle list needs a multiple of 3");
     Append(topo, srv ? srv : s_white.get(), verts, count);
   }
 

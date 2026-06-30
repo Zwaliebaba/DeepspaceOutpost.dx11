@@ -311,6 +311,11 @@ void Renderer::blitCanvasToBackBuffer()
 	context_->RSSetViewports(1, &vp);
 	context_->RSSetState(present_raster_.get());
 
+	/* Bind our own opaque/no-depth output-merger state rather than inheriting whatever
+	 * the 2D batch left set: this blit is a straight copy of the canvas. */
+	context_->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+	context_->OMSetDepthStencilState(nullptr, 0);
+
 	context_->IASetInputLayout(nullptr);
 	context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	context_->VSSetShader(present_vs_.get(), nullptr, 0);

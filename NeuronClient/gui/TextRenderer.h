@@ -33,10 +33,13 @@ class TextRenderer
     // Tint for subsequent DrawText* calls (default opaque white). Channels are 0-255.
     void SetColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
 
+    // Draw _text at (_x,_y) left-aligned / right-aligned / centred on _x. These take
+    // the string verbatim (no printf formatting - format with std::format/snprintf at
+    // the call site if needed), so a '%' in a caption is just a glyph.
     void DrawText2DSimple(float _x, float _y, float _size, std::string_view _text);
-    void DrawText2D(float _x, float _y, float _size, std::string_view _text, ...);
-    void DrawText2DRight(float _x, float _y, float _size, std::string_view _text, ...);
-    void DrawText2DCenter(float _x, float _y, float _size, std::string_view _text, ...);
+    void DrawText2D(float _x, float _y, float _size, std::string_view _text);
+    void DrawText2DRight(float _x, float _y, float _size, std::string_view _text);
+    void DrawText2DCenter(float _x, float _y, float _size, std::string_view _text);
 
     static float GetTextWidth(size_t _numChars, float _size = 13.0f);
 

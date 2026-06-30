@@ -2,9 +2,6 @@
 #include "TextRenderer.h"
 #include "Render2D.h"
 
-#include <cstdarg> // va_list / va_start / va_end
-#include <cstring> // strlen
-
 using Neuron::Graphics::Render2D;
 using Neuron::Graphics::Texture;
 using Neuron::Graphics::TextureManager;
@@ -97,38 +94,21 @@ void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string
     Render2D::SetProgram(Render2D::DefaultProgram);
 }
 
-void TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2D(float _x, float _y, float _size, std::string_view _text)
 {
-  char buf[512];
-  va_list ap;
-  va_start(ap, _text);
-  vsprintf(buf, _text.data(), ap);
-  va_end(ap);
-  DrawText2DSimple(_x, _y, _size, buf);
+  DrawText2DSimple(_x, _y, _size, _text);
 }
 
-void TextRenderer::DrawText2DRight(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2DRight(float _x, float _y, float _size, std::string_view _text)
 {
-  char buf[512];
-  va_list ap;
-  va_start(ap, _text);
-  vsprintf(buf, _text.data(), ap);
-  va_end(ap);
-
-  const float width = GetTextWidth(strlen(buf), _size);
-  DrawText2DSimple(_x - width, _y, _size, buf);
+  const float width = GetTextWidth(_text.size(), _size);
+  DrawText2DSimple(_x - width, _y, _size, _text);
 }
 
-void TextRenderer::DrawText2DCenter(float _x, float _y, float _size, std::string_view _text, ...)
+void TextRenderer::DrawText2DCenter(float _x, float _y, float _size, std::string_view _text)
 {
-  char buf[512];
-  va_list ap;
-  va_start(ap, _text);
-  vsprintf(buf, _text.data(), ap);
-  va_end(ap);
-
-  const float width = GetTextWidth(strlen(buf), _size);
-  DrawText2DSimple(_x - width / 2, _y, _size, buf);
+  const float width = GetTextWidth(_text.size(), _size);
+  DrawText2DSimple(_x - width / 2, _y, _size, _text);
 }
 
 float TextRenderer::GetTextWidth(size_t _numChars, float _size) { return _numChars * _size * HORIZONTAL_SIZE; }

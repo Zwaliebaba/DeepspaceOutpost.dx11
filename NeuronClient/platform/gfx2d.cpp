@@ -453,6 +453,9 @@ void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt
 	int   len = (int)std::strlen(txt);
 	int   maxlen = (bx - tx) / 8;
 	if (maxlen <= 0) maxlen = 1;
+	/* A line copies pos+1 chars plus a NUL into strbuf, and pos can reach maxlen, so
+	 * clamp maxlen to the buffer to keep a wide (bx-tx) from overflowing it. */
+	if (maxlen > static_cast<int>(sizeof(strbuf)) - 2) maxlen = static_cast<int>(sizeof(strbuf)) - 2;
 
 	while (len > 0)
 	{
@@ -591,7 +594,7 @@ void gfx2d_flush(void)
 			Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(), 1.0f / g_font_sheet->GetHeight(),
 									 1.0f);
 
-		std::vector<Render2D::Vertex> scratch;
+		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
 			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
