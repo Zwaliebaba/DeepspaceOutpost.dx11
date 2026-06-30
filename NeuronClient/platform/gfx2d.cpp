@@ -298,11 +298,10 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
 }
 
-/* ---- depth-sorted 3D render chain (ported from alg_gfx.c) ---- */
-constexpr int MAX_POLYS = 100;
-struct PolyData { int z, no_points, face_colour, point_list[16], next; };
-PolyData g_poly_chain[MAX_POLYS];
-int g_start_poly = 0, g_total_polys = 0;
+/* The depth-sorted painter's chain was retired once the 3D scene moved to the GPU
+ * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_polygon /
+ * gfx_render_line now draw immediately as plain 2D, kept only for any 2D-projected
+ * marker that still uses them. */
 
 } // namespace
 
@@ -532,37 +531,19 @@ void gfx_draw_scanner(void)
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 
-/* ---- depth-sorted render chain ---- */
-void gfx_start_render(void) { g_start_poly = 0; g_total_polys = 0; }
+/* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
+void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
-void gfx_render_polygon(int num_points, int* point_list, int face_colour, int zavg)
+/* Draw immediately as a flat 2D polygon; the depth key is ignored (the GPU z-buffer
+ * orders the 3D scene now). poly_list is 2 ints (x,y) per point, same as gfx_polygon. */
+void gfx_render_polygon(int num_points, int* point_list, int face_colour, int /*zavg*/)
 {
-	if (g_total_polys == MAX_POLYS) return;
-	int x = g_total_polys++;
-	g_poly_chain[x].no_points = num_points;
-	g_poly_chain[x].face_colour = face_colour;
-	g_poly_chain[x].z = zavg;
-	g_poly_chain[x].next = -1;
-	int ints_to_copy = num_points * 2;
-	if (ints_to_copy < 0) ints_to_copy = 0;
-	if (ints_to_copy > 16) ints_to_copy = 16;
-	for (int i = 0; i < ints_to_copy; i++) g_poly_chain[x].point_list[i] = point_list[i];
-	for (int i = ints_to_copy; i < 16; i++) g_poly_chain[x].point_list[i] = 0;
-	if (x == 0) return;
-	if (zavg > g_poly_chain[g_start_poly].z) { g_poly_chain[x].next = g_start_poly; g_start_poly = x; return; }
-	int i = g_start_poly;
-	for (; g_poly_chain[i].next != -1; i = g_poly_chain[i].next)
-	{
-		int nx = g_poly_chain[i].next;
-		if (zavg > g_poly_chain[nx].z) { g_poly_chain[i].next = x; g_poly_chain[x].next = nx; return; }
-	}
-	g_poly_chain[i].next = x;
+	gfx_polygon(num_points, point_list, face_colour);
 }
 
-void gfx_render_line(int x1, int y1, int x2, int y2, int dist, int col)
+void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
 {
-	int pl[4] = { x1, y1, x2, y2 };
-	gfx_render_polygon(2, pl, col, dist);
+	gfx_draw_colour_line(x1, y1, x2, y2, col);
 }
 
 void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
@@ -572,20 +553,6 @@ void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
 
 void gfx_finish_render(void)
 {
-	/* Draw any remaining 2D painter-sorted polygons (legacy path; empty now that ships
-	 * render through Scene3D, but kept for any other RenderPolygon user). */
-	if (g_total_polys > 0)
-	{
-		for (int i = g_start_poly; i != -1; i = g_poly_chain[i].next)
-		{
-			int n = g_poly_chain[i].no_points;
-			int* pl = g_poly_chain[i].point_list;
-			int col = g_poly_chain[i].face_colour;
-			if (n == 2) gfx_draw_colour_line(pl[0], pl[1], pl[2], pl[3], col);
-			else        gfx_polygon(n, pl, col);
-		}
-	}
-
 	/* Mark where the GPU 3D scene renders in submission order: the models collected
 	 * since the last marker draw here - after the 2D background just emitted, before the
 	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point. */
