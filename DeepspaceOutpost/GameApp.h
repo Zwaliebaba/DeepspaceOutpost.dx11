@@ -3,7 +3,7 @@
 // GameApp - the concrete application object the engine drives.
 //
 // The game is migrating onto the GameMain lifecycle (Update/RenderScene/RenderCanvas),
-// driven once per frame by ClientEngine::Tick (called from gfx_update_screen). RenderCanvas
+// driven once per frame by ClientEngine::Frame (called from gfx_update_screen). RenderCanvas
 // already owns the 2D UI (GUI overlay); Update/RenderScene are still stubs while the legacy
 // game_main() loop drives gameplay and the legacy gfx_* path fills the scene batch.
 // ClientEngine holds one of these (created with winrt::make_self) for its lifecycle dispatch.

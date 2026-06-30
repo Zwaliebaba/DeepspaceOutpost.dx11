@@ -1548,7 +1548,7 @@ int game_main(void)
     display_commander_status();
 
     // The in-flight/docked frame now runs through the GameMain lifecycle: each
-    // gfx_update_screen() drives ClientEngine::Tick(), which calls GameApp::Update ->
+    // gfx_update_screen() drives ClientEngine::Frame(), which calls GameApp::Update ->
     // game_update() and GameApp::RenderScene -> game_render_scene(), then presents. The
     // gate keeps those hooks live only for this loop (the intro/game-over/mission
     // sequences below drive their own frames with the hooks inert).

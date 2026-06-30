@@ -122,38 +122,11 @@ void gfx_graphics_shutdown(void)
 
 void gfx_update_screen(void)
 {
-	/* The engine owns the per-frame render: it drives the GameMain lifecycle
-	   (Update/RenderScene/RenderCanvas), flushes the 2D batch to the back buffer and
-	   presents (ClientEngine::Tick). The platform layer keeps the message pump and frame
-	   pacing below for now; those move onto the engine when the outer loop inverts. */
-	if (g_renderer_ready)
-		ClientEngine::Tick();
-
-	platform_pump_messages();
-
-	/* Regulate to speed_cap ms/frame so the game runs at the intended pace. */
-	static LARGE_INTEGER freq = { 0 };
-	static LARGE_INTEGER prev = { 0 };
-	if (freq.QuadPart == 0)
-		QueryPerformanceFrequency(&freq);
-
-	int cap = (speed_cap > 0) ? speed_cap : 55;
-	double target = cap / 1000.0;
-
-	if (prev.QuadPart != 0)
-	{
-		for (;;)
-		{
-			LARGE_INTEGER now;
-			QueryPerformanceCounter(&now);
-			double elapsed = double(now.QuadPart - prev.QuadPart) / double(freq.QuadPart);
-			if (elapsed >= target)
-				break;
-			if (target - elapsed > 0.003)
-				Sleep(1);
-		}
-	}
-	QueryPerformanceCounter(&prev);
+	/* The engine owns the whole frame now: GameMain lifecycle (Update/RenderScene/
+	   RenderCanvas) + flush + present, then the OS message pump and frame pacing. This
+	   gfx.h hook just hands it the game's speed_cap (the platform owns that config value;
+	   the engine owns the loop mechanics). */
+	ClientEngine::Frame(speed_cap);
 }
 
 /* The process entry point (wWinMain) lives in the game executable
