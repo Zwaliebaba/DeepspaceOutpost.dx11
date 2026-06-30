@@ -10,8 +10,8 @@
 #include <unordered_map>
 
 #include "Mesh.h"
-#include "RenderQueue.h"   // Neuron::Render::ModelDraw
-#include "ViewMetrics.h"
+#include "RenderQueue.h"      // Neuron::Render::ModelDraw
+#include "SceneProjection.h"  // Neuron::Client::Matrix4 / ViewMetrics
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the
 // CPU-projected flight scene. Where the legacy path projected each ship's vertices on
@@ -65,6 +65,11 @@ namespace Neuron::Graphics
       // return a mesh with indexCount == 0 (cached "no geometry") - callers skip those.
       static const GpuMesh* MeshForType(int _type);
 
+      // Render one camera-space planet/sun billboard (a depth-tested quad) for a
+      // SHIP_PLANET / SHIP_SUN model. Shares the depth/cull/blend state with the ship
+      // pass; uses the billboard shader + a per-billboard params buffer.
+      static void renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj);
+
       inline static winrt::com_ptr<ID3D11VertexShader> s_vs;
       inline static winrt::com_ptr<ID3D11PixelShader> s_ps;
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
@@ -72,6 +77,14 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_depth;
       inline static winrt::com_ptr<ID3D11RasterizerState> s_raster;
       inline static winrt::com_ptr<ID3D11BlendState> s_blend;
+
+      // Billboard (planet / sun) program + its dynamic 6-vertex quad and b1 params.
+      inline static winrt::com_ptr<ID3D11VertexShader> s_bbVs;
+      inline static winrt::com_ptr<ID3D11PixelShader> s_bbPs;
+      inline static winrt::com_ptr<ID3D11Buffer> s_bbVb;
+      inline static winrt::com_ptr<ID3D11Buffer> s_bbParamsCb;
+      // Viewport optics for the in-progress RenderModels pass (billboard sizing).
+      inline static Neuron::Client::ViewMetrics s_view;
 
       inline static std::unordered_map<int, GpuMesh> s_meshes;
       inline static MeshProvider s_provider;

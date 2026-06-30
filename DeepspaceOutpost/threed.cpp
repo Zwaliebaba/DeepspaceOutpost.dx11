@@ -539,38 +539,30 @@ void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
 
 void draw_planet (struct local_object *planet)
 {
-	int x,y;
-	int radius;
-
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-
-	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
-
-	/* On-screen radius scales with the focal length (retro focal 512 == the old
-	 * 6291456/distance * GFX_SCALE), so the planet grows to fill a bigger view. */
-	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
-
-	if ((x + radius <  0) ||
-		(x - radius > vm.width) ||
-		(y + radius < 0) ||
-		(y - radius > vm.height))
+	if (planet->location.z <= 0)
 		return;
+
+	/* Emit the planet as a GPU billboard (a depth-tested camera-facing disk), so it
+	 * occludes correctly against the 3D ships and no longer floods the framebuffer with
+	 * per-pixel software rasterization. Scene3D derives the on-screen radius from the
+	 * distance + focal length and reproduces the style:
+	 *   0 wireframe -> ring, 1 green -> filled disk, 2/3 SNES/fractal -> banded disk. */
+	Neuron::Render::ModelDraw md;
+	md.type = SHIP_PLANET;
+	md.style = planet_render_style;
+	md.location[0] = planet->location.x;
+	md.location[1] = planet->location.y;
+	md.location[2] = planet->location.z;
+	md.distance = planet->distance;
 
 	switch (planet_render_style)
 	{
-		case 0:
-			draw_wireframe_planet (x, y, radius, planet->rotmat);
-			break;
-		
-		case 1:
-			ActiveRenderQueue().FilledCircle (x, y, radius, GFX_COL_GREEN_1);
-			break;
-
-		case 2:
-		case 3:
-			render_planet (x, y, radius, planet->rotmat);
-			break;
+		case 0:  md.colour = GFX_COL_WHITE;   break;                              /* wireframe ring */
+		case 1:  md.colour = GFX_COL_GREEN_1; break;                              /* filled green   */
+		default: md.colour = GFX_COL_GREEN_1; md.colour2 = GFX_COL_BLUE_1; break; /* SNES / fractal */
 	}
+
+	ActiveRenderQueue().DrawModel (md);
 }
 
 
@@ -672,22 +664,20 @@ void render_sun (int xo, int yo, int radius)
 
 void draw_sun (struct local_object *planet)
 {
-	int x,y;
-	int radius;
-
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-
-	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
-
-	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
-
-	if ((x + radius <  0) ||
-		(x - radius > vm.width) ||
-		(y + radius < 0) ||
-		(y - radius > vm.height))
+	if (planet->location.z <= 0)
 		return;
 
-	render_sun (x, y, radius);
+	/* Emit the sun as a GPU billboard (depth-tested radial-gradient disk), replacing the
+	 * per-pixel render_sun rasterizer. Scene3D draws the white->yellow->orange bands. */
+	Neuron::Render::ModelDraw md;
+	md.type = SHIP_SUN;
+	md.location[0] = planet->location.x;
+	md.location[1] = planet->location.y;
+	md.location[2] = planet->location.z;
+	md.distance = planet->distance;
+	md.colour = GFX_COL_WHITE;
+
+	ActiveRenderQueue().DrawModel (md);
 }
 
 

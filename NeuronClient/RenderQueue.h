@@ -74,9 +74,10 @@ namespace Neuron::Render
   // a DrawModel Command's dataOffset.
   struct ModelDraw
   {
-    int      type = 0;        // legacy SHIP_* model id
-    int      style = 0;       // render style: 0 = solid, 1 = wireframe
-    int      colour = -1;     // palette override; < 0 keeps the model's own face colours
+    int      type = 0;        // legacy SHIP_* model id (also SHIP_PLANET / SHIP_SUN billboards)
+    int      style = 0;       // render style: ships 0=solid/1=wireframe; planet = planet_render_style
+    int      colour = -1;     // palette index: ships < 0 keep face colours; planet/sun primary colour
+    int      colour2 = -1;    // secondary palette index (banded planet styles); < 0 if unused
     uint32_t flags = 0;       // legacy local_object flags (e.g. FLG_FIRING)
     double   location[3] = {};         // camera-space position (x right, y up, z forward)
     double   rotmat[3][3] = {};        // orientation basis: row 0 = side, 1 = roof, 2 = nose
