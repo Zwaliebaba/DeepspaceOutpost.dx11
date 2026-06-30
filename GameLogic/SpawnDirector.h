@@ -47,10 +47,21 @@ namespace Neuron::GameLogic
         return ECS::EntityId{};
 
       const Math::Vector3i64 anchor = players[NextRand() % players.size()];
+
+      // Spawn at a distance, not on top of the player. Each axis offset is at least
+      // +/-6000, so the Chebyshev distance always exceeds the pirate's 5000 engage range:
+      // a fresh pirate appears as a dot and has to close in (and the player, with the
+      // longer 6000 range, can fire first) instead of opening fire from point-blank the
+      // instant it spawns. Spread is +/-[6000, 9000) per axis.
+      auto axisOffset = [this]() -> int64_t {
+        const uint32_t r = NextRand();
+        const int64_t mag = 6000 + static_cast<int64_t>(r % 3000);   // [6000, 9000)
+        return (r & 0x10000u) ? mag : -mag;                          // sign from a mid bit
+      };
       const Math::Vector3i64 pos{
-        anchor.x + static_cast<int64_t>(NextRand() % 4000) - 2000,
-        anchor.y + static_cast<int64_t>(NextRand() % 4000) - 2000,
-        anchor.z + static_cast<int64_t>(NextRand() % 4000) - 2000,
+        anchor.x + axisOffset(),
+        anchor.y + axisOffset(),
+        anchor.z + axisOffset(),
       };
 
       const ECS::EntityId e = _world.Create();

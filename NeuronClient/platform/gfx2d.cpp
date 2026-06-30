@@ -6,9 +6,10 @@
  * The gfx.h 2D contract on a submission-order batch renderer. Two vertex streams
  * (solid-colour and textured) feed a single command list, so lines/polygons,
  * sprites, the HUD bitmap and text all composite in the exact order the game draws
- * them. The batch replays into the persistent 512x514 canvas in gfx2d_flush() -
- * through Neuron::Graphics::ImmediateRenderer - and Renderer::present() then blits it
- * to the window. (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
+ * them. In gfx2d_flush() the batch replays through Neuron::Graphics::Render2D straight
+ * onto the back buffer (letterboxed), and Renderer::swap() then presents it. An idle
+ * frame with an empty batch is left unpresented so the last frame persists (see
+ * gfx2d_flush). (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *
  * Colours are palette indices resolved against scanner.bmp. Solid primitives are
  * opaque (index 0 -> opaque black); sprite/HUD art is .dds (alpha baked in). Text is
@@ -21,13 +22,14 @@
 #include "Renderer.h"
 #include "gfx2d.h"
 #include "TextureManager.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 
 #include "gfx.h"
 #include "ViewMetrics.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -80,12 +82,15 @@ int                        g_origin_y  = 0;
 bool                       g_scene_full = false;
 Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
 
-/* Current canvas size, mirrored from the renderer (retro 512x514 or client). */
-int canvasW() { Renderer* r = platform_renderer(); return r ? r->canvasWidth()  : Renderer::kCanvasWidth;  }
-int canvasH() { Renderer* r = platform_renderer(); return r ? r->canvasHeight() : Renderer::kCanvasHeight; }
+/* The virtual coordinate space the 2D batch is authored in: the retro 512x514 canvas,
+ * or the live client area when the in-flight 3D fills the window. (Formerly the size of
+ * an off-screen canvas texture; now just the projection space that gfx2d_flush
+ * letterboxes straight onto the back buffer.) */
+int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::kCanvasWidth;  }
+int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::kCanvasHeight; }
 
-/* The 2D batch renders through Neuron::Graphics::ImmediateRenderer (see gfx2d_flush),
- * so this layer no longer owns any Direct3D shaders / buffers / pipeline state. */
+/* The 2D batch renders through Neuron::Graphics::Render2D (see gfx2d_flush), so this
+ * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
 std::map<std::string, Texture> g_textures;
 
 /* The shared .dds bitmap font: a 16-column x 14-row grid of cells starting at
@@ -229,6 +234,7 @@ const char* spriteFile(int sprite_no)
 		case IMG_MISSILE_RED:    return "missred.dds";
 		case IMG_BLAKE:          return "blake.dds";
 		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
+		case IMG_CROSSHAIR:      return "Textures/Crosshair.dds";
 		default:                 return nullptr;
 	}
 }
@@ -243,33 +249,45 @@ ID3D11ShaderResourceView* fontSheetSRV()
 	return (g_font_sheet && g_font_sheet->IsLoaded()) ? g_font_sheet->GetShaderResourceView() : nullptr;
 }
 
-void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
+/* Emit one run of glyph quads at (x,y) in a single tint. Factored out of drawString
+ * so a drop-shadow pass can be laid down before the coloured glyphs. */
+void emitGlyphs(ID3D11ShaderResourceView* srv, const FontSize& fs, float x, float y, const char* s, uint32_t tint)
 {
-	ID3D11ShaderResourceView* srv = fontSheetSRV();
-	if (!srv || !s) return;
+	/* Per-glyph tex cell on the 16-col x 14-row grid (16x16 px cells in the 256x224
+	 * sheet) starting at ASCII 32. Sample the WHOLE cell on exact texel boundaries:
+	 * with point sampling that reconstructs the native glyph pixels cleanly at any
+	 * destination size. (The old fudged UVs - a 0.9 width crop plus sub-texel margins -
+	 * pushed the sample window off the texel grid, so small body text sampled between
+	 * source pixels and lost crispness; see TextRenderer::GetTexCoord* for the GUI's
+	 * matching cells.) chars <= 32 (space + control) advance without drawing. */
+	constexpr float CELL_W = 1.0f / 16.0f;   // 16 columns
+	constexpr float CELL_H = 1.0f / 14.0f;   // 14 rows
 
-	/* Per-glyph tex cell on the 16x14 ASCII-32 grid. These constants mirror
-	 * TextRenderer::GetTexCoordX/Y (gui/TextRenderer.cpp) so the same sheet renders
-	 * identically here; the small margins inset the cell to avoid sampling the
-	 * neighbouring glyph. chars <= 32 (space + control) advance without drawing. */
-	constexpr float TEX_MARGIN  = 0.003f;
-	constexpr float TEX_STRETCH = 1.0f - 26.0f * TEX_MARGIN;
-	constexpr float TEX_WIDTH   = 1.0f / 16.0f * TEX_STRETCH * 0.9f;
-	constexpr float TEX_HEIGHT  = 1.0f / 14.0f * TEX_STRETCH;
-
-	float pen = (float)x;
+	float pen = x;
 	for (; *s; s++)
 	{
 		const unsigned char c = (unsigned char)*s;
 		if (c > 32)
 		{
-			const float u0 = (c % 16) * (1.0f / 16.0f) + TEX_MARGIN + 0.002f;
-			const float v0 = ((c >> 4) - 2) * (1.0f / 14.0f) + TEX_MARGIN + 0.001f;
-			pushTexQuad(srv, pen, (float)y, pen + fs.charW, (float)y + fs.charH,
-						u0, v0, u0 + TEX_WIDTH, v0 + TEX_HEIGHT, tint);
+			const float u0 = (c % 16) * CELL_W;
+			const float v0 = ((c >> 4) - 2) * CELL_H;
+			pushTexQuad(srv, pen, y, pen + fs.charW, y + fs.charH,
+						u0, v0, u0 + CELL_W, v0 + CELL_H, tint);
 		}
 		pen += fs.charW;
 	}
+}
+
+void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
+{
+	ID3D11ShaderResourceView* srv = fontSheetSRV();
+	if (!srv || !s) return;
+
+	/* Single pass: the glyphs get a crisp outline in the shader at flush time. Commands
+	 * bound to the font sheet are replayed through Render2D's text-outline program (see
+	 * gfx2d_flush), so the text stays readable over the busy 3D backdrop without an
+	 * extra offset-shadow geometry pass. */
+	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
 }
 
 /* ---- depth-sorted 3D render chain (ported from alg_gfx.c) ---- */
@@ -442,6 +460,9 @@ void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt
 	int   len = (int)std::strlen(txt);
 	int   maxlen = (bx - tx) / 8;
 	if (maxlen <= 0) maxlen = 1;
+	/* A line copies pos+1 chars plus a NUL into strbuf, and pos can reach maxlen, so
+	 * clamp maxlen to the buffer to keep a wide (bx-tx) from overflowing it. */
+	if (maxlen > static_cast<int>(sizeof(strbuf)) - 2) maxlen = static_cast<int>(sizeof(strbuf)) - 2;
 
 	while (len > 0)
 	{
@@ -503,8 +524,6 @@ void gfx_draw_scanner(void)
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 
-/* gfx_request_file lives in dialog_win.cpp (Win32 common dialog). */
-
 /* ---- depth-sorted render chain ---- */
 void gfx_start_render(void) { g_start_poly = 0; g_total_polys = 0; }
 
@@ -516,7 +535,11 @@ void gfx_render_polygon(int num_points, int* point_list, int face_colour, int za
 	g_poly_chain[x].face_colour = face_colour;
 	g_poly_chain[x].z = zavg;
 	g_poly_chain[x].next = -1;
-	for (int i = 0; i < 16; i++) g_poly_chain[x].point_list[i] = point_list[i];
+	int ints_to_copy = num_points * 2;
+	if (ints_to_copy < 0) ints_to_copy = 0;
+	if (ints_to_copy > 16) ints_to_copy = 16;
+	for (int i = 0; i < ints_to_copy; i++) g_poly_chain[x].point_list[i] = point_list[i];
+	for (int i = ints_to_copy; i < 16; i++) g_poly_chain[x].point_list[i] = 0;
 	if (x == 0) return;
 	if (zavg > g_poly_chain[g_start_poly].z) { g_poly_chain[x].next = g_start_poly; g_start_poly = x; return; }
 	int i = g_start_poly;
@@ -550,104 +573,104 @@ void gfx_finish_render(void)
 /* =====================================================================
  *  Flush
  * ===================================================================== */
-void gfx2d_flush(void)
+bool gfx2d_flush(bool forcePresent)
 {
-	using Neuron::Graphics::ImmediateRenderer;
-	using Neuron::Graphics::MatrixStackId;
-	using Neuron::Graphics::Primitive;
-	using Neuron::Graphics::ShaderProgram;
+	using Neuron::Graphics::Core;
+	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return false; }
 
-	/* Match the canvas to the mode this batch was authored for (retro vs full window). */
-	r->ensureCanvasMode(g_scene_full);
-
-	if (!g_cmds.empty())
+	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
+	 * previously presented frame stays on screen. The menu/station screens repaint only
+	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
+	 * empty batch here is what made those screens flash to black on idle frames. */
+	if (g_cmds.empty() && !forcePresent)
 	{
-		/* Bind the off-screen canvas (RT + full-canvas viewport), then replay the
-		 * submission-ordered command list through ImmediateRenderer. A screen-space
-		 * ortho (Y down) maps the batch's canvas-pixel coordinates straight to clip
-		 * space, exactly as the old bespoke vertex shader did. */
-		r->bindCanvasTarget();
+		g_cverts.clear(); g_tverts.clear(); g_cmds.clear();
+		return false;
+	}
 
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-		ImmediateRenderer::PushMatrix();
-		ImmediateRenderer::LoadIdentity();
-		ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(r->canvasWidth()), static_cast<float>(r->canvasHeight()), 0.0f);
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-		ImmediateRenderer::PushMatrix();
-		ImmediateRenderer::LoadIdentity();
+	/* The batch is authored in the virtual space (retro 512x514, or the client area in
+	 * full-window flight). Letterbox it onto the back buffer with an integer scale so the
+	 * pixel art stays crisp; full-window flight gives scale 1 and no bars. No off-screen
+	 * canvas / blit: the viewport scales the virtual space straight onto the back buffer. */
+	const int vw = canvasW();
+	const int vh = canvasH();
+	const int cw = r->clientWidth();
+	const int ch = r->clientHeight();
+	int scale = std::min(cw / vw, ch / vh);
+	if (scale < 1) scale = 1;
+	const int dstX = (cw - vw * scale) / 2;
+	const int dstY = (ch - vh * scale) / 2;
 
-		ImmediateRenderer::UseProgram(ShaderProgram::Generic);
-		ImmediateRenderer::SetDepthTestEnabled(false);
-		ImmediateRenderer::SetDepthWriteEnabled(false);
-		ImmediateRenderer::SetCullEnabled(false);
-		ImmediateRenderer::SetFogEnabled(false);
-		ImmediateRenderer::SetScissorEnabled(true);
-		/* Point sampling keeps the pixel sprites / HUD / bitmap font crisp, matching
-		 * the old batch's sampler. */
-		ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP);
+	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
+	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
 
+	/* Clear the whole back buffer (letterbox bars + anything the batch does not paint)
+	 * before this frame's content. */
+	if (rtv && ctx)
+	{
+		const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+		ctx->ClearRenderTargetView(rtv, black);
+	}
+
+	if (!g_cmds.empty() && rtv)
+	{
+		/* Replay the submission-ordered command list through Render2D, letterboxed onto
+		 * the back buffer. Point sampling keeps the sprites / HUD / bitmap font crisp.
+		 * (XOR for the chart cross-hairs is dropped - the logic-op path never worked and
+		 * is slated for a texture.) */
+		Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
+
+		/* Text commands (those bound to the font sheet) replay through the built-in
+		 * text-outline program for a shader-side outline; sprites/HUD and colored prims
+		 * use the default program. Configure the outline from the sheet's texel size. */
+		ID3D11ShaderResourceView* fontSrv = fontSheetSRV();
+		if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
+			g_font_sheet->GetHeight() > 0.0f)
+			Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(), 1.0f / g_font_sheet->GetHeight(),
+									 1.0f);
+
+		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
-			ImmediateRenderer::SetScissorRect(c.scissor.left, c.scissor.top, c.scissor.right, c.scissor.bottom);
+			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
+							  c.scissor.bottom - c.scissor.top);
+
+			scratch.clear();
+			scratch.reserve(c.count);
 
 			if (c.kind == Kind::Tex)
 			{
-				/* Sprites / HUD / text: alpha-blended textured triangles. */
-				ImmediateRenderer::SetColorLogicOpXor(false);
-				ImmediateRenderer::SetBlendEnabled(true);
-				ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
-				ImmediateRenderer::BindTexture(0, c.srv);
-				ImmediateRenderer::Begin(Primitive::Triangles);
 				for (uint32_t i = 0; i < c.count; i++)
 				{
 					const TexVertex& v = g_tverts[c.start + i];
-					ImmediateRenderer::Color(v.rgba);
-					ImmediateRenderer::TexCoord(v.u, v.v);
-					ImmediateRenderer::Vertex(v.x, v.y);
+					scratch.push_back({v.x, v.y, v.u, v.v, v.rgba});
 				}
-				ImmediateRenderer::End();
-				ImmediateRenderer::BindTexture(0, nullptr);
+				Render2D::SetProgram(c.srv == fontSrv ? Render2D::TextOutlineProgram() : Render2D::DefaultProgram);
+				Render2D::Submit(Render2D::Topo::Tris, scratch.data(), static_cast<int>(scratch.size()), c.srv);
 			}
 			else
 			{
-				/* Solid primitives: opaque, or XOR for the chart cross-hairs. */
-				ImmediateRenderer::SetColorLogicOpXor(c.xorop);
-				ImmediateRenderer::SetBlendEnabled(false);
-
-				const Primitive topo = (c.topo == Topo::Points) ? Primitive::Points
-									 : (c.topo == Topo::Lines)  ? Primitive::Lines
-									 :                            Primitive::Triangles;
-				ImmediateRenderer::Begin(topo);
 				for (uint32_t i = 0; i < c.count; i++)
 				{
 					const ColorVertex& v = g_cverts[c.start + i];
-					ImmediateRenderer::Color(v.rgba);
-					ImmediateRenderer::Vertex(v.x, v.y);
+					scratch.push_back({v.x, v.y, 0.0f, 0.0f, v.rgba});
 				}
-				ImmediateRenderer::End();
+				const Render2D::Topo topo = (c.topo == Topo::Points) ? Render2D::Topo::Points
+										  : (c.topo == Topo::Lines)  ? Render2D::Topo::Lines
+																	 : Render2D::Topo::Tris;
+				Render2D::SetProgram(Render2D::DefaultProgram);
+				Render2D::Submit(topo, scratch.data(), static_cast<int>(scratch.size()), nullptr);
 			}
 		}
 
-		/* Leave ImmediateRenderer in its default state so the GUI overlay (drawn next,
-		 * to the back buffer) and the next frame are unaffected by the batch's settings. */
-		ImmediateRenderer::SetScissorEnabled(false);
-		ImmediateRenderer::SetColorLogicOpXor(false);
-		ImmediateRenderer::SetBlendEnabled(false);
-		ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
-		ImmediateRenderer::BindTexture(0, nullptr);
-		ImmediateRenderer::SetDepthTestEnabled(true);
-		ImmediateRenderer::SetDepthWriteEnabled(true);
-		ImmediateRenderer::SetCullEnabled(true);
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-		ImmediateRenderer::PopMatrix();
-		ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-		ImmediateRenderer::PopMatrix();
+		Render2D::End();
 	}
 
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
+	return true;
 }

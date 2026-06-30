@@ -3,11 +3,10 @@
 #include "Canvas.h"
 #include "TextRenderer.h"
 #include "GuiWindow.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 #include "platform_win.h"
 
-using Neuron::Graphics::ImmediateRenderer;
-using Neuron::Graphics::Primitive;
+using Neuron::Graphics::Render2D;
 
 namespace
 {
@@ -23,7 +22,7 @@ namespace
 }
 
 GuiButton::GuiButton()
-  : m_fontSize(11.0f),
+  : m_fontSize(13.0f),
     m_centered(false),
     m_disabled(false),
     m_highlightedThisFrame(false),
@@ -51,76 +50,46 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
 
   if (highlighted || clicked)
   {
-    ImmediateRenderer::Begin(Primitive::Quads);
-    ImmediateRenderer::ColorBytes(199, 214, 220, 255);
-    if (clicked)
-      ImmediateRenderer::ColorBytes(255, 255, 255, 255);
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::ColorBytes(112, 141, 168, 255);
-    if (clicked)
-      ImmediateRenderer::ColorBytes(162, 191, 208, 255);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
+    // Vertical gradient fill (lighter on top), brighter when clicked.
+    const uint32_t top = clicked ? Render2D::Rgba(255, 255, 255, 255) : Render2D::Rgba(199, 214, 220, 255);
+    const uint32_t bottom = clicked ? Render2D::Rgba(162, 191, 208, 255) : Render2D::Rgba(112, 141, 168, 255);
+    Render2D::TexQuadColored(nullptr, realX, realY, realX + m_bounds.Width, realY + m_bounds.Height, 0, 0, 0, 0, top,
+                             top, bottom, bottom);
 
     g_editorFont.SetRenderShadow(true);
-
     if (m_disabled)
-      ImmediateRenderer::ColorBytes(128, 128, 75, 30);
+      g_editorFont.SetColor(128, 128, 75, 255);
     else
-      ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+      g_editorFont.SetColor(255, 255, 150, 255);
 
     if (m_centered)
-    {
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
-      g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
-    }
     else
-    {
       g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
-      g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
-    }
     g_editorFont.SetRenderShadow(false);
   }
   else
   {
-    ImmediateRenderer::ColorBytes(107, 37, 39, 64);
-    ImmediateRenderer::Begin(Primitive::Quads);
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
+    Render2D::FillRect(realX, realY, realX + m_bounds.Width, realY + m_bounds.Height, Render2D::Rgba(107, 37, 39, 64));
 
-    ImmediateRenderer::Begin(Primitive::Lines);
-    ImmediateRenderer::ColorBytes(100, 34, 34, 200);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY);
-
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-
-    ImmediateRenderer::Color(0.1f, 0.0f, 0.0f, 1.0f);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
+    // Bevel: light top/left, dark right/bottom.
+    const uint32_t light = Render2D::Rgba(100, 34, 34, 200);
+    const uint32_t dark = Render2D::Rgba(26, 0, 0, 255);
+    Render2D::DrawLine(realX, realY + m_bounds.Height, realX, realY, light);
+    Render2D::DrawLine(realX, realY, realX + m_bounds.Width, realY, light);
+    Render2D::DrawLine(realX + m_bounds.Width, realY, realX + m_bounds.Width, realY + m_bounds.Height, dark);
+    Render2D::DrawLine(realX + m_bounds.Width, realY + m_bounds.Height, realX, realY + m_bounds.Height, dark);
 
     if (m_disabled)
-      ImmediateRenderer::Color(0.5f, 0.5f, 0.5f, 1.0f);
+      g_editorFont.SetColor(128, 128, 128, 255);
     else
-      ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
+      g_editorFont.SetColor(255, 255, 255, 255);
 
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
     else
       g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
   }
-
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 void GuiButton::SetProperties(const std::string& _name, int _x, int _y, int _w, int _h, const std::string& _caption,
@@ -172,54 +141,33 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
     clicked = true;
   if (clicked)
   {
-    ImmediateRenderer::Begin(Primitive::Quads);
-    ImmediateRenderer::ColorBytes(199, 214, 220, 255);
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::ColorBytes(112, 141, 168, 255);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
+    const uint32_t top = Render2D::Rgba(199, 214, 220, 255);
+    const uint32_t bottom = Render2D::Rgba(112, 141, 168, 255);
+    Render2D::TexQuadColored(nullptr, realX, realY, realX + m_bounds.Width, realY + m_bounds.Height, 0, 0, 0, 0, top,
+                             top, bottom, bottom);
 
     g_editorFont.SetRenderShadow(true);
-    ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+    g_editorFont.SetColor(255, 255, 150, 255);
     if (m_centered)
-    {
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
-      g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
-    }
     else
-    {
       g_editorFont.DrawText2D(realX + 5, realY + 10, m_fontSize, m_caption);
-      g_editorFont.DrawText2D(realX + 5, realY + 10, m_fontSize, m_caption);
-    }
     g_editorFont.SetRenderShadow(false);
   }
   else
   {
-    ImmediateRenderer::ColorBytes(107, 37, 39, 64);
-
     if (highlighted)
     {
       parent->SetCurrentButton(this);
-      ImmediateRenderer::Begin(Primitive::Lines);
-      ImmediateRenderer::ColorBytes(100, 34, 34, 250);
-      ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-      ImmediateRenderer::Vertex(realX, realY);
-
-      ImmediateRenderer::Vertex(realX, realY);
-      ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-
-      ImmediateRenderer::Color(0.0f, 0.0f, 0.0f, 1.0f);
-      ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-      ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-
-      ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-      ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-      ImmediateRenderer::End();
+      const uint32_t light = Render2D::Rgba(100, 34, 34, 250);
+      const uint32_t dark = Render2D::Rgba(0, 0, 0, 255);
+      Render2D::DrawLine(realX, realY + m_bounds.Height, realX, realY, light);
+      Render2D::DrawLine(realX, realY, realX + m_bounds.Width, realY, light);
+      Render2D::DrawLine(realX + m_bounds.Width, realY, realX + m_bounds.Width, realY + m_bounds.Height, dark);
+      Render2D::DrawLine(realX + m_bounds.Width, realY + m_bounds.Height, realX, realY + m_bounds.Height, dark);
     }
 
-    ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
+    g_editorFont.SetColor(255, 255, 255, 255);
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
     else
@@ -227,15 +175,13 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
 
     if (highlighted)
     {
-      ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 0.5f);
+      g_editorFont.SetColor(255, 255, 255, 128);
       if (m_centered)
         g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
       else
         g_editorFont.DrawText2D(realX + 5, realY + 10, m_fontSize, m_caption);
     }
   }
-
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
 
   GuiButton::Render(realX, realY, highlighted, clicked);
 }
@@ -252,33 +198,16 @@ void CloseButton::Render(int realX, int realY, bool highlighted, bool clicked)
 {
   if (m_iconised)
   {
-    if (highlighted || clicked)
-      ImmediateRenderer::ColorBytes(160, 137, 139, 64);
-    else
-      ImmediateRenderer::ColorBytes(60, 37, 39, 64);
+    const uint32_t fill =
+      (highlighted || clicked) ? Render2D::Rgba(160, 137, 139, 64) : Render2D::Rgba(60, 37, 39, 64);
+    Render2D::FillRect(realX, realY, realX + m_bounds.Width, realY + m_bounds.Height, fill);
 
-    ImmediateRenderer::Begin(Primitive::Quads);
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
-
-    ImmediateRenderer::Begin(Primitive::Lines);
-    ImmediateRenderer::ColorBytes(0, 0, 150, 100);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY);
-
-    ImmediateRenderer::Vertex(realX, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-
-    ImmediateRenderer::Color(0.1f, 0.0f, 0.0f, 1.0f);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-
-    ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-    ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-    ImmediateRenderer::End();
+    const uint32_t light = Render2D::Rgba(0, 0, 150, 100);
+    const uint32_t dark = Render2D::Rgba(26, 0, 0, 255);
+    Render2D::DrawLine(realX, realY + m_bounds.Height, realX, realY, light);
+    Render2D::DrawLine(realX, realY, realX + m_bounds.Width, realY, light);
+    Render2D::DrawLine(realX + m_bounds.Width, realY, realX + m_bounds.Width, realY + m_bounds.Height, dark);
+    Render2D::DrawLine(realX + m_bounds.Width, realY + m_bounds.Height, realX, realY + m_bounds.Height, dark);
   }
   else
     GuiButton::Render(realX, realY, highlighted, clicked);
@@ -287,45 +216,22 @@ void CloseButton::Render(int realX, int realY, bool highlighted, bool clicked)
 void LabelButton::Render(int realX, int realY, bool highlighted, bool clicked)
 {
   if (m_disabled)
-    ImmediateRenderer::Color(0.5f, 0.5f, 0.5f, 1.0f);
+    g_editorFont.SetColor(128, 128, 128, 255);
   else
-    ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
+    g_editorFont.SetColor(255, 255, 255, 255);
 
-  g_editorFont.DrawText2D(realX + 5, realY + 10, 11.0f, m_caption);
+  g_editorFont.DrawText2D(realX + 5, realY + 10, 13.0f, m_caption);
 }
 
 void InvertedBox::Render(int realX, int realY, bool highlighted, bool clicked)
 {
-  ImmediateRenderer::Color(0.05f, 0.0f, 0.0f, 0.4f);
-  ImmediateRenderer::Begin(Primitive::Quads);
-  ImmediateRenderer::Vertex(realX, realY);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-  ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-  ImmediateRenderer::End();
+  Render2D::FillRect(realX, realY, realX + m_bounds.Width, realY + m_bounds.Height, Render2D::Rgba(13, 0, 0, 102));
 
-  //
-  // Border lines
-
-  ImmediateRenderer::Color(0.0f, 0.0f, 0.0f, 1.0f);
-  ImmediateRenderer::Begin(Primitive::Lines); // top
-  ImmediateRenderer::Vertex(realX, realY);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::Begin(Primitive::Lines); // left
-  ImmediateRenderer::Vertex(realX, realY);
-  ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::ColorBytes(100, 34, 34, 150);
-  ImmediateRenderer::Begin(Primitive::Lines);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::Begin(Primitive::Lines); // bottom
-  ImmediateRenderer::Vertex(realX, realY + m_bounds.Height);
-  ImmediateRenderer::Vertex(realX + m_bounds.Width, realY + m_bounds.Height);
-  ImmediateRenderer::End();
+  // Border lines: black top/left, dark-red right/bottom.
+  const uint32_t blackBorder = Render2D::Rgba(0, 0, 0, 255);
+  const uint32_t redBorder = Render2D::Rgba(100, 34, 34, 150);
+  Render2D::DrawLine(realX, realY, realX + m_bounds.Width, realY, blackBorder);
+  Render2D::DrawLine(realX, realY, realX, realY + m_bounds.Height, blackBorder);
+  Render2D::DrawLine(realX + m_bounds.Width, realY, realX + m_bounds.Width, realY + m_bounds.Height, redBorder);
+  Render2D::DrawLine(realX, realY + m_bounds.Height, realX + m_bounds.Width, realY + m_bounds.Height, redBorder);
 }

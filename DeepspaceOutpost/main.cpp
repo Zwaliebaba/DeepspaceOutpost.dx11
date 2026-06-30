@@ -24,7 +24,6 @@
 #include "sound.h"
 #include "swat.h"
 #include "random.h"
-#include "options.h"
 #include "stars.h"
 #include "missions.h"
 #include "pilot.h"
@@ -35,9 +34,6 @@
 #include "Messages/Defs/CoreEvents.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
-
-int old_cross_x, old_cross_y;
-int cross_timer;
 
 int draw_lasers;
 int mcount;
@@ -175,18 +171,11 @@ void initialise_game(void)
 
   cross_x = -1;
   cross_y = -1;
-  cross_timer = 0;
 
   PlayerCaps().maxSpeed = 40; /* 0.27 Light Mach */
   PlayerCaps().maxRoll = 31;
   PlayerCaps().maxClimb = 8; /* CF 8 */
   PlayerCaps().maxFuel = 70; /* 7.0 Light Years */
-}
-
-void finish_game(void)
-{
-  finish = 1;
-  game_over = 1;
 }
 
 /*
@@ -195,8 +184,6 @@ void finish_game(void)
 
 void move_cross(int dx, int dy)
 {
-  cross_timer = 5;
-
   if (current_screen == SCR_SHORT_RANGE)
   {
     cross_x += (dx * 4);
@@ -227,28 +214,33 @@ void move_cross(int dx, int dy)
  * Draw the cross hairs at the specified position.
  */
 
+// Draw the chart crosshair as a textured sprite (Textures/Crosshair.dds), centred on
+// (cx,cy) and clipped to the chart area. The chart is redrawn every frame (see
+// game_render_flight), so the crosshair is just drawn fresh on top each frame - no XOR
+// erase (the old logic-op path was dropped in the Render2D move). The half-size matches
+// the old cross reach: 16 px on the short-range chart, 8 px on the galactic chart.
 void draw_cross(int cx, int cy)
 {
+  int half;
+  int clipBottom;
   if (current_screen == SCR_SHORT_RANGE)
   {
-    gfx_set_clip_region(1, 37, 510, 339);
-    xor_mode(TRUE);
-    gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_RED);
-    gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_RED);
-    xor_mode(FALSE);
-    gfx_set_clip_region(1, 1, 510, 383);
+    half = 16;
+    clipBottom = 339;
+  }
+  else if (current_screen == SCR_GALACTIC_CHART)
+  {
+    half = 8;
+    clipBottom = 293;
+  }
+  else
+  {
     return;
   }
 
-  if (current_screen == SCR_GALACTIC_CHART)
-  {
-    gfx_set_clip_region(1, 37, 510, 293);
-    xor_mode(TRUE);
-    gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
-    gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
-    xor_mode(FALSE);
-    gfx_set_clip_region(1, 1, 510, 383);
-  }
+  gfx_set_clip_region(1, 37, 510, clipBottom);
+  gfx_draw_sprite_scaled(IMG_CROSSHAIR, cx - half, cy - half, half * 2, half * 2);
+  gfx_set_clip_region(1, 1, 510, 383);
 }
 
 void draw_laser_sights(void)
@@ -326,14 +318,6 @@ void arrow_right(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    buy_stock();
-    break;
-
-  case SCR_SETTINGS:
-    select_right_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(1, 0);
@@ -358,14 +342,6 @@ void arrow_left(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    sell_stock();
-    break;
-
-  case SCR_SETTINGS:
-    select_left_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(-1, 0);
@@ -390,22 +366,6 @@ void arrow_up(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    select_previous_stock();
-    break;
-
-  case SCR_EQUIP_SHIP:
-    select_previous_equip();
-    break;
-
-  case SCR_OPTIONS:
-    select_previous_option();
-    break;
-
-  case SCR_SETTINGS:
-    select_up_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, -1);
@@ -428,22 +388,6 @@ void arrow_down(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    select_next_stock();
-    break;
-
-  case SCR_EQUIP_SHIP:
-    select_next_equip();
-    break;
-
-  case SCR_OPTIONS:
-    select_next_option();
-    break;
-
-  case SCR_SETTINGS:
-    select_down_setting();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, 1);
@@ -458,47 +402,6 @@ void arrow_down(void)
     else
       ramp_flight_climb(CLIMB_RAMP_STEP);
     climbing = 1;
-    break;
-  }
-}
-
-void return_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_EQUIP_SHIP:
-    buy_equip();
-    break;
-
-  case SCR_OPTIONS:
-    do_option();
-    break;
-
-  case SCR_SETTINGS:
-    toggle_setting();
-    break;
-  }
-}
-
-void y_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_QUIT:
-    finish_game();
-    break;
-  }
-}
-
-void n_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_QUIT:
-    if (docked)
-      display_commander_status();
-    else
-      current_screen = SCR_FRONT_VIEW;
     break;
   }
 }
@@ -801,10 +704,6 @@ void handle_flight_keys(void)
 {
   int keyasc;
 
-  if (docked && ((current_screen == SCR_MARKET_PRICES) || (current_screen == SCR_OPTIONS) || (current_screen == SCR_SETTINGS) || (
-    current_screen == SCR_EQUIP_SHIP)))
-    kbd_read_key();
-
   kbd_poll_keyboard();
 
   if (game_paused)
@@ -877,14 +776,12 @@ void handle_flight_keys(void)
   if (kbd_F5_pressed)
   {
     find_input = 0;
-    old_cross_x = -1;
     display_galactic_chart();
   }
 
   if (kbd_F6_pressed)
   {
     find_input = 0;
-    old_cross_x = -1;
     display_short_range_chart();
   }
 
@@ -967,12 +864,6 @@ void handle_flight_keys(void)
 
     return;
   }
-
-  if (kbd_y_pressed)
-    y_pressed();
-
-  if (kbd_n_pressed)
-    n_pressed();
 
   if (kbd_fire_pressed)
   {
@@ -1074,9 +965,6 @@ void handle_flight_keys(void)
   if (kbd_right_pressed)
     arrow_right();
 
-  if (kbd_enter_pressed)
-    return_pressed();
-
   if (kbd_energy_bomb_pressed)
   {
     if ((!docked) && (cmdr.energy_bomb))
@@ -1112,67 +1000,63 @@ void set_commander_name(char* path)
   *cname = '\0';
 }
 
-void run_first_intro_screen(void)
+// ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
+//
+// The classic intro -> flight -> game-over sequence used to be a stack of blocking
+// for(;;) loops inside game_main(). It now runs as an explicit state machine stepped one
+// frame at a time by the engine: each gfx_update_screen() runs ClientEngine::Frame() ->
+// GameApp::Update/RenderScene -> game_update()/game_render_scene(), which dispatch on
+// s_state. Each enter_*() does a state's one-time setup; the per-frame work and the
+// transition tests live in game_update()/game_render_scene().
+//
+// The deeply nested blocking sequences the game still spins up from inside a frame (the
+// docking break pattern, mission briefs) keep working through the re-entrancy guard in
+// ClientEngine::Frame: those nested gfx_update_screen() calls only present, they do not
+// re-enter the state step.
+
+enum class GameState
+{
+  Intro1,   // "DEEPSPACE OUTPOST" title (Elite theme)
+  Intro2,   // ship parade (Blue Danube)
+  Flight,   // in-flight / docked - the live game
+  GameOver, // the death animation, then a fresh game
+};
+
+static GameState s_state = GameState::Intro1;
+static int s_gameOverFrame = 0;   // game-over frames rendered (the animation runs 100)
+
+// Enter the first intro screen (title + Elite theme).
+static void enter_intro1(void)
 {
   current_screen = SCR_INTRO_ONE;
-
   snd_play_midi(SND_ELITE_THEME, TRUE);
-
   initialise_intro1();
-
-  for (;;)
-  {
-    update_intro1();
-
-    gfx_update_screen();
-
-    kbd_poll_keyboard();
-
-    if (kbd_space_pressed)
-      break;
-  }
-
-  snd_stop_midi();
+  s_state = GameState::Intro1;
 }
 
-void run_second_intro_screen(void)
+// Enter the second intro screen (ship parade + Blue Danube).
+static void enter_intro2(void)
 {
   current_screen = SCR_INTRO_TWO;
-
   snd_play_midi(SND_BLUE_DANUBE, TRUE);
-
   initialise_intro2();
-
   PlayerFlight().speed = 3;
   PlayerFlight().roll = 0;
   PlayerFlight().climb = 0;
-
-  for (;;)
-  {
-    update_intro2();
-
-    gfx_update_screen();
-
-    kbd_poll_keyboard();
-
-    if (kbd_space_pressed)
-      break;
-  }
-
-  snd_stop_midi();
+  s_state = GameState::Intro2;
 }
 
-/*
- * Draw the game over sequence. 
- */
-
-void run_game_over_screen()
+// Enter live flight (and the docked menus); start on the commander status screen.
+static void enter_flight(void)
 {
-  int i;
-  int newship;
-  Matrix rotmat;
-  int type;
+  dock_player();
+  display_commander_status();
+  s_state = GameState::Flight;
+}
 
+// Enter the game-over animation: a dead Cobra tumbling through wreckage for 100 frames.
+static void enter_game_over(void)
+{
   current_screen = SCR_GAME_OVER;
   gfx_set_clip_region(1, 1, 510, 383);
 
@@ -1181,27 +1065,55 @@ void run_game_over_screen()
   PlayerFlight().climb = 0;
   clear_local_objects();
 
+  Matrix rotmat;
   set_init_matrix(rotmat);
 
-  newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
+  int newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
   local_objects[newship].flags |= FLG_DEAD;
 
-  for (i = 0; i < 5; i++)
+  for (int i = 0; i < 5; i++)
   {
-    type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
+    const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
     newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, -400, rotmat, 0, 0);
     local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
     local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
     local_objects[newship].velocity = rand255() & 15;
   }
 
-  for (i = 0; i < 100; i++)
+  s_gameOverFrame = 0;
+  s_state = GameState::GameOver;
+}
+
+// Begin a fresh game: reset the world, dock, then roll into the intro sequence.
+static void start_new_game(void)
+{
+  game_over = 0;
+  initialise_game();
+  dock_player();
+  update_console();
+  current_screen = SCR_FRONT_VIEW;
+  enter_intro1();
+}
+
+// After the game-over animation. In thin-client mode the server has already respawned us
+// in place (it keeps no permadeath yet), so clear the death and drop straight back into
+// flight - the replicated snapshots drive the view again. The degraded single-player
+// fallback has no server to respawn us, so it starts a fresh game (intro).
+static void respawn_after_death(void)
+{
+  if (Client::ReplicationClientInstance().IsOpen())
   {
-    gfx_clear_display();
-    update_starfield();
-    update_local_objects();
-    gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
-    gfx_update_screen();
+    game_over = 0;
+    docked = 0;
+    PlayerFlight().speed = 0;
+    PlayerFlight().roll = 0;
+    PlayerFlight().climb = 0;
+    current_screen = SCR_FRONT_VIEW;
+    s_state = GameState::Flight;
+  }
+  else
+  {
+    start_new_game();
   }
 }
 
@@ -1270,12 +1182,23 @@ static void process_server_events(void)
     }
     else if (Neuron::Msg::TryDecode(msg, death))
     {
-      // A kill/detonation: clear the lock if it was on the dead entity, drop
-      // it from the view, and play the explosion.
-      if (death.victim == g_missile_lock_target)
-        g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(death.victim);
-      snd_play_sample(SND_EXPLODE);
+      if (death.victim == rc.LocalPlayer())
+      {
+        // We were killed. Trigger the game-over sequence (game_update_flight picks this
+        // up next frame). The server respawns us in place, so after the animation we
+        // resume flight rather than restart - see respawn_after_death().
+        game_over = 1;
+        snd_play_sample(SND_EXPLODE);
+      }
+      else
+      {
+        // Another entity died: clear the lock if it was on it, drop it from the view,
+        // and play the explosion.
+        if (death.victim == g_missile_lock_target)
+          g_missile_lock_target = 0xFFFFFFFFu;
+        rc.Forget(death.victim);
+        snd_play_sample(SND_EXPLODE);
+      }
     }
     else if (Neuron::Msg::TryDecode(msg, despawn))
     {
@@ -1325,6 +1248,233 @@ static void send_player_input(void)
   Client::ReplicationClientInstance().SendInput(in);
 }
 
+// Per-frame logic for the in-flight/docked state: drain replicated state, advance sound,
+// choose the scene/clip mode, read input, and run the per-frame bookkeeping. Split out of
+// the old monolithic loop. Transitions to the game-over animation when the player dies.
+static void game_update_flight(void)
+{
+  if (game_over)
+  {
+    enter_game_over();
+    return;
+  }
+
+  // Drain any replicated world state that arrived since last frame. This is a no-op
+  // until ReplicationClientInstance().Open() is called, so the single-player path is
+  // unchanged; once open, the client consumes the server's authoritative snapshots here
+  // instead of simulating locally.
+  Client::ReplicationClientInstance().Pump();
+  if (Client::ReplicationClientInstance().IsOpen())
+  {
+    process_server_events();
+    // Backstop: forget entities that silently left our area of interest (no despawn
+    // event is sent for those), so they don't pile up as ghosts. ~3s at 30 Hz.
+    Client::ReplicationClientInstance().EvictStale(90);
+  }
+
+  snd_update_sound();
+
+  // Full-window 3D for cockpit views (retro/letterboxed for menus); this also sets the
+  // aspect-aware optics used by the projection in the render pass.
+  gfx_set_scene_fullwindow(is_flight_view(current_screen));
+  gfx_set_scene_clip();
+
+  rolling = 0;
+  climbing = 0;
+
+  handle_flight_keys();
+
+  // In thin-client mode, the player's intent goes to the server.
+  if (Client::ReplicationClientInstance().IsOpen())
+    send_player_input();
+
+  if (game_paused)
+    return;
+
+  if (message_count > 0)
+    message_count--;
+
+  if (!rolling)
+    centre_flight_roll();
+
+  if (!climbing)
+    centre_flight_climb();
+}
+
+// Per-frame draw for the in-flight/docked state: the 3D scene, HUD and overlays the old
+// loop body emitted (with the simulation-and-draw steps that are still fused).
+static void game_render_flight(void)
+{
+  if (game_paused)
+    return;
+
+  // Charts (galactic / short range): redraw the chart, the live selected-system readout
+  // and the crosshair every frame. The replicated chart functions are idempotent (they
+  // only re-park the cursor when it is off-screen), so a per-frame redraw suits the
+  // clear-and-redraw back buffer and the crosshair sprite moves cleanly without the old
+  // XOR erase. Handles the chart whether opened docked or in flight.
+  if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
+  {
+    if (current_screen == SCR_GALACTIC_CHART)
+      display_galactic_chart();
+    else
+      display_short_range_chart();
+    show_distance_to_planet();
+    draw_cross(cross_x, cross_y);
+    return;
+  }
+
+  if (!docked)
+  {
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+      == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+    {
+      gfx_clear_display();
+      update_starfield();
+    }
+
+    if (auto_pilot)
+    {
+      auto_dock();
+      if ((mcount & 127) == 0)
+        info_message("Docking Computers On");
+    }
+
+    // In thin-client mode the server owns the world: render the replicated, interpolated
+    // state instead of simulating locally.
+    if (Client::ReplicationClientInstance().IsOpen())
+      render_replicated_objects();
+    else
+      update_local_objects();
+
+    if (docked)
+    {
+      update_console();
+      return;
+    }
+
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
+      == SCR_RIGHT_VIEW))
+    {
+      if (draw_lasers)
+      {
+        draw_laser_lines();
+        draw_lasers--;
+      }
+
+      draw_laser_sights();
+    }
+
+    if (message_count > 0)
+      gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
+
+    if (hyper_ready)
+    {
+      display_hyper_status();
+      if ((mcount & 3) == 0)
+        countdown_hyperspace();
+    }
+
+    mcount--;
+    if (mcount < 0)
+      mcount = 255;
+
+    if ((mcount & 7) == 0)
+      regenerate_shields();
+
+    if ((mcount & 31) == 10)
+    {
+      if (PlayerDefense().energy < 50)
+      {
+        info_message("ENERGY LOW");
+        snd_play_sample(SND_BEEP);
+      }
+
+      update_altitude();
+    }
+
+    if ((mcount & 31) == 20)
+      update_cabin_temp();
+
+    if ((mcount == 0) && (!witchspace))
+      random_encounter();
+
+    cool_laser();
+    time_ecm();
+
+    update_console();
+  }
+
+  if (current_screen == SCR_BREAK_PATTERN)
+    display_break_pattern();
+}
+
+// Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on
+// Space; flight runs the live game; the game-over animation plays out then restarts.
+void game_update(void)
+{
+  switch (s_state)
+  {
+    case GameState::Intro1:
+      kbd_poll_keyboard();
+      if (kbd_space_pressed)
+      {
+        snd_stop_midi();
+        enter_intro2();
+      }
+      break;
+
+    case GameState::Intro2:
+      kbd_poll_keyboard();
+      if (kbd_space_pressed)
+      {
+        snd_stop_midi();
+        enter_flight();
+      }
+      break;
+
+    case GameState::Flight:
+      game_update_flight();
+      break;
+
+    case GameState::GameOver:
+      if (s_gameOverFrame >= 100)
+      {
+        respawn_after_death();   // animation done -> resume flight (MMO) or fresh game
+        break;
+      }
+      s_gameOverFrame++;
+      break;
+  }
+}
+
+// Per-frame draw hook (GameApp::RenderScene): draw the active state's scene into the 2D
+// batch (the engine flushes it to the back buffer after this).
+void game_render_scene(void)
+{
+  switch (s_state)
+  {
+    case GameState::Intro1:
+      update_intro1();
+      break;
+
+    case GameState::Intro2:
+      update_intro2();
+      break;
+
+    case GameState::Flight:
+      game_render_flight();
+      break;
+
+    case GameState::GameOver:
+      gfx_clear_display();
+      update_starfield();
+      update_local_objects();
+      gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
+      break;
+  }
+}
+
 int game_main(void)
 {
   read_config_file();
@@ -1363,174 +1513,14 @@ int game_main(void)
   finish = 0;
   auto_pilot = 0;
 
+  // The whole game now runs through the GameMain lifecycle: each gfx_update_screen()
+  // drives ClientEngine::Frame() -> GameApp::Update/RenderScene -> game_update()/
+  // game_render_scene(), which step the state machine (intro -> flight -> game-over ->
+  // new game). game_main() just boots the first game and pumps frames until the window
+  // closes (the message pump exits the process on close).
+  start_new_game();
   while (!finish)
-  {
-    game_over = 0;
-    initialise_game();
-    dock_player();
-
-    update_console();
-
-    current_screen = SCR_FRONT_VIEW;
-    run_first_intro_screen();
-    run_second_intro_screen();
-
-    old_cross_x = -1;
-    old_cross_y = -1;
-
-    dock_player();
-    display_commander_status();
-
-    while (!game_over)
-    {
-      // Drain any replicated world state that arrived since last frame. This
-      // is a no-op until ReplicationClientInstance().Open() is called, so the
-      // single-player path is unchanged; once open, the client consumes the
-      // server's authoritative snapshots here instead of simulating locally.
-      Client::ReplicationClientInstance().Pump();
-      if (Client::ReplicationClientInstance().IsOpen())
-      {
-        process_server_events();
-        // Backstop: forget entities that silently left our area of interest
-        // (no despawn event is sent for those), so they don't pile up as
-        // ghosts. ~3s at the server's 30 Hz tick.
-        Client::ReplicationClientInstance().EvictStale(90);
-      }
-
-      snd_update_sound();
-      gfx_update_screen();
-      // Full-window 3D for cockpit views (retro/letterboxed for menus); this
-      // also sets the aspect-aware optics used by the projection below.
-      gfx_set_scene_fullwindow(is_flight_view(current_screen));
-      gfx_set_scene_clip();
-
-      rolling = 0;
-      climbing = 0;
-
-      handle_flight_keys();
-
-      // In thin-client mode, the player's intent goes to the server.
-      if (Client::ReplicationClientInstance().IsOpen())
-        send_player_input();
-
-      if (game_paused)
-        continue;
-
-      if (message_count > 0)
-        message_count--;
-
-      if (!rolling)
-        centre_flight_roll();
-
-      if (!climbing)
-        centre_flight_climb();
-
-      if (!docked)
-      {
-        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-          == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
-        {
-          gfx_clear_display();
-          update_starfield();
-        }
-
-        if (auto_pilot)
-        {
-          auto_dock();
-          if ((mcount & 127) == 0)
-            info_message("Docking Computers On");
-        }
-
-        // In thin-client mode the server owns the world: render the
-        // replicated, interpolated state instead of simulating locally.
-        if (Client::ReplicationClientInstance().IsOpen())
-          render_replicated_objects();
-        else
-          update_local_objects();
-
-        if (docked)
-        {
-          update_console();
-          continue;
-        }
-
-        if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-          == SCR_RIGHT_VIEW))
-        {
-          if (draw_lasers)
-          {
-            draw_laser_lines();
-            draw_lasers--;
-          }
-
-          draw_laser_sights();
-        }
-
-        if (message_count > 0)
-          gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
-
-        if (hyper_ready)
-        {
-          display_hyper_status();
-          if ((mcount & 3) == 0)
-            countdown_hyperspace();
-        }
-
-        mcount--;
-        if (mcount < 0)
-          mcount = 255;
-
-        if ((mcount & 7) == 0)
-          regenerate_shields();
-
-        if ((mcount & 31) == 10)
-        {
-          if (PlayerDefense().energy < 50)
-          {
-            info_message("ENERGY LOW");
-            snd_play_sample(SND_BEEP);
-          }
-
-          update_altitude();
-        }
-
-        if ((mcount & 31) == 20)
-          update_cabin_temp();
-
-        if ((mcount == 0) && (!witchspace))
-          random_encounter();
-
-        cool_laser();
-        time_ecm();
-
-        update_console();
-      }
-
-      if (current_screen == SCR_BREAK_PATTERN)
-        display_break_pattern();
-
-      if (cross_timer > 0)
-      {
-        cross_timer--;
-        if (cross_timer == 0)
-          show_distance_to_planet();
-      }
-
-      if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
-      {
-        if (old_cross_x != -1)
-          draw_cross(old_cross_x, old_cross_y);
-
-        old_cross_x = cross_x;
-        old_cross_y = cross_y;
-
-        draw_cross(old_cross_x, old_cross_y);
-      }
-    }
-
-    if (!finish)
-      run_game_over_screen();
-  }
+    gfx_update_screen();
 
   snd_sound_shutdown();
 

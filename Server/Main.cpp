@@ -12,6 +12,9 @@
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/CoreEvents.h"
 
+#include <unordered_set>
+#include <vector>
+
 using namespace winrt;
 using namespace Neuron;
 
@@ -25,6 +28,13 @@ namespace
   constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
   constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
 
+  // How far a system's landmarks (planet + station) stay visible, independent of the
+  // per-ship AOI radius. A planet/station is a huge, static body you fly toward for a
+  // long time, so culling it at the +/-1 ship cell (~100k-300k units) makes it pop in and
+  // out as you cross the system. ~20 AOI cells keeps the local system on the wire while
+  // distant systems (scattered tens of millions of units apart) stay culled.
+  constexpr int64_t LANDMARK_VIS_DIST = 2'000'000;
+
   // Indices of every entity currently in the world (for the despawn diff).
   std::vector<uint32_t> CurrentIds(ECS::Registry& _world)
   {
@@ -34,6 +44,38 @@ namespace
       ids.push_back(_id.index);
     });
     return ids;
+  }
+
+  // Add landmark entities (planets/stations) within LANDMARK_VIS_DIST of the viewer to an
+  // already-built AOI snapshot, skipping any the AOI pass already included. Keeps the
+  // planet/station the player is flying around from popping out at the ship-AOI boundary,
+  // without widening interest for ordinary ships.
+  void AppendLandmarks(ECS::Registry& _world, Net::WorldSnapshot& _snap, const Math::Vector3i64& _viewerPos,
+                       const std::vector<ECS::EntityId>& _landmarks)
+  {
+    std::unordered_set<uint32_t> present;
+    present.reserve(_snap.entities.size() * 2);
+    for (const Net::EntitySnapshot& e : _snap.entities)
+      present.insert(e.id);
+
+    for (ECS::EntityId lm : _landmarks)
+    {
+      if (present.count(lm.index))
+        continue;
+      if (!_world.IsValid(lm))
+        continue;   // a station can (just) be destroyed; its id then drops out
+      const GameLogic::WorldTransform* t = _world.TryGet<GameLogic::WorldTransform>(lm);
+      if (t == nullptr)
+        continue;
+
+      // Galaxy extent is +/-1e8, so each delta squared (<=4e16) and their sum (<=1.2e17)
+      // stay well within int64; LANDMARK_VIS_DIST^2 is 4e12.
+      const int64_t dx = t->position.x - _viewerPos.x;
+      const int64_t dy = t->position.y - _viewerPos.y;
+      const int64_t dz = t->position.z - _viewerPos.z;
+      if (dx * dx + dy * dy + dz * dz <= LANDMARK_VIS_DIST * LANDMARK_VIS_DIST)
+        _snap.entities.push_back(GameLogic::MakeEntitySnapshot(_world, lm, *t));
+    }
   }
 }
 
@@ -55,17 +97,26 @@ int main()
   // something; players are spawned on demand as clients connect.
   ECS::Registry world;
 
+  // Static landmarks (planets + stations). They stay visible to nearby viewers beyond the
+  // ship AOI radius (see AppendLandmarks); collected here as they are created. Never moved
+  // or (planets) destroyed, so the ids stay valid for the process lifetime.
+  std::vector<ECS::EntityId> landmarks;
+
   // The home system's celestial bodies, ahead of the spawn so a launching player
   // sees them (typed so the client draws the planet/station models, not a ship).
   const ECS::EntityId planet = world.Create();
   world.Add<GameLogic::WorldTransform>(planet, GameLogic::WorldTransform{ { 0, 0, 65536 } });
   world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
+  landmarks.push_back(planet);
 
-  // One pirate ahead-right of the spawn, close enough to be clearly visible.
+  // One pirate ahead-right, out toward the planet. Placed well beyond its own engage
+  // range from the spawn (and station behind), so a fresh launch isn't sniped/farmed at
+  // the spawn point; you meet it as an opt-in fight on the way to the planet. Its range
+  // is shortened too, so it only opens fire at close quarters rather than from afar.
   const ECS::EntityId pirate = world.Create();
-  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1000, 300, 4000 } });
+  world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1500, 400, 14000 } });
   world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
-  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 5000, /*autoEngage*/ true });
+  world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
 
   // Home system station, BEHIND the spawn (negative z) so a launching player
@@ -74,6 +125,7 @@ int main()
   const ECS::EntityId station = world.Create();
   world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, -3000 } });
   world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
+  landmarks.push_back(station);
   // The station is a (near-indestructible) combat target so firing on it is a
   // detectable crime; it never initiates fire (autoEngage = false).
   world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
@@ -96,11 +148,13 @@ int main()
     const ECS::EntityId pl = world.Create();
     world.Add<GameLogic::WorldTransform>(pl, GameLogic::WorldTransform{ sys.planetPos });
     world.Add<GameLogic::NetType>(pl, GameLogic::NetType{ GameLogic::ShipType::Planet });
+    landmarks.push_back(pl);
 
     const ECS::EntityId stn = world.Create();
     world.Add<GameLogic::WorldTransform>(stn, GameLogic::WorldTransform{ sys.stationPos });
     world.Add<GameLogic::NetType>(stn, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
     world.Add<GameLogic::Combatant>(stn, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
+    landmarks.push_back(stn);
     GameLogic::ServerStation ss;
     ss.systemId = static_cast<int>(sys.id);
     GameLogic::GenerateMarket(sys.planet.economy, sys.marketSeed, ss.market);
@@ -180,6 +234,16 @@ int main()
 
     if (world.TryGet<GameLogic::PlayerTag>(_k.victim) != nullptr)
     {
+      // Tell the dying player it died so its client plays the game-over sequence; we
+      // still respawn it in place below. Sent only to that one session, so other
+      // clients don't briefly drop the (still-alive, respawned) ship from their view.
+      for (auto& entry : sessions.All())
+        if (entry.second.entity.index == _k.victim.index)
+        {
+          entry.second.events.Send(Msg::EntityDeath{ _k.victim.index, _k.killer });
+          break;
+        }
+
       if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(_k.victim))
       {
         c->energy = 255;
@@ -311,7 +375,6 @@ int main()
     // Each kill is an EntityKilled fact; the subscriber respawns a player in place
     // or broadcasts the death and destroys the wreck (whose removal also rides the
     // despawn diff below).
-    for (const GameLogic::Kill& kill : kills)
       bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     bus.Dispatch();
 
@@ -329,7 +392,10 @@ int main()
       if (world.IsValid(s.entity))
         viewerPos = world.Get<GameLogic::WorldTransform>(s.entity).position;
 
-      const Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, AOI_RADIUS_CELLS, s.entity.index);
+      Net::WorldSnapshot snap = aoi.SnapshotFor(world, tick, viewerPos, AOI_RADIUS_CELLS, s.entity.index);
+      // Keep the local system's planet/station visible across the whole system, not just
+      // the +/-1 ship cell, so the body you are flying toward never pops out.
+      AppendLandmarks(world, snap, viewerPos, landmarks);
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 
