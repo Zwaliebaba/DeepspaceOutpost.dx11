@@ -16,9 +16,7 @@
 
 #include "platform_win.h"
 #include "Renderer.h"
-#include "gfx2d.h"
 #include "audio_win.h"
-#include "GuiOverlay.h"
 
 #include "ClientEngine.h"
 #include "EventManager.h"
@@ -124,28 +122,13 @@ void gfx_graphics_shutdown(void)
 
 void gfx_update_screen(void)
 {
+	/* The engine owns the per-frame render: it drives the GameMain lifecycle
+	   (Update/RenderScene/RenderCanvas), flushes the 2D batch to the back buffer and
+	   presents (ClientEngine::Tick). The platform layer keeps the message pump and frame
+	   pacing below for now; those move onto the engine when the outer loop inverts. */
 	if (g_renderer_ready)
-	{
-		GuiOverlay::Update();
-		const bool overlayShown = GuiOverlay::IsShown();
+		ClientEngine::Tick();
 
-		/* Draw the frame's 2D batch (letterboxed) to the back buffer. An idle frame
-		 * (empty batch, no overlay) paints nothing and is not presented, so the last
-		 * presented frame stays on screen - the menu/station screens repaint on demand,
-		 * not every frame, and FLIP_DISCARD keeps no retained content. The overlay forces
-		 * a fresh (cleared) frame to composite onto. */
-		const bool painted = gfx2d_flush(overlayShown);
-		if (painted)
-		{
-			/* The GUI draws full-window on top (client space). No-op unless shown. */
-			GuiOverlay::Render(g_renderer.clientWidth(), g_renderer.clientHeight());
-			g_renderer.swap();
-		}
-
-		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
-		 * render path re-enables full-window mode each frame it draws. */
-		gfx_set_scene_fullwindow(0);
-	}
 	platform_pump_messages();
 
 	/* Regulate to speed_cap ms/frame so the game runs at the intended pace. */

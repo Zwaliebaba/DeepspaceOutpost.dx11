@@ -11,6 +11,9 @@
 #include "Renderer.h"
 #include "input_win.h"
 
+#include "gfx.h"    // gfx_set_scene_fullwindow
+#include "gfx2d.h"  // gfx2d_flush
+
 namespace
 {
   const wchar_t* kWindowClass = L"DeepspaceOutpostWindow";
@@ -120,6 +123,38 @@ namespace Neuron::Client
     m_main = _gameMain;
     if (m_main)
       m_main->Startup();
+  }
+
+  void ClientEngine::Tick()
+  {
+    if (!m_main)
+      return;
+
+    // Per-frame logic hook. The classic game_main() loop still drives gameplay, so this
+    // is a stub for now; a real delta will be threaded through once the loop inverts.
+    m_main->Update(0.0f);
+
+    // Scene hook: draw the 3D + HUD into the 2D batch. Still a stub - the legacy gfx_*
+    // path already populated the batch this iteration - so this must run before the flush
+    // so it composites correctly once it does draw.
+    m_main->RenderScene();
+
+    // Replay the frame's 2D batch (letterboxed) to the back buffer. An idle frame (empty
+    // batch, overlay hidden) paints nothing and is not presented, so the last presented
+    // frame stays on screen. The overlay forces a fresh cleared frame to composite onto.
+    GuiOverlay::Update();
+    const bool overlayShown = GuiOverlay::IsShown();
+    const bool painted = gfx2d_flush(overlayShown);
+    if (painted)
+    {
+      m_main->RenderCanvas(); // 2D UI (GUI overlay) on top of the scene
+      if (Renderer* r = platform_renderer())
+        r->swap();
+    }
+
+    // Default the NEXT frame to the retro letterboxed canvas; the in-flight render path
+    // re-enables full-window mode each frame it draws.
+    gfx_set_scene_fullwindow(0);
   }
 
   void ClientEngine::Shutdown()

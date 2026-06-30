@@ -26,6 +26,14 @@ namespace Neuron::Client
       static void StartGame(const winrt::com_ptr<GameMain>& _gameMain);
       static void Shutdown();
 
+      // Drive one frame's render through the GameMain lifecycle: Update (logic),
+      // RenderScene (3D/HUD into the 2D batch), flush the batch to the back buffer,
+      // RenderCanvas (2D UI on top), then present. The classic game_main() loop calls
+      // this once per iteration via gfx_update_screen() for now; Update/RenderScene are
+      // stubs until the game's per-frame work migrates onto those hooks. No-op without a
+      // started game.
+      static void Tick();
+
       // Handle a client-area resize (from the window procedure's WM_SIZE): rebuild the
       // Core swap chain + the Renderer back buffer and notify the game. No-op until the
       // window/device are fully up.
