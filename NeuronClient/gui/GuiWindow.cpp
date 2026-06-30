@@ -3,13 +3,12 @@
 #include "Canvas.h"
 #include "GraphicsCore.h"
 #include "GuiButton.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
 #include "input_win.h"
 
-using Neuron::Graphics::ImmediateRenderer;
-using Neuron::Graphics::Primitive;
+using Neuron::Graphics::Render2D;
 
 GuiWindow::GuiWindow(std::string_view _name)
   : m_x(0),
@@ -76,81 +75,45 @@ int GuiWindow::GetClientRectY2() { return m_h - 2; }
 void GuiWindow::Render(bool hasFocus)
 {
   //
-  // Main body fill
-
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::GuiWindow);
-  const auto interfaceTex = Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds");
-  ImmediateRenderer::BindTexture(0, interfaceTex ? interfaceTex->GetShaderResourceView() : nullptr);
-  ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
-
-  // Map the whole interface texture across the window: it is a vertical red gradient
-  // (dark edges, bright middle), so this gives every window that panel shading. The
-  // texture's fine scanlines filter away cleanly because it now has a mip chain.
-  const float texW = 1.0f;
-  const float texH = 1.0f;
-
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 0.96f);
-  ImmediateRenderer::Begin(Primitive::Quads);
-  ImmediateRenderer::TexCoord(0.0f, 0.0f);
-  ImmediateRenderer::Vertex(m_x, m_y);
-  ImmediateRenderer::TexCoord(texW, 0.0f);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y);
-  ImmediateRenderer::TexCoord(texW, texH);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y + m_h);
-  ImmediateRenderer::TexCoord(0.0f, texH);
-  ImmediateRenderer::Vertex(m_x, m_y + m_h);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
-  ImmediateRenderer::BindTexture(0, nullptr);
+  // Main body fill: map the whole interface texture across the window (a vertical red
+  // gradient, dark edges / bright middle) for the panel shading, at 0.96 alpha. If the
+  // texture is missing, Render2D falls back to its white texture (a flat panel).
+  // Cached after it first loads (TextureManager caches too, but this skips the
+  // per-window, per-frame name hash once the panel texture is resident).
+  static std::shared_ptr<Neuron::Graphics::Texture> s_interfaceTex;
+  if (!s_interfaceTex || !s_interfaceTex->IsLoaded())
+    s_interfaceTex = Neuron::Graphics::TextureManager::LoadTexture("Textures\\InterfaceRed.dds");
+  ID3D11ShaderResourceView* interfaceSRV =
+    (s_interfaceTex && s_interfaceTex->IsLoaded()) ? s_interfaceTex->GetShaderResourceView() : nullptr;
+  Render2D::TexQuad(interfaceSRV, m_x, m_y, m_x + m_w, m_y + m_h, 0.0f, 0.0f, 1.0f, 1.0f,
+                    Render2D::Rgba(255, 255, 255, 245));
 
   //
-  // Title bar fill
+  // Title bar fill: a vertical gradient (light top, darker bottom).
+  const float titleBarHeight = GetClientRectY1() - 1;
+  const uint32_t titleTop = Render2D::Rgba(199, 214, 220, 255);
+  const uint32_t titleBottom = Render2D::Rgba(112, 141, 168, 255);
+  Render2D::TexQuadColored(nullptr, m_x, m_y, m_x + m_w, m_y + titleBarHeight, 0, 0, 0, 0, titleTop, titleTop,
+                           titleBottom, titleBottom);
 
-  float titleBarHeight = GetClientRectY1() - 1;
-  ImmediateRenderer::Begin(Primitive::Quads);
-  ImmediateRenderer::ColorBytes(199, 214, 220, 255);
-  ImmediateRenderer::Vertex(m_x, m_y);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y);
-  ImmediateRenderer::ColorBytes(112, 141, 168, 255);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y + titleBarHeight);
-  ImmediateRenderer::Vertex(m_x, m_y + titleBarHeight);
-  ImmediateRenderer::End();
+  // Light inner border (top/left/right/bottom).
+  const uint32_t border = Render2D::Rgba(199, 214, 220, 255);
+  Render2D::DrawLine(m_x, m_y, m_x + m_w, m_y, border);
+  Render2D::DrawLine(m_x, m_y, m_x, m_y + m_h, border);
+  Render2D::DrawLine(m_x + m_w, m_y, m_x + m_w, m_y + m_h, border);
+  Render2D::DrawLine(m_x, m_y + m_h, m_x + m_w, m_y + m_h, border);
 
-  ImmediateRenderer::ColorBytes(199, 214, 220, 255);
-  ImmediateRenderer::Begin(Primitive::Lines); // top
-  ImmediateRenderer::Vertex(m_x, m_y);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::Begin(Primitive::Lines); // left
-  ImmediateRenderer::Vertex(m_x, m_y);
-  ImmediateRenderer::Vertex(m_x, m_y + m_h);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::Begin(Primitive::Lines); // right
-  ImmediateRenderer::Vertex(m_x + m_w, m_y);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y + m_h);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::Begin(Primitive::Lines); // bottom
-  ImmediateRenderer::Vertex(m_x, m_y + m_h);
-  ImmediateRenderer::Vertex(m_x + m_w, m_y + m_h);
-  ImmediateRenderer::End();
-
-  ImmediateRenderer::ColorBytes(42, 56, 82, 255);
-  ImmediateRenderer::Begin(Primitive::LineLoop);
-  ImmediateRenderer::Vertex(m_x - 2, m_y - 2);
-  ImmediateRenderer::Vertex(m_x + m_w + 1, m_y - 2);
-  ImmediateRenderer::Vertex(m_x + m_w + 1, m_y + m_h + 1);
-  ImmediateRenderer::Vertex(m_x - 2, m_y + m_h + 1);
-  ImmediateRenderer::End();
+  // Dark outer frame (the old LineLoop, as four segments).
+  const uint32_t frame = Render2D::Rgba(42, 56, 82, 255);
+  Render2D::DrawLine(m_x - 2, m_y - 2, m_x + m_w + 1, m_y - 2, frame);
+  Render2D::DrawLine(m_x + m_w + 1, m_y - 2, m_x + m_w + 1, m_y + m_h + 1, frame);
+  Render2D::DrawLine(m_x + m_w + 1, m_y + m_h + 1, m_x - 2, m_y + m_h + 1, frame);
+  Render2D::DrawLine(m_x - 2, m_y + m_h + 1, m_x - 2, m_y - 2, frame);
 
   g_gameFont.SetRenderShadow(true);
-  ImmediateRenderer::ColorBytes(255, 255, 150, 30);
+  g_gameFont.SetColor(255, 255, 150, 255);
   int y = m_y + 9;
   int fontSize = 14;
-  g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
   g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
   g_gameFont.SetRenderShadow(false);
 

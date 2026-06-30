@@ -26,11 +26,11 @@ set(NEURONCLIENT_SOURCES
     # Imported from the donor NeuronClient; the foundation the GUI/text/menu import
     # is built on. See docs/phase1-graphicscore.md.
     graphics/GraphicsCore.cpp
-    graphics/ImmediateRenderer.cpp
+    graphics/Render2D.cpp
     graphics/TextureManager.cpp
     graphics/DDSTextureLoader.cpp
 
-    # Imported text + GUI menu system (Phases 3-4). Drawn through ImmediateRenderer;
+    # Imported text + GUI menu system (Phases 3-4). Drawn through Neuron::Graphics::Render2D;
     # menu navigation reads keyboard.h directly and the exit button calls
     # platform_request_quit(). Textures load directly through
     # Neuron::Graphics::TextureManager. See docs/phase2-4-gui-text.md.
@@ -47,7 +47,6 @@ set(NEURONCLIENT_SOURCES
     platform/GfxRenderSink.cpp
     platform/audio_xa2.cpp
     platform/input_win.cpp
-    platform/dialog_win.cpp
 )
 
 set(NEURONCLIENT_HEADERS
@@ -58,8 +57,7 @@ set(NEURONCLIENT_HEADERS
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h
-    graphics/ImmediateRenderer.h
-    graphics/ConstantBuffers.h
+    graphics/Render2D.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 
@@ -120,12 +118,9 @@ target_include_directories(NeuronClient PUBLIC
 # --- Native Direct3D 11 shaders -----------------------------------------------
 # Each shaders/*.hlsl is compiled by fxc into a C++ byte-array header in
 # shaders/CompiledShaders/<name>.h (array g_<name>, with '-' replaced by '_').
-# ImmediateRenderer.cpp #includes those headers, so that directory is on its private
-# include path. The compiled headers are committed to the repo, so a configure
-# without fxc still builds against them; fxc is only needed to *regenerate* them
-# after editing the HLSL. Stage is taken from the file-name suffix: *VS.hlsl ->
-# vs_5_0/VSMain, *PS.hlsl -> ps_5_0/PSMain. Partials (shaders/partials/*.hlsli) are
-# #include-only.
+# Render2D.cpp #includes those headers, so that directory is on its private include
+# path. Stage is taken from the file-name suffix: *VS.hlsl -> vs_5_0/VSMain,
+# *PS.hlsl -> ps_5_0/PSMain. Partials (shaders/partials/*.hlsli) are #include-only.
 set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/CompiledShaders")
 
@@ -145,19 +140,13 @@ file(GLOB SHADER_PARTIALS CONFIGURE_DEPENDS "${SHADER_SRC_DIR}/partials/*.hlsli"
 
 if(NOT FXC_EXECUTABLE)
     message(WARNING
-        "fxc (the HLSL compiler) was not found - using the committed "
-        "shaders/CompiledShaders/*.h byte arrays as-is. Editing shaders/*.hlsl will "
-        "NOT take effect until you configure from a Visual Studio / Windows SDK "
+        "fxc (the HLSL compiler) was not found. The shaders/CompiledShaders/*.h byte "
+        "arrays are produced by fxc; without it (and without committed headers) the "
+        "build cannot resolve them. Configure from a Visual Studio / Windows SDK "
         "developer environment (or set FXC_EXECUTABLE).")
     add_custom_target(NeuronClientShaders SOURCES ${SHADER_SOURCES} ${SHADER_PARTIALS})
 else()
     file(MAKE_DIRECTORY "${SHADER_OUT_DIR}")
-
-    # Per-shader fxc defines. The lit programs bake in a fixed light count + per-vertex
-    # normals; keep MAX_LIGHTS in sync with Neuron::Graphics::MAX_LIGHTS in
-    # graphics/ConstantBuffers.h.
-    set(SHADER_DEFINES_generic-colored-3dVS "MAX_LIGHTS=8" "NORMALS_PROVIDED=1")
-    set(SHADER_DEFINES_generic-colored-3dPS "MAX_LIGHTS=8" "NORMALS_PROVIDED=1")
 
     set(SHADER_HEADERS "")
     foreach(SHADER ${SHADER_SOURCES})
@@ -177,15 +166,9 @@ else()
         string(REPLACE "-" "_" SHADER_VAR "g_${SHADER_NAME}")
         set(SHADER_HEADER "${SHADER_OUT_DIR}/${SHADER_NAME}.h")
 
-        set(SHADER_DEFINE_ARGS "")
-        foreach(def ${SHADER_DEFINES_${SHADER_NAME}})
-            list(APPEND SHADER_DEFINE_ARGS "/D" "${def}")
-        endforeach()
-
         add_custom_command(
             OUTPUT "${SHADER_HEADER}"
             COMMAND "${FXC_EXECUTABLE}" /nologo /T ${SHADER_PROFILE} /E ${SHADER_ENTRY}
-                    ${SHADER_DEFINE_ARGS}
                     /Fh "${SHADER_HEADER}" /Vn ${SHADER_VAR} "${SHADER}"
             DEPENDS "${SHADER}" ${SHADER_PARTIALS} "${CMAKE_CURRENT_LIST_FILE}"
             MAIN_DEPENDENCY "${SHADER}"

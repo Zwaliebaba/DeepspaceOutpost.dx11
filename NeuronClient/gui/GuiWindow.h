@@ -39,7 +39,7 @@ class GuiWindow
     // NOTE: the donor's CreateValueControl()/RemoveValueControl() (numeric/string
     // value sliders) depended on InputField/InputScroller, which still rode the legacy
     // gl* path and a cursor/keydefs stack. They are deferred until InputField is
-    // ported to ImmediateRenderer (see docs/phase2-4-gui-text.md).
+    // ported onto the native 2D layer (Render2D) if value controls are needed.
 
     int GetClientRectX1();
     int GetClientRectY1();

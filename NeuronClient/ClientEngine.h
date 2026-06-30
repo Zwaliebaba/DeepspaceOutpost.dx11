@@ -26,6 +26,15 @@ namespace Neuron::Client
       static void StartGame(const winrt::com_ptr<GameMain>& _gameMain);
       static void Shutdown();
 
+      // Drive one whole frame: the GameMain lifecycle (Update(dt) logic, RenderScene
+      // 3D/HUD into the 2D batch), flush the batch to the back buffer, RenderCanvas (2D
+      // UI on top), present, then pump the OS message queue and pace to frameCapMs so the
+      // game runs at its intended rate. The classic game_main() loop calls this once per
+      // iteration via gfx_update_screen(); the render lifecycle is no-op without a started
+      // game (the pump/pace still run). frameCapMs is the target frame time in ms (the
+      // game's speed_cap), also the fixed timestep handed to Update.
+      static void Frame(int frameCapMs);
+
       // Handle a client-area resize (from the window procedure's WM_SIZE): rebuild the
       // Core swap chain + the Renderer back buffer and notify the game. No-op until the
       // window/device are fully up.

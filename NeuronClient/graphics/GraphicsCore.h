@@ -36,7 +36,7 @@ namespace Neuron::Graphics
                       UINT backBufferCount = 2, D3D_FEATURE_LEVEL minFeatureLevel = D3D_FEATURE_LEVEL_10_0,
                       unsigned int flags = c_FlipPresent) noexcept;
 
-      static void Shutdown() {}
+      static void Shutdown();
 
       static void CreateDeviceResources();
       static void CreateWindowSizeDependentResources();

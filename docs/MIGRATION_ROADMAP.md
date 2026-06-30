@@ -47,6 +47,14 @@ CI-verified and visually validated by the project owner.
 - **Procedural 256-system galaxy**, each with a planet + orbiting station/market;
   **galactic chart** (F5) plots the server manifest; **teleport** (hyperspace key
   while docked) jumps to the system at the crosshair, server-validated.
+- **Death → game-over → respawn**: the server sends the dying player its own
+  `EntityDeath` (only to that session), the client plays the game-over sequence, then
+  resumes flight where the server respawned it in place (no permadeath yet).
+- **Landmark interest**: planets/stations stay visible across a whole system
+  (`AppendLandmarks`, ~2M-unit radius) instead of being culled at the ±1-cell ship AOI,
+  so the body you fly toward no longer pops in and out. Dynamic NPC pirates also spawn
+  beyond their engage range (not on top of the player), and the fixed starter pirate sits
+  further out — so a fresh launch isn't instantly farmed.
 
 ### Top open items (see §5 for the full list)
 1. **Persistence (Phase F)** — nothing survives a server restart. Highest-value

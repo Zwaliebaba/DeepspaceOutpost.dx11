@@ -16,9 +16,7 @@
 
 #include "platform_win.h"
 #include "Renderer.h"
-#include "gfx2d.h"
 #include "audio_win.h"
-#include "GuiOverlay.h"
 
 #include "ClientEngine.h"
 #include "EventManager.h"
@@ -124,44 +122,11 @@ void gfx_graphics_shutdown(void)
 
 void gfx_update_screen(void)
 {
-	if (g_renderer_ready)
-	{
-		gfx2d_flush();           /* replay the frame's 2D batch into the canvas */
-		GuiOverlay::Update();
-		/* Blit the letterboxed game canvas to the back buffer, then draw the GUI
-		 * full-window on top (client space) before presenting. No-op unless shown. */
-		g_renderer.blitCanvasToBackBuffer();
-		GuiOverlay::Render(g_renderer.clientWidth(), g_renderer.clientHeight());
-		g_renderer.swap();
-		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight
-		 * render path re-enables full-window mode each frame it draws. */
-		gfx_set_scene_fullwindow(0);
-	}
-	platform_pump_messages();
-
-	/* Regulate to speed_cap ms/frame so the game runs at the intended pace. */
-	static LARGE_INTEGER freq = { 0 };
-	static LARGE_INTEGER prev = { 0 };
-	if (freq.QuadPart == 0)
-		QueryPerformanceFrequency(&freq);
-
-	int cap = (speed_cap > 0) ? speed_cap : 55;
-	double target = cap / 1000.0;
-
-	if (prev.QuadPart != 0)
-	{
-		for (;;)
-		{
-			LARGE_INTEGER now;
-			QueryPerformanceCounter(&now);
-			double elapsed = double(now.QuadPart - prev.QuadPart) / double(freq.QuadPart);
-			if (elapsed >= target)
-				break;
-			if (target - elapsed > 0.003)
-				Sleep(1);
-		}
-	}
-	QueryPerformanceCounter(&prev);
+	/* The engine owns the whole frame now: GameMain lifecycle (Update/RenderScene/
+	   RenderCanvas) + flush + present, then the OS message pump and frame pacing. This
+	   gfx.h hook just hands it the game's speed_cap (the platform owns that config value;
+	   the engine owns the loop mechanics). */
+	ClientEngine::Frame(speed_cap);
 }
 
 /* The process entry point (wWinMain) lives in the game executable

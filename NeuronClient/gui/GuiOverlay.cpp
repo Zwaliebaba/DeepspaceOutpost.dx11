@@ -4,13 +4,13 @@
 #include "Canvas.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
-#include "ImmediateRenderer.h"
+#include "Render2D.h"
 #include "Strings.h"
 
 #include "input_win.h"
 
-using Neuron::Graphics::ImmediateRenderer;
-using Neuron::Graphics::MatrixStackId;
+using Neuron::Graphics::Core;
+using Neuron::Graphics::Render2D;
 
 namespace
 {
@@ -82,7 +82,7 @@ namespace
 
 void GuiOverlay::Startup()
 {
-  // ClientEngine has already brought up Core / ImmediateRenderer / Canvas / fonts /
+  // ClientEngine has already brought up Core / Render2D / Canvas / fonts /
   // Strings by the time this runs. The overlay starts hidden; the game opens it on
   // demand (F8 market, F11 options) via Open() / ShowWindow().
   s_ready = true;
@@ -90,7 +90,7 @@ void GuiOverlay::Startup()
 
 void GuiOverlay::Shutdown()
 {
-  // Canvas / ImmediateRenderer are torn down by ClientEngine::Shutdown().
+  // Canvas / Render2D are torn down by ClientEngine::Shutdown().
   s_ready = false;
   s_shown = false;
 }
@@ -167,32 +167,12 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   if (!s_ready || !s_shown)
     return;
 
-  // The back buffer is already bound with a full client-area viewport (the Renderer's
-  // blitCanvasToBackBuffer ran just before us), so the GUI draws full-window on top of
-  // the letterboxed game - in client-pixel space, matching where Canvas places windows.
-
-  // Screen-space (client-space) orthographic projection, Y down.
-  ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-  ImmediateRenderer::Ortho2D(0.0f, static_cast<float>(clientWidth), static_cast<float>(clientHeight), 0.0f);
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PushMatrix();
-  ImmediateRenderer::LoadIdentity();
-
-  ImmediateRenderer::SetBlendEnabled(true);
-  ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
-  ImmediateRenderer::SetDepthTestEnabled(false);
-  ImmediateRenderer::SetDepthWriteEnabled(false);
-  ImmediateRenderer::SetCullEnabled(false);
-  ImmediateRenderer::SetFogEnabled(false);
-  ImmediateRenderer::Color(1.0f, 1.0f, 1.0f, 1.0f);
-
+  // gfx2d_flush has already drawn the (letterboxed) game to the back buffer this frame;
+  // the GUI draws full-window on top in client-pixel space, matching where Canvas places
+  // windows. Open one native 2D pass (client-space ortho, Y down, alpha blend, no
+  // depth/cull, 1:1 mapping) and let Canvas submit every window/button/glyph into the
+  // batch, flushed at End.
+  Render2D::Begin(Core::GetRenderTargetView(), clientWidth, clientHeight);
   Canvas::Render();
-
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::Projection);
-  ImmediateRenderer::PopMatrix();
-  ImmediateRenderer::SetMatrixMode(MatrixStackId::ModelView);
-  ImmediateRenderer::PopMatrix();
+  Render2D::End();
 }

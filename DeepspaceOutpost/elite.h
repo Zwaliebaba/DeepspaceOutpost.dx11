@@ -10,7 +10,6 @@
 #define SCR_GALACTIC_CHART	3
 #define SCR_SHORT_RANGE		4
 #define	SCR_PLANET_DATA		5
-#define SCR_MARKET_PRICES	6
 #define SCR_CMDR_STATUS		7
 #define SCR_FRONT_VIEW		8
 #define SCR_REAR_VIEW		9
@@ -18,14 +17,12 @@
 #define SCR_RIGHT_VIEW		11
 #define SCR_BREAK_PATTERN	12
 #define SCR_INVENTORY		13
-#define SCR_EQUIP_SHIP		14
-#define SCR_OPTIONS			15
 #define SCR_LOAD_CMDR		16
 #define SCR_SAVE_CMDR		17
-#define SCR_QUIT			18
 #define SCR_GAME_OVER		19
-#define SCR_SETTINGS		20
 #define SCR_ESCAPE_POD		21
+// (SCR_MARKET_PRICES, SCR_EQUIP_SHIP, SCR_OPTIONS, SCR_QUIT, SCR_SETTINGS retired with
+//  the legacy gfx_display_* screens; those screens are GUI windows now.)
 
 
 #define PULSE_LASER		0x0F
