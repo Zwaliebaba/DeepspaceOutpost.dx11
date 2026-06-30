@@ -181,12 +181,6 @@ void initialise_game(void)
   PlayerCaps().maxFuel = 70; /* 7.0 Light Years */
 }
 
-void finish_game(void)
-{
-  finish = 1;
-  game_over = 1;
-}
-
 /*
  * Move the planet chart cross hairs to specified position.
  */
@@ -329,10 +323,6 @@ void arrow_right(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    buy_stock();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(1, 0);
@@ -357,10 +347,6 @@ void arrow_left(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    sell_stock();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(-1, 0);
@@ -385,14 +371,6 @@ void arrow_up(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    select_previous_stock();
-    break;
-
-  case SCR_EQUIP_SHIP:
-    select_previous_equip();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, -1);
@@ -415,14 +393,6 @@ void arrow_down(void)
 {
   switch (current_screen)
   {
-  case SCR_MARKET_PRICES:
-    select_next_stock();
-    break;
-
-  case SCR_EQUIP_SHIP:
-    select_next_equip();
-    break;
-
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, 1);
@@ -437,39 +407,6 @@ void arrow_down(void)
     else
       ramp_flight_climb(CLIMB_RAMP_STEP);
     climbing = 1;
-    break;
-  }
-}
-
-void return_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_EQUIP_SHIP:
-    buy_equip();
-    break;
-  }
-}
-
-void y_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_QUIT:
-    finish_game();
-    break;
-  }
-}
-
-void n_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_QUIT:
-    if (docked)
-      display_commander_status();
-    else
-      current_screen = SCR_FRONT_VIEW;
     break;
   }
 }
@@ -772,10 +709,6 @@ void handle_flight_keys(void)
 {
   int keyasc;
 
-  if (docked && ((current_screen == SCR_MARKET_PRICES) || (current_screen == SCR_OPTIONS) || (current_screen == SCR_SETTINGS) || (
-    current_screen == SCR_EQUIP_SHIP)))
-    kbd_read_key();
-
   kbd_poll_keyboard();
 
   if (game_paused)
@@ -939,12 +872,6 @@ void handle_flight_keys(void)
     return;
   }
 
-  if (kbd_y_pressed)
-    y_pressed();
-
-  if (kbd_n_pressed)
-    n_pressed();
-
   if (kbd_fire_pressed)
   {
     if ((!docked) && (draw_lasers == 0))
@@ -1044,9 +971,6 @@ void handle_flight_keys(void)
 
   if (kbd_right_pressed)
     arrow_right();
-
-  if (kbd_enter_pressed)
-    return_pressed();
 
   if (kbd_energy_bomb_pressed)
   {

@@ -10,11 +10,6 @@ void move_cursor_to_origin (void);
 void find_planet_by_name (char *find_name);
 void display_commander_status (void);
 int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed to_planet);
-void highlight_stock (int i);
-void select_previous_stock (void);
-void select_next_stock (void);
-void buy_stock (void);
-void sell_stock (void);
 
 /* Render-free market accessors / actions, used by the GUI market window so it can
  * read and trade without driving the legacy gfx_display_* screen. */
@@ -34,9 +29,6 @@ void inventory_line (int i, char *buf, int buflen);
 int  planet_data_line_count (void);
 void planet_data_line (int i, char *buf, int buflen);
 void planet_data_title (char *buf, int buflen);
-void select_next_equip (void);
-void select_previous_equip (void);
-void buy_equip (void);
 
 /* Render-free equip-screen access for the GUI equip window. */
 int  equip_do (int index);          /* expand a laser sub-menu, or buy the item */

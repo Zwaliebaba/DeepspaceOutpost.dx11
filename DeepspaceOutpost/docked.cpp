@@ -1166,81 +1166,7 @@ void display_commander_status (void)
 #define	KILOGRAMS	1
 #define GRAMS		2
 
-static int hilite_item;
 static char *unit_name[] = {"t", "kg", "g"};
-
-
-void display_stock_price (int i)
-{
-	int y;
-	char str[100];
-
-	y = i * 15 + 55;
-
-	gfx_display_text (16, y, stock_market[i].name);
-
-	gfx_display_text (180, y, unit_name[stock_market[i].units]);
-	sprintf (str, "%d.%d", stock_market[i].current_price / 10,
-						   stock_market[i].current_price % 10);
-	gfx_display_text (256, y, str);
-
-	if (stock_market[i].current_quantity > 0)
-		sprintf (str, "%d%s", stock_market[i].current_quantity,
-							  unit_name[stock_market[i].units]);
-	else
-		strcpy (str, "-");
-
-	gfx_display_text (338, y, str);
-
-	if (cmdr.current_cargo[i] > 0)
-		sprintf (str, "%d%s", cmdr.current_cargo[i],
-							  unit_name[stock_market[i].units]);
-	else
-		strcpy (str, "-");
-
-	gfx_display_text (444, y, str);
-}
-
-
-void highlight_stock (int i)
-{
-	int y;
-	char str[30];
-	
-	if ((hilite_item != -1) && (hilite_item != i))
-	{
-		y = hilite_item * 15 + 55;
-		gfx_clear_area (2, y, 510, y + 15);
-		display_stock_price (hilite_item);		
-	}
-
-	y = i * 15 + 55;
-	
-	gfx_draw_rectangle (2, y, 510, y + 15, GFX_COL_DARK_RED);
-	display_stock_price (i);		
-
-	hilite_item = i;
-
-	gfx_clear_text_area();
-	sprintf (str, "Cash: %d.%d", cmdr.credits / 10, cmdr.credits % 10);
-	gfx_display_text (16, 340, str);
-}
-
-void select_previous_stock (void)
-{
-	if ((!docked) || (hilite_item == 0))
-		return;
-
-	highlight_stock (hilite_item - 1);
-}
-
-void select_next_stock (void)
-{
-	if ((!docked) || (hilite_item == 16))
-		return;
-
-	highlight_stock (hilite_item + 1);
-}
 
 
 // Render-free buy: mutates state (or sends a server request in thin-client mode).
@@ -1344,26 +1270,6 @@ void market_format_row (int item, char *buf, int buflen)
 }
 
 
-// Legacy gfx_display_* market navigation (still used by the SCR_MARKET_PRICES
-// keyboard dispatch); the trade itself now goes through market_buy/market_sell.
-void buy_stock (void)
-{
-	if (!docked)
-		return;
-
-	market_buy (hilite_item);
-	highlight_stock (hilite_item);
-}
-
-
-void sell_stock (void)
-{
-	if (!docked)
-		return;
-
-	market_sell (hilite_item);
-	highlight_stock (hilite_item);
-}
 
 
 
@@ -1716,134 +1622,6 @@ int equip_present (int type)
 }
 
 
-void display_equip_price (int i)
-{
-	int x, y;
-	int col;
-	char str[100];
-	
-	y = equip_stock[i].y;
-	if (y == 0)
-		return;
-
-	col = equip_stock[i].canbuy ? GFX_COL_WHITE : GFX_COL_GREY_1;
-
-	x = *(equip_stock[i].name) == '>' ? 50 : 16; 
-
-	gfx_display_colour_text (x, y, &equip_stock[i].name[1], col);
-
-	if (equip_stock[i].price != 0)
-	{
-		sprintf (str, "%d.%d", equip_stock[i].price / 10, equip_stock[i].price % 10);
-		gfx_display_colour_text (338, y, str, col);
-	}
-}
-
-
-void highlight_equip (int i)
-{
-	int y;
-	char str[30];
-	
-	if ((hilite_item != -1) && (hilite_item != i))
-	{
-		y = equip_stock[hilite_item].y;
-		gfx_clear_area (2, y+1, 510, y + 15);
-		display_equip_price (hilite_item);		
-	}
-
-	y = equip_stock[i].y;
-	
-	gfx_draw_rectangle (2, y+1, 510, y + 15, GFX_COL_DARK_RED);
-	display_equip_price (i);		
-
-	hilite_item = i;
-
-	gfx_clear_text_area();
-	sprintf (str, "Cash: %d.%d", cmdr.credits / 10, cmdr.credits % 10);
-	gfx_display_text (16, 340, str);
-}
-
-
-void select_next_equip (void)
-{
-	int next;
-	int i;
-
-	if (hilite_item == (NO_OF_EQUIP_ITEMS - 1))
-		return;
-
-	next = hilite_item;
-	for (i = hilite_item + 1; i < NO_OF_EQUIP_ITEMS; i++)
-	{
-		if (equip_stock[i].y != 0)
-		{
-			next = i;
-			break;
-		}
-	}
-
-	if (next != hilite_item)	
-		highlight_equip (next);
-}
-
-void select_previous_equip (void)
-{
-	int i;
-	int prev;
-	
-	if (hilite_item == 0)
-		return;
-	
-	prev = hilite_item;
-	for (i = hilite_item - 1; i >= 0; i--)
-	{
-		if (equip_stock[i].y != 0)
-		{
-			prev = i;
-			break;
-		}
-	}
-
-	if (prev != hilite_item)	
-		highlight_equip (prev);
-}
-
-
-void list_equip_prices (void)
-{
-	int i;
-	int y;
-	int tech_level;
-
-	gfx_clear_area (2, 55, 510, 380);
-	
-	tech_level = current_planet_data.techlevel + 1;
-
-	equip_stock[0].price = (70 - cmdr.fuel) * 2;
-	
-	y = 55;
-	for (i = 0; i < NO_OF_EQUIP_ITEMS; i++)
-	{
-	    equip_stock[i].canbuy = ((equip_present (equip_stock[i].type) == 0) &&
-								 (equip_stock[i].price <= cmdr.credits));
-	
-		if (equip_stock[i].show && (tech_level >= equip_stock[i].level))
-		{
-			equip_stock[i].y = y;
-			y += 15;
-		}
-		else
-			equip_stock[i].y = 0;
-
-		display_equip_price (i);
-	}
-	
-	i = hilite_item;
-	hilite_item = -1;
-	highlight_equip (i);
-}
-
 
 void collapse_equip_list (void)
 {
@@ -2027,22 +1805,6 @@ int equip_do (int index)
 	return 1;
 }
 
-
-// Legacy gfx_display_* equip navigation: act on the keyboard-highlighted item, then
-// redraw. The action itself now goes through equip_do.
-void buy_equip (void)
-{
-	if (equip_stock[hilite_item].name[0] == '+')
-	{
-		equip_do (hilite_item);
-		hilite_item++;          // land the highlight on the first expanded sub-item
-		list_equip_prices();
-		return;
-	}
-
-	equip_do (hilite_item);
-	list_equip_prices();
-}
 
 
 /* ---- Render-free equip accessors for the GUI equip window. The visible set =
