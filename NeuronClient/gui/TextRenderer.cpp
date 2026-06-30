@@ -96,48 +96,75 @@ void TextRenderer::DrawText2DSimple(float _x, float _y, float _size, std::string
 
   const float horiSize = _size * HORIZONTAL_SIZE;
 
-  if (m_renderShadow)
-    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_COLOR);
-  else
-    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_ONE);
   ImmediateRenderer::SetBlendEnabled(true);
-
   ImmediateRenderer::BindTexture(0, m_texture->GetShaderResourceView());
   ImmediateRenderer::SetSampler(0, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
 
-  // Dedicated text program: u_Color (white here) * per-vertex colour * glyph. The
-  // per-vertex colour carries the tint set by the caller (or white from BeginText2D).
+  // Dedicated text program: u_Color * per-vertex colour * glyph. The per-vertex colour
+  // carries the tint set by the caller (or white from BeginText2D); u_Color is set per
+  // pass below (white for the glyph, black for its drop shadow).
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::TextOverlay);
-  ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-  // Batch the whole string into one draw.
-  ImmediateRenderer::Begin(Primitive::Quads);
+  // Batch the whole string into one quad draw, offset by (ox, oy) pixels.
   const size_t numChars = _text.size();
-  for (unsigned int i = 0; i < numChars; ++i)
-  {
-    const unsigned char thisChar = _text[i];
-
-    if (thisChar > 32)
+  auto emit = [&](float ox, float oy) {
+    float x = _x + ox;
+    const float y = _y + oy;
+    ImmediateRenderer::Begin(Primitive::Quads);
+    for (unsigned int i = 0; i < numChars; ++i)
     {
-      const float texX = GetTexCoordX(thisChar);
-      const float texY = GetTexCoordY(thisChar);
+      const unsigned char thisChar = _text[i];
 
-      ImmediateRenderer::TexCoord(texX, texY + TEX_HEIGHT);
-      ImmediateRenderer::Vertex(_x, _y + _size);
+      if (thisChar > 32)
+      {
+        const float texX = GetTexCoordX(thisChar);
+        const float texY = GetTexCoordY(thisChar);
 
-      ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY + TEX_HEIGHT);
-      ImmediateRenderer::Vertex(_x + horiSize, _y + _size);
+        ImmediateRenderer::TexCoord(texX, texY + TEX_HEIGHT);
+        ImmediateRenderer::Vertex(x, y + _size);
 
-      ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY);
-      ImmediateRenderer::Vertex(_x + horiSize, _y);
+        ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY + TEX_HEIGHT);
+        ImmediateRenderer::Vertex(x + horiSize, y + _size);
 
-      ImmediateRenderer::TexCoord(texX, texY);
-      ImmediateRenderer::Vertex(_x, _y);
+        ImmediateRenderer::TexCoord(texX + TEX_WIDTH, texY);
+        ImmediateRenderer::Vertex(x + horiSize, y);
+
+        ImmediateRenderer::TexCoord(texX, texY);
+        ImmediateRenderer::Vertex(x, y);
+      }
+
+      x += horiSize;
     }
+    ImmediateRenderer::End();
+  };
 
-    _x += horiSize;
+  if (m_renderShadow)
+  {
+    // Legacy soft-"glow" path used for window titles and highlighted captions, which
+    // sit on the light title/selection bars. The caller draws the string twice and
+    // relies on this blend to build the glow, so keep it as-is.
+    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_COLOR);
+    ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
+    emit(0.0f, 0.0f);
   }
-  ImmediateRenderer::End();
+  else
+  {
+    // Body text (labels, market rows, normal button captions). Use straight alpha
+    // blending so glyphs sit opaquely on the panel instead of washing additively into
+    // the bright centre of the red gradient (the old SRC_ALPHA/ONE blend made the text
+    // low-contrast and hard to read). A 1px near-black drop shadow gives every glyph a
+    // crisp edge against any background colour.
+    ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
+
+    // Shadow pass: force the colour to black (u_Color = 0) while keeping the glyph's
+    // own alpha, so it reads as a shadow regardless of the caller's tint.
+    ImmediateRenderer::SetDrawColor(0.0f, 0.0f, 0.0f, 0.9f);
+    emit(1.0f, 1.0f);
+
+    // Main pass: full tint (u_Color = white) * caller's per-vertex colour * glyph.
+    ImmediateRenderer::SetDrawColor(1.0f, 1.0f, 1.0f, 1.0f);
+    emit(0.0f, 0.0f);
+  }
 
   ImmediateRenderer::UseProgram(Neuron::Graphics::ShaderProgram::Generic);
   ImmediateRenderer::SetBlendFunc(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA);
