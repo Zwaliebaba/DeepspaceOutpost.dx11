@@ -761,9 +761,50 @@ static bool LogicOpSupported()
   return cached == 1;
 }
 
+// Logic-op support is also format-specific. The device may support OM logic ops in
+// general, while the currently-bound render target format does not. In that case,
+// enabling LogicOpEnable still trips the D3D debug layer at Draw time.
+static bool CurrentRenderTargetSupportsLogicOp()
+{
+  auto* ctx = Core::GetD3DDeviceContext();
+
+  com_ptr<ID3D11RenderTargetView> rtv;
+  ctx->OMGetRenderTargets(1, rtv.put(), nullptr);
+  if (!rtv)
+    return false;
+
+  D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
+  rtv->GetDesc(&rtvDesc);
+  DXGI_FORMAT format = rtvDesc.Format;
+
+  if (format == DXGI_FORMAT_UNKNOWN)
+  {
+    com_ptr<ID3D11Resource> resource;
+    rtv->GetResource(resource.put());
+
+    com_ptr<ID3D11Texture2D> tex2D;
+    if (resource && SUCCEEDED(resource->QueryInterface(IID_PPV_ARGS(tex2D.put()))))
+    {
+      D3D11_TEXTURE2D_DESC texDesc{};
+      tex2D->GetDesc(&texDesc);
+      format = texDesc.Format;
+    }
+  }
+
+  if (format == DXGI_FORMAT_UNKNOWN)
+    return false;
+
+  D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{};
+  support.InFormat = format;
+  if (FAILED(Core::GetD3DDevice()->CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2, &support, sizeof(support))))
+    return false;
+
+  return (support.OutFormatSupport2 & D3D11_FORMAT_SUPPORT2_OUTPUT_MERGER_LOGIC_OP) != 0;
+}
+
 ID3D11BlendState* ImmediateRenderer::blendState()
 {
-  const bool xorOp = s_state.logicOpXor && LogicOpSupported();
+  const bool xorOp = s_state.logicOpXor && LogicOpSupported() && CurrentRenderTargetSupportsLogicOp();
 
   uint32_t key = (s_state.blendEnabled ? 1u : 0u) | (static_cast<uint32_t>(s_state.blendSrc) << 1) |
     (static_cast<uint32_t>(s_state.blendDst) << 6) | (xorOp ? (1u << 12) : 0u);
