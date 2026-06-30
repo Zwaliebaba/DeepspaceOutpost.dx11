@@ -1301,7 +1301,6 @@ void complete_hyperspace (void)
 	create_new_stars();
 	clear_local_objects();
 
-	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
 
 	pz = (((docked_planet.b) & 7) + 7) / 2;
@@ -1410,7 +1409,6 @@ void launch_player (void)
 	cmdr.legal_status |= carrying_contraband();
 	create_new_stars();
 	clear_local_objects();
-	generate_landscape(docked_planet.a * 251 + docked_planet.b);
 	set_init_matrix (rotmat);
 	add_new_ship (SHIP_PLANET, 0, 0, 65536, rotmat, 0, 0);
 

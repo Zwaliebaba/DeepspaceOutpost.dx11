@@ -4,6 +4,7 @@
 #include "Canvas.h"
 #include "GuiOverlay.h"
 #include "Render2D.h"
+#include "Scene3D.h"
 #include "Strings.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
@@ -100,8 +101,9 @@ namespace Neuron::Client
     CoreEngine::Startup();
     Strings::Startup();
 
-    // Bring up the native D3D11 device (2D overlay + canvas: no depth buffer).
-    Graphics::Core::Startup(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN);
+    // Bring up the native D3D11 device. A D32 depth buffer is allocated alongside the
+    // back buffer for the 3D scene pass (Scene3D); the 2D layer (Render2D) ignores it.
+    Graphics::Core::Startup(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
 
     m_instance = _hInstance;
 
@@ -130,6 +132,7 @@ namespace Neuron::Client
     Graphics::Core::SetWindow(m_hwnd, client.right - client.left, client.bottom - client.top);
     Graphics::Core::CreateWindowSizeDependentResources();
     Graphics::Render2D::Startup();
+    Graphics::Scene3D::Startup();
 
     Canvas::Startup();
     g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
@@ -258,6 +261,7 @@ namespace Neuron::Client
     g_gameFont.Shutdown();
     Graphics::TextureManager::Shutdown();
     Canvas::Shutdown();
+    Graphics::Scene3D::Shutdown();
     Graphics::Render2D::Shutdown();
     Graphics::Core::Shutdown();
     Strings::Shutdown();

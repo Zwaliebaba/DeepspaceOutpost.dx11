@@ -3,6 +3,7 @@
 #include "GfxRenderSink.h"
 
 #include "gfx.h"
+#include "gfx2d.h" // gfx2d_submit_model
 
 // Each method forwards to the matching gfx.h primitive so a replayed queue
 // reproduces the original draw sequence exactly.
@@ -51,6 +52,13 @@ void GfxRenderSink::RenderPolygon(int _numPoints, const int* _points, int _colou
 void GfxRenderSink::RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour)
 {
   gfx_render_line(_x0, _y0, _x1, _y1, _dist, _colour);
+}
+
+void GfxRenderSink::DrawModel(const Neuron::Render::ModelDraw& _model)
+{
+  // Collect the model for this frame's GPU 3D pass (rendered via Scene3D inside
+  // gfx2d_flush, between the 2D background and the HUD).
+  gfx2d_submit_model(_model);
 }
 
 void GfxRenderSink::Sprite(int _spriteId, int _x, int _y)

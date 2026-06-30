@@ -35,6 +35,7 @@ int compass_centre_x;
 int compass_centre_y;
 
 int planet_render_style = 0;
+int scene_shading = 0;   /* 0 = flat (faithful), 1 = lit (opt-in directional shading) */
 
 int game_over;
 int docked;

@@ -18,13 +18,6 @@
 #include "space.h"
 #include "random.h"
 
-#define MAX(x,y) (((x) > (y)) ? (x) : (y))
-
-
-#define LAND_X_MAX	128
-#define LAND_Y_MAX	128
-
-static unsigned char landscape[LAND_X_MAX+1][LAND_Y_MAX+1];
 
 static struct point point_list[100];
 
@@ -165,461 +158,73 @@ void draw_wireframe_ship (struct local_object *obj)
 
 void draw_solid_ship (struct local_object *obj)
 {
-	int i;
-	int sx,sy;
-	double rx,ry,rz;
-	struct vector vec;
-	struct vector camera_vec;
-	double tmp;
-	struct ship_face *face_data;
-	int num_faces;
-	int num_points;
-	int poly_list[16];
-	int zavg;
-	struct ship_solid *solid_data;
-	struct ship_data *ship;
-	Matrix trans_mat;
-	int lasv;
-	int col;
+	struct ship_data *ship = ship_list[obj->type];
 
-	solid_data = &ship_solids[obj->type];
-	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-
-	num_faces = solid_data->num_faces;
-	face_data = solid_data->face_data;
-
-/*
-	for (i = 0; i < num_faces; i++)
+	/* Emit the ship as a GPU 3D model. Scene3D applies the model->camera rotation
+	 * (transpose of obj->rotmat) + translation, projects it with a real perspective and
+	 * resolves visibility with the hardware z-buffer - replacing the old CPU vertex
+	 * projection, signed-area backface test and painter's-sorted 2D polygons. */
+	Neuron::Render::ModelDraw md;
+	md.type = obj->type;
+	md.style = 0;
+	md.colour = -1;
+	md.flags = obj->flags;
+	md.location[0] = obj->location.x;
+	md.location[1] = obj->location.y;
+	md.location[2] = obj->location.z;
+	for (int i = 0; i < 3; i++)
 	{
-		vec.x = face_data[i].norm_x;
-		vec.y = face_data[i].norm_y;
-		vec.z = face_data[i].norm_z;
-
-		vec = unit_vector (&vec);
-		cos_angle = vector_dot_product (&vec, &camera_vec);
-
-		visible[i] = (cos_angle < -0.13);
+		md.rotmat[i][0] = obj->rotmat[i].x;
+		md.rotmat[i][1] = obj->rotmat[i].y;
+		md.rotmat[i][2] = obj->rotmat[i].z;
 	}
-*/
+	md.distance = obj->distance;
+	ActiveRenderQueue().DrawModel (md);
 
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
-
-	for (i = 0; i < ship->num_points; i++)
+	/* The laser bolt stays on the 2D path for now: project just the muzzle vertex
+	 * through the same transform the GPU uses and draw the depth-sorted 2D line. */
+	if (obj->flags & FLG_FIRING)
 	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
+		Matrix trans_mat;
+		double tmp;
+		struct vector vec;
+		double rx, ry, rz;
+		int sx, sy;
+		int lasv;
+		int col;
 
+		for (int i = 0; i < 3; i++)
+			trans_mat[i] = obj->rotmat[i];
+
+		tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
+		tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
+		tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
+
+		lasv = ship->front_laser;
+		vec.x = ship->points[lasv].x;
+		vec.y = ship->points[lasv].y;
+		vec.z = ship->points[lasv].z;
 		mult_vector (&vec, trans_mat);
 
 		rx = vec.x + obj->location.x;
 		ry = vec.y + obj->location.y;
 		rz = vec.z + obj->location.z;
-
 		if (rz <= 0)
 			rz = 1;
 
 		project_to_screen (rx, ry, rz, &sx, &sy);
 
-		point_list[i].x = sx;
-		point_list[i].y = sy;
-		point_list[i].z = rz;
-
-	}
-
-	for (i = 0; i < num_faces; i++)
-	{
-		if (((point_list[face_data[i].p1].x - point_list[face_data[i].p2].x) * 
-		     (point_list[face_data[i].p3].y - point_list[face_data[i].p2].y) -
-			 (point_list[face_data[i].p1].y - point_list[face_data[i].p2].y) *
-			 (point_list[face_data[i].p3].x - point_list[face_data[i].p2].x)) <= 0)
-		{
-			num_points = face_data[i].points;
-
-			poly_list[0] = point_list[face_data[i].p1].x;
-			poly_list[1] = point_list[face_data[i].p1].y;
-			zavg = point_list[face_data[i].p1].z;
-
-			poly_list[2] = point_list[face_data[i].p2].x;
-			poly_list[3] = point_list[face_data[i].p2].y;
-			zavg = MAX(zavg,point_list[face_data[i].p2].z);
-
-			if (num_points > 2)
-			{
-				poly_list[4] = point_list[face_data[i].p3].x;
-				poly_list[5] = point_list[face_data[i].p3].y;
-				zavg = MAX(zavg,point_list[face_data[i].p3].z);
-			}
-
-			if (num_points > 3)
-			{
-				poly_list[6] = point_list[face_data[i].p4].x;
-				poly_list[7] = point_list[face_data[i].p4].y;
-				zavg = MAX(zavg,point_list[face_data[i].p4].z);
-			}
-
-			if (num_points > 4)
-			{
-				poly_list[8] = point_list[face_data[i].p5].x;
-				poly_list[9] = point_list[face_data[i].p5].y;
-				zavg = MAX(zavg,point_list[face_data[i].p5].z);
-			}
-
-			if (num_points > 5)
-			{
-				poly_list[10] = point_list[face_data[i].p6].x;
-				poly_list[11] = point_list[face_data[i].p6].y;
-				zavg = MAX(zavg,point_list[face_data[i].p6].z);
-			}
-														 
-			if (num_points > 6)
-			{
-				poly_list[12] = point_list[face_data[i].p7].x;
-				poly_list[13] = point_list[face_data[i].p7].y;
-				zavg = MAX(zavg,point_list[face_data[i].p7].z);
-			}
-
-			if (num_points > 7)
-			{
-				poly_list[14] = point_list[face_data[i].p8].x;
-				poly_list[15] = point_list[face_data[i].p8].y;
-				zavg = MAX(zavg,point_list[face_data[i].p8].z);
-			}
-			
-
-			/* poly_list holds 2 ints (x,y) per point. */
-			ActiveRenderQueue().RenderPolygon (face_data[i].points, poly_list, 2 * face_data[i].points, face_data[i].colour, zavg);
-			
-		}
-	}
-
-	if (obj->flags & FLG_FIRING)
-	{
 		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		lasv = ship_list[obj->type]->front_laser;
 		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
 
-		ActiveRenderQueue().RenderLine (point_list[lasv].x, point_list[lasv].y,
+		ActiveRenderQueue().RenderLine (sx, sy,
 						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
-						 point_list[lasv].z, col);
+						 (int) rz, col);
 	}
 }
 
 
 
-
-
-/*
- * Colour map used to generate a SNES-style planet.
- * This is a quick hack and needs tidying up.
- */
-
-int snes_planet_colour[] =
-{
-	102, 102,
-	134, 134, 134, 134,
-	167, 167, 167, 167,
-	213, 213,
-	255,
-	83,83,83,83,
-	122,
-	83,83,
-	249,249,249,249, 
-	83,
-	122,
-	249,249,249,249,249,249,
-	83, 83,
-	122,
-	83,83, 83, 83,
-	255,
-	213, 213,
-	167,167, 167, 167,
-	134,134, 134, 134,
-	102, 102
-}; 
-
-
-/*
- * Generate a landscape map for a SNES-style planet.
- */
-
-void generate_snes_landscape (void)
-{
-	int x,y;
-	int colour;
-	
-	for (y = 0; y <= LAND_Y_MAX; y++)
-	{
-		colour = snes_planet_colour[y * (sizeof(snes_planet_colour)/sizeof(int)) / LAND_Y_MAX];  
-		for (x = 0; x <= LAND_X_MAX; x++)
-		{
-			landscape[x][y] = colour;		
-		}
-	}	
-}
-
-
-
-
-/*
- * Guassian random number generator.
- * Returns a number between -7 and +8 with Gaussian distribution.
- */
-
-int grand (void)
-{
-	int i;
-	int r;
-	
-	r = 0;
-	for (i = 0; i < 12; i++)
-		r += randint() & 15;
-	
-	r /= 12;
-	r -= 7;
-
-	return r;
-}
-
-
-/*
- * Calculate the midpoint between two given points.
- */
-
-int calc_midpoint (int sx, int sy, int ex, int ey)
-{
-	int a,b,n;
-
-	a = landscape[sx][sy];
-	b = landscape[ex][ey];
-	
-	n = ((a + b) / 2) + grand();
-	if (n < 0)
-		n = 0;
-	if (n > 255)
-		n = 255;
-	
-	return n;
-} 
-
-
-/*
- * Calculate a square on the midpoint map.
- */
-
-void midpoint_square (int tx, int ty, int w)
-{
-	int mx,my;
-	int bx,by;
-	int d;
-
-	d = w / 2;	
-	mx = tx + d;
-	my = ty + d;
-	bx = tx + w;
-	by = ty + w;
-	
-	landscape[mx][ty] = calc_midpoint(tx,ty,bx,ty);
-	landscape[mx][by] = calc_midpoint(tx,by,bx,by);
-	landscape[tx][my] = calc_midpoint(tx,ty,tx,by);
-	landscape[bx][my] = calc_midpoint(bx,ty,bx,by);
-	landscape[mx][my] = calc_midpoint(tx,my,bx,my); 
-
-	if (d == 1)
-		return;
-	
-	midpoint_square (tx,ty,d);
-	midpoint_square (mx,ty,d);
-	midpoint_square (tx,my,d);
-	midpoint_square (mx,my,d);
-}
-
-
-/*
- * Generate a fractal landscape.
- * Uses midpoint displacement method.
- */
-
-void generate_fractal_landscape (int rnd_seed)
-{
-	int x,y,d,h;
-	double dist;
-	int dark;
-	int old_seed;
-	
-	old_seed = get_rand_seed();
-	set_rand_seed(rnd_seed);
-	
-	d = LAND_X_MAX / 8;
-	
-	for (y = 0; y <= LAND_Y_MAX; y += d)
-		for (x = 0; x <= LAND_X_MAX; x += d)
-			landscape[x][y] = randint() & 255;
-
-	for (y = 0; y < LAND_Y_MAX; y += d)
-		for (x = 0; x < LAND_X_MAX; x += d)	
-			midpoint_square (x,y,d);
-
-	for (y = 0; y <= LAND_Y_MAX; y++)
-	{
-		for (x = 0; x <= LAND_X_MAX; x++)
-		{
-			dist = x*x + y*y;
-			dark = dist > 10000;
-			h = landscape[x][y];
-			if (h > 166)
-				landscape[x][y] = dark ? GFX_COL_GREEN_1 : GFX_COL_GREEN_2;
-			else 
-				landscape[x][y] = dark ? GFX_COL_BLUE_2 : GFX_COL_BLUE_1;
-
-		}
-	}
-
-	set_rand_seed (old_seed);
-}
-
-
-void generate_landscape (int rnd_seed)
-{
-	switch (planet_render_style)
-	{
-		case 0:		/* Wireframe... do nothing for now... */
-			break;
-		
-		case 1:
-			/* generate_green_landscape (); */
-			break;
-		
-		case 2:
-			generate_snes_landscape();
-			break;
-		
-		case 3:
-			generate_fractal_landscape (rnd_seed);
-			break;
-	}
-}
-
- 
- 
-/*
- * Draw a line of the planet with appropriate rotation.
- */
-
-
-void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int vy)
-{
-	int lx, ly;
-	int rx, ry;
-	int colour;
-	int sx,sy;
-	int ex;
-	int div;
-
-	/* Clip against the live view, not the fixed 512x384 rectangle, so a planet
-	 * that fills a large window is not cut off at the old right/bottom edge. */
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-	const int v_right  = vm.width  - 1;
-	const int v_bottom = vm.height - 1;
-
-	sy = y + yo;
-
-	if ((sy < 0) || (sy > v_bottom))
-		return;
-
-	sx = xo - x;
-	ex = xo + x;
-
-	rx = -x * vx - y * vy;
-	ry = -x * vy + y * vx;
-	rx += radius << 16;
-	ry += radius << 16;
-	div = radius << 10;	 /* radius * 2 * LAND_X_MAX >> 16 */
-
-
-	for (; sx <= ex; sx++)
-	{
-		if ((sx >= 0) && (sx <= v_right))
-		{
-			lx = rx / div;
-			ly = ry / div;
-			colour = landscape[lx][ly];
- 
-			ActiveRenderQueue().FastPixel (sx, sy, colour);
-		}
-		rx += vx;
-		ry += vy;
-	}
-}
-
-
-/*
- * Draw a solid planet.  Based on Doros circle drawing alogorithm.
- */
-
-void render_planet (int xo, int yo, int radius, struct vector *vec)
-{
-	int x,y;
-	int s;
-	int vx,vy;
-
-	xo += GFX_X_OFFSET;
-	yo += GFX_Y_OFFSET;
-	
-	vx = vec[1].x * 65536;
-	vy = vec[1].y * 65536;	
-	
-	s = radius;
-	x = radius;
-	y = 0;
-
-	s -= x + x;
-	while (y <= x)
-	{
-		render_planet_line (xo, yo, x, y, radius, vx, vy);
-		render_planet_line (xo, yo, x,-y, radius, vx, vy);
-		render_planet_line (xo, yo, y, x, radius, vx, vy);
-		render_planet_line (xo, yo, y,-x, radius, vx, vy);
-		
-		s += y + y + 1;
-		y++;
-		if (s >= 0)
-		{
-			s -= x + x + 2;
-			x--;
-		}				
-	}
-}
-
-
-/*
- * Draw a wireframe planet.
- * At the moment we just draw a circle.
- * Need to add in the two arcs that the original had.
- */
-
-void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
-{
-	ActiveRenderQueue().Circle (xo, yo, radius, GFX_COL_WHITE);
-}
 
 
 /*
@@ -632,155 +237,49 @@ void draw_wireframe_planet (int xo, int yo, int radius, struct vector *vec)
 
 void draw_planet (struct local_object *planet)
 {
-	int x,y;
-	int radius;
-
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-
-	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
-
-	/* On-screen radius scales with the focal length (retro focal 512 == the old
-	 * 6291456/distance * GFX_SCALE), so the planet grows to fill a bigger view. */
-	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
-
-	if ((x + radius <  0) ||
-		(x - radius > vm.width) ||
-		(y + radius < 0) ||
-		(y - radius > vm.height))
+	if (planet->location.z <= 0)
 		return;
+
+	/* Emit the planet as a GPU billboard (a depth-tested camera-facing disk), so it
+	 * occludes correctly against the 3D ships and no longer floods the framebuffer with
+	 * per-pixel software rasterization. Scene3D derives the on-screen radius from the
+	 * distance + focal length and reproduces the style:
+	 *   0 wireframe -> ring, 1 green -> filled disk, 2/3 SNES/fractal -> banded disk. */
+	Neuron::Render::ModelDraw md;
+	md.type = SHIP_PLANET;
+	md.style = planet_render_style;
+	md.location[0] = planet->location.x;
+	md.location[1] = planet->location.y;
+	md.location[2] = planet->location.z;
+	md.distance = planet->distance;
 
 	switch (planet_render_style)
 	{
-		case 0:
-			draw_wireframe_planet (x, y, radius, planet->rotmat);
-			break;
-		
-		case 1:
-			ActiveRenderQueue().FilledCircle (x, y, radius, GFX_COL_GREEN_1);
-			break;
-
-		case 2:
-		case 3:
-			render_planet (x, y, radius, planet->rotmat);
-			break;
+		case 0:  md.colour = GFX_COL_WHITE;   break;                              /* wireframe ring */
+		case 1:  md.colour = GFX_COL_GREEN_1; break;                              /* filled green   */
+		default: md.colour = GFX_COL_GREEN_1; md.colour2 = GFX_COL_BLUE_1; break; /* SNES / fractal */
 	}
+
+	ActiveRenderQueue().DrawModel (md);
 }
-
-
-void render_sun_line (int xo, int yo, int x, int y, int radius)
-{
-	int sy = yo + y;
-	int sx,ex;
-	int colour;
-	int dx,dy;
-	int distance;
-	int inner,outer;
-	int inner2;
-	int mix;
-
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-	const int v_right  = vm.width  - 1;
-	const int v_bottom = vm.height - 1;
-
-	if ((sy < 0) || (sy > v_bottom))
-		return;
-
-	sx = xo - x;
-	ex = xo + x;
-
-	sx -= (radius * (2 + (randint() & 7))) >> 8;
-	ex += (radius * (2 + (randint() & 7))) >> 8;
-
-	if ((sx > v_right) || (ex < 0))
-		return;
-
-	if (sx < 0)
-		sx = 0;
-
-	if (ex > v_right)
-		ex = v_right;
-
-	inner = (radius * (200 + (randint() & 7))) >> 8;
-	inner *= inner;
-	
-	inner2 = (radius * (220 + (randint() & 7))) >> 8;
-	inner2 *= inner2;
-	
-	outer = (radius * (239 + (randint() & 7))) >> 8;
-	outer *= outer;	
-
-	dy = y * y;
-	dx = sx - xo;
-	
-	for (; sx <= ex; sx++,dx++)
-	{
-		mix = (sx ^ y) & 1;
-		distance = dx * dx + dy;
-
-		if (distance < inner)
-			colour = GFX_COL_WHITE;
-		else if (distance < inner2)
-			colour = GFX_COL_YELLOW_4;
-		else if (distance < outer)
-			colour = GFX_ORANGE_3;
-		else
-			colour = mix ? GFX_ORANGE_1 : GFX_ORANGE_2;
-		
-		ActiveRenderQueue().FastPixel (sx, sy, colour);
-	} 	
-}
-
-
-void render_sun (int xo, int yo, int radius)
-{
-	int x,y;
-	int s;
-	
-	xo += GFX_X_OFFSET;
-	yo += GFX_Y_OFFSET;
-	
-	s = -radius;
-	x = radius;
-	y = 0;
-
-	// s -= x + x;
-	while (y <= x)
-	{
-		render_sun_line (xo, yo, x, y, radius);
-		render_sun_line (xo, yo, x,-y, radius);
-		render_sun_line (xo, yo, y, x, radius);
-		render_sun_line (xo, yo, y,-x, radius);
-		
-		s += y + y + 1;
-		y++;
-		if (s >= 0)
-		{
-			s -= x + x + 2;
-			x--;
-		}				
-	}
-}
-
 
 
 void draw_sun (struct local_object *planet)
 {
-	int x,y;
-	int radius;
-
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-
-	project_to_screen (planet->location.x, planet->location.y, planet->location.z, &x, &y);
-
-	radius = (int) ((6291456.0 / planet->distance) * (vm.focal / 256.0));
-
-	if ((x + radius <  0) ||
-		(x - radius > vm.width) ||
-		(y + radius < 0) ||
-		(y - radius > vm.height))
+	if (planet->location.z <= 0)
 		return;
 
-	render_sun (x, y, radius);
+	/* Emit the sun as a GPU billboard (depth-tested radial-gradient disk), replacing the
+	 * per-pixel render_sun rasterizer. Scene3D draws the white->yellow->orange bands. */
+	Neuron::Render::ModelDraw md;
+	md.type = SHIP_SUN;
+	md.location[0] = planet->location.x;
+	md.location[1] = planet->location.y;
+	md.location[2] = planet->location.z;
+	md.distance = planet->distance;
+	md.colour = GFX_COL_WHITE;
+
+	ActiveRenderQueue().DrawModel (md);
 }
 
 

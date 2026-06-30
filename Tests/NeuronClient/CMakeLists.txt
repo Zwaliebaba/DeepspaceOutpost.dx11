@@ -12,6 +12,9 @@ add_executable(NeuronClient.Tests
     UniverseTests.cpp
     ReplicatedSceneTests.cpp
     ViewMetricsTests.cpp
+    RenderQueueTests.cpp
+    SceneProjectionTests.cpp
+    MeshTests.cpp
 )
 
 target_compile_features(NeuronClient.Tests PRIVATE cxx_std_23)

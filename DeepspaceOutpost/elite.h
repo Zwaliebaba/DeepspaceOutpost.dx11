@@ -121,6 +121,7 @@ extern int compass_centre_x;
 extern int compass_centre_y;
 
 extern int planet_render_style;
+extern int scene_shading;
 
 extern int game_over;
 extern int docked;
