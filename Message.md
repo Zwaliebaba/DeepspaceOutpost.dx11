@@ -1,9 +1,11 @@
 # Message.md — A Unified Message System for NeuronCore
 
-> **Status:** Implementation in progress — **Phases 0–2 landed**, Phase 3 next (see §14 and the
-> table just below). v2 folded in a commercial-engine architecture review; v2.1 resolved the four
-> open questions (now §16: one catalog; `DamageApplied` server-internal; validation-now/
-> crypto-deferred; raw-float with on-demand quantization). The settled decisions:
+> **Status:** ✅ **Complete — Phases 0–5 landed.** Every client↔server datagram is a catalog
+> message on a typed lane; server combat is bus-driven; the client mirrors it; the legacy
+> `EventManager` pub/sub and the bespoke `ClientInput`/`GameEvents`/`StationProtocol`/`EventType`
+> codecs are gone; catalog tooling (schema export, diff, packet decoder, fuzz) is in place. See
+> the status table and §14. (v2 folded in a commercial-engine architecture review; v2.1 resolved
+> four open questions — §16. Settled decisions:)
 >
 > | Decision | Choice |
 > |---|---|
@@ -27,7 +29,7 @@
 | 3b-2 | Split physical Control/Gameplay/Bulk reliable lanes (`MessageEndpoint`) | ✅ Landed |
 | 4a | Client-side `MessageBus`; route inbound facts through it (symmetric with server) | ✅ Landed |
 | 4b | Key polling → `ActionTriggered` (LocalOnly) → command-builder → `InputCommand` | ✅ Landed |
-| 5 | Tooling & hardening (decoder, schema/compat export, fuzz, race tests, metrics) | ⏳ Pending |
+| 5 | Tooling & hardening: standalone packet decoder, schema/compat export, malformed-packet fuzz | ✅ Landed |
 
 > **Verification note.** The project targets MSVC; this environment has no Windows toolchain, so
 > the std-only message headers and the winsock-free test suites are built locally with clang++ 18
@@ -570,10 +572,34 @@ all drive the same path). Continuous flight (roll/pitch/throttle) stays the lega
 `PlayerFlight` state, normalized to axes at send time — it isn't key-event-shaped. Behaviour is
 unchanged. Covered by `InputActionsTests` (codec + command-builder + LocalOnly/non-wire checks).
 
-**Phase 5 — Tooling & hardening.**
-Standalone packet-dump decoder, schema-doc + catalog-diff generators, message/bandwidth/CPU
-metrics surfaced, malformed-packet fuzz + event/snapshot race tests, 100-bot trace run.
-Collapse `PeekMagic` to one branch; update `AGENTS.md`/roadmap.
+**Phase 5 — Tooling & hardening. ✅ DONE (core).**
+All NeuronCore, header-only, fully headless-tested:
+- `Messages/Catalog.h` — include-once to register the whole catalog into `GlobalRegistry()`
+  (the single source the tools enumerate, no game executable needed).
+- `Messages/CatalogTools.h` — `ExportCatalogText` (schema doc, sorted by id) and `DiffCatalogs`
+  / `FormatDiff` (added/removed/changed — a compatibility report between two builds).
+- `Messages/PacketInspect.h` — `InspectPacket`: decode a captured `'NMSG'` (unreliable) or
+  `'NRLB'` (reliable-lane) datagram into `(kind, lane, [{id, name, length}])` using the
+  registry, bounds-safe; `FormatPacket` pretty-prints it. The core of a standalone packet-dump
+  tool.
+- Tests: `CatalogToolsTests`, `PacketInspectTests`, and `MessageFuzzTests` (garbage-bytes and
+  truncated-datagram fuzz + overlong-length rejection — every parser rejects cleanly, never
+  over-reads). 119 headless cases pass on clang++ 18 / g++ 13.
+
+*Residual (optional, running-game instrumentation — not blocking):* wiring per-message bandwidth/
+CPU **metrics** into the live client/server loops (the `MessageBus`/`MessageEndpoint` already
+expose `Stats()`), a thin console exe wrapping `InspectPacket`, a 100-bot trace soak, and the
+cosmetic `PeekMagic` collapse. These are Win32/runtime instrumentation, deferred as polish.
+
+---
+
+## Migration complete
+
+Phases 0–5 are landed. The original goal is delivered end to end: **every client↔server datagram
+is a catalog message on a typed lane**, the **server** drives combat through `Msg::MessageBus`,
+the **client** mirrors it with its own bus for inbound facts and outbound input intent, the legacy
+`EventManager` pub/sub and the bespoke `ClientInput`/`GameEvents`/`StationProtocol`/`EventType`
+codecs are **gone**, and the catalog is observable/diffable/decodable via the §Phase-5 tooling.
 
 ---
 

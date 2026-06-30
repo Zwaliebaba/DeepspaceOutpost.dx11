@@ -49,6 +49,9 @@ set(NEURONCORE_HEADERS
     Messages/Framing.h
     Messages/Reliable.h
     Messages/MessageEndpoint.h
+    Messages/Catalog.h
+    Messages/CatalogTools.h
+    Messages/PacketInspect.h
     Messages/Defs/InputCommand.h
     Messages/Defs/CoreEvents.h
     Messages/Defs/InputActions.h
