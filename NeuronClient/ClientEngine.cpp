@@ -101,8 +101,9 @@ namespace Neuron::Client
     CoreEngine::Startup();
     Strings::Startup();
 
-    // Bring up the native D3D11 device (2D overlay + canvas: no depth buffer).
-    Graphics::Core::Startup(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN);
+    // Bring up the native D3D11 device. A D32 depth buffer is allocated alongside the
+    // back buffer for the 3D scene pass (Scene3D); the 2D layer (Render2D) ignores it.
+    Graphics::Core::Startup(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT);
 
     m_instance = _hInstance;
 
