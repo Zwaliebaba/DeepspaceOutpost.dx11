@@ -225,28 +225,33 @@ void move_cross(int dx, int dy)
  * Draw the cross hairs at the specified position.
  */
 
+// Draw the chart crosshair as a textured sprite (Textures/Crosshair.dds), centred on
+// (cx,cy) and clipped to the chart area. The chart is redrawn every frame (see
+// game_render_flight), so the crosshair is just drawn fresh on top each frame - no XOR
+// erase (the old logic-op path was dropped in the Render2D move). The half-size matches
+// the old cross reach: 16 px on the short-range chart, 8 px on the galactic chart.
 void draw_cross(int cx, int cy)
 {
+  int half;
+  int clipBottom;
   if (current_screen == SCR_SHORT_RANGE)
   {
-    gfx_set_clip_region(1, 37, 510, 339);
-    xor_mode(TRUE);
-    gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_RED);
-    gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_RED);
-    xor_mode(FALSE);
-    gfx_set_clip_region(1, 1, 510, 383);
+    half = 16;
+    clipBottom = 339;
+  }
+  else if (current_screen == SCR_GALACTIC_CHART)
+  {
+    half = 8;
+    clipBottom = 293;
+  }
+  else
+  {
     return;
   }
 
-  if (current_screen == SCR_GALACTIC_CHART)
-  {
-    gfx_set_clip_region(1, 37, 510, 293);
-    xor_mode(TRUE);
-    gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
-    gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
-    xor_mode(FALSE);
-    gfx_set_clip_region(1, 1, 510, 383);
-  }
+  gfx_set_clip_region(1, 37, 510, clipBottom);
+  gfx_draw_sprite_scaled(IMG_CROSSHAIR, cx - half, cy - half, half * 2, half * 2);
+  gfx_set_clip_region(1, 1, 510, 383);
 }
 
 void draw_laser_sights(void)
@@ -1390,6 +1395,22 @@ static void game_render_flight(void)
   if (game_paused)
     return;
 
+  // Charts (galactic / short range): redraw the chart, the live selected-system readout
+  // and the crosshair every frame. The replicated chart functions are idempotent (they
+  // only re-park the cursor when it is off-screen), so a per-frame redraw suits the
+  // clear-and-redraw back buffer and the crosshair sprite moves cleanly without the old
+  // XOR erase. Handles the chart whether opened docked or in flight.
+  if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
+  {
+    if (current_screen == SCR_GALACTIC_CHART)
+      display_galactic_chart();
+    else
+      display_short_range_chart();
+    show_distance_to_planet();
+    draw_cross(cross_x, cross_y);
+    return;
+  }
+
   if (!docked)
   {
     if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
@@ -1473,24 +1494,6 @@ static void game_render_flight(void)
 
   if (current_screen == SCR_BREAK_PATTERN)
     display_break_pattern();
-
-  if (cross_timer > 0)
-  {
-    cross_timer--;
-    if (cross_timer == 0)
-      show_distance_to_planet();
-  }
-
-  if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
-  {
-    if (old_cross_x != -1)
-      draw_cross(old_cross_x, old_cross_y);
-
-    old_cross_x = cross_x;
-    old_cross_y = cross_y;
-
-    draw_cross(old_cross_x, old_cross_y);
-  }
 }
 
 // Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on

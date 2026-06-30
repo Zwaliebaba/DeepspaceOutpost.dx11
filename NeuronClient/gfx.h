@@ -106,6 +106,7 @@
 #define IMG_MISSILE_RED		9
 #define IMG_BLAKE			10
 #define IMG_TARGET_LOCK		11
+#define IMG_CROSSHAIR		12
 
 
 int gfx_graphics_startup (void);

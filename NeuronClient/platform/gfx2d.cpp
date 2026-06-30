@@ -234,6 +234,7 @@ const char* spriteFile(int sprite_no)
 		case IMG_MISSILE_RED:    return "missred.dds";
 		case IMG_BLAKE:          return "blake.dds";
 		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
+		case IMG_CROSSHAIR:      return "Textures/Crosshair.dds";
 		default:                 return nullptr;
 	}
 }
