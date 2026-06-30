@@ -48,6 +48,25 @@ namespace Neuron::Graphics
     };
     static_assert(sizeof(BillboardParams) == 32, "BillboardParams must match the BillboardCb cbuffer");
 
+    // Mirrors ShipLightCb in shaders/partials/scene3d.hlsli (model-view + directional
+    // light). Ship-only (b2); billboards do not use it.
+    struct ShipLightConstants
+    {
+      float mv[16];
+      float lightDir[4];
+      float ambient[4];
+      float diffuse[4];
+      float params[4]; // x = lit (0 / 1)
+    };
+    static_assert(sizeof(ShipLightConstants) == 128, "ShipLightConstants must match the ShipLightCb cbuffer");
+
+    // A fixed directional light from the upper-right, angled slightly toward the camera
+    // (view space: +z is forward). ambient + diffuse == 1, so a fully-lit face keeps its
+    // original palette colour and shadowed faces darken toward 0.4x.
+    constexpr float kLightDir[3] = {0.5f, 0.7f, -0.5f};
+    constexpr float kAmbient = 0.40f;
+    constexpr float kDiffuse = 0.60f;
+
     // 0xAABBGGRR -> float4 (r,g,b,a) in 0..1.
     void unpackRgba(uint32_t _rgba, float _out[4])
     {
@@ -84,6 +103,7 @@ namespace Neuron::Graphics
     s_bbPs = nullptr;
     s_bbVb = nullptr;
     s_bbParamsCb = nullptr;
+    s_shipLightCb = nullptr;
     s_meshes.clear();
     s_ready = false;
     // s_provider is set by the game once at startup; keep it across device resets.
@@ -159,6 +179,14 @@ namespace Neuron::Graphics
     bbcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     bbcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     check_hresult(device->CreateBuffer(&bbcbd, nullptr, s_bbParamsCb.put()));
+
+    // b2: ship lighting (model-view + directional light). Bound for ship draws only.
+    D3D11_BUFFER_DESC lcbd{};
+    lcbd.ByteWidth = sizeof(ShipLightConstants);
+    lcbd.Usage = D3D11_USAGE_DYNAMIC;
+    lcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    lcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    check_hresult(device->CreateBuffer(&lcbd, nullptr, s_shipLightCb.put()));
 
     s_ready = true;
     return true;
@@ -281,11 +309,32 @@ namespace Neuron::Graphics
       std::memcpy(mapped.pData, &cb, sizeof(cb));
       ctx->Unmap(s_cb.get(), 0);
 
+      // b2: model-view (for view-space normals) + the directional light. Always uploaded
+      // and bound; when lighting is off, params.x = 0 and the vertex shader skips it, so
+      // the flat per-face colour is unchanged.
+      ShipLightConstants lc{};
+      for (int k = 0; k < 16; ++k)
+        lc.mv[k] = static_cast<float>(mv.m[static_cast<size_t>(k)]);
+      lc.lightDir[0] = kLightDir[0];
+      lc.lightDir[1] = kLightDir[1];
+      lc.lightDir[2] = kLightDir[2];
+      lc.ambient[0] = lc.ambient[1] = lc.ambient[2] = kAmbient;
+      lc.diffuse[0] = lc.diffuse[1] = lc.diffuse[2] = kDiffuse;
+      lc.params[0] = s_lit ? 1.0f : 0.0f;
+
+      D3D11_MAPPED_SUBRESOURCE mappedLc;
+      if (FAILED(ctx->Map(s_shipLightCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedLc)))
+        continue;
+      std::memcpy(mappedLc.pData, &lc, sizeof(lc));
+      ctx->Unmap(s_shipLightCb.get(), 0);
+
       ctx->VSSetShader(s_vs.get(), nullptr, 0);
       ctx->PSSetShader(s_ps.get(), nullptr, 0);
       ID3D11Buffer* cbs[1] = {s_cb.get()};
       ctx->VSSetConstantBuffers(0, 1, cbs);
       ctx->PSSetConstantBuffers(0, 1, cbs);
+      ID3D11Buffer* lcb = s_shipLightCb.get();
+      ctx->VSSetConstantBuffers(2, 1, &lcb);
 
       const UINT stride = sizeof(MeshVertex);
       const UINT offset = 0;

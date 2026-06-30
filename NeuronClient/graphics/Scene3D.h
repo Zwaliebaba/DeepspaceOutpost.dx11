@@ -43,6 +43,11 @@ namespace Neuron::Graphics
       using MeshProvider = std::function<bool(int /*type*/, MeshData& /*out*/)>;
       static void SetMeshProvider(MeshProvider _provider);
 
+      // Opt-in faceted directional lighting for ships (Phase 5). Off by default, which
+      // reproduces the faithful flat per-face colour exactly. Planet/sun billboards are
+      // unaffected. The game toggles this from its "Ship Shading" setting.
+      static void SetLightingEnabled(bool _enabled) { s_lit = _enabled; }
+
       // Render camera-space models to _rtv with depth-testing against _dsv. The
       // projection comes from _view (the live flight optics); the scene is placed in the
       // letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect
@@ -74,6 +79,8 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11PixelShader> s_ps;
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
       inline static winrt::com_ptr<ID3D11Buffer> s_cb;
+      inline static winrt::com_ptr<ID3D11Buffer> s_shipLightCb; // b2: model-view + directional light (ships)
+      inline static bool s_lit = false;                          // opt-in ship lighting (default flat)
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_depth;
       inline static winrt::com_ptr<ID3D11RasterizerState> s_raster;
       inline static winrt::com_ptr<ID3D11BlendState> s_blend;

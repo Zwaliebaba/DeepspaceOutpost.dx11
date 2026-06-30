@@ -47,7 +47,39 @@ DX11 stack that already exists in `NeuronClient`.
 
 ---
 
+## Implementation status — 2026-06-30 (Phases 0–5 complete)
+
+The migration is **implemented and visually verified on Windows**. The in-flight 3D
+scene now renders entirely on the GPU through the new `Scene3D` renderer.
+
+| Phase | Status | What landed |
+|---|---|---|
+| **0** Seam + headless scaffolding | ✅ Done | `RenderQueue::DrawModel` + `ModelDraw` seam; `NullRenderSink` no-op; headless tests (record/replay). |
+| **1** `Scene3D` skeleton + mesh/projection | ✅ Done | `SceneProjection.h` (perspective derived from `ViewMetrics`, unit-tested vs `ProjectPoint`); `Mesh.h` `BuildSolidMesh`; `Scene3D` renderer + lazy GPU mesh cache. |
+| **2** Ships on the GPU | ✅ Done | Solid ships render as GPU geometry with a real z-buffer (`CULL_NONE` + depth); painter's sort no longer used for ships. Fixed a blank-scene bug: the device came up with no depth buffer (`Core::Startup(..., D32_FLOAT)`). |
+| **3** Planet + sun on the GPU | ✅ Done | Planet/sun render as depth-tested **billboards** in the same pass — retiring the software pixel rasterizers and fixing ship↔planet/sun occlusion. Sun = radial gradient; planet = ring / disk / banded by style. |
+| **4** Retire dead CPU 3D code | ✅ Done | Deleted ~446 lines: the software planet/sun rasterizers + landscape subsystem, and the painter's linked list. `gfx_render_polygon/line` are now thin 2D forwarders (the laser bolt still uses them). |
+| **5** Opt-in lit shading | ✅ Done | A "Ship Shading" setting (`scene_shading`, default **Flat**) toggles faceted directional lighting on ships via a ship-only `b2` light buffer; the flat path and billboards are untouched. |
+
+**Faithful-default holds:** with `scene_shading = Flat` and the default planet style
+(wireframe), the output matches the legacy look; lighting is purely opt-in.
+
+**Known follow-ups (deferred, low value/used rarely):**
+- SNES/fractal planet styles are a *banded approximation*, not the exact rotated
+  landscape texture (the default wireframe + green styles are faithful).
+- The laser bolt and explosions remain on the 2D path.
+- The `RenderPolygon`/`RenderLine` seam vocabulary is kept as 2D forwarders rather
+  than fully removed (broad, low-value churn).
+- Per-vertex *smooth* normals + specular (the meshes are flat-normal today) and
+  scene MSAA are possible future polish on the opt-in lit path.
+
+---
+
 ## 1. Current-state analysis (grounded in the code)
+
+> **Note:** §1–§7 below describe the pre-migration state and the plan as authored.
+> They are retained as the design record; see the status table above for what
+> actually shipped.
 
 ### 1.1 The 3D scene is computed entirely on the CPU
 `DeepspaceOutpost/threed.cpp` is the whole 3D renderer, and it produces **2D
@@ -254,7 +286,7 @@ Each phase is independently shippable and **Windows-CI-verified**. Phases 0–2 
 faithful-look ships; 3 adds planet/sun; 4 retires dead CPU code; 5 is the opt-in
 visual upgrade.
 
-### Phase 0 — Seam + headless scaffolding (no visual change)
+### Phase 0 — Seam + headless scaffolding (no visual change) ✅ DONE
 - Add `CommandType::DrawModel` + `RenderQueue::DrawModel(...)` and
   `RenderSink::DrawModel`; `NullRenderSink` no-ops it (keeps server/BotClient
   building). Extend `RenderQueue::Replay`.
@@ -265,7 +297,7 @@ visual upgrade.
   matches `ProjectPoint` for a point grid.
 - **Deliverable:** nothing renders differently yet; seam + tests in place.
 
-### Phase 1 — `Scene3D` skeleton + `MeshLibrary` (infrastructure) [updated 2026-06-30]
+### Phase 1 — `Scene3D` skeleton + `MeshLibrary` (infrastructure) ✅ DONE [updated 2026-06-30]
 - Stand up the **`Scene3D`** renderer (sibling to `Render2D`): device resources
   from `GraphicsCore`, a 3D input layout (pos3 + normal + RGBA8), a dynamic VB/IB,
   the perspective+model/view constant buffers, depth-stencil (test+write,
@@ -285,7 +317,7 @@ visual upgrade.
   winding against `ship_solids` for a few ships headlessly.
 - **Deliverable:** `Scene3D` + buffers + depth wired; still drawing nothing.
 
-### Phase 2 — Ships on the GPU (the keystone)
+### Phase 2 — Ships on the GPU (the keystone) ✅ DONE
 - `Scene3D::DrawModel` for ships: set the `ViewMetrics`-derived perspective
   projection; depth test+write ON, `LESS_EQUAL`; backface cull ON (winding
   chosen to match legacy front-facing); the **flat** `scene3dPS` (per-face palette
@@ -303,7 +335,7 @@ visual upgrade.
 - **Deliverable:** all ships render through the GPU; painter's sort no longer
   used for ships.
 
-### Phase 3 — Planet & sun on the GPU
+### Phase 3 — Planet & sun on the GPU ✅ DONE
 - Generate a **UV/ico sphere mesh** once in `MeshLibrary`. Draw planet/sun as a
   transformed sphere instead of the per-pixel scanline rasterizers
   (`render_planet`, `render_sun`).
@@ -319,7 +351,7 @@ visual upgrade.
 - **Deliverable:** planet + sun are GPU spheres; the software pixel rasterizers
   are gone (largest per-frame CPU win).
 
-### Phase 4 — Retire dead CPU 3D code & the painter's chain
+### Phase 4 — Retire dead CPU 3D code & the painter's chain ✅ DONE
 - Remove the now-unused `gfx_render_polygon`/`gfx_finish_render` **painter's
   linked list** (`g_poly_chain`, `gfx2d.cpp:275-548`) and the
   `RenderPolygon`/`RenderLine` 2D-projection paths for the scene, plus the
@@ -330,7 +362,7 @@ visual upgrade.
 - **Deliverable:** one 3D path (GPU); `threed.cpp` shrinks to scene-submission
   glue.
 
-### Phase 5 — Opt-in visual upgrades (behind a flag)
+### Phase 5 — Opt-in visual upgrades (behind a flag) ✅ DONE
 - Add a client setting (config/options) `scene_shading = flat | lit`. `lit`
   selects a **lit `scene3dPS` variant** (directional light · the per-vertex
   normals already in the meshes), supplied by a small light constant buffer;

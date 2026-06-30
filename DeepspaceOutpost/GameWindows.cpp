@@ -19,6 +19,7 @@
 extern int wireframe;
 extern int anti_alias_gfx;
 extern int planet_render_style;
+extern int scene_shading;
 extern int hoopy_casinos;
 extern int instant_dock;
 extern void write_config_file(void);
@@ -139,6 +140,7 @@ namespace
         addCycle("Graphics", &wireframe, {"Solid", "Wireframe"});
         addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
         addCycle("Planet Style", &planet_render_style, {"Wireframe", "Green", "SNES", "Fractal"});
+        addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
         addCycle("Planet Desc.", &hoopy_casinos, {"BBC", "MSX"});
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});
 

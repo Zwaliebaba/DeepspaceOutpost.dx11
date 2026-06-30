@@ -33,6 +33,7 @@
 #include "ReplicationClient.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
+#include "Scene3D.h"
 
 int draw_lasers;
 int mcount;
@@ -1451,6 +1452,10 @@ void game_update(void)
 // batch (the engine flushes it to the back buffer after this).
 void game_render_scene(void)
 {
+  // Push the current "Ship Shading" setting to the 3D renderer (cheap; the flag may
+  // change at runtime via the options window). Off = faithful flat per-face colour.
+  Neuron::Graphics::Scene3D::SetLightingEnabled(scene_shading != 0);
+
   switch (s_state)
   {
     case GameState::Intro1:
