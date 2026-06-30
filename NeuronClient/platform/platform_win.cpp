@@ -126,11 +126,9 @@ void gfx_update_screen(void)
 {
 	if (g_renderer_ready)
 	{
-		gfx2d_flush();           /* replay the frame's 2D batch into the canvas */
+		gfx2d_flush();           /* draw the frame's 2D batch (letterboxed) to the back buffer */
 		GuiOverlay::Update();
-		/* Blit the letterboxed game canvas to the back buffer, then draw the GUI
-		 * full-window on top (client space) before presenting. No-op unless shown. */
-		g_renderer.blitCanvasToBackBuffer();
+		/* The GUI draws full-window on top (client space), then present. No-op unless shown. */
 		GuiOverlay::Render(g_renderer.clientWidth(), g_renderer.clientHeight());
 		g_renderer.swap();
 		/* Default the NEXT frame to the retro letterboxed canvas; the in-flight

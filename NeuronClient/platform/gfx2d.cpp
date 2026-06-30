@@ -28,6 +28,7 @@
 
 #include <d3d11.h>
 #include <winrt/base.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -80,9 +81,12 @@ int                        g_origin_y  = 0;
 bool                       g_scene_full = false;
 Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
 
-/* Current canvas size, mirrored from the renderer (retro 512x514 or client). */
-int canvasW() { Renderer* r = platform_renderer(); return r ? r->canvasWidth()  : Renderer::kCanvasWidth;  }
-int canvasH() { Renderer* r = platform_renderer(); return r ? r->canvasHeight() : Renderer::kCanvasHeight; }
+/* The virtual coordinate space the 2D batch is authored in: the retro 512x514 canvas,
+ * or the live client area when the in-flight 3D fills the window. (Formerly the size of
+ * an off-screen canvas texture; now just the projection space that gfx2d_flush
+ * letterboxes straight onto the back buffer.) */
+int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::kCanvasWidth;  }
+int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::kCanvasHeight; }
 
 /* The 2D batch renders through Neuron::Graphics::Render2D (see gfx2d_flush), so this
  * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
@@ -566,24 +570,43 @@ void gfx_finish_render(void)
  * ===================================================================== */
 void gfx2d_flush(void)
 {
+	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
 	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
 
-	/* Match the canvas to the mode this batch was authored for (retro vs full window). */
-	r->ensureCanvasMode(g_scene_full);
+	/* The batch is authored in the virtual space (retro 512x514, or the client area in
+	 * full-window flight). Letterbox it onto the back buffer with an integer scale so the
+	 * pixel art stays crisp; full-window flight gives scale 1 and no bars. No off-screen
+	 * canvas / blit: the viewport scales the virtual space straight onto the back buffer. */
+	const int vw = canvasW();
+	const int vh = canvasH();
+	const int cw = r->clientWidth();
+	const int ch = r->clientHeight();
+	int scale = std::min(cw / vw, ch / vh);
+	if (scale < 1) scale = 1;
+	const int dstX = (cw - vw * scale) / 2;
+	const int dstY = (ch - vh * scale) / 2;
 
-	if (!g_cmds.empty())
+	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
+	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
+
+	/* Clear the whole back buffer (letterbox bars + anything the batch does not paint)
+	 * before this frame's content. */
+	if (rtv && ctx)
 	{
-		/* Bind the off-screen canvas (RT + full-canvas viewport), then replay the
-		 * submission-ordered command list through Render2D. Begin with a null RTV draws
-		 * to the canvas just bound here; a screen-space ortho (Y down) maps the batch's
-		 * canvas-pixel coordinates straight to clip space. Point sampling keeps the
-		 * pixel sprites / HUD / bitmap font crisp. (XOR for the chart cross-hairs is
-		 * dropped - the logic-op path never worked and is slated for a texture.) */
-		r->bindCanvasTarget();
-		Render2D::Begin(nullptr, r->canvasWidth(), r->canvasHeight(), D3D11_FILTER_MIN_MAG_MIP_POINT);
+		const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+		ctx->ClearRenderTargetView(rtv, black);
+	}
+
+	if (!g_cmds.empty() && rtv)
+	{
+		/* Replay the submission-ordered command list through Render2D, letterboxed onto
+		 * the back buffer. Point sampling keeps the sprites / HUD / bitmap font crisp.
+		 * (XOR for the chart cross-hairs is dropped - the logic-op path never worked and
+		 * is slated for a texture.) */
+		Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
 		/* Text commands (those bound to the font sheet) replay through the built-in
 		 * text-outline program for a shader-side outline; sprites/HUD and colored prims

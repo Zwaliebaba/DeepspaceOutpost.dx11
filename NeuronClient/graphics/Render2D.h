@@ -47,12 +47,17 @@ namespace Neuron::Graphics
           (static_cast<uint32_t>(a) << 24);
       }
 
-      // Open a 2D pass targeting rtv with a (width x height) Y-down orthographic
-      // projection (pixel coordinates, origin top-left). Resets the scissor to the
-      // whole target. Submissions are batched until End. The filter applies to the
-      // textured draws (text/sprites); colored primitives are unaffected.
-      static void Begin(ID3D11RenderTargetView* rtv, int width, int height,
-                        D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR);
+      // Open a 2D pass targeting rtv. Geometry is authored in a virtual pixel space of
+      // (virtualW x virtualH) with a Y-down ortho (origin top-left). That virtual space
+      // is placed on the target at (dstX,dstY) scaled by dstScale - i.e. virtual pixel
+      // (x,y) lands at target pixel (dstX + x*dstScale, dstY + y*dstScale). The viewport
+      // and SetClip scissors are computed from that mapping, so callers (and the gfx2d
+      // batch) keep working purely in virtual coordinates while the content is letterboxed
+      // onto the back buffer. The default (dstX=dstY=0, dstScale=1) maps 1:1, i.e. the
+      // virtual space IS target pixels (the GUI overlay's case). Submissions are batched
+      // until End; the filter applies to textured draws (text/sprites).
+      static void Begin(ID3D11RenderTargetView* rtv, int virtualW, int virtualH, int dstX = 0, int dstY = 0,
+                        float dstScale = 1.0f, D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR);
       static void End();
 
       // Scissor rectangle in target pixels; clamps to the target. Cleared (full
@@ -180,8 +185,11 @@ namespace Neuron::Graphics
       inline static std::vector<Cmd> s_cmds;
       inline static D3D11_RECT s_scissor = {};
       inline static ID3D11RenderTargetView* s_rtv = nullptr;
-      inline static int s_width = 0;
-      inline static int s_height = 0;
+      inline static int s_width = 0;     // virtual-space width  (ortho)
+      inline static int s_height = 0;    // virtual-space height (ortho)
+      inline static int s_dstX = 0;      // virtual->target placement: offset...
+      inline static int s_dstY = 0;
+      inline static float s_dstScale = 1.0f; // ...and scale
       inline static D3D11_FILTER s_filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
       inline static bool s_inPass = false;
   };

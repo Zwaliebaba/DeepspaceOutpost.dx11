@@ -319,14 +319,18 @@ float4 PSMain(VSOut i) : SV_Target
     SetShaderParams(params, sizeof(params));
   }
 
-  void Render2D::Begin(ID3D11RenderTargetView* rtv, int width, int height, D3D11_FILTER filter)
+  void Render2D::Begin(ID3D11RenderTargetView* rtv, int virtualW, int virtualH, int dstX, int dstY, float dstScale,
+                       D3D11_FILTER filter)
   {
     if (!EnsureResources())
       return;
 
     s_rtv = rtv;
-    s_width = width;
-    s_height = height;
+    s_width = virtualW;
+    s_height = virtualH;
+    s_dstX = dstX;
+    s_dstY = dstY;
+    s_dstScale = dstScale;
     s_filter = filter;
     s_inPass = true;
 
@@ -335,10 +339,10 @@ float4 PSMain(VSOut i) : SV_Target
     s_program = DefaultProgram;
     ClearClip();
 
-    // Y-down pixel-space orthographic projection (origin top-left): maps pixel
-    // coordinates straight to clip space.
-    const XMMATRIX proj = XMMatrixOrthographicOffCenterRH(0.0f, static_cast<float>(width), static_cast<float>(height),
-                                                          0.0f, -1.0f, 1.0f);
+    // Y-down ortho over the virtual space (origin top-left); the viewport (Flush) then
+    // scales/offsets it onto the target.
+    const XMMATRIX proj = XMMatrixOrthographicOffCenterRH(0.0f, static_cast<float>(virtualW),
+                                                          static_cast<float>(virtualH), 0.0f, -1.0f, 1.0f);
     D3D11_MAPPED_SUBRESOURCE mapped;
     auto* ctx = Core::GetD3DDeviceContext();
     check_hresult(ctx->Map(s_cb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
@@ -356,20 +360,33 @@ float4 PSMain(VSOut i) : SV_Target
 
   void Render2D::ClearClip()
   {
-    s_scissor = {0, 0, s_width, s_height};
+    // Full content region (the placed virtual space) in target pixels.
+    const LONG w = static_cast<LONG>(s_width * s_dstScale);
+    const LONG h = static_cast<LONG>(s_height * s_dstScale);
+    s_scissor = {s_dstX, s_dstY, s_dstX + w, s_dstY + h};
   }
 
   void Render2D::SetClip(int x, int y, int w, int h)
   {
-    LONG l = x, t = y, r = x + w, b = y + h;
-    if (l < 0)
-      l = 0;
-    if (t < 0)
-      t = 0;
-    if (r > s_width)
-      r = s_width;
-    if (b > s_height)
-      b = s_height;
+    // Virtual-space rect -> target pixels, clamped to the content region so it can't
+    // spill into the letterbox bars.
+    const LONG cx0 = s_dstX;
+    const LONG cy0 = s_dstY;
+    const LONG cx1 = s_dstX + static_cast<LONG>(s_width * s_dstScale);
+    const LONG cy1 = s_dstY + static_cast<LONG>(s_height * s_dstScale);
+
+    LONG l = s_dstX + static_cast<LONG>(x * s_dstScale);
+    LONG t = s_dstY + static_cast<LONG>(y * s_dstScale);
+    LONG r = s_dstX + static_cast<LONG>((x + w) * s_dstScale);
+    LONG b = s_dstY + static_cast<LONG>((y + h) * s_dstScale);
+    if (l < cx0)
+      l = cx0;
+    if (t < cy0)
+      t = cy0;
+    if (r > cx1)
+      r = cx1;
+    if (b > cy1)
+      b = cy1;
     s_scissor = {l, t, r, b};
   }
 
@@ -484,9 +501,12 @@ float4 PSMain(VSOut i) : SV_Target
       ID3D11RenderTargetView* rtv = s_rtv;
       ctx->OMSetRenderTargets(1, &rtv, nullptr);
 
+      // Place the virtual space on the target: offset by (dstX,dstY), scaled by dstScale.
       D3D11_VIEWPORT vp{};
-      vp.Width = static_cast<float>(s_width);
-      vp.Height = static_cast<float>(s_height);
+      vp.TopLeftX = static_cast<float>(s_dstX);
+      vp.TopLeftY = static_cast<float>(s_dstY);
+      vp.Width = s_width * s_dstScale;
+      vp.Height = s_height * s_dstScale;
       vp.MaxDepth = 1.0f;
       ctx->RSSetViewports(1, &vp);
     }
