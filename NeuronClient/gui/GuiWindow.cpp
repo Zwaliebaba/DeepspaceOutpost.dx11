@@ -113,7 +113,7 @@ void GuiWindow::Render(bool hasFocus)
   g_gameFont.SetRenderShadow(true);
   g_gameFont.SetColor(255, 255, 150, 255);
   int y = m_y + 9;
-  int fontSize = 12;
+  int fontSize = 14;
   g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
   g_gameFont.SetRenderShadow(false);
 
