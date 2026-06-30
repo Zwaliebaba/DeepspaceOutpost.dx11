@@ -28,6 +28,7 @@
 #include "MissileSystem.h"
 #include "SpawnDirector.h"
 #include "StationServices.h"
+#include "CombatMessages.h"
 
 namespace Neuron::GameLogic
 {

@@ -18,11 +18,17 @@
 #include "DataWriter.h"
 #include "DataReader.h"
 #include "ReliableChannel.h"   // ReliableMessage, SAFE_UDP_PAYLOAD
-#include "GameEvents.h"        // EventType
+#include "Messages/MessageId.h"  // Msg::MessageId
 
 namespace Neuron::Net
 {
   inline constexpr std::size_t GALAXY_NAME_MAX = 12;   // NUL-padded system name
+
+  // Catalog id for one galaxy-manifest chunk (a Bulk-lane reliable message). The
+  // chunk is fixed-layout display data with a fixed char[] array, hand-encoded
+  // below, so it carries a reserved MessageId rather than going through the generic
+  // codec. (It replaces the old EventType::GalaxyManifest tag.)
+  inline constexpr Msg::MessageId GALAXY_MANIFEST_ID = static_cast<Msg::MessageId>(0x0210);
 
   // One system as the chart needs it: identity, absolute world position of its
   // planet, and the display attributes. Pure data - the server computes these
@@ -100,7 +106,7 @@ namespace Neuron::Net
   [[nodiscard]] inline bool DecodeManifestChunk(const ReliableMessage& _m, uint32_t& _total,
                                                 uint32_t& _baseIndex, std::vector<GalaxySystemInfo>& _out)
   {
-    if (_m.type != static_cast<uint16_t>(EventType::GalaxyManifest))
+    if (_m.type != Msg::Raw(GALAXY_MANIFEST_ID))
       return false;
     DataReader r(_m.payload.data(), _m.payload.size());
     _total = r.ReadU32();
@@ -120,7 +126,7 @@ namespace Neuron::Net
       const std::size_t n = std::min(MANIFEST_SYSTEMS_PER_CHUNK, _systems.size() - base);
       const std::vector<uint8_t> payload =
           EncodeManifestChunk(total, static_cast<uint32_t>(base), &_systems[base], static_cast<uint16_t>(n));
-      _ch.Send(static_cast<uint16_t>(EventType::GalaxyManifest), payload);
+      _ch.Send(Msg::Raw(GALAXY_MANIFEST_ID), payload);
     }
   }
 }

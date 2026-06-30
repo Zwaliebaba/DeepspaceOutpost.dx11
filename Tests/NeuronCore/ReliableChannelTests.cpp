@@ -5,7 +5,8 @@
 
 #include "DataWriter.h"
 #include "ReliableChannel.h"
-#include "GameEvents.h"
+#include "Messages/Reliable.h"
+#include "Messages/Defs/CoreEvents.h"
 
 using namespace Neuron;
 
@@ -45,7 +46,11 @@ namespace
     Net::ReliableMessage m;
     if (!_ch.Receive(m))
       return false;
-    return Net::DecodeDespawn(m, _id);
+    Msg::EntityDespawn ds;
+    if (!Msg::TryDecode(m, ds))
+      return false;
+    _id = ds.entityId;
+    return true;
   }
 }
 
@@ -54,8 +59,8 @@ TEST(Reliable, DeliversMessagesInOrder)
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
-  Net::SendDespawn(server, 11);
-  Net::SendDespawn(server, 22);
+  Msg::SendReliable(server, Msg::EntityDespawn{ 11 });
+  Msg::SendReliable(server, Msg::EntityDespawn{ 22 });
 
   std::vector<uint8_t> pkt = server.WritePacket();
   EXPECT_TRUE(client.ReadPacket(pkt.data(), pkt.size()));
@@ -73,7 +78,7 @@ TEST(Reliable, AckClearsTheOutgoingQueue)
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
-  Net::SendDeath(server, 5, 9);
+  Msg::SendReliable(server, Msg::EntityDeath{ 5, 9 });
   EXPECT_TRUE(server.PendingOutgoing() == 1);
 
   std::vector<uint8_t> toClient = server.WritePacket();
@@ -90,7 +95,7 @@ TEST(Reliable, ResendsUntilAcked)
   Net::ReliableChannel server;
   Net::ReliableChannel client;
 
-  Net::SendChat(server, 1, "hello");
+  Msg::SendReliable(server, Msg::Chat{ 1, "hello" });
 
   // First packet is "lost" (built but never delivered).
   (void)server.WritePacket();
@@ -102,27 +107,26 @@ TEST(Reliable, ResendsUntilAcked)
 
   Net::ReliableMessage m;
   EXPECT_TRUE(client.Receive(m));
-  uint32_t sender = 0;
-  std::string text;
-  EXPECT_TRUE(Net::DecodeChat(m, sender, text));
-  EXPECT_TRUE(sender == 1);
-  EXPECT_TRUE(text == "hello");
+  Msg::Chat chat;
+  EXPECT_TRUE(Msg::TryDecode(m, chat));
+  EXPECT_TRUE(chat.sender == 1);
+  EXPECT_TRUE(chat.text == "hello");
 }
 
 TEST(Reliable, BuffersGapsAndFlushesWhenFilled)
 {
   Net::ReliableChannel client;
 
-  const uint16_t despawnType = static_cast<uint16_t>(Net::EventType::EntityDespawn);
+  const uint16_t despawnType = Msg::Raw(Msg::EntityDespawn::Id);
 
   // Deliver sequence 2 before sequence 1 (a reordering): nothing is ready yet.
-  std::vector<uint8_t> p2 = BuildPacket(0, { { 2, despawnType, Net::EncodeDespawn(222) } });
+  std::vector<uint8_t> p2 = BuildPacket(0, { { 2, despawnType, Msg::Encode(Msg::EntityDespawn{ 222 }) } });
   EXPECT_TRUE(client.ReadPacket(p2.data(), p2.size()));
   EXPECT_TRUE(!client.HasReady());
   EXPECT_TRUE(client.NextExpected() == 1);
 
   // Now sequence 1 arrives: it is delivered, then the buffered 2 flushes behind it.
-  std::vector<uint8_t> p1 = BuildPacket(0, { { 1, despawnType, Net::EncodeDespawn(111) } });
+  std::vector<uint8_t> p1 = BuildPacket(0, { { 1, despawnType, Msg::Encode(Msg::EntityDespawn{ 111 }) } });
   EXPECT_TRUE(client.ReadPacket(p1.data(), p1.size()));
 
   uint32_t id = 0;
@@ -138,7 +142,7 @@ TEST(Reliable, IgnoresDuplicates)
   Net::ReliableChannel client;
 
   std::vector<uint8_t> p =
-    BuildPacket(0, { { 1, static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(7) } });
+    BuildPacket(0, { { 1, Msg::Raw(Msg::EntityDespawn::Id), Msg::Encode(Msg::EntityDespawn{ 7 }) } });
 
   EXPECT_TRUE(client.ReadPacket(p.data(), p.size()));
   EXPECT_TRUE(client.ReadPacket(p.data(), p.size()));   // same packet again
@@ -153,7 +157,7 @@ TEST(Reliable, PacketStaysWithinMtu)
 {
   Net::ReliableChannel server;
   for (int i = 0; i < 500; ++i)
-    Net::SendChat(server, static_cast<uint32_t>(i), "a fairly chatty line of text for sizing");
+    Msg::SendReliable(server, Msg::Chat{ static_cast<uint32_t>(i), "a fairly chatty line of text for sizing" });
 
   std::vector<uint8_t> pkt = server.WritePacket(Net::SAFE_UDP_PAYLOAD);
   EXPECT_TRUE(pkt.size() <= Net::SAFE_UDP_PAYLOAD);
@@ -163,26 +167,25 @@ TEST(Reliable, PacketStaysWithinMtu)
 
 TEST(Reliable, EventEncodingsRoundTrip)
 {
-  Net::ReliableMessage despawn{ static_cast<uint16_t>(Net::EventType::EntityDespawn), Net::EncodeDespawn(99) };
-  uint32_t id = 0;
-  EXPECT_TRUE(Net::DecodeDespawn(despawn, id));
-  EXPECT_TRUE(id == 99);
+  Net::ReliableMessage despawn{ Msg::Raw(Msg::EntityDespawn::Id), Msg::Encode(Msg::EntityDespawn{ 99 }) };
+  Msg::EntityDespawn ds;
+  EXPECT_TRUE(Msg::TryDecode(despawn, ds));
+  EXPECT_TRUE(ds.entityId == 99);
 
-  Net::ReliableMessage death{ static_cast<uint16_t>(Net::EventType::EntityDeath), Net::EncodeDeath(3, 8) };
-  uint32_t victim = 0, killer = 0;
-  EXPECT_TRUE(Net::DecodeDeath(death, victim, killer));
-  EXPECT_TRUE(victim == 3);
-  EXPECT_TRUE(killer == 8);
+  Net::ReliableMessage death{ Msg::Raw(Msg::EntityDeath::Id), Msg::Encode(Msg::EntityDeath{ 3, 8 }) };
+  Msg::EntityDeath d;
+  EXPECT_TRUE(Msg::TryDecode(death, d));
+  EXPECT_TRUE(d.victim == 3);
+  EXPECT_TRUE(d.killer == 8);
 
-  Net::ReliableMessage chat{ static_cast<uint16_t>(Net::EventType::Chat), Net::EncodeChat(42, "gg wp") };
-  uint32_t sender = 0;
-  std::string text;
-  EXPECT_TRUE(Net::DecodeChat(chat, sender, text));
-  EXPECT_TRUE(sender == 42);
-  EXPECT_TRUE(text == "gg wp");
+  Net::ReliableMessage chat{ Msg::Raw(Msg::Chat::Id), Msg::Encode(Msg::Chat{ 42, "gg wp" }) };
+  Msg::Chat c;
+  EXPECT_TRUE(Msg::TryDecode(chat, c));
+  EXPECT_TRUE(c.sender == 42);
+  EXPECT_TRUE(c.text == "gg wp");
 
-  // A decoder rejects a mismatched type.
-  EXPECT_TRUE(!Net::DecodeDeath(despawn, victim, killer));
+  // A decoder rejects a mismatched id.
+  EXPECT_TRUE(!Msg::TryDecode(despawn, d));
 }
 
 TEST(Reliable, SurvivesLossyReorderingLink)
@@ -194,7 +197,7 @@ TEST(Reliable, SurvivesLossyReorderingLink)
   Net::ReliableChannel client;
 
   for (int i = 0; i < 20; ++i)
-    Net::SendDespawn(server, static_cast<uint32_t>(1000 + i));
+    Msg::SendReliable(server, Msg::EntityDespawn{ static_cast<uint32_t>(1000 + i) });
 
   // Loop until everything is both delivered AND acked. Each direction lands only
   // occasionally (heavy loss); unacked messages are resent every packet, so they
@@ -211,9 +214,9 @@ TEST(Reliable, SurvivesLossyReorderingLink)
     Net::ReliableMessage m;
     while (client.Receive(m))
     {
-      uint32_t id = 0;
-      EXPECT_TRUE(Net::DecodeDespawn(m, id));
-      got.push_back(id);
+      Msg::EntityDespawn ds;
+      EXPECT_TRUE(Msg::TryDecode(m, ds));
+      got.push_back(ds.entityId);
     }
 
     std::vector<uint8_t> c2s = client.WritePacket();   // carries the ack back

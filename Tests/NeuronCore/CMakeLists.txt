@@ -14,6 +14,16 @@ add_executable(NeuronCore.Tests
     StationProtocolTests.cpp
     InterpolationTests.cpp
     SnapshotTransportTests.cpp
+    MessageCodecTests.cpp
+    MessageBusTests.cpp
+    MessageWireTests.cpp
+    CatalogGovernanceTests.cpp
+    ReliableEventsTests.cpp
+    MessageEndpointTests.cpp
+    InputActionsTests.cpp
+    CatalogToolsTests.cpp
+    PacketInspectTests.cpp
+    MessageFuzzTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)

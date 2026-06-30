@@ -31,6 +31,9 @@
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "Messages/MessageBus.h"
+#include "Messages/Defs/CoreEvents.h"
+#include "Messages/Defs/InputActions.h"
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
@@ -1161,52 +1164,103 @@ void info_message(const char* message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
+// The client's in-process event bus. Inbound reliable facts (decoded from the
+// server) are published here and independent subscribers (commerce, audio/VFX,
+// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
+// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
+static Neuron::Msg::MessageBus g_clientBus;
+
+// This frame's discrete combat input, accumulated from ActionTriggered messages and
+// consumed by send_player_input. Continuous flight (roll/pitch/throttle) is NOT here -
+// it stays the legacy rate-based PlayerFlight state, normalized to axes at send time.
+static bool     s_frameFire = false;
+static bool     s_frameMissile = false;
+static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
+
+static void register_client_event_handlers(void)
+{
+  static bool registered = false;
+  if (registered)
+    return;
+  registered = true;
+
+  // Commerce: apply the authoritative station result to the local commander.
+  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  {
+    if (_resp.status != Net::StationStatus::Ok)
+      return;
+    cmdr.credits = _resp.credits;
+    if (_resp.commodity < NO_OF_STOCK_ITEMS)
+      cmdr.current_cargo[_resp.commodity] = _resp.cargo;
+  });
+
+  // Death: our own death triggers the game-over sequence; any other entity's death
+  // drops it from the view, clears a missile lock on it, and plays the explosion.
+  g_clientBus.Subscribe<Neuron::Msg::EntityDeath>([](const Neuron::Msg::EntityDeath& _death)
+  {
+    Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+    if (_death.victim == rc.LocalPlayer())
+    {
+      // We were killed. Trigger the game-over sequence (game_update_flight picks this
+      // up next frame). The server respawns us in place, so after the animation we
+      // resume flight rather than restart - see respawn_after_death().
+      game_over = 1;
+      snd_play_sample(SND_EXPLODE);
+      return;
+    }
+    if (_death.victim == g_missile_lock_target)
+      g_missile_lock_target = 0xFFFFFFFFu;
+    rc.Forget(_death.victim);
+    snd_play_sample(SND_EXPLODE);
+  });
+
+  // Despawn: drop the entity from the view and clear a missile lock on it.
+  g_clientBus.Subscribe<Neuron::Msg::EntityDespawn>([](const Neuron::Msg::EntityDespawn& _ds)
+  {
+    if (_ds.entityId == g_missile_lock_target)
+      g_missile_lock_target = 0xFFFFFFFFu;
+    Client::ReplicationClientInstance().Forget(_ds.entityId);
+  });
+
+  // Input command-builder: a discrete combat action sets this frame's intent, which
+  // send_player_input folds into the outgoing InputCommand.
+  g_clientBus.Subscribe<Neuron::Msg::ActionTriggered>([](const Neuron::Msg::ActionTriggered& _a)
+  {
+    switch (_a.action)
+    {
+      case Neuron::Msg::InputAction::Fire:
+        s_frameFire = true;
+        break;
+      case Neuron::Msg::InputAction::LaunchMissile:
+        s_frameMissile = true;
+        s_frameMissileTarget = _a.param;
+        break;
+    }
+  });
+}
+
 static void process_server_events(void)
 {
+  register_client_event_handlers();
+
+  // Decode each inbound reliable fact to its catalog type and publish it onto the
+  // client bus; the subscribers above react. Dispatch once after draining.
   Client::ReplicationClient& rc = Client::ReplicationClientInstance();
   Net::ReliableMessage msg;
   while (rc.PollEvent(msg))
   {
     Net::StationResponse resp;
-    uint32_t entityId = 0;
-    uint32_t killerId = 0;
+    Neuron::Msg::EntityDeath death;
+    Neuron::Msg::EntityDespawn despawn;
 
-    if (Neuron::Net::DecodeStationResponse(msg, resp))
-    {
-      if (resp.status == Net::StationStatus::Ok)
-      {
-        cmdr.credits = resp.credits;
-        if (resp.commodity < NO_OF_STOCK_ITEMS)
-          cmdr.current_cargo[resp.commodity] = resp.cargo;
-      }
-    }
-    else if (Neuron::Net::DecodeDeath(msg, entityId, killerId))
-    {
-      if (entityId == rc.LocalPlayer())
-      {
-        // We were killed. Trigger the game-over sequence (game_update_flight picks this
-        // up next frame). The server respawns us in place, so after the animation we
-        // resume flight rather than restart - see respawn_after_death().
-        game_over = 1;
-        snd_play_sample(SND_EXPLODE);
-      }
-      else
-      {
-        // Another entity died: clear the lock if it was on it, drop it from the view,
-        // and play the explosion.
-        if (entityId == g_missile_lock_target)
-          g_missile_lock_target = 0xFFFFFFFFu;
-        rc.Forget(entityId);
-        snd_play_sample(SND_EXPLODE);
-      }
-    }
-    else if (Neuron::Net::DecodeDespawn(msg, entityId))
-    {
-      if (entityId == g_missile_lock_target)
-        g_missile_lock_target = 0xFFFFFFFFu;
-      rc.Forget(entityId);
-    }
+    if (Neuron::Msg::TryDecode(msg, resp))
+      g_clientBus.Publish(resp);
+    else if (Neuron::Msg::TryDecode(msg, death))
+      g_clientBus.Publish(death);
+    else if (Neuron::Msg::TryDecode(msg, despawn))
+      g_clientBus.Publish(despawn);
   }
+  g_clientBus.Dispatch();
 }
 
 // The four in-flight cockpit views render the 3D scene full-window; every other
@@ -1240,10 +1294,26 @@ static void send_player_input(void)
   in.rollAxis = -static_cast<float>(PlayerFlight().roll) / static_cast<float>(maxRoll);
   in.pitchAxis = -static_cast<float>(PlayerFlight().climb) / static_cast<float>(maxClimb);
   in.throttle = static_cast<float>(PlayerFlight().speed) / static_cast<float>(maxSpeed);
-  in.fire = (kbd_fire_pressed != 0);
-  in.fireMissile = s_fire_missile_intent;
-  in.missileTarget = s_fire_missile_intent ? s_fire_missile_target : Net::NO_MISSILE_TARGET;
-  s_fire_missile_intent = false;
+
+  // Discrete combat actions flow as LocalOnly ActionTriggered messages through the
+  // client bus into this frame's intent (the command-builder pattern): the input
+  // layer publishes what the player did, the subscriber accumulates it here.
+  register_client_event_handlers();
+  s_frameFire = false;
+  s_frameMissile = false;
+  s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  if (kbd_fire_pressed)
+    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
+  if (s_fire_missile_intent)
+  {
+    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::LaunchMissile, s_fire_missile_target });
+    s_fire_missile_intent = false;
+  }
+  g_clientBus.Dispatch();
+
+  in.fire = s_frameFire;
+  in.fireMissile = s_frameMissile;
+  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
 
   Client::ReplicationClientInstance().SendInput(in);
 }

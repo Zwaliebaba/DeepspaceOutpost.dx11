@@ -20,8 +20,9 @@
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
 #include "ClientInput.h"
 #include "ReliableChannel.h"
-#include "GameEvents.h"
 #include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
+#include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
+#include "Messages/Defs/CoreEvents.h" // Msg::AssignPlayer
 
 #include "SimComponents.h"
 #include "StationServices.h"
@@ -39,7 +40,7 @@ namespace Neuron::GameLogic
   {
     Net::Endpoint endpoint;
     ECS::EntityId entity;
-    Net::ReliableChannel events;       // reliable stream to THIS client
+    Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
   };
@@ -61,8 +62,10 @@ namespace Neuron::GameLogic
         Session s;
         s.endpoint = _ep;
         s.entity = SpawnPlayer(_world);
-        Net::SendAssignPlayer(s.events, s.entity.index);
-        Net::SendManifest(s.events, m_manifest);   // the galaxy chart data, once on connect
+        s.events.Send(Msg::AssignPlayer{ s.entity.index });   // Control lane
+        // The galaxy chart, once on connect, on the Bulk lane so it can't head-of-line
+        // -block gameplay/control events.
+        Net::SendManifest(s.events.Channel(Msg::MessageLane::Bulk), m_manifest);
         it = m_sessions.emplace(key, std::move(s)).first;
       }
 
@@ -84,7 +87,7 @@ namespace Neuron::GameLogic
     {
       auto it = m_sessions.find(EndpointKey(_ep));
       if (it != m_sessions.end())
-        it->second.events.ReadPacket(_data, _size);
+        it->second.events.OnDatagram(_data, _size);
     }
 
     // Drop sessions idle for more than `_timeoutTicks`, destroying their entities.
@@ -111,12 +114,13 @@ namespace Neuron::GameLogic
       return gone;
     }
 
-    // Queue a reliable event onto every session's channel (e.g. a despawn that
-    // everyone must see exactly once).
-    void Broadcast(uint16_t _type, const std::vector<uint8_t>& _payload)
+    // Queue a catalog message onto every session's lanes (e.g. a despawn or death
+    // that everyone must see exactly once); routed to the message's lane.
+    template <Msg::Message M>
+    void Broadcast(const M& _m)
     {
       for (auto& entry : m_sessions)
-        entry.second.events.Send(_type, _payload);
+        entry.second.events.Send(_m);
     }
 
     // Set the galaxy manifest sent to every client when it connects (static for

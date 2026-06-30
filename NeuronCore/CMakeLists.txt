@@ -17,7 +17,6 @@ set(NEURONCORE_SOURCES
 
 set(NEURONCORE_HEADERS
     NeuronCore.h
-    Event.h
     EventManager.h
     ECS.h
     Vector3i64.h
@@ -30,7 +29,6 @@ set(NEURONCORE_HEADERS
     SnapshotReceiver.h
     SnapshotInterpolator.h
     ReliableChannel.h
-    GameEvents.h
     ClientInput.h
     StationProtocol.h
     NetLib.h
@@ -42,6 +40,21 @@ set(NEURONCORE_HEADERS
     NeuronHelper.h
     TasksCore.h
     TimerCore.h
+    Messages/MessageId.h
+    Messages/MessageTraits.h
+    Messages/NetEntityId.h
+    Messages/Serialize.h
+    Messages/Registry.h
+    Messages/MessageBus.h
+    Messages/Framing.h
+    Messages/Reliable.h
+    Messages/MessageEndpoint.h
+    Messages/Catalog.h
+    Messages/CatalogTools.h
+    Messages/PacketInspect.h
+    Messages/Defs/InputCommand.h
+    Messages/Defs/CoreEvents.h
+    Messages/Defs/InputActions.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

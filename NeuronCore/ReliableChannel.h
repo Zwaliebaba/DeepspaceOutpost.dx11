@@ -38,8 +38,9 @@ namespace Neuron::Net
   inline constexpr uint32_t EVENT_MAGIC = 0x4E455654;   // 'NEVT'
   inline constexpr uint16_t EVENT_VERSION = 1;
 
-  // A reliable message: an application-defined type tag plus an opaque payload
-  // (encoded by the game layer, e.g. GameEvents.h).
+  // A reliable message: an application-defined type tag plus an opaque payload.
+  // The type tag is a MessageId and the payload its Serialize encoding (see
+  // Messages/Reliable.h: SendReliable / TryDecode).
   struct ReliableMessage
   {
     uint16_t type = 0;

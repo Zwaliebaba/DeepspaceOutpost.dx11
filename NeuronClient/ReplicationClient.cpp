@@ -2,8 +2,10 @@
 
 #include "ReplicationClient.h"
 
-#include "GameEvents.h"
 #include "GalaxyManifest.h"
+#include "Messages/Framing.h"
+#include "Messages/Reliable.h"
+#include "Messages/Defs/CoreEvents.h"
 
 namespace Neuron::Client
 {
@@ -66,8 +68,8 @@ namespace Neuron::Client
         case Net::SNAPSHOT_MAGIC:
           m_interp.Apply(buffer, size);        // unreliable bulk state
           break;
-        case Net::EVENT_MAGIC:
-          m_events.ReadPacket(buffer, size);   // reliable ordered events
+        case Msg::RELIABLE_MAGIC:
+          m_events.OnDatagram(buffer, size);   // reliable lanes (Control/Gameplay/Bulk)
           break;
         default:
           break;   // unknown/foreign datagram: ignore
@@ -80,23 +82,24 @@ namespace Neuron::Client
     Net::ReliableMessage msg;
     while (m_events.Receive(msg))
     {
-      uint32_t playerId = 0;
+      Msg::AssignPlayer assign;
       uint32_t total = 0;
       uint32_t base = 0;
-      if (Net::DecodeAssignPlayer(msg, playerId))
-        m_localPlayer = playerId;
+      if (Msg::TryDecode(msg, assign))
+        m_localPlayer = assign.entityId;
       else if (Net::DecodeManifestChunk(msg, total, base, m_galaxy))
         m_galaxy.reserve(total);   // chunks arrive in order; just accumulate
       else
         m_appEvents.push_back(std::move(msg));
     }
 
-    // Send our cumulative ack back so the server stops resending delivered
-    // events (the packet also carries any client->server reliable messages).
+    // Send our cumulative acks back so the server stops resending delivered events
+    // (these datagrams also carry any client->server reliable messages). One per
+    // lane that has something to (re)send or a new ack to deliver.
     if (m_haveServer)
     {
-      const std::vector<uint8_t> ack = m_events.WritePacket();
-      m_socket.SendTo(m_server, ack.data(), ack.size());
+      for (const std::vector<uint8_t>& dg : m_events.WriteDatagrams())
+        m_socket.SendTo(m_server, dg.data(), dg.size());
     }
   }
 
@@ -105,9 +108,11 @@ namespace Neuron::Client
     if (!m_open || !m_haveServer)
       return;
 
-    Net::DataWriter writer;
-    Net::WriteInput(writer, _input);
-    m_socket.SendTo(m_server, writer.Data(), writer.Size());
+    // The intent rides the unified 'NMSG' unreliable lane as one InputCommand
+    // record (replacing the old bespoke 'NCMD' packet).
+    Msg::PacketWriter writer(Msg::MessageLane::Unreliable);
+    writer.Add(_input);
+    m_socket.SendTo(m_server, writer.Bytes().data(), writer.Size());
   }
 
   bool ReplicationClient::PollEvent(Net::ReliableMessage& _out)
