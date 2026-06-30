@@ -15,11 +15,11 @@ namespace Neuron::Graphics
 {
   namespace
   {
-    // One interleaved vertex serves colored and textured draws. The pixel shader is
-    // col * texture: colored primitives sample a 1x1 white texture, so the result is
-    // just the per-vertex colour; text/sprites bind their atlas. Row-major, row-vector
-    // matrix convention (mul(pos, M)), matching the rest of the renderer.
-    const char* kShaderHLSL = R"(
+    // Shared 2D vertex stage + texture/sampler. Every Render2D program is this prelude
+    // plus its own pixel shader (and any extra cbuffers): one interleaved vertex
+    // (POSITION/TEXCOORD0/COLOR0), b0 = the row-major ortho (mul(pos, M)), one texture at
+    // t0/s0. Colored primitives bind a 1x1 white texture, so col*tex is just the colour.
+#define RENDER2D_PRELUDE R"(
 cbuffer Cb2D : register(b0)
 {
     row_major float4x4 u_Proj;
@@ -39,43 +39,26 @@ VSOut VSMain(VSIn i)
 
 Texture2D    u_Tex : register(t0);
 SamplerState u_Smp : register(s0);
+)"
 
+    // Default program: per-vertex colour times the bound texture.
+    const char* kShaderHLSL = RENDER2D_PRELUDE R"(
 float4 PSMain(VSOut i) : SV_Target
 {
     return i.col * u_Tex.Sample(u_Smp, i.uv);
 }
 )";
 
-    // Built-in text-outline program. Same vertex contract as the default (b0 ortho,
-    // POSITION/TEXCOORD0/COLOR0); the PS reads b1 for the outline colour + atlas texel
-    // size, samples the glyph coverage (alpha) plus an 8-tap ring one outline-width out,
+    // Built-in text-outline program. b1 carries the outline colour + atlas texel size;
+    // the PS samples the glyph coverage (alpha) plus an 8-tap ring one outline-width out
     // and composites the per-vertex text colour over the outline colour. Straight-alpha
     // blend: it returns the coverage-normalised colour and total coverage in alpha.
-    const char* kTextOutlineHLSL = R"(
-cbuffer Cb2D : register(b0)
-{
-    row_major float4x4 u_Proj;
-};
+    const char* kTextOutlineHLSL = RENDER2D_PRELUDE R"(
 cbuffer TextParams : register(b1)
 {
     float4 u_OutlineColor;   // rgb + a
     float4 u_OutlineParams;  // x=texelW, y=texelH, z=widthTexels, w=unused
 };
-
-struct VSIn  { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 col : COLOR0; };
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; float4 col : COLOR0; };
-
-VSOut VSMain(VSIn i)
-{
-    VSOut o;
-    o.pos = mul(float4(i.pos, 0.0, 1.0), u_Proj);
-    o.uv  = i.uv;
-    o.col = i.col;
-    return o;
-}
-
-Texture2D    u_Tex : register(t0);
-SamplerState u_Smp : register(s0);
 
 float4 PSMain(VSOut i) : SV_Target
 {
@@ -99,6 +82,8 @@ float4 PSMain(VSOut i) : SV_Target
     return float4(rgb, a);
 }
 )";
+
+#undef RENDER2D_PRELUDE
 
     // Compile one HLSL source/entry/profile. Returns null on failure (logging the
     // compiler errors) rather than throwing, so a bad caller-supplied program shader
