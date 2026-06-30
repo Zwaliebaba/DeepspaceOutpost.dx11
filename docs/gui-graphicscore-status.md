@@ -7,9 +7,11 @@ consolidation of all 2D onto one batched renderer. The early step-by-step histor
 described systems that have since been retired, so they were removed — the history is in
 git.
 
-_Last updated: after consolidating all 2D onto `Render2D` and rendering the game
-directly to the back buffer (off-screen canvas, `ImmediateRenderer`, and the fxc shader
-pipeline all removed)._
+_Last updated: after moving the whole game onto the engine-driven GameMain lifecycle (a
+top-level state machine; the engine owns the frame), restoring the offline fxc /
+`CompiledShaders` pipeline for the built-in Render2D shaders, and removing the legacy
+gfx_display_* screens that the GUI overlay replaced. The off-screen canvas and
+`ImmediateRenderer` remain retired._
 
 ## The stack today
 
@@ -24,9 +26,12 @@ The whole client renders through one native D3D11 stack, with a **single 2D laye
   (keyed by topology / texture / scissor / program). One interleaved vertex format and
   one shader serve both (colored prims sample a built-in 1×1 white texture). Features: a
   virtual→target **letterbox transform** (placement + scissor mapping), a runtime
-  **shader-program registry** (`RegisterProgram`/`SetProgram`, compiled via `D3DCompile`
-  — no fxc/offline step), and a built-in **text-outline** program (with a `b1` params
-  cbuffer). Used by the GUI overlay (→ back buffer, 1:1) and the in-game batch
+  **shader-program registry** (`RegisterProgram`/`SetProgram`, compiled via `D3DCompile`),
+  and a built-in **text-outline** program (with a `b1` params cbuffer). The built-in
+  programs (default + text-outline) live in `NeuronClient/shaders/*.hlsl` and are compiled
+  offline by **fxc** into `shaders/CompiledShaders/*.h` byte arrays at build time (the
+  project's committed-header convention); only caller-supplied custom programs are compiled
+  at runtime. Used by the GUI overlay (→ back buffer, 1:1) and the in-game batch
   (→ back buffer, letterboxed).
 - **`TextureManager` + `DDSTextureLoader`** — native `.dds` loading with a generated mip
   chain; all game art (sprites, scanner HUD, fonts, interface) loads through here.
@@ -51,9 +56,16 @@ The whole client renders through one native D3D11 stack, with a **single 2D laye
 - **`GfxRenderSink`** replays the `RenderQueue` (the A1 render seam) through the `gfx.h`
   contract — the in-flight 3D wireframe path. Client-only; the queue/sink become a client
   per-frame render context in A4 (see `RenderContext.h`).
-- **Engine bootstrap** (`ClientEngine`, `GameMain`, `DeepspaceOutpost/GameApp`,
+- **Engine bootstrap + frame loop** (`ClientEngine`, `GameMain`, `DeepspaceOutpost/GameApp`,
   `NeuronCore/EventManager`) — `ClientEngine` owns the window + Core; `wWinMain` boots it
-  → `make_self<GameApp>` → `game_main()`.
+  → `make_self<GameApp>` → `game_main()`. The **engine owns the frame**:
+  `ClientEngine::Frame()` drives the GameMain lifecycle (`Update(dt)` / `RenderScene` /
+  `RenderCanvas`) + flush + present, then the OS message pump and frame pacing.
+  `game_main()` just boots the first game and pumps frames; the whole game (intro → flight
+  → game-over → new game) runs as a **state machine** in `game_update()`/`game_render_scene()`
+  (see `DeepspaceOutpost/main.cpp`). Deeply nested blocking sequences (the docking break
+  pattern, mission briefs) keep working via a re-entrancy guard in `Frame()` — they only
+  present, they don't re-enter the state step.
 
 ## Game screens — list/form screens are GUI windows
 
@@ -84,49 +96,64 @@ the GUI never touches the legacy gfx drawing.
 
 - **Legacy platform 2D layer** (`Font.cpp`, `Image.cpp`, the bespoke `gfx_dx11`) — gone;
   the master palette is baked into the engine (`scanner_palette.h`).
-- **`ImmediateRenderer` + the fxc / HLSL / `CompiledShaders` pipeline** — removed. All 2D
-  goes through `Render2D`, which compiles its (inline) shaders at runtime.
+- **`ImmediateRenderer`** — removed. All 2D goes through `Render2D`.
 - **Off-screen canvas + letterboxed present** — removed. The game renders full-window
   straight to the back buffer (letterbox via the viewport); `Renderer` shrank to a thin
   device/palette adopter.
+- **Render2D shaders on the offline fxc / `CompiledShaders` convention** — the built-in
+  programs moved from inline runtime `D3DCompile` strings into `shaders/*.hlsl`, compiled by
+  fxc into committed `CompiledShaders/*.h` byte arrays at build time (custom programs still
+  compile at runtime).
 - **Shader-side text outline** — replaces the old two-pass offset drop-shadow, for both
-  GUI and in-game text.
+  GUI and in-game text. Glyph UVs are **pixel-aligned** (exact texel cells) so the bitmap
+  font stays crisp at small sizes under point sampling.
+- **Idle-frame present fix** — an empty 2D batch is no longer cleared+presented (FLIP_DISCARD
+  keeps no retained content), so menu/station screens that repaint on demand no longer flash
+  to black between inputs.
+- **Whole game on the GameMain lifecycle** — the nested blocking screen loops in `game_main()`
+  became an engine-driven state machine (intro → flight → game-over); the engine owns the
+  frame (`ClientEngine::Frame`: lifecycle + present + pump + pace).
+- **Legacy gfx_display_* screens removed** — `options.cpp` (Options/Settings/Quit) and the
+  unreachable `display_market_prices` / `display_inventory` / `equip_ship` (all replaced by
+  GUI windows). `display_data_on_planet` is kept (F7 in MMO mode by design).
 - **Review hardening** — `vsnprintf` bounds (+ no `string_view`-as-format), the present
   binds its own opaque/no-depth OM state, `gfx_display_pretty_text` wrap bounded, the GUI
   panel SRV cached, and topology/shader asserts.
 - **`dialog_win.cpp`** (dead save/load file picker) — removed.
 
-## Not yet verified on Windows ⏳
+## Windows verification
 
-This 2D consolidation has only been **compile-gated by CI**; it has **not** been run on
-Windows. The arc most likely to hide a visual regression:
+Confirmed on Windows: intro screens, the letterboxed menu/station screens (no black-flash),
+crisp outlined text, and in-flight 3D (planet/ships render steady after the server landmark
+AOI fix — see `MIGRATION_ROADMAP.md`). GUI menus, the Options/Settings/Quit + Market
+migrations, and palette colour were confirmed earlier.
 
-- the **direct-to-back-buffer + letterbox/scissor transform** (gfx2d → Render2D): confirm
-  the letterboxed retro screens (status / charts / station / intro) center at the right
-  integer scale with black bars, scissor-clipped charts land correctly at scale ≠ 1, and
-  full-window flight fills the window with the HUD floated;
-- the **GUI overlay** draws correctly on top of the letterboxed game;
-- **outlined text** over busy backgrounds;
-- **live window resize** (`WM_SIZE` → Core swap-chain rebuild) — no crash, correct layout.
+Still wants a Windows pass (compile-gated by CI, not yet exercised end-to-end):
 
-(Older, previously confirmed on Windows: GUI menus render; the Options/Settings/Quit and
-Market migrations; palette colour.)
+- the **GameMain state machine** full arc: intro → launch → flight → death → game-over →
+  back to intro, plus the nested blocking sequences (docking break pattern, mission briefs)
+  that ride the `Frame()` re-entrancy guard;
+- **scissor-clipped charts** at scale ≠ 1 (F5/F6) landing correctly;
+- **live window resize** (`WM_SIZE` → Core swap-chain rebuild) — no crash, correct layout
+  (note: resizing while parked on a static menu can briefly drop the image — no retained
+  canvas; cosmetic).
 
 ## Next steps (in order)
 
-1. **Windows smoke test** of the items above — the validation gate before building
-   further on this stack.
+1. **Windows smoke test** of the state-machine arc + charts + resize (see above) — the
+   validation gate before building further on this stack.
 2. **Chart cross-hair as a texture** — the XOR logic-op path was dropped in the Render2D
    move (it never worked reliably); draw the crosshair as a sprite/quad instead.
-3. **Move the game render onto the `GameMain` lifecycle** (`Update` / `RenderScene` /
-   `RenderCanvas`) instead of `game_main()` driving everything.
-4. **Dead-code cleanup** — the unreachable legacy screens (`display_options` /
-   `game_settings_screen` / `quit_screen`, `display_market_prices`, `display_inventory` /
-   `display_data_on_planet`, `equip_ship`) and their `SCR_*` keyboard dispatch (note
-   `display_commander_status` still serves the docked backdrop).
-5. **A4 render-seam ownership** — give a client per-frame render context the `RenderQueue`
+3. **Finish the sim/draw split in the flight state** — `game_render_scene`'s flight path
+   still runs fused simulation-and-draw steps (the `mcount` bookkeeping, `update_local_objects`,
+   `render_replicated_objects`). Separating pure simulation into `game_update` is blocked by
+   the `mcount` interleaving; a deliberate pass could untangle it.
+4. **A4 render-seam ownership** — give a client per-frame render context the `RenderQueue`
    + `GfxRenderSink`, retiring the `ActiveRenderQueue()` / `g_gfxSink` globals
    (`RenderContext.h`). Tied to the GameLogic split.
+5. **Retire the dead-by-guard keyboard cases** — the `SCR_MARKET_PRICES` / `SCR_EQUIP_SHIP`
+   / `SCR_QUIT` cases (and their handlers) are now unreachable; remove them once their last
+   uses are confirmed gone, and prune the matching `SCR_*` defines.
 6. **Retire keyboard GUI nav** once mouse-driven menus fully cover the screens (then
    simplify `GuiWindow::Update`).
 7. **Smaller:** port `InputField` / `InputScroller` value sliders onto Render2D if needed;
