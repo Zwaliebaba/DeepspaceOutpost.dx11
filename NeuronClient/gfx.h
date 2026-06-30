@@ -135,7 +135,6 @@ void gfx_start_render (void);
 void gfx_render_polygon (int num_points, int *point_list, int face_colour, int zavg);
 void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
 void gfx_finish_render (void);
-int gfx_request_file (const char *title, char *path, const char *ext);
 
 /*
  * Toggle XOR drawing mode for subsequent line draws (used to draw/erase the

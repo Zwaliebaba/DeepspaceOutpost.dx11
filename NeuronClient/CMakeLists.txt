@@ -47,7 +47,6 @@ set(NEURONCLIENT_SOURCES
     platform/GfxRenderSink.cpp
     platform/audio_xa2.cpp
     platform/input_win.cpp
-    platform/dialog_win.cpp
 )
 
 set(NEURONCLIENT_HEADERS

@@ -521,8 +521,6 @@ void gfx_draw_scanner(void)
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 
-/* gfx_request_file lives in dialog_win.cpp (Win32 common dialog). */
-
 /* ---- depth-sorted render chain ---- */
 void gfx_start_render(void) { g_start_poly = 0; g_total_polys = 0; }
 
