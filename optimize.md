@@ -141,12 +141,13 @@ below are re-scoped by the D1 decision — see the note under them.
      `gfx_set_scene_fullwindow(1)`) or its client-space 2D is silently clipped away (the 3D
      still shows — it uses its own viewport). Fixed-2D screens stay retro, so their default
      512×514 scissor matches their authoring and they are unaffected.
-4. **Verify input hit-testing.** With native-centred placement the retro 512×514 canvas sits
-   at an offset in the window, so any mouse mapping into it would be off. In practice the retro
-   game screens are **keyboard-driven** (the chart crosshair `cross_x/cross_y` is moved by keys,
-   not the mouse) and the GUI overlay reads the mouse in client space already — so this is a
-   verification pass, expected to be a no-op, not a migration. Confirm on the charts + any
-   mouse-driven menu.
+4. **Verify input hit-testing. [DONE — confirmed no-op]** With native-centred placement the
+   retro 512×514 canvas sits at an offset in the window, so any mouse mapping into it would be
+   off. Verified there is none: the only mouse consumer (`input_mouse_state`) feeds solely the
+   GUI overlay (client-space, correct); the retro game screens are keyboard-driven — the chart
+   "cursor" is the crosshair `cross_x/cross_y`, moved by keys and compared against chart-space
+   star positions entirely within the 512×514 space (`chart_nearest_to_cursor`). No mouse input
+   maps to the offset canvas, so placement is input-safe.
 
 **Steps 5–6 are superseded by D1.** The original end-state — collapse `canvasW/H` to the
 client size and delete the 512×514 space — assumed every screen re-authored to client-space.
