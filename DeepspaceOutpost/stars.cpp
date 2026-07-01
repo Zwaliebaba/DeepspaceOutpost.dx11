@@ -46,9 +46,9 @@ static inline int star_on_screen (int sx, int sy)
 	return (sx >= 1) && (sx <= vm.width - 1) && (sy >= 1) && (sy <= vm.height - 1);
 }
 
-/* The starfield as scene-pass "dust": alongside the legacy 2D pixels, collect each drawn
- * star as a small clip-space quad. Scene3D draws these over the skybox (only when the
- * skybox is enabled; otherwise the legacy 2D starfield still shows, so this is inert). */
+/* The starfield as scene-pass "dust": when the skybox is enabled, each drawn star is
+ * collected as a small clip-space quad instead of the legacy 2D pixels. Scene3D draws
+ * these over the skybox. With the skybox off, this stays empty and the 2D starfield shows. */
 static std::vector<Neuron::Graphics::Scene3D::DustVertex> s_dustQuads;
 
 static void push_dust (int sx, int sy, double zz)
@@ -124,16 +124,25 @@ void front_starfield (void)
 
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
-			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-			push_dust (sx, sy, zz);
-
-			if (zz < 0xC0)
-				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-			if (zz < 0x90)
+			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
+			   the legacy 2D pixels would then double-draw them, so emit one or the
+			   other, never both. */
+			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
 			{
-				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				push_dust (sx, sy, zz);
+			}
+			else
+			{
+				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+
+				if (zz < 0xC0)
+					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
+
+				if (zz < 0x90)
+				{
+					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				}
 			}
 		}
 
@@ -216,16 +225,25 @@ void rear_starfield (void)
 
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
-			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-			push_dust (sx, sy, zz);
-
-			if (zz < 0xC0)
-				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-			if (zz < 0x90)
+			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
+			   the legacy 2D pixels would then double-draw them, so emit one or the
+			   other, never both. */
+			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
 			{
-				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				push_dust (sx, sy, zz);
+			}
+			else
+			{
+				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+
+				if (zz < 0xC0)
+					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
+
+				if (zz < 0x90)
+				{
+					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				}
 			}
 		}
 
@@ -313,16 +331,25 @@ void side_starfield (void)
 
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
-			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-			push_dust (sx, sy, zz);
-
-			if (zz < 0xC0)
-				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-			if (zz < 0x90)
+			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
+			   the legacy 2D pixels would then double-draw them, so emit one or the
+			   other, never both. */
+			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
 			{
-				ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-				ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				push_dust (sx, sy, zz);
+			}
+			else
+			{
+				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+
+				if (zz < 0xC0)
+					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
+
+				if (zz < 0x90)
+				{
+					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
+					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
+				}
 			}
 		}
 

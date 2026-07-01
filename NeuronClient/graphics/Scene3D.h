@@ -54,6 +54,7 @@ namespace Neuron::Graphics
       // unchanged). NOTE: when on it fills the scene viewport, so it currently occludes the
       // legacy 2D starfield - the 3D "dust" that replaces that starfield is the next step.
       static void SetSkyboxEnabled(bool _enabled) { s_skybox = _enabled; }
+      static bool IsSkyboxEnabled() { return s_skybox; }
 
       // Dust points for this frame (star migration): the streaming starfield rendered in the
       // scene pass over the skybox instead of the legacy 2D batch. The game projects the stars
