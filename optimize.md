@@ -260,13 +260,16 @@ past the split forces throwaway 2D-background scaffolding.
    is now the single 2D-pass owner. Still two *passes* (different placements) — merging them is
    step 2. (`gfx2d`→`Canvas` is a transitional include that goes away when the bracket moves up
    to `RenderCanvas` in step 3; the dependency is acyclic.)
-2. **Fold the GUI overlay into one pass.** Today the game HUD batch (native-centred 512×514,
-   point filter) and the overlay (client-space full-window, linear filter) are two separate
-   `Canvas::Start/End` brackets with a re-clear between. Merge them so the overlay windows draw
-   in the same pass, after the HUD — note they have **different placements/filters**, so this is
-   not a trivial deletion of the overlay's bracket; it needs the pass to switch placement mid-
-   stream (or the overlay to adopt the same client-space sub-batch). This is the real work Step 1
-   set up.
+2. **Consolidate the 2D phase into `RenderCanvas`. [DONE]** The literal "one `Begin/End`" is
+   superseded by D1: the game HUD (native-centred 512×514, point filter) and the GUI overlay
+   (client-space full-window, linear filter) are **two permanent coordinate spaces**, so they
+   stay two `Canvas::Start/End` passes. What Step 2 delivers is the user's actual goal — the
+   3-hook frame structure: `GameApp::RenderCanvas` now owns the whole 2D phase (overlay
+   `Update`, the `gfx2d_flush` game-HUD replay, then the overlay draw) and returns whether the
+   frame painted; `ClientEngine::Frame` collapses to `Update → RenderScene → RenderCanvas →
+   Present`. `RenderCanvas` changed `void → bool` (contained: one override, one caller).
+   Behaviour-preserving — same call order, same nested-frame handling, same idle-frame present
+   gate (now returned from `RenderCanvas`).
 3. Lift the `Scene3D::RenderModels` call out of the `Kind::Scene` marker into
    `RenderScene()` (after the background, §2.2); delete the marker + batch-split.
 4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool

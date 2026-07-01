@@ -16,6 +16,7 @@
 
 #include "GuiOverlay.h"
 #include "Renderer.h"
+#include "gfx2d.h" // gfx2d_flush - the game's 2D batch replay
 
 class GameApp : public Neuron::GameMain
 {
@@ -35,11 +36,22 @@ class GameApp : public Neuron::GameMain
     void Update(float _deltaSeconds) override { game_update(); }
     void RenderScene() override { game_render_scene(); }
 
-    // 2D UI on top of the scene: the GUI overlay (windows/menus), full-window in client
-    // pixels. No-op unless the overlay is shown.
-    void RenderCanvas() override
+    // The whole 2D phase: refresh the GUI overlay (input / auto-hide), replay the game's
+    // 2D batch (HUD + menus, letterboxed) to the back buffer, then draw the GUI overlay
+    // (windows/menus, client-space) on top. Returns whether anything was painted - an idle
+    // frame (empty batch, overlay hidden) paints nothing and is left unpresented so the
+    // previous frame persists. The two 2D layers are separate Canvas passes (the game HUD
+    // is native-centred 512x514; the overlay is full-window client pixels).
+    bool RenderCanvas() override
     {
-      if (Renderer* r = platform_renderer())
-        GuiOverlay::Render(r->clientWidth(), r->clientHeight());
+      GuiOverlay::Update();
+      const bool overlayShown = GuiOverlay::IsShown();
+      const bool painted = gfx2d_flush(overlayShown);
+      if (painted)
+      {
+        if (Renderer* r = platform_renderer())
+          GuiOverlay::Render(r->clientWidth(), r->clientHeight());
+      }
+      return painted;
     }
 };
