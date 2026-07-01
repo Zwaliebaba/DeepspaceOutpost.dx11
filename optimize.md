@@ -90,9 +90,9 @@ deleted when the last screen is migrated.
 ### 1.4 Steps
 
 1. **Single source of canvas size.** Make `canvasW()/canvasH()` always return the client
-   size; delete the retro 512×514 branch. Introduce the scale-to-fill shim so existing
-   fixed layouts still render full-window (deliberate: bars gone). Verify each screen still
-   readable.
+   size; delete the retro 512×514 branch. Introduce the aspect-preserving scale-to-fit shim
+   so existing fixed layouts still render sensibly during migration. Verify each screen
+   still readable.
 2. **Anchor model.** Formalise a small anchor/layout helper on top of
    `gfx_set_draw_origin`/`gfx_hud_anchor` (corners/edges/centre + logical offsets) so
    screens can place elements relative to the client rect.
