@@ -97,6 +97,31 @@ Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
 int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::kCanvasWidth;  }
 int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::kCanvasHeight; }
 
+/* Placement of the authored 2D canvas onto the back buffer: the single source of the
+ * virtual size + destination offset + scale that both the 2D replay and the 3D scene
+ * pass use (see gfx2d_flush). Aspect-preserving scale-to-fit - fill the window as far as
+ * one axis allows and centre the rest - is the transitional mapping (Phase 1 shim) while
+ * screens migrate from the fixed 512x514 space to native client-space; on the fitted axis
+ * the black bars go away. Full-window flight authors at the client size, so scale is 1 and
+ * there is no offset. (Was an integer letterbox; fractional fit trades a little pixel-art
+ * crispness on scaled retro screens for filling the window, and disappears per screen as
+ * layouts move to client pixels.) */
+struct CanvasPlacement { int vw, vh, dstX, dstY; float scale; };
+
+CanvasPlacement canvasPlacement()
+{
+	Renderer* r = platform_renderer();
+	const int vw = canvasW();
+	const int vh = canvasH();
+	const int cw = r ? r->clientWidth()  : vw;
+	const int ch = r ? r->clientHeight() : vh;
+	float scale = std::min(cw / static_cast<float>(vw), ch / static_cast<float>(vh));
+	if (scale < 1.0f) scale = 1.0f;
+	const int dstX = static_cast<int>((cw - vw * scale) * 0.5f);
+	const int dstY = static_cast<int>((ch - vh * scale) * 0.5f);
+	return { vw, vh, dstX, dstY, scale };
+}
+
 /* The 2D batch renders through Neuron::Graphics::Render2D (see gfx2d_flush), so this
  * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
 std::map<std::string, Texture> g_textures;
@@ -577,18 +602,16 @@ bool gfx2d_flush(bool forcePresent)
 		return false;
 	}
 
-	/* The batch is authored in the virtual space (retro 512x514, or the client area in
-	 * full-window flight). Letterbox it onto the back buffer with an integer scale so the
-	 * pixel art stays crisp; full-window flight gives scale 1 and no bars. No off-screen
-	 * canvas / blit: the viewport scales the virtual space straight onto the back buffer. */
-	const int vw = canvasW();
-	const int vh = canvasH();
-	const int cw = r->clientWidth();
-	const int ch = r->clientHeight();
-	int scale = std::min(cw / vw, ch / vh);
-	if (scale < 1) scale = 1;
-	const int dstX = (cw - vw * scale) / 2;
-	const int dstY = (ch - vh * scale) / 2;
+	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
+	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
+	 * replay and the 3D scene pass both consume the same rect. No off-screen canvas / blit:
+	 * the viewport scales the virtual space straight onto the back buffer. */
+	const CanvasPlacement cp = canvasPlacement();
+	const int vw = cp.vw;
+	const int vh = cp.vh;
+	const int dstX = cp.dstX;
+	const int dstY = cp.dstY;
+	const float scale = cp.scale;
 
 	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
 	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
@@ -628,8 +651,8 @@ bool gfx2d_flush(bool forcePresent)
 				 * same target, no re-clear, so it composites on top. */
 				Render2D::End();
 				Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
-														vw * scale, vh * scale, g_models.data() + c.start,
-														static_cast<int>(c.count));
+														static_cast<int>(vw * scale), static_cast<int>(vh * scale),
+														g_models.data() + c.start, static_cast<int>(c.count));
 				Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 				if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
 					g_font_sheet->GetHeight() > 0.0f)
