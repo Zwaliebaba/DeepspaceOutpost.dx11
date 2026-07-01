@@ -340,11 +340,12 @@ void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int c) { 
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
 {
-	/* Full-window flight clears the whole canvas (the 3D fills it); retro mode
-	 * keeps clearing just the legacy play area so the dashboard strip persists. */
-	if (g_scene_full)
-		addRect(0, 0, canvasW() - 1, canvasH() - 1, col_rgba(GFX_COL_BLACK));
-	else
+	/* gfx2d_flush already clears the whole back buffer to black each frame, and in full-window
+	 * flight the 3D scene pass (skybox) fills it. Since the 2D layer now composites *on top of*
+	 * the 3D (Phase 2 Step 3), a full-window 2D black rect here would paint over the scene - so
+	 * skip it in full-window mode. Retro mode (2D-only screens, no 3D pass) still clears just
+	 * the legacy play area so the persistent dashboard strip is untouched. */
+	if (!g_scene_full)
 		addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK));
 }
 void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
