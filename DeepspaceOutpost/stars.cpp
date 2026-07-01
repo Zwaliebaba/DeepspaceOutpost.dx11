@@ -420,28 +420,90 @@ void flip_stars (void)
 }
 
 
-/* Accumulated skybox star-field orientation. Roll rotates the field at the same rate the
-   2D star sim spins (roll/256 rad per frame); pitch pans it vertically. Gains are gentle
-   and purely for feel - the skybox is a distant backdrop, not a physically exact match, so
-   these are tuned to taste. Kept bounded so the floats never drift large. */
-static float s_skyRoll = 0.0f;
-static float s_skyPanY = 0.0f;
+/* Skybox camera->world orientation. The cube skybox is sampled by view direction, so it
+   needs the camera's orientation in the world. We track the ship's orientation as a 3x3 that
+   maps view-space (x right, y up, z forward) to the world the cubemap art is authored in,
+   integrating the player's roll (about forward/z) and climb (about right/x) each frame; the
+   per-view look direction (rear/left/right) is composed on top. Rotation rates are tuned for
+   feel - the sky is a distant backdrop, and the cubemap can be re-oriented to match. */
+static float s_shipRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // view->world, accumulated
+
+/* Per-frame integration gains (radians per unit of roll/climb). */
+static const double kSkyRollGain  = 1.0 / 256.0;
+static const double kSkyPitchGain = 1.0 / 256.0;
+
+/* C = A * B for row-major 3x3 (element (r,c) = m[r*3+c]). */
+static void mat3_mul (const float a[9], const float b[9], float out[9])
+{
+	float tmp[9];
+	for (int r = 0; r < 3; r++)
+		for (int c = 0; c < 3; c++)
+			tmp[r * 3 + c] = a[r * 3 + 0] * b[0 * 3 + c] +
+			                 a[r * 3 + 1] * b[1 * 3 + c] +
+			                 a[r * 3 + 2] * b[2 * 3 + c];
+	for (int i = 0; i < 9; i++)
+		out[i] = tmp[i];
+}
+
+/* Gram-Schmidt renormalise so repeated multiplies don't drift off SO(3). */
+static void mat3_orthonormalise (float m[9])
+{
+	/* rows as basis vectors */
+	float* x = &m[0];
+	float* y = &m[3];
+	float* z = &m[6];
+	auto norm = [] (float* v) {
+		float l = sqrtf (v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+		if (l > 1e-6f) { v[0]/=l; v[1]/=l; v[2]/=l; }
+	};
+	auto dot = [] (const float* a, const float* b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; };
+	norm (x);
+	float dy = dot (y, x);
+	y[0]-=dy*x[0]; y[1]-=dy*x[1]; y[2]-=dy*x[2]; norm (y);
+	/* z = x cross y */
+	z[0] = x[1]*y[2] - x[2]*y[1];
+	z[1] = x[2]*y[0] - x[0]*y[2];
+	z[2] = x[0]*y[1] - x[1]*y[0];
+}
 
 static void accumulate_skybox_orientation (void)
 {
-	const double roll  = (double) PlayerFlight().roll;
-	const double climb = (double) PlayerFlight().climb;
+	const double roll  = (double) PlayerFlight().roll  * kSkyRollGain;
+	const double climb = (double) PlayerFlight().climb * kSkyPitchGain;
 
-	s_skyRoll += (float) (roll / 256.0);
-	s_skyPanY += (float) (climb / 256.0) * 0.02f;
+	/* Local-frame increments (compose on the right of the current orientation): roll about
+	   the view forward axis (z), pitch about the view right axis (x). */
+	const float cr = (float) cos (roll),  sr = (float) sin (roll);
+	const float cp = (float) cos (climb), sp = (float) sin (climb);
+	const float rz[9] = { cr, -sr, 0,  sr, cr, 0,  0, 0, 1 };
+	const float rx[9] = { 1, 0, 0,  0, cp, -sp,  0, sp, cp };
 
-	/* Wrap roll to keep it in a sane range (cos/sin are periodic anyway). */
-	const float twoPi = 6.2831853f;
-	if (s_skyRoll >  twoPi) s_skyRoll -= twoPi;
-	if (s_skyRoll < -twoPi) s_skyRoll += twoPi;
+	mat3_mul (s_shipRot, rz, s_shipRot);
+	mat3_mul (s_shipRot, rx, s_shipRot);
+	mat3_orthonormalise (s_shipRot);
 
-	Neuron::Graphics::Scene3D::SetSkyboxOrientation (
-		cosf (s_skyRoll), sinf (s_skyRoll), 0.0f, s_skyPanY);
+	/* Per-view look direction (about the up axis y): front = identity, rear = 180,
+	   left/right = -/+90 degrees. */
+	float view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+	if (current_screen == SCR_REAR_VIEW || current_screen == SCR_GAME_OVER)
+	{
+		const float v[9] = { -1, 0, 0, 0, 1, 0, 0, 0, -1 }; // yaw 180
+		for (int i = 0; i < 9; i++) view[i] = v[i];
+	}
+	else if (current_screen == SCR_LEFT_VIEW)
+	{
+		const float v[9] = { 0, 0, -1, 0, 1, 0, 1, 0, 0 }; // yaw -90
+		for (int i = 0; i < 9; i++) view[i] = v[i];
+	}
+	else if (current_screen == SCR_RIGHT_VIEW)
+	{
+		const float v[9] = { 0, 0, 1, 0, 1, 0, -1, 0, 0 }; // yaw +90
+		for (int i = 0; i < 9; i++) view[i] = v[i];
+	}
+
+	float cam[9];
+	mat3_mul (s_shipRot, view, cam); // camera->world = ship * viewLook
+	Neuron::Graphics::Scene3D::SetSkyboxOrientation (cam);
 }
 
 

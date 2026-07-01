@@ -56,17 +56,13 @@ namespace Neuron::Graphics
       static void SetSkyboxEnabled(bool _enabled) { s_skybox = _enabled; }
       static bool IsSkyboxEnabled() { return s_skybox; }
 
-      // Orientation of the skybox star field (star migration): an accumulated roll (as
-      // cos/sin) and a pan offset, both in the shader's star-sampling space, so the stars
-      // drift and rotate with control input while the gradient stays screen-fixed. The game
-      // accumulates these from the player's roll/pitch and pushes them each frame. Defaults
-      // (identity roll, zero pan) leave the star field screen-fixed.
-      static void SetSkyboxOrientation(float _cosRoll, float _sinRoll, float _panX, float _panY)
+      // Camera->world rotation for the skybox (star migration): a row-major 3x3 (9 floats)
+      // the game accumulates from the player's roll/pitch and the per-view look direction, so
+      // the cubemap stays fixed in the world while the ship turns. Identity looks down +Z.
+      static void SetSkyboxOrientation(const float _rot3x3[9])
       {
-        s_skyCos = _cosRoll;
-        s_skySin = _sinRoll;
-        s_skyPanX = _panX;
-        s_skyPanY = _panY;
+        for (int i = 0; i < 9; ++i)
+          s_skyRot[i] = _rot3x3[i];
       }
 
       // Dust points for this frame (star migration): the streaming starfield rendered in the
@@ -132,12 +128,11 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11PixelShader> s_skyPs;
       inline static winrt::com_ptr<ID3D11Buffer> s_skyCb;
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_skyDepth; // depth test/write off
-      inline static bool s_skybox = true;                              // opt-in (default off)
-      // Accumulated star-field orientation (SetSkyboxOrientation); identity = screen-fixed.
-      inline static float s_skyCos = 1.0f;
-      inline static float s_skySin = 0.0f;
-      inline static float s_skyPanX = 0.0f;
-      inline static float s_skyPanY = 0.0f;
+      inline static bool s_skybox = true;                               // opt-in (default off)
+      // Camera->world rotation (row-major 3x3); identity until the game feeds an orientation.
+      inline static float s_skyRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+      inline static winrt::com_ptr<ID3D11SamplerState> s_skySampler;       // cube sampler (s0)
+      inline static winrt::com_ptr<ID3D11ShaderResourceView> s_skyCubeSrv; // Skybox.dds cube (t0)
 
       // Dust program (star migration) + its dynamic vertex buffer and this frame's quads.
       inline static winrt::com_ptr<ID3D11VertexShader> s_dustVs;

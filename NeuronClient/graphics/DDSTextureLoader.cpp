@@ -335,4 +335,112 @@ namespace Neuron::Graphics
     if (outSRV) *outSRV = srv.detach();
     return S_OK;
   }
+
+  HRESULT CreateDDSCubemapFromMemory(ID3D11Device* device, const uint8_t* ddsData, size_t ddsDataSize,
+                                     ID3D11Texture2D** outTexture, ID3D11ShaderResourceView** outSRV) noexcept
+  {
+    if (outTexture) *outTexture = nullptr;
+    if (outSRV) *outSRV = nullptr;
+    if (!device || !ddsData || ddsDataSize < sizeof(uint32_t) + sizeof(DDS_HEADER))
+      return E_INVALIDARG;
+
+    if (*reinterpret_cast<const uint32_t*>(ddsData) != kDdsMagic)
+      return E_FAIL;
+
+    const auto* header = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32_t));
+    if (header->size != sizeof(DDS_HEADER) || header->ddspf.size != sizeof(DDS_PIXELFORMAT))
+      return E_FAIL;
+
+    // Require a cubemap with all six faces present (legacy caps2 bits).
+    constexpr uint32_t DDS_CUBEMAP_ALLFACES = 0x200 | 0x400 | 0x800 | 0x1000 | 0x2000 | 0x4000 | 0x8000; // 0xFE00
+    if ((header->caps2 & DDS_CUBEMAP) == 0 || (header->caps2 & DDS_CUBEMAP_ALLFACES) != DDS_CUBEMAP_ALLFACES)
+      return E_FAIL;
+
+    size_t offset = sizeof(uint32_t) + sizeof(DDS_HEADER);
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+
+    const bool dx10 = (header->ddspf.flags & DDS_FOURCC) && header->ddspf.fourCC == MakeFourCC('D', 'X', '1', '0');
+    if (dx10)
+    {
+      if (ddsDataSize < offset + sizeof(DDS_HEADER_DXT10))
+        return E_FAIL;
+      const auto* h10 = reinterpret_cast<const DDS_HEADER_DXT10*>(ddsData + offset);
+      offset += sizeof(DDS_HEADER_DXT10);
+      // resourceDimension 3 == TEXTURE2D; a DX10 cube is arraySize 6 with the TEXTURECUBE misc flag.
+      if (h10->resourceDimension != 3 || h10->arraySize != 6)
+        return E_FAIL;
+      format = static_cast<DXGI_FORMAT>(h10->dxgiFormat);
+    }
+    else
+    {
+      format = GetDXGIFormat(header->ddspf);
+    }
+
+    if (format == DXGI_FORMAT_UNKNOWN)
+      return E_FAIL;
+
+    const uint32_t width = header->width;
+    const uint32_t height = header->height;
+    const uint32_t mipCount = header->mipMapCount ? header->mipMapCount : 1;
+    if (width == 0 || height == 0)
+      return E_FAIL;
+
+    const uint8_t* src = ddsData + offset;
+    const uint8_t* bitEnd = ddsData + ddsDataSize;
+
+    // One subresource per (face, mip): faces are stored consecutively, each with its full
+    // mip chain (D3D11 subresource index == face * mipCount + mip).
+    std::vector<D3D11_SUBRESOURCE_DATA> initData(static_cast<size_t>(6) * mipCount);
+    for (uint32_t face = 0; face < 6; ++face)
+    {
+      uint32_t w = width, h = height;
+      for (uint32_t mip = 0; mip < mipCount; ++mip)
+      {
+        size_t numBytes = 0, rowBytes = 0;
+        GetSurfaceInfo(w, h, format, numBytes, rowBytes);
+        if (src + numBytes > bitEnd)
+          return E_FAIL; // truncated cube data
+
+        D3D11_SUBRESOURCE_DATA& sd = initData[static_cast<size_t>(face) * mipCount + mip];
+        sd.pSysMem = src;
+        sd.SysMemPitch = static_cast<UINT>(rowBytes);
+        sd.SysMemSlicePitch = static_cast<UINT>(numBytes);
+
+        src += numBytes;
+        w = std::max<uint32_t>(1, w >> 1);
+        h = std::max<uint32_t>(1, h >> 1);
+      }
+    }
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = mipCount;
+    desc.ArraySize = 6;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+    com_ptr<ID3D11Texture2D> tex;
+    HRESULT hr = device->CreateTexture2D(&desc, initData.data(), tex.put());
+    if (FAILED(hr))
+      return hr;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Format = format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+    srvDesc.TextureCube.MipLevels = mipCount;
+
+    com_ptr<ID3D11ShaderResourceView> srv;
+    hr = device->CreateShaderResourceView(tex.get(), &srvDesc, srv.put());
+    if (FAILED(hr))
+      return hr;
+
+    if (outTexture) *outTexture = tex.detach();
+    if (outSRV) *outSRV = srv.detach();
+    return S_OK;
+  }
 }

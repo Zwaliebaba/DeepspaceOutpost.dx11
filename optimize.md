@@ -252,14 +252,15 @@ Landing it first makes `RenderScene()` own the whole under-layer cleanly; deferr
 past the split forces throwaway 2D-background scaffolding.
 
 **Progress:**
-- **Skybox scaffold [DONE, off by default]** — `skyboxVS/PS.hlsl` (full-screen triangle from
-  `SV_VertexID`; gradient + procedural screen-space stars, params in b0) + `Scene3D::renderSkybox`
-  drawn depth-disabled at the start of the scene pass, gated by `Scene3D::SetSkyboxEnabled` (D3).
-  Off by default so behaviour is unchanged; the CMake `*.hlsl` glob compiles + CI-validates the
-  new shaders. Tuning knobs are the `kSky*` / `kStar*` constants in `Scene3D.cpp`. Two follow-ups:
-  (a) the stars are screen-space for now — an orientation-aware version needs the camera
-  orientation plumbed into the pass; (b) enabling the skybox currently occludes the 2D starfield,
-  so the **dust** migration (below) is required before it can be the default.
+- **Skybox: procedural → cubemap [DONE]** — the procedural gradient/star background was replaced
+  by a real six-face environment **cubemap** (`GameData/Textures/Skybox.dds`, a 2048² BGRA cube).
+  A new `CreateDDSCubemapFromMemory` + `TextureManager::LoadCubemap` load it (the old loader
+  rejected cube DDS); `skyboxVS/PS.hlsl` now builds a full-screen triangle, hands each pixel a
+  view-space ray, and the PS rotates that ray into world space (`u_Rot*`) and samples the
+  `TextureCube`. `Scene3D::renderSkybox` binds the cube + a linear/clamp sampler; if the cube is
+  missing it skips (black clear). Gated by `Scene3D::SetSkyboxEnabled` (D3), drawn depth-disabled
+  at the start of the scene pass. (The earlier procedural version had a visible star lattice; the
+  cubemap moves the whole look into art.)
 - **Dust migration [DONE]** — `stars.cpp` now collects each drawn star as a small clip-space
   quad (`push_dust`, sized by depth) and hands the frame's quads to `Scene3D::SetDust`; a new
   dust program (`dustVS/PS.hlsl`, pass-through) draws them over the skybox, behind the ships,
@@ -268,11 +269,14 @@ past the split forces throwaway 2D-background scaffolding.
   (a) **[DONE]** drop the redundant 2D starfield emission when the skybox is on — `stars.cpp`
       now emits each star as *either* dust (skybox on) *or* the legacy 2D pixels (skybox off),
       never both, gated on `Scene3D::IsSkyboxEnabled()`;
-  (b) **[DONE]** orientation-aware skybox stars — an accumulated roll (rotation) + pitch (pan)
-      from `PlayerFlight` is pushed via `Scene3D::SetSkyboxOrientation` and applied to the
-      star-sampling coordinate in `skyboxPS` (`u_SkyXform`; `u_Params.w` = aspect for isotropic
-      rotation). The gradient stays screen-fixed; gains in `stars.cpp` are tuned to taste;
-  (c) *(pending)* once both look right, make the skybox the default and delete the 2D starfield path.
+  (b) **[DONE, now cubemap-based]** orientation-aware skybox — `stars.cpp` accumulates a 3x3
+      camera->world matrix from the player's roll (about forward) + pitch (about right) and the
+      per-view look direction (front/rear/left/right), fed via `Scene3D::SetSkyboxOrientation`,
+      so the cubemap stays fixed in the world while the ship turns. (Earlier this was a 2D roll/pan
+      of the procedural stars; superseded by the cubemap. Integration gains in `stars.cpp` are
+      tunable, and the cube art can be re-oriented to match the convention.)
+  (c) *(pending)* the skybox is now default-on; still to do — validate all views and, once happy,
+      delete the legacy 2D starfield path.
 
 ### 2.4 Steps (each behaviour-preserving)
 

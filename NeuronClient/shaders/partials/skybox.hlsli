@@ -1,28 +1,31 @@
 #ifndef SKYBOX_HLSLI
 #define SKYBOX_HLSLI
 
-// Procedural skybox (star migration, Phase 2): a full-screen background - a vertical
-// gradient plus procedurally-placed stars - drawn behind the 3D scene, replacing the pure
-// black clear. No vertex buffer: the VS builds a full-screen triangle from SV_VertexID.
-// b0 carries the look parameters so Scene3D can tune it without recompiling.
+// Cube skybox (star migration): a real six-face environment cubemap drawn as the flight
+// background, replacing the pure black clear. No vertex buffer - the VS builds a full-screen
+// triangle from SV_VertexID and hands each pixel a view-space ray; the PS rotates that ray
+// into world space by the camera orientation and samples the cubemap.
 //
-// The star field is orientation-aware: u_SkyXform carries an accumulated roll rotation and
-// a pan (fed from the player's roll/pitch), applied to the star-sampling coordinate only -
-// so the stars drift and rotate with control input while the gradient stays screen-fixed.
+// View space is x-right, y-up, z-forward (matching SceneProjection). "World" is whatever
+// orientation the cubemap art is authored in; u_Rot0..2 is the camera->world rotation the
+// game accumulates from the player's roll/pitch (+ the per-view look direction), so the sky
+// stays fixed in the world while the ship turns.
 
 cbuffer SkyboxCb : register(b0)
 {
-    float4 u_TopColor;    // gradient colour at the top of the view (rgb; a unused)
-    float4 u_BottomColor; // gradient colour at the bottom of the view
-    float4 u_Params;      // x = star threshold (0..1; higher = fewer stars),
-                          // y = star brightness, z = star grid density, w = aspect (w/h)
-    float4 u_SkyXform;    // x = cos(roll), y = sin(roll), z = pan X, w = pan Y (star coord)
+    float4 u_Params; // x = tan(halfFovY), y = aspect (w/h), z/w unused
+    float4 u_Rot0;   // camera->world rotation, row 0 (xyz; w unused)
+    float4 u_Rot1;   // row 1
+    float4 u_Rot2;   // row 2
 };
+
+TextureCube  g_Sky        : register(t0);
+SamplerState g_SkySampler : register(s0);
 
 struct VSOut
 {
-    float4 pos : SV_Position;
-    float2 uv  : TEXCOORD0; // 0..1 across the visible screen (bottom-left origin)
+    float4 pos     : SV_Position;
+    float3 viewDir : TEXCOORD0; // view-space ray (x right, y up, z forward)
 };
 
 #endif // SKYBOX_HLSLI
