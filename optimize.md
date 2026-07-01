@@ -30,6 +30,20 @@ server/bot/test path (`NullRenderSink`) is preserved throughout — see §5.
 
 ---
 
+## Decisions (locked)
+
+| # | Decision | Choice |
+|---|---|---|
+| D1 | Aspect / responsive policy (Phase 1) | **Anchored HUD + centred fixed-size panels.** HUD furniture anchors to the client-rect edges/corners; menus, charts, station and dialogs stay fixed-size and centred — the model the GUI overlay windows already use. No per-screen reflow. |
+| D2 | `Canvas::Start/End` home (Phase 2) | **Extend the existing `Canvas` class** with `Start()/End()` (the GUI window manager gains the 2D-pass bracket). |
+| D3 | Skybox (star migration) | **Procedural in-shader** — gradient + procedurally-placed stars, no texture assets; density/colour via shader constants. Structured so a cubemap can drop in later. |
+| D4 | Dust speed cue (star migration) | **Density + parallax** — fixed-size points; nearer points parallax faster and spawn density/rate scales with speed. |
+| D5 | Idle-frame present (Phase 2) | **Always present.** The three hooks always render the current screen, so there is no empty frame to skip; drop the `forcePresent`/`painted` idle gate. |
+| D6 | Nested blocking sequences (Phase 2) | **Keep the `s_inLifecycle` guard** (break pattern / mission briefs) for now; revisit only if it obstructs the refactor. |
+| — | Delta-time | **Deferred** to its own track (§3). |
+
+---
+
 ## Phase 1 — Unify the 2D coordinate space to client pixels
 
 ### 1.1 Where we are
@@ -60,17 +74,18 @@ plan it as a series of shippable steps, not a big bang.
 
 ### 1.3 Strategy
 
-Author 2D against a **logical reference space that maps 1:1 to client pixels**, with
-anchors for the fixed HUD/menu furniture, mirroring how the GUI overlay and the
-full-window HUD already work. Reuse the existing `gfx_set_draw_origin` / `gfx_hud_anchor`
-mechanism as the anchoring foundation rather than inventing a new one.
+Author 2D directly in **client pixels** with an **anchor model** for the fixed furniture
+(D1): the HUD anchors to the client-rect edges/corners, and menus/charts/station/dialogs
+are **fixed-size panels centred** in the window — the same model the GUI overlay windows
+already use (`Canvas.cpp` centres via `Core::GetOutputSize()`). Reuse the existing
+`gfx_set_draw_origin` / `gfx_hud_anchor` mechanism as the anchoring foundation rather than
+inventing a new one. No per-screen responsive reflow is needed.
 
 **Transitional shim (keeps the game playable during migration).** Before touching any
-screen, replace the *letterbox* mapping with a *scale-to-fill* (or fit-no-bars) mapping in
-one place (`gfx2d_flush` + `Render2D::Begin`). Un-migrated screens then fill the window
-instead of sitting in bars, and each screen is migrated from "scaled 512×514" to "true
-client-space anchored layout" one at a time. The shim is deleted when the last screen is
-migrated.
+screen, replace the *letterbox* mapping with an aspect-preserving *scale-to-fit* mapping in
+one place (`gfx2d_flush` + `Render2D::Begin`), so un-migrated fixed-512×514 screens still
+render sensibly while each is moved to anchored client-space one at a time. The shim is
+deleted when the last screen is migrated.
 
 ### 1.4 Steps
 
@@ -83,7 +98,8 @@ migrated.
    screens can place elements relative to the client rect.
 3. **Migrate screens in groups**, each its own commit, each verified:
    intro → charts (galactic/short-range) → docked/station/trade/market → missions →
-   flight HUD/overlays. Convert fixed 512×514 coords to anchored client-space.
+   flight HUD/overlays. Convert fixed 512×514 coords to anchored client-space (HUD anchored
+   to edges; menus/panels fixed-size centred, per D1).
 4. **Migrate input hit-testing** to client space in lockstep with each screen: mouse
    mapping, and the chart crosshair (`cross_x/cross_y`) which is authored in virtual space.
 5. **Remove the letterbox machinery.** Delete `dstX/dstY/dstScale` from `Render2D::Begin`
@@ -95,8 +111,9 @@ migrated.
 
 - **Deliberate visual change** on every retro screen — needs a screenshot pass per screen
   group (intro, both charts, docked/market/trade, missions, HUD, flight views).
-- **Aspect ratio** — decide fit-with-bars vs fill vs anchored-responsive per screen; pixel
-  art may distort under naive stretch (the shim should preserve aspect).
+- **Aspect ratio** — resolved (D1): HUD anchors, panels stay fixed-size and centred, so no
+  stretch/distortion of pixel art; wider/taller windows just show more space around the
+  centred panels. The transitional shim preserves aspect.
 - **Input parity** — mouse/crosshair hit-testing must move to client space together with
   each screen or clicks land wrong.
 - **Non-16:9 / resize** — client-space layouts must tolerate arbitrary window sizes
@@ -113,11 +130,11 @@ simpler (no letterbox params in the 2D bracket).
 
 ```
 ClientEngine::Frame(dt):
-    if (!nested):
+    if (!nested):                  // D6: s_inLifecycle guard kept
         m_main->Update(dt)         // logic/input/net/sound (fixed-step for now)
-        m_main->RenderScene()      // clear + starfield background + Scene3D ships
+        m_main->RenderScene()      // skybox + dust + Scene3D ships (depth)
         m_main->RenderCanvas()     // Canvas::Start(); 2D HUD + menus + GUI; Canvas::End();
-    Core::Present()
+    Core::Present()                // D5: always present
     platform_pump_messages(); pace();
 ```
 
@@ -125,7 +142,7 @@ Layer order is fixed by **function order**, replacing the in-band scene marker:
 
 | Layer | Owner | Contents |
 |---|---|---|
-| under | `RenderScene()` | back-buffer clear, starfield background, 3D ships/planets/sun (depth-tested) |
+| under | `RenderScene()` | procedural skybox, dust particles, 3D ships/planets/sun (all depth-tested) |
 | over  | `RenderCanvas()` | HUD, charts, docked screens, GUI overlay windows |
 
 `Canvas::Start()/End()` is the single 2D-pass bracket (one `Render2D::Begin/End`, now pure
@@ -140,28 +157,31 @@ them**. A naive "all 3D in `RenderScene`, all 2D in `RenderCanvas`" would paint 
 starfield over the ships. This mid-batch splice is the reason the clean 3-hook split is
 non-trivial.
 
-**The clean fix is the star migration (§2.5), not a 2D workaround.** Once the starfield
+**The clean fix is the star migration (§2.3), not a 2D workaround.** Once the starfield
 becomes a 3D skybox + depth-tested dust, the background moves *into* the scene pass and
 this problem disappears: `RenderScene()` = skybox → dust → ships (one 3D pass, ordered by
 depth), `RenderCanvas()` = pure 2D over-layer. The `Kind::Scene` marker and the
 `g_models_marked` bookkeeping are then deleted outright.
 
-**Do not build throwaway scaffolding.** Because the star migration is planned (§2.5), do
+**Do not build throwaway scaffolding.** Because the star migration is planned (§2.3), do
 *not* invest in a "move the 2D starfield into a RenderScene 2D sub-batch" step — that would
 be deleted the moment the skybox lands. Sequence the star migration **before** the
 RenderScene/RenderCanvas split so the split is built once, in its final shape. If for
-scheduling reasons the split must land first, keep the existing marker as-is until §2.5
+scheduling reasons the split must land first, keep the existing marker as-is until §2.3
 retires it — don't half-migrate the 2D starfield.
 
 **Primary Phase-2 behaviour risk** — verify skybox → dust → ships → HUD ordering on all
 flight views + witchspace + game-over.
 
-### 2.5 Star migration (skybox + 3D dust) — sequenced here, tracked separately
+### 2.3 Star migration (skybox + 3D dust) — its own PR, sequenced here
 
 Replace the 2D `update_starfield` point cloud (`DeepspaceOutpost/stars.cpp`) with:
-- a **skybox** background (procedural gradient or cubemap) drawn first at far depth, and
-- small **3D "dust" particles** (depth-tested, camera-relative) whose motion conveys speed
-  (velocity-stretch / density / parallax — a visual-design choice to iterate on).
+- a **procedural in-shader skybox** (D3) — gradient + procedurally-placed stars from a
+  seed, no texture assets, density/colour via constants; drawn first at far depth and
+  structured so a cubemap can drop in later.
+- small **3D "dust" particles** (depth-tested, camera-relative) whose speed cue is
+  **density + parallax** (D4): nearer points parallax faster, and spawn density/rate scales
+  with speed.
 
 This is net-new rendering scope, so treat it as its **own change / PR**, not part of the
 loop-refactor commits:
@@ -179,7 +199,7 @@ loop-refactor commits:
 Landing it first makes `RenderScene()` own the whole under-layer cleanly; deferring it
 past the split forces throwaway 2D-background scaffolding.
 
-### 2.3 Steps (each behaviour-preserving)
+### 2.4 Steps (each behaviour-preserving)
 
 1. `Canvas::Start()/End()` as a pure rename of the current `gfx2d_flush` `Begin/End`
    bracket (now client-space, no letterbox params).
@@ -187,7 +207,7 @@ past the split forces throwaway 2D-background scaffolding.
    `Begin/End` (`GuiOverlay.cpp:175-177`). One coordinate space makes this trivial now.
 3. Lift the `Scene3D::RenderModels` call out of the `Kind::Scene` marker into
    `RenderScene()` (after the background, §2.2); delete the marker + batch-split.
-4. Retire the idle-frame present gate — drop `gfx2d_flush`'s `forcePresent`/return-bool
+4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool
    and the `painted` guard (`ClientEngine.cpp:210-220`); always render + present.
 5. **(Optional, larger)** Short-circuit the client `RenderQueue` round-trip: have
    `RenderScene()` consume recorded `ModelDraw`s directly for `Scene3D`, instead of
@@ -197,12 +217,13 @@ past the split forces throwaway 2D-background scaffolding.
    `gfx_start_render/gfx_finish_render`, `forcePresent`, and — if nesting is reworked —
    `s_inLifecycle`. Sweep references before each removal.
 
-### 2.4 Phase-2 preservation checklist
+### 2.5 Phase-2 preservation checklist
 
-- Layer order (§2.2): starfield → ships → HUD on all flight views + game-over.
+- Layer order (§2.2): skybox → dust → ships → HUD on all flight views + game-over.
 - Nested blocking sequences (break pattern `SCR_BREAK_PATTERN`, mission briefs) call
   `gfx_update_screen()` recursively; the new `Frame` must still pump + present the inner
-  sequence without re-running the outer `Update/RenderScene` (keep/replace `s_inLifecycle`).
+  sequence without re-running the outer `Update/RenderScene` — the `s_inLifecycle` guard is
+  kept for this (D6).
 - Overlay auto-hide + input suppression still run each frame before the 2D pass.
 - Device-lost stays on `Core::Present()` (already unified).
 
@@ -222,7 +243,7 @@ interpolation. Not required by either phase above.
 
 1. Phase 1 (client-space migration) — the big one; land it screen-group by screen-group
    behind the scale-to-fill shim so the game stays playable each commit.
-2. Star migration (§2.5) — skybox + 3D dust, its own PR; lands **before** the
+2. Star migration (§2.3) — skybox + 3D dust, its own PR; lands **before** the
    RenderScene/RenderCanvas split so that split is built once. Independent of Phase 1, so
    it can start in parallel.
 3. Phase 2 steps 1–4 — the behaviour-preserving loop refactor (layering split now trivial).
@@ -240,15 +261,12 @@ not remove the queue or the null path. `RenderQueueTests` keep passing.
 
 ---
 
-## 6. Remaining decisions
+## 6. Open questions
 
-1. **Aspect policy** for client-space screens: fit-with-(smaller)-bars, fill, or
-   fully-responsive anchored layout per screen? (Drives the shim and the re-author.)
-2. **`Canvas::Start/End` home** — extend the existing `Canvas` (the GUI window manager,
-   already large) per the request, or a small dedicated 2D-pass type? (Recommend a new
-   type to keep window-management and pass-management separate.)
-3. **Idle persistence** — is "don't present idle frames" worth keeping, or always present
-   (simpler)? Affects Phase 2 step 4.
+None outstanding — all design decisions are locked in the **Decisions** table above
+(D1–D6, plus deferred delta-time). The document is complete enough to start implementation
+at Phase 1, Step 1. New questions that surface during implementation should be appended to
+the Decisions table with the next Dn id.
 
 ---
 
@@ -256,7 +274,7 @@ not remove the queue or the null path. `RenderQueueTests` keep passing.
 
 - The `Scene3D` GPU pipeline, `Render2D` batcher internals, and constant-buffer layouts —
   this is control-flow + coordinate-space work, not a renderer rewrite. **Sole exception:**
-  the star migration (§2.5) extends `Scene3D` with a skybox draw + a dust-particle program;
+  the star migration (§2.3) extends `Scene3D` with a skybox draw + a dust-particle program;
   that is a deliberate, isolated feature change, not part of the structural refactor.
 - `Core` device/present/device-lost — already unified.
 - The `RenderQueue`/`RenderSink` contract and its headless path (§5).
