@@ -120,10 +120,10 @@ deleted when the last screen is migrated.
      centred by `canvasPlacement()` (step 1). Nothing to migrate per screen; they render 1:1
      centred with black margins. Only *scenes* (which should fill the window) and per-gauge
      HUD anchoring need active work.
-   - **scenes still on the retro path** — the game-over screen (`game_render_scene`, GameState
-     GameOver: starfield + ships + "GAME OVER") is a scene, so like the intro it should opt
-     into full-window (`gfx_set_scene_fullwindow`) rather than render native-centred. Small
-     follow-up, same pattern as the intro.
+   - **game-over scene [DONE]** — `game_render_scene`'s GameOver case now opts into full-window
+     (`gfx_set_scene_fullwindow` + `gfx_set_scene_clip`) so the starfield/ships fill the window
+     and "GAME OVER" is centred vertically (`ch/2`), same pattern as the intro. All scene
+     screens (intro, flight, game-over) now use the full-window path.
    - **flight HUD** — already floats as a 512×514 block bottom-centred (`gfx_hud_anchor`).
      Breaking it into individually edge/corner-anchored gauges (finer D1) is an optional
      later refinement, not required for correctness.
