@@ -48,8 +48,8 @@ namespace Neuron::Render
     uint32_t dataOffset{};    // DrawModel: index into the model arena
   };
 
-  // A 3D model instance for the GPU scene pass - the successor to the
-  // CPU-projected RenderPolygon stream. Instead of pre-projected 2D points, it
+  // A 3D model instance for the GPU scene pass - the successor to the retired
+  // CPU-projected polygon stream. Instead of pre-projected 2D points, it
   // carries the object's identity and its camera-space transform (orientation
   // basis + position) plus presentation options; the client's Scene3D renderer
   // turns one of these into an indexed draw with a real perspective + z-buffer.

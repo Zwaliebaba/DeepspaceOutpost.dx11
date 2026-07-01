@@ -4,12 +4,12 @@
 // model tables into GPU-ready geometry.
 //
 // The legacy ships are stored as a point table plus a list of solid faces (2..8
-// vertices each, fan-ordered), drawn on the CPU by gfx_polygon (threed.cpp ->
-// gfx_render_polygon). The GPU migration (see 3Dmigration.md) uploads each ship
-// type once into an immutable vertex/index buffer. This header is the pure-data
-// builder for that geometry: it fan-triangulates the faces exactly as gfx_polygon
-// did, with one set of vertices per face so the flat per-face colour and normal
-// are preserved (vertices are never shared across faces).
+// vertices each, fan-ordered), which the retired CPU renderer fan-triangulated and
+// depth-sorted as flat 2D polygons. The GPU migration (see 3Dmigration.md) uploads
+// each ship type once into an immutable vertex/index buffer. This header is the
+// pure-data builder for that geometry: it fan-triangulates the faces the same way,
+// with one set of vertices per face so the flat per-face colour and normal are
+// preserved (vertices are never shared across faces).
 //
 // Deliberately free of D3D and of the game's ship_data/ship_face headers (which
 // live in the DeepspaceOutpost exe, above this layer): the builder takes neutral
@@ -57,11 +57,11 @@ namespace Neuron::Graphics
   };
 
   // Fan-triangulate solid faces into a flat-shaded triangle mesh, exactly as the
-  // legacy gfx_polygon did: a face (p0, p1, ..., pN-1) becomes triangles
+  // legacy CPU fan did: a face (p0, p1, ..., pN-1) becomes triangles
   // (p0, pi, pi+1) for i in 1..N-2. Each face contributes its own vertices, so the
   // per-face colour and normal are preserved. A face with an out-of-range point
   // index, fewer than 3 points, or more than 8 points is skipped (it is not a
-  // solid polygon). The winding order matches gfx_polygon's emission order; the
+  // solid polygon). The winding order matches the legacy emission order; the
   // backface-cull direction is chosen later in Scene3D's rasterizer state.
   [[nodiscard]] inline MeshData BuildSolidMesh(const MeshPoint* _points, int _numPoints, const MeshFace* _faces,
                                                int _numFaces)
