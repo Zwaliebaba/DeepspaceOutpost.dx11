@@ -1,14 +1,13 @@
 #include "pch.h"
 #include "Strings.h"
+#include "FileSys.h"
 #include "Json.h"
 
-#include <fstream>
-#include <iterator>
 #include <map>
 
 // String resources are loaded from the .json files shipped under
-// GameData/Strings/<language>/<class>.json (staged next to the executable, the same
-// CWD-relative convention the rest of the game's assets use). Each file is a flat
+// GameData/Strings/<language>/<class>.json (staged next to the executable and read
+// via FileSys, whose home directory is the executable's folder). Each file is a flat
 // JSON object mapping a resource id to its localized value.
 
 namespace
@@ -47,21 +46,14 @@ namespace
     return result;
   }
 
-  std::string ReadFileBytes(const std::wstring& _path)
-  {
-    std::ifstream file(_path.c_str(), std::ios::binary); // MSVC: wide-path ifstream overload
-    if (!file)
-      return {};
-    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-  }
-
   const std::map<std::wstring, std::wstring>& LoadClass(const std::wstring& _class)
   {
     if (const auto it = g_classes.find(_class); it != g_classes.end())
       return it->second;
 
     const std::wstring relativePath = L"Strings/" + g_language + L"/" + _class + L".json";
-    const std::string text = ReadFileBytes(relativePath);
+    const byte_buffer_t bytes = BinaryFile::ReadFile(relativePath);
+    const std::string text(bytes.begin(), bytes.end());
 
     std::map<std::wstring, std::wstring> table;
     if (!text.empty())

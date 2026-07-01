@@ -1,10 +1,7 @@
 #include "pch.h"
 #include "TextureManager.h"
 #include "DDSTextureLoader.h"
-
-#include <fstream>
-#include <iterator>
-#include <vector>
+#include "FileSys.h"
 
 namespace Neuron::Graphics
 {
@@ -18,14 +15,6 @@ namespace Neuron::Graphics
         if (c == '\\')
           c = '/';
       return _path;
-    }
-
-    std::vector<uint8_t> ReadFileBytes(const std::string& _path)
-    {
-      std::ifstream file(_path, std::ios::binary); // CWD-relative, like the rest of the game's assets
-      if (!file)
-        return {};
-      return std::vector<uint8_t>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     }
   }
 
@@ -41,7 +30,8 @@ namespace Neuron::Graphics
     ID3D11Device* device = Core::GetD3DDevice();
     if (device)
     {
-      const std::vector<uint8_t> bytes = ReadFileBytes(key);
+      // Asset paths are ASCII; widen for the wide-path FileSys read.
+      const byte_buffer_t bytes = BinaryFile::ReadFile(std::wstring(key.begin(), key.end()));
       if (!bytes.empty())
       {
         com_ptr<ID3D11Texture2D> tex;
@@ -76,7 +66,9 @@ namespace Neuron::Graphics
     ID3D11Device* device = Core::GetD3DDevice();
     if (device)
     {
-      const std::vector<uint8_t> bytes = ReadFileBytes(NormalizePath(_name));
+      const std::string path = NormalizePath(_name);
+      // Asset paths are ASCII; widen for the wide-path FileSys read.
+      const byte_buffer_t bytes = BinaryFile::ReadFile(std::wstring(path.begin(), path.end()));
       if (!bytes.empty())
       {
         com_ptr<ID3D11Texture2D> tex;
