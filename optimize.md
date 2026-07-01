@@ -260,9 +260,13 @@ past the split forces throwaway 2D-background scaffolding.
   (a) the stars are screen-space for now — an orientation-aware version needs the camera
   orientation plumbed into the pass; (b) enabling the skybox currently occludes the 2D starfield,
   so the **dust** migration (below) is required before it can be the default.
-- **Dust migration [TODO]** — move the `stars.cpp` starfield into the scene pass as depth-tested
-  3D points (density + parallax, D4), drawn over the skybox. This is what lets the skybox go on
-  by default and completes the "RenderScene owns the under-layer" goal.
+- **Dust migration [DONE]** — `stars.cpp` now collects each drawn star as a small clip-space
+  quad (`push_dust`, sized by depth) and hands the frame's quads to `Scene3D::SetDust`; a new
+  dust program (`dustVS/PS.hlsl`, pass-through) draws them over the skybox, behind the ships,
+  when the skybox is enabled. Reuses the proven CPU starfield motion (density + parallax, D4),
+  so it is inert when the skybox is off (2D starfield unchanged). Follow-ups: (a) drop the now
+  redundant 2D starfield emission when the skybox is on; (b) orientation-aware skybox stars;
+  (c) once both look right, make the skybox the default and delete the 2D starfield path.
 
 ### 2.4 Steps (each behaviour-preserving)
 
