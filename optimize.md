@@ -137,13 +137,47 @@ submission order.
 Today the 3D pass is spliced into the *middle* of the 2D batch (`gfx2d.cpp:639-653`)
 because the **starfield is 2D drawn under the ships** while the **HUD is 2D drawn over
 them**. A naive "all 3D in `RenderScene`, all 2D in `RenderCanvas`" would paint the
-starfield over the ships.
+starfield over the ships. This mid-batch splice is the reason the clean 3-hook split is
+non-trivial.
 
-**Fix:** `RenderScene()` owns the whole under-layer — the clear, the starfield background
-(`gfx_clear_display` + `update_starfield`, moved out of the HUD flow), then the `Scene3D`
-pass. `RenderCanvas()` owns only the over-layer. This deletes the mid-batch marker and the
-`g_models_marked` bookkeeping entirely. **Primary Phase-2 behaviour risk** — verify
-starfield → ships → HUD ordering on all flight views + witchspace + game-over.
+**The clean fix is the star migration (§2.5), not a 2D workaround.** Once the starfield
+becomes a 3D skybox + depth-tested dust, the background moves *into* the scene pass and
+this problem disappears: `RenderScene()` = skybox → dust → ships (one 3D pass, ordered by
+depth), `RenderCanvas()` = pure 2D over-layer. The `Kind::Scene` marker and the
+`g_models_marked` bookkeeping are then deleted outright.
+
+**Do not build throwaway scaffolding.** Because the star migration is planned (§2.5), do
+*not* invest in a "move the 2D starfield into a RenderScene 2D sub-batch" step — that would
+be deleted the moment the skybox lands. Sequence the star migration **before** the
+RenderScene/RenderCanvas split so the split is built once, in its final shape. If for
+scheduling reasons the split must land first, keep the existing marker as-is until §2.5
+retires it — don't half-migrate the 2D starfield.
+
+**Primary Phase-2 behaviour risk** — verify skybox → dust → ships → HUD ordering on all
+flight views + witchspace + game-over.
+
+### 2.5 Star migration (skybox + 3D dust) — sequenced here, tracked separately
+
+Replace the 2D `update_starfield` point cloud (`DeepspaceOutpost/stars.cpp`) with:
+- a **skybox** background (procedural gradient or cubemap) drawn first at far depth, and
+- small **3D "dust" particles** (depth-tested, camera-relative) whose motion conveys speed
+  (velocity-stretch / density / parallax — a visual-design choice to iterate on).
+
+This is net-new rendering scope, so treat it as its **own change / PR**, not part of the
+loop-refactor commits:
+
+- It is the **one sanctioned extension to `Scene3D`** in this effort (new shader + a small
+  particle buffer + a skybox draw), which §7 otherwise freezes.
+- It is **independent of Phase 1** (3D, not 2D client-space), so it can be prototyped in
+  parallel.
+- It reuses the existing perspective/projection + depth state already in `Scene3D`
+  (`NeuronClient/graphics/Scene3D.cpp`); no new pipeline concepts.
+- On landing, retire `stars.cpp`'s 2D path and the 2D-background dependency in
+  `game_render_flight` / game-over.
+
+**Why here and not "later":** it is on the critical path of Phase 2's layering split (§2.2).
+Landing it first makes `RenderScene()` own the whole under-layer cleanly; deferring it
+past the split forces throwaway 2D-background scaffolding.
 
 ### 2.3 Steps (each behaviour-preserving)
 
@@ -188,9 +222,12 @@ interpolation. Not required by either phase above.
 
 1. Phase 1 (client-space migration) — the big one; land it screen-group by screen-group
    behind the scale-to-fill shim so the game stays playable each commit.
-2. Phase 2 steps 1–4 — the behaviour-preserving loop refactor.
-3. Phase 2 step 5–6 — the `RenderQueue` short-circuit + dead-code deletion.
-4. Delta-time — separate track, later.
+2. Star migration (§2.5) — skybox + 3D dust, its own PR; lands **before** the
+   RenderScene/RenderCanvas split so that split is built once. Independent of Phase 1, so
+   it can start in parallel.
+3. Phase 2 steps 1–4 — the behaviour-preserving loop refactor (layering split now trivial).
+4. Phase 2 step 5–6 — the `RenderQueue` short-circuit + dead-code deletion.
+5. Delta-time — separate track, later.
 
 ---
 
@@ -218,7 +255,9 @@ not remove the queue or the null path. `RenderQueueTests` keep passing.
 ## 7. Do NOT touch / out of scope
 
 - The `Scene3D` GPU pipeline, `Render2D` batcher internals, and constant-buffer layouts —
-  this is control-flow + coordinate-space work, not a renderer rewrite.
+  this is control-flow + coordinate-space work, not a renderer rewrite. **Sole exception:**
+  the star migration (§2.5) extends `Scene3D` with a skybox draw + a dust-particle program;
+  that is a deliberate, isolated feature change, not part of the structural refactor.
 - `Core` device/present/device-lost — already unified.
 - The `RenderQueue`/`RenderSink` contract and its headless path (§5).
 - Frame pacing / message pump (`ClientEngine.cpp:227-250`).
