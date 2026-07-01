@@ -2,6 +2,7 @@
 #include "GuiOverlay.h"
 
 #include "Canvas.h"
+#include "GraphicsCore.h" // Neuron::Graphics::Core (was pulled in transitively via Render2D.h)
 #include "GuiButton.h"
 #include "GuiWindow.h"
 #include "Strings.h"
