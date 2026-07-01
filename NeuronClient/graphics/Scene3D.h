@@ -132,7 +132,7 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11PixelShader> s_skyPs;
       inline static winrt::com_ptr<ID3D11Buffer> s_skyCb;
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_skyDepth; // depth test/write off
-      inline static bool s_skybox = false;                              // opt-in (default off)
+      inline static bool s_skybox = true;                              // opt-in (default off)
       // Accumulated star-field orientation (SetSkyboxOrientation); identity = screen-fixed.
       inline static float s_skyCos = 1.0f;
       inline static float s_skySin = 0.0f;
