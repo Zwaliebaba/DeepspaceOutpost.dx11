@@ -118,27 +118,45 @@ deleted when the last screen is migrated.
    - **fixed-2D screens (charts / docked / station / market / missions) [DONE globally, no
      per-screen edits]** — per D1 these stay authored in 512×514 and are placed native-size
      centred by `canvasPlacement()` (step 1). Nothing to migrate per screen; they render 1:1
-     centred with black margins. Only *scenes* (which should fill the window) and per-gauge
-     HUD anchoring need active work.
+     centred with black margins. Only *scenes* (which should fill the window) need active work.
    - **game-over scene [DONE]** — `game_render_scene`'s GameOver case now opts into full-window
      (`gfx_set_scene_fullwindow` + `gfx_set_scene_clip`) so the starfield/ships fill the window
      and "GAME OVER" is centred vertically (`ch/2`), same pattern as the intro. All scene
      screens (intro, flight, game-over) now use the full-window path.
-   - **flight HUD** — already floats as a 512×514 block bottom-centred (`gfx_hud_anchor`).
-     Breaking it into individually edge/corner-anchored gauges (finer D1) is an optional
-     later refinement, not required for correctness.
+   - **flight HUD [DONE — anchored as a unit]** — the classic Elite dashboard is a *cohesive*
+     instrument cluster (`gfx_draw_scanner` + the gauges drawn at positions relative to each
+     other in the 512×514 strip). It already floats as a unit to the bottom edge
+     (`gfx_hud_anchor`), which is the correct D1 realization for a unified dashboard. Scattering
+     the individual gauges to screen corners would fragment the panel and break the classic
+     look — a full HUD redesign, not an anchor tweak — so it is **intentionally not done**.
+     (Making the bottom dashboard bigger on wide screens is a size/scaling question, tracked
+     with the general "screens are a bit small" follow-up, not a correctness item.)
+
+**Phase 1 status: essentially complete.** Scenes fill the window (intro, flight, game-over);
+fixed-2D screens render native-size centred; the HUD is edge-anchored as a unit. Steps 4–6
+below are re-scoped by the D1 decision — see the note under them.
    - **Migration gotcha (learned on the intro):** the 2D scissor (`g_scissor`) defaults to the
      retro 512×514 rect and is not reset per frame, so a screen that opts into **full-window**
      (scenes) **must** also set the full-canvas clip (`gfx_set_scene_clip()` after
      `gfx_set_scene_fullwindow(1)`) or its client-space 2D is silently clipped away (the 3D
      still shows — it uses its own viewport). Fixed-2D screens stay retro, so their default
      512×514 scissor matches their authoring and they are unaffected.
-4. **Migrate input hit-testing** to client space in lockstep with each screen: mouse
-   mapping, and the chart crosshair (`cross_x/cross_y`) which is authored in virtual space.
-5. **Remove the letterbox machinery.** Delete `dstX/dstY/dstScale` from `Render2D::Begin`
-   and `gfx2d_flush`, the `SetClip` scale, `g_origin` float, `g_scene_full` branch, and
-   `Renderer::kCanvasWidth/Height`. `Render2D::Begin` collapses to a client-space ortho.
-6. **Delete the shim.** One coordinate space remains: client pixels.
+4. **Verify input hit-testing.** With native-centred placement the retro 512×514 canvas sits
+   at an offset in the window, so any mouse mapping into it would be off. In practice the retro
+   game screens are **keyboard-driven** (the chart crosshair `cross_x/cross_y` is moved by keys,
+   not the mouse) and the GUI overlay reads the mouse in client space already — so this is a
+   verification pass, expected to be a no-op, not a migration. Confirm on the charts + any
+   mouse-driven menu.
+
+**Steps 5–6 are superseded by D1.** The original end-state — collapse `canvasW/H` to the
+client size and delete the 512×514 space — assumed every screen re-authored to client-space.
+D1 chose "fixed-size centred, no reflow", so the fixed-2D screens **permanently** author in
+512×514 and are placed native-centred. The dual authoring space (512×514 for fixed-2D +
+client pixels for scenes/HUD) is therefore the intended **final** design, not transitional;
+`canvasPlacement()` + the `g_scene_full` distinction is the permanent seam. The letterbox
+*scaling* is already gone (native placement); there is no further machinery to remove. The
+one open thread is purely cosmetic — the "screens are a bit small on big monitors" size/scaling
+question — deliberately deferred.
 
 ### 1.5 Phase-1 risks
 
