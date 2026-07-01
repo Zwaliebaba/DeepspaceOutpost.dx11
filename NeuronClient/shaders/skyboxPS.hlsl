@@ -1,7 +1,11 @@
 // Procedural skybox pixel shader: a vertical gradient plus procedurally-placed stars.
 // Cheap and asset-free; the look is driven entirely by the b0 params so Scene3D can tune
-// gradient colours and star density/brightness. (Screen-space stars for now - see the
-// note in partials/skybox.hlsli.)
+// gradient colours and star density/brightness.
+//
+// Stars are scattered, not gridded: each cell holds at most one candidate, but its position
+// is jittered inside the cell and its size/brightness vary per star, so there is no visible
+// lattice and no two stars look identical. We scan the 3x3 neighbourhood of the sampled
+// cell so a star jittered near a cell edge still draws in full.
 
 #include "partials/skybox.hlsli"
 
@@ -27,17 +31,39 @@ float4 PSMain(VSOut _i) : SV_Target
                                   u_SkyXform.y,  u_SkyXform.x);
     p = mul(rot, p) + u_SkyXform.zw;
 
-    // One candidate star per grid cell: keep it when its hash passes the threshold,
-    // brightest at the cell centre so it reads as a small round point.
     const float density = max(u_Params.z, 1.0);
     const float2 grid = p * density;
     const float2 cell = floor(grid);
-    if (hash21(cell) > u_Params.x)
+    const float2 f = grid - cell; // position within the sampled cell, [0,1)
+
+    float star = 0.0;
+    [unroll]
+    for (int oy = -1; oy <= 1; ++oy)
     {
-        const float2 f = frac(grid) - 0.5;
-        const float d = saturate(1.0 - length(f) * 3.0);
-        col += (d * d) * u_Params.y;
+        [unroll]
+        for (int ox = -1; ox <= 1; ++ox)
+        {
+            const float2 c = cell + float2(ox, oy);
+            if (hash21(c) <= u_Params.x)
+                continue; // no star in this cell
+
+            // Jitter the star inside its cell so it never sits on the lattice.
+            const float2 jitter = float2(hash21(c + 17.13), hash21(c + 43.71));
+            const float2 d = (float2(ox, oy) + jitter) - f;
+
+            // One random drives size + brightness, skewed so most stars are tiny faint
+            // pinpoints and only a few are large and bright (r*r biases toward 0).
+            const float r = hash21(c + 71.97);
+            const float mag = r * r;
+            const float radius = lerp(0.12, 0.55, mag); // in cell units
+            const float bright = lerp(0.25, 1.0, mag);
+
+            // Round soft point; squared falloff keeps small stars crisp without hard edges.
+            const float point = saturate(1.0 - length(d) / radius);
+            star = max(star, point * point * bright);
+        }
     }
 
+    col += star * u_Params.y;
     return float4(col, 1.0);
 }
