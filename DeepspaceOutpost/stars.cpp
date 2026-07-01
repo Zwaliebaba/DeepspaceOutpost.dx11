@@ -2,12 +2,14 @@
 
 #include <stdlib.h>
 #include <math.h>
+#include <vector>
 
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
 #include "GameUniverse.h"
 #include "RenderContext.h"
+#include "Scene3D.h" // Neuron::Graphics::Scene3D::SetDust - starfield as scene-pass dust
 #include "vector.h"
 #include "stars.h"
 #include "random.h"
@@ -42,6 +44,35 @@ static inline int star_on_screen (int sx, int sy)
 {
 	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 	return (sx >= 1) && (sx <= vm.width - 1) && (sy >= 1) && (sy <= vm.height - 1);
+}
+
+/* The starfield as scene-pass "dust": alongside the legacy 2D pixels, collect each drawn
+ * star as a small clip-space quad. Scene3D draws these over the skybox (only when the
+ * skybox is enabled; otherwise the legacy 2D starfield still shows, so this is inert). */
+static std::vector<Neuron::Graphics::Scene3D::DustVertex> s_dustQuads;
+
+static void push_dust (int sx, int sy, double zz)
+{
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	if (vm.width <= 0 || vm.height <= 0)
+		return;
+
+	/* A touch bigger for nearer stars (smaller z), echoing the legacy 1-4px dots. Sizes
+	 * are in pixels; tune to taste with the skybox. */
+	const float sizePx = (zz < 0x90) ? 2.4f : (zz < 0xC0 ? 1.8f : 1.2f);
+	const float hx = sizePx / static_cast<float>(vm.width);
+	const float hy = sizePx / static_cast<float>(vm.height);
+	const float cx = 2.0f * static_cast<float>(sx) / static_cast<float>(vm.width) - 1.0f;
+	const float cy = 1.0f - 2.0f * static_cast<float>(sy) / static_cast<float>(vm.height);
+	const float b = 1.0f;
+
+	using DV = Neuron::Graphics::Scene3D::DustVertex;
+	const DV quad[6] = {
+		{cx - hx, cy - hy, b}, {cx + hx, cy - hy, b}, {cx + hx, cy + hy, b},
+		{cx - hx, cy - hy, b}, {cx + hx, cy + hy, b}, {cx - hx, cy + hy, b},
+	};
+	for (const DV& v : quad)
+		s_dustQuads.push_back (v);
 }
 
 
@@ -94,6 +125,7 @@ void front_starfield (void)
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+			push_dust (sx, sy, zz);
 
 			if (zz < 0xC0)
 				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
@@ -185,6 +217,7 @@ void rear_starfield (void)
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+			push_dust (sx, sy, zz);
 
 			if (zz < 0xC0)
 				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
@@ -281,6 +314,7 @@ void side_starfield (void)
 		if ((!warp_stars) && star_on_screen (sx, sy))
 		{
 			ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
+			push_dust (sx, sy, zz);
 
 			if (zz < 0xC0)
 				ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
@@ -361,6 +395,8 @@ void flip_stars (void)
 
 void update_starfield (void)
 {
+	s_dustQuads.clear();
+
 	switch (current_screen)
 	{
 		case SCR_FRONT_VIEW:
@@ -384,4 +420,9 @@ void update_starfield (void)
 	/* Replay the recorded starfield into the gfx backend at this same point,
 	   so the on-screen result is identical to the old direct gfx_ calls. */
 	FlushRenderQueue();
+
+	/* Hand this frame's stars to the scene pass as dust. Scene3D draws them over the
+	   skybox only when the skybox is enabled; otherwise this is inert (the 2D starfield
+	   above still shows), so the default look is unchanged. */
+	Neuron::Graphics::Scene3D::SetDust (s_dustQuads.data(), static_cast<int>(s_dustQuads.size()));
 }
