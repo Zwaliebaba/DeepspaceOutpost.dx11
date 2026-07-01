@@ -59,8 +59,8 @@ float4 PSMain(VSOut _i) : SV_Target
             const float bright = lerp(0.25, 1.0, mag);
 
             // Round soft point; squared falloff keeps small stars crisp without hard edges.
-            const float point = saturate(1.0 - length(d) / radius);
-            star = max(star, point * point * bright);
+            const float falloff = saturate(1.0 - length(d) / radius);
+            star = max(star, falloff * falloff * bright);
         }
     }
 
