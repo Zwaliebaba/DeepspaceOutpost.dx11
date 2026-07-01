@@ -409,7 +409,9 @@ namespace Neuron::Graphics
                              const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
                              const Neuron::Render::ModelDraw* _models, int _count)
   {
-    if (!_rtv || !_dsv || !_models || _count <= 0 || _vpW <= 0 || _vpH <= 0)
+    // The scene pass owns the background (skybox + dust), so it runs even with no models
+    // this frame - staring at empty space must still show the sky, not a black void.
+    if (!_rtv || !_dsv || _vpW <= 0 || _vpH <= 0)
       return;
     if (!EnsureResources())
       return;
@@ -433,17 +435,22 @@ namespace Neuron::Graphics
     ctx->RSSetViewports(1, &vp);
 
     s_view = _view;
-    const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
 
-    // Procedural skybox + streaming dust behind the ships, when enabled. Both are
-    // depth-disabled, so they fill the colour buffer without touching the just-cleared
-    // depth; the ships draw over them. The shared ship state below overrides their pipeline
-    // state before the draw loop.
+    // Skybox + streaming dust behind the ships, when enabled. Both are depth-disabled, so
+    // they fill the colour buffer without touching the just-cleared depth; the ships draw
+    // over them. Drawn before the model-count check so the background shows in empty space.
     if (s_skybox)
     {
       renderSkybox();
       renderDust();
     }
+
+    // Nothing else to draw this frame (no ships / planet / sun in view): the background above
+    // is the whole scene, so skip the ship pipeline setup.
+    if (!_models || _count <= 0)
+      return;
+
+    const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
 
     // Shared pipeline state. The ship + billboard programs use the same input layout,
     // topology, depth, cull and blend; only the shaders + buffers differ per draw.

@@ -593,8 +593,13 @@ void gfx_finish_render(void)
 {
 	/* Mark where the GPU 3D scene renders in submission order: the models collected
 	 * since the last marker draw here - after the 2D background just emitted, before the
-	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point. */
-	if (g_models.size() > g_models_marked)
+	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point.
+	 *
+	 * Emit the marker even with no new models when the skybox is on: the skybox + dust are
+	 * the scene-pass background and must render every flight frame, including when you stare
+	 * at empty space (no ship / planet / sun in view). With the skybox off, keep the old
+	 * behaviour - no models, no marker, no pass. */
+	if (g_models.size() > g_models_marked || Neuron::Graphics::Scene3D::IsSkyboxEnabled())
 	{
 		Cmd c{};
 		c.kind = Kind::Scene;
