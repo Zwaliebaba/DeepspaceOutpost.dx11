@@ -23,13 +23,11 @@ void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model);
 // painted (caller should present it), false if there was nothing to draw and the
 // back buffer was left untouched.
 //
-// The menu/station screens only repaint on demand (not every frame), so on an idle
-// frame the batch is empty. The swap chain uses FLIP_DISCARD, which keeps no retained
-// content, so painting+presenting an empty batch would clear the screen to black.
-// Instead, an empty batch is a no-op (returns false) and the previously presented
-// frame stays on screen - the role the old off-screen canvas used to fill. Pass
-// forcePresent=true to clear and present a frame even when the batch is empty (the GUI
-// overlay needs a fresh frame to composite onto).
-bool gfx2d_flush(bool forcePresent);
+// Every screen redraws every frame now (flight HUD, charts, docked legacy screens, the 3D
+// scene pass), so the batch is never empty during normal play and this always clears +
+// draws + is present-ready. The one screen that draws nothing - a paused game - is handled
+// by the caller (GameApp::RenderCanvas) simply not presenting, so the last frame stays on
+// screen (FLIP_DISCARD keeps no retained content). There is no idle-frame gate here.
+void gfx2d_flush(void);
 
 #endif /* GFX2D_H */

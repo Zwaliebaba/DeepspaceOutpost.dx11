@@ -601,23 +601,18 @@ void gfx_finish_render(void)
 /* =====================================================================
  *  Flush
  * ===================================================================== */
-bool gfx2d_flush(bool forcePresent)
+void gfx2d_flush(void)
 {
 	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return; }
 
-	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
-	 * previously presented frame stays on screen. The menu/station screens repaint only
-	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
-	 * empty batch here is what made those screens flash to black on idle frames. */
-	if (g_cmds.empty() && !g_haveScene && !forcePresent)
-	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false;
-		return false;
-	}
+	/* Always render + present (D5): every screen redraws every frame now (flight HUD, charts,
+	 * docked legacy screens, scene pass) so there is no empty frame to skip. The one exception
+	 * - a paused game, which draws nothing - is handled by the caller not presenting, keeping
+	 * the last frame on screen. So there is no idle-frame gate here any more. */
 
 	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
 	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
@@ -711,5 +706,4 @@ bool gfx2d_flush(bool forcePresent)
 	g_cmds.clear();
 	g_models.clear();
 	g_haveScene = false;
-	return true;
 }
