@@ -1394,6 +1394,25 @@ static void game_render_flight(void)
     return;
   }
 
+  // Docked legacy screens (commander status, planet data) redraw every frame, like the charts
+  // above, so there is no empty frame to skip now that the idle-frame present gate is gone.
+  // Both are idempotent (they just re-render from current state). Skipped while a GUI overlay
+  // window is up: it draws + presents on top, so the legacy screen underneath would only be
+  // occluded. (Charts are handled above; the break pattern is handled at the end.)
+  if (docked && !GuiOverlay::IsShown())
+  {
+    if (current_screen == SCR_CMDR_STATUS)
+    {
+      display_commander_status();
+      return;
+    }
+    if (current_screen == SCR_PLANET_DATA)
+    {
+      display_data_on_planet();
+      return;
+    }
+  }
+
   if (!docked)
   {
     if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen

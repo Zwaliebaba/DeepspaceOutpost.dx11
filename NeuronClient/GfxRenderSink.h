@@ -21,6 +21,5 @@ public:
   void Triangle(int _x0, int _y0, int _x1, int _y1, int _x2, int _y2, int _colour) override;
   void RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour) override;
   void DrawModel(const Neuron::Render::ModelDraw& _model) override;
-  void StartRender() override;
   void FinishRender() override;
 };

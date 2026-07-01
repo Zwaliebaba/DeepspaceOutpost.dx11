@@ -74,7 +74,7 @@ std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
 /* 3D scene models for this frame (ships/planets/sun), collected via gfx2d_submit_model.
- * g_haveScene records that a StartRender/FinishRender bracket ran this frame, so gfx2d_flush
+ * g_haveScene records that the scene was submitted this frame (gfx_finish_render), so gfx2d_flush
  * draws the 3D scene pass (skybox + dust + these models) once, before the 2D layer - even
  * when g_models is empty (staring at empty space still shows the skybox). */
 std::vector<Neuron::Render::ModelDraw> g_models;
@@ -576,7 +576,6 @@ void gfx_draw_scanner(void)
 }
 
 /* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
-void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
 /* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
  * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */
@@ -601,23 +600,18 @@ void gfx_finish_render(void)
 /* =====================================================================
  *  Flush
  * ===================================================================== */
-bool gfx2d_flush(bool forcePresent)
+void gfx2d_flush(void)
 {
 	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return; }
 
-	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
-	 * previously presented frame stays on screen. The menu/station screens repaint only
-	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
-	 * empty batch here is what made those screens flash to black on idle frames. */
-	if (g_cmds.empty() && !g_haveScene && !forcePresent)
-	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false;
-		return false;
-	}
+	/* Always render + present (D5): every screen redraws every frame now (flight HUD, charts,
+	 * docked legacy screens, scene pass) so there is no empty frame to skip. The one exception
+	 * - a paused game, which draws nothing - is handled by the caller not presenting, keeping
+	 * the last frame on screen. So there is no idle-frame gate here any more. */
 
 	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
 	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
@@ -711,5 +705,4 @@ bool gfx2d_flush(bool forcePresent)
 	g_cmds.clear();
 	g_models.clear();
 	g_haveScene = false;
-	return true;
 }

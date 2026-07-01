@@ -530,8 +530,6 @@ void update_local_objects (void)
 	struct local_object flip;
 	
 	
-	ActiveRenderQueue().StartRender();
-
 	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
 		type = local_objects[i].type;
@@ -658,8 +656,6 @@ static double s_nearest_station_dist = 1.0e18;
 
 void render_replicated_objects (void)
 {
-	ActiveRenderQueue().StartRender();
-
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 
 	// Sample at alpha 1.0 (the latest tick) for now; a render-time-based alpha for

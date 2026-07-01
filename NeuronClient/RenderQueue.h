@@ -32,8 +32,7 @@ namespace Neuron::Render
     Triangle,
     RenderLine,      // depth-keyed 2D line (gfx_render_line) - the laser bolt
     DrawModel,       // GPU 3D model instance (camera-space transform; see ModelDraw)
-    StartRender,     // open the 3D scene batch (delimiter for the GPU Scene3D pass)
-    FinishRender,    // flush the 3D scene batch (runs the Scene3D pass)
+    FinishRender,    // marks the end of this frame's 3D scene submission (runs the Scene3D pass)
   };
 
   // A fixed-size command record. The DrawModel payload lives in the owning
@@ -83,7 +82,6 @@ namespace Neuron::Render
     virtual void Triangle(int _x0, int _y0, int _x1, int _y1, int _x2, int _y2, int _colour) = 0;
     virtual void RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour) = 0;
     virtual void DrawModel(const ModelDraw& _model) = 0;
-    virtual void StartRender() = 0;
     virtual void FinishRender() = 0;
   };
 
@@ -99,7 +97,6 @@ namespace Neuron::Render
     void Triangle(int, int, int, int, int, int, int) override {}
     void RenderLine(int, int, int, int, int, int) override {}
     void DrawModel(const ModelDraw&) override {}
-    void StartRender() override {}
     void FinishRender() override {}
   };
 
@@ -118,7 +115,6 @@ namespace Neuron::Render
     void Triangle(int _x0, int _y0, int _x1, int _y1, int _x2, int _y2, int _colour);
     void RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, int _colour);
     void DrawModel(const ModelDraw& _model);
-    void StartRender();
     void FinishRender();
 
     // Replay every recorded command, in order, into the sink.

@@ -314,15 +314,33 @@ past the split forces throwaway 2D-background scaffolding.
    the marker deletion.) Also subsumes the earlier "emit the marker even with no models when
    the skybox is on" fix: `g_haveScene` is set by the bracket itself, so empty space still
    shows the skybox.
-4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool
-   and the `painted` guard (`ClientEngine.cpp:210-220`); always render + present.
+4. **[DONE]** Retire the idle-frame present gate (D5). `gfx2d_flush` is now `void` with no
+   `forcePresent` and no empty-batch gate — it always clears + draws. The docked legacy
+   screens that used to repaint on demand (`SCR_CMDR_STATUS`, `SCR_PLANET_DATA`) now redraw
+   every frame in `game_render_flight` (like the charts already did; both are idempotent),
+   so there are no empty frames during normal play. The **one** deliberate present-skip left
+   is a **paused** game: the flight loop draws nothing (and the sim/draw are still fused, so
+   drawing the frozen scene without advancing state would need the loop un-fused — Step 5
+   territory), so `GameApp::RenderCanvas` returns false when `game_paused && !overlay`, and
+   the caller keeps the last frame on screen. This replaces the general `forcePresent`/
+   return-bool/`painted` machinery with one explicit, readable pause check.
 5. **(Optional, larger)** Short-circuit the client `RenderQueue` round-trip: have
    `RenderScene()` consume recorded `ModelDraw`s directly for `Scene3D`, instead of
    `DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model`. Keep the queue for
    headless (§5).
-6. Delete dead machinery: `Kind::Scene`, `gfx2d_submit_model`,
-   `gfx_start_render/gfx_finish_render`, `forcePresent`, and — if nesting is reworked —
-   `s_inLifecycle`. Sweep references before each removal.
+6. **[DONE, partial]** Delete dead machinery. Removed as they became dead:
+   - `Kind::Scene` + `g_models_marked` — deleted in Step 3 (marker retired).
+   - `forcePresent` + the idle-batch gate + the `painted` return — deleted in Step 4.
+   - **`StartRender` bracket half** — `gfx_start_render` was a no-op and the scene is gated
+     entirely by `g_haveScene` (set in `FinishRender`), so the whole `StartRender` chain is
+     gone: `RenderSink::StartRender`, `CommandType::StartRender`, `RenderQueue::StartRender`,
+     `GfxRenderSink::StartRender`, `gfx_start_render`, both `space.cpp` call sites, and the
+     null/test sink overrides. `FinishRender` stays (it marks the frame's scene submission).
+
+   Deferred (not dead yet): `gfx2d_submit_model` and `gfx_finish_render` are still the live
+   model-collection + scene-mark path — they only become removable with Step 5's `RenderQueue`
+   short-circuit. `s_inLifecycle` is still needed for the nested blocking sequences (D6), so it
+   stays until/unless the nesting is reworked.
 
 ### 2.5 Phase-2 preservation checklist
 
