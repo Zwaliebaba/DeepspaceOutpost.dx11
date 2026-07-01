@@ -43,7 +43,6 @@ bool Renderer::loadPalette()
 	 * entries are already in paletteColour()'s 0xAABBGGRR byte order; index 0 is the
 	 * transparent colour key. */
 	std::memcpy(palette_, kScannerPalette, sizeof(palette_));
-	palette_loaded_ = true;
 	return true;
 }
 

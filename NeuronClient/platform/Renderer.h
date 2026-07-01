@@ -45,7 +45,6 @@ public:
 	/* Master 256-colour palette (baked in scanner_palette.h). Index -> 0xAABBGGRR
 	 * (R8G8B8A8_UNORM byte order); index 0 is the transparent colour key. */
 	uint32_t paletteColour(int index) const { return palette_[index & 0xff]; }
-	bool paletteLoaded() const { return palette_loaded_; }
 
 private:
 	bool loadPalette();
@@ -54,7 +53,6 @@ private:
 	int  client_h_ = 0;
 
 	uint32_t palette_[256] = {};
-	bool     palette_loaded_ = false;
 };
 
 /* Process-wide renderer instance, owned by the platform layer. Null until
