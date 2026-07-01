@@ -99,9 +99,13 @@ deleted when the last screen is migrated.
    keyboard-driven; the GUI overlay is already client-space). Transitional tradeoff: a little
    pixel-art crispness on scaled retro screens, gone per-screen as layouts move to client
    pixels.
-2. **Anchor model.** Formalise a small anchor/layout helper on top of
-   `gfx_set_draw_origin`/`gfx_hud_anchor` (corners/edges/centre + logical offsets) so
-   screens can place elements relative to the client rect.
+2. **Anchor model. [DONE]** Added `gfx_anchor(where, w, h, dx, dy, &ox, &oy)` (9-point
+   `gfx_anchor_point`: corners/edges/centre + a canvas-pixel nudge) that computes the draw
+   origin placing a `w×h` block within the current canvas rect, on top of the existing
+   `gfx_set_draw_origin`/`g_origin` translation. `gfx_hud_anchor` is now the bottom-centre
+   512×514 case of it (behaviour-preserving, verified). Screens migrate by anchoring their
+   fixed-size panels/HUD with this instead of hard-coded 512×514 coordinates. No screen
+   changed yet — this is the mechanism Step 3 uses.
 3. **Migrate screens in groups**, each its own commit, each verified:
    intro → charts (galactic/short-range) → docked/station/trade/market → missions →
    flight HUD/overlays. Convert fixed 512×514 coords to anchored client-space (HUD anchored

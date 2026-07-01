@@ -423,23 +423,43 @@ const Neuron::Client::ViewMetrics& gfx_view_metrics(void) { return g_view; }
 // float the HUD; pass (0,0) to draw in the canvas's own space again.
 void gfx_set_draw_origin(int x, int y) { g_origin_x = x; g_origin_y = y; }
 
-// Where the legacy 512x514 HUD layout should be anchored this frame. Retro mode
-// keeps it at the origin; full-window mode pins it to the bottom-centre of the
-// client area so the dashboard floats over the 3D.
+// Compute the draw origin that anchors a w x h layout block within the current canvas
+// rect (see gfx.h). The block is authored in its own 0..w / 0..h space; the caller sets
+// this origin, draws, then resets to (0,0).
+void gfx_anchor(gfx_anchor_point where, int w, int h, int dx, int dy, int* ox, int* oy)
+{
+	const int cw = canvasW();
+	const int ch = canvasH();
+
+	int x = 0, y = 0;
+	switch (where)
+	{
+	case GFX_ANCHOR_TOP_LEFT:  case GFX_ANCHOR_LEFT:   case GFX_ANCHOR_BOTTOM_LEFT:  x = 0;              break;
+	case GFX_ANCHOR_TOP:       case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_BOTTOM:       x = (cw - w) / 2;   break;
+	case GFX_ANCHOR_TOP_RIGHT: case GFX_ANCHOR_RIGHT:  case GFX_ANCHOR_BOTTOM_RIGHT: x = cw - w;         break;
+	}
+	switch (where)
+	{
+	case GFX_ANCHOR_TOP_LEFT:    case GFX_ANCHOR_TOP:    case GFX_ANCHOR_TOP_RIGHT:    y = 0;             break;
+	case GFX_ANCHOR_LEFT:        case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_RIGHT:        y = (ch - h) / 2;  break;
+	case GFX_ANCHOR_BOTTOM_LEFT: case GFX_ANCHOR_BOTTOM: case GFX_ANCHOR_BOTTOM_RIGHT: y = ch - h;        break;
+	}
+
+	x += dx;
+	y += dy;
+	if (x < 0) x = 0;
+	if (y < 0) y = 0;
+	if (ox) *ox = x;
+	if (oy) *oy = y;
+}
+
+// Where the legacy 512x514 HUD layout is anchored this frame: bottom-centre of the
+// canvas. In full-window flight the canvas is the client area, so the dashboard floats
+// over the 3D; in retro the canvas is exactly 512x514, so this yields (0,0). The
+// bottom-centre special case of gfx_anchor.
 void gfx_hud_anchor(int* ox, int* oy)
 {
-	if (g_scene_full)
-	{
-		*ox = (canvasW() - 512) / 2;
-		*oy = canvasH() - 514;
-		if (*ox < 0) *ox = 0;
-		if (*oy < 0) *oy = 0;
-	}
-	else
-	{
-		*ox = 0;
-		*oy = 0;
-	}
+	gfx_anchor(GFX_ANCHOR_BOTTOM, 512, 514, 0, 0, ox, oy);
 }
 
 // Set the clip rect to the 3D play area for the current mode: the whole canvas

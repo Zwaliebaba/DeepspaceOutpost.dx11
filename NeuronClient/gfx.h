@@ -157,4 +157,22 @@ void gfx_set_draw_origin (int x, int y);
 void gfx_hud_anchor (int *ox, int *oy);
 void gfx_set_scene_clip (void);
 
+/*
+ * General layout anchor (client-space UI migration, Phase 1). Computes the draw
+ * origin (top-left, in current-canvas pixels) that places a w x h layout block at
+ * `where` within the current canvas rect - the client area in full-window/client-space
+ * mode, the 512x514 canvas in retro - plus a (dx,dy) nudge in canvas pixels (+x right,
+ * +y down). The block is authored in its own 0..w / 0..h local space: call
+ * gfx_set_draw_origin(*ox,*oy), draw it, then gfx_set_draw_origin(0,0). Origins are
+ * clamped to >= 0 so an oversized block stays pinned to the top-left. gfx_hud_anchor is
+ * the bottom-centre 512x514 case of this.
+ */
+enum gfx_anchor_point
+{
+	GFX_ANCHOR_TOP_LEFT,    GFX_ANCHOR_TOP,     GFX_ANCHOR_TOP_RIGHT,
+	GFX_ANCHOR_LEFT,        GFX_ANCHOR_CENTRE,  GFX_ANCHOR_RIGHT,
+	GFX_ANCHOR_BOTTOM_LEFT, GFX_ANCHOR_BOTTOM,  GFX_ANCHOR_BOTTOM_RIGHT
+};
+void gfx_anchor (gfx_anchor_point where, int w, int h, int dx, int dy, int *ox, int *oy);
+
 #endif
