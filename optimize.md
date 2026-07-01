@@ -116,6 +116,11 @@ deleted when the last screen is migrated.
    - **intro [DONE]** — `update_intro1/2` now opt into full-window (`gfx_set_scene_fullwindow`,
      FOV-preserving so the hero ship keeps its apparent size), centre the title sprite on the
      window, and anchor the prompts to the bottom edge. Needs an eyeball for exact framing.
+   - **Migration gotcha (learned here):** the 2D scissor (`g_scissor`) defaults to the retro
+     512×514 rect and is not reset per frame, so a screen going client-space **must** also set
+     the full-canvas clip (`gfx_set_scene_clip()` after `gfx_set_scene_fullwindow(1)`) or its
+     client-space 2D is silently clipped away (the 3D still shows — it uses its own viewport).
+     Apply this to every screen in the migration.
 4. **Migrate input hit-testing** to client space in lockstep with each screen: mouse
    mapping, and the chart crosshair (`cross_x/cross_y`) which is authored in virtual space.
 5. **Remove the letterbox machinery.** Delete `dstX/dstY/dstScale` from `Render2D::Begin`

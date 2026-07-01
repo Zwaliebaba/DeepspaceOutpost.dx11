@@ -66,6 +66,7 @@ void update_intro1 (void)
 	// sprite centres on the window and the prompts anchor to the bottom edge. The (514-y)
 	// offsets keep the legacy distance-from-bottom of the old 512x514 layout.
 	gfx_set_scene_fullwindow (1);
+	gfx_set_scene_clip ();   // clip to the whole window; the default 512x514 scissor would clip client-space 2D
 	int ch;
 	gfx_canvas_size (nullptr, &ch);
 
@@ -120,6 +121,7 @@ void update_intro2 (void)
 	// Client-space intro (see update_intro1): full-window ship parade + starfield, title
 	// centred, ship name + prompt anchored to the bottom edge.
 	gfx_set_scene_fullwindow (1);
+	gfx_set_scene_clip ();   // clip to the whole window; the default 512x514 scissor would clip client-space 2D
 	int ch;
 	gfx_canvas_size (nullptr, &ch);
 
