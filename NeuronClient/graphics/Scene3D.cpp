@@ -16,6 +16,8 @@
 #include "scenebbVS.h" // g_scenebbVS - planet/sun billboard vertex shader
 #include "skyboxPS.h"  // g_skyboxPS  - procedural skybox background
 #include "skyboxVS.h"  // g_skyboxVS  - full-screen-triangle skybox vertex shader
+#include "dustPS.h"    // g_dustPS    - dust points (starfield in the scene pass)
+#include "dustVS.h"    // g_dustVS
 
 using winrt::com_ptr;
 using winrt::check_hresult;
@@ -127,6 +129,12 @@ namespace Neuron::Graphics
     s_skyPs = nullptr;
     s_skyCb = nullptr;
     s_skyDepth = nullptr;
+    s_dustVs = nullptr;
+    s_dustPs = nullptr;
+    s_dustLayout = nullptr;
+    s_dustVb = nullptr;
+    s_dustCapacity = 0;
+    s_dust.clear();
     s_meshes.clear();
     s_ready = false;
     // s_provider is set by the game once at startup; keep it across device resets.
@@ -230,6 +238,18 @@ namespace Neuron::Graphics
     skdsd.StencilEnable = FALSE;
     check_hresult(device->CreateDepthStencilState(&skdsd, s_skyDepth.put()));
 
+    // Dust program (starfield in the scene pass): pass-through VS + white PS, its own
+    // clip-space-XY + brightness input layout. The dynamic vertex buffer is grown lazily
+    // in renderDust. Reuses the skybox depth-off state, the cull-none raster and opaque blend.
+    check_hresult(device->CreateVertexShader(g_dustVS, sizeof(g_dustVS), nullptr, s_dustVs.put()));
+    check_hresult(device->CreatePixelShader(g_dustPS, sizeof(g_dustPS), nullptr, s_dustPs.put()));
+
+    const D3D11_INPUT_ELEMENT_DESC dustElems[] = {
+      {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+      {"COLOR", 0, DXGI_FORMAT_R32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+    };
+    check_hresult(device->CreateInputLayout(dustElems, _countof(dustElems), g_dustVS, sizeof(g_dustVS), s_dustLayout.put()));
+
     s_ready = true;
     return true;
   }
@@ -308,6 +328,58 @@ namespace Neuron::Graphics
     ctx->Draw(3, 0);
   }
 
+  void Scene3D::SetDust(const DustVertex* _pts, int _count)
+  {
+    if (!_pts || _count <= 0)
+      s_dust.clear();
+    else
+      s_dust.assign(_pts, _pts + _count);
+  }
+
+  void Scene3D::renderDust()
+  {
+    if (s_dust.empty())
+      return;
+
+    ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
+    if (!ctx)
+      return;
+
+    // Grow the dynamic vertex buffer if this frame's dust is bigger than any before it.
+    if (s_dust.size() > s_dustCapacity || !s_dustVb)
+    {
+      s_dustCapacity = s_dust.size() + s_dust.size() / 2 + 64;
+      s_dustVb = nullptr;
+      D3D11_BUFFER_DESC vbd{};
+      vbd.ByteWidth = static_cast<UINT>(s_dustCapacity * sizeof(DustVertex));
+      vbd.Usage = D3D11_USAGE_DYNAMIC;
+      vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+      vbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+      if (FAILED(Core::GetD3DDevice()->CreateBuffer(&vbd, nullptr, s_dustVb.put())))
+        return;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (FAILED(ctx->Map(s_dustVb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+      return;
+    std::memcpy(mapped.pData, s_dust.data(), s_dust.size() * sizeof(DustVertex));
+    ctx->Unmap(s_dustVb.get(), 0);
+
+    ctx->OMSetDepthStencilState(s_skyDepth.get(), 0); // depth off (over skybox, under ships)
+    ctx->RSSetState(s_raster.get());
+    const float blendFactor[4] = {0, 0, 0, 0};
+    ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);
+    ctx->IASetInputLayout(s_dustLayout.get());
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    const UINT stride = sizeof(DustVertex);
+    const UINT offset = 0;
+    ID3D11Buffer* vb = s_dustVb.get();
+    ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    ctx->VSSetShader(s_dustVs.get(), nullptr, 0);
+    ctx->PSSetShader(s_dustPs.get(), nullptr, 0);
+    ctx->Draw(static_cast<UINT>(s_dust.size()), 0);
+  }
+
   void Scene3D::RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
                              const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
                              const Neuron::Render::ModelDraw* _models, int _count)
@@ -338,11 +410,15 @@ namespace Neuron::Graphics
     s_view = _view;
     const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
 
-    // Procedural skybox behind the ships, when enabled. Depth-disabled, so it fills the
-    // colour buffer without touching the just-cleared depth; the ships draw over it. The
-    // shared ship state below overrides the skybox's pipeline state before the draw loop.
+    // Procedural skybox + streaming dust behind the ships, when enabled. Both are
+    // depth-disabled, so they fill the colour buffer without touching the just-cleared
+    // depth; the ships draw over them. The shared ship state below overrides their pipeline
+    // state before the draw loop.
     if (s_skybox)
+    {
       renderSkybox();
+      renderDust();
+    }
 
     // Shared pipeline state. The ship + billboard programs use the same input layout,
     // topology, depth, cull and blend; only the shaders + buffers differ per draw.
