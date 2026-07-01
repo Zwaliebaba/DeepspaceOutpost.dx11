@@ -461,7 +461,10 @@ void draw_ship (struct local_object *ship)
 
 	if (ship->type == SHIP_PLANET)
 	{
-		draw_planet (ship);
+		/* TEMPORARILY DISABLED: the planet billboard is screen-filling at spawn - it starts at
+		   ~docking range, where the legacy radius formula draws it huge. Skip drawing it for now
+		   while the spawn distance / placement is sorted out; the planet object still exists for
+		   docking + navigation, it just is not rendered. Restore draw_planet(ship) to re-enable. */
 		return;
 	}
 

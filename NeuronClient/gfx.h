@@ -113,7 +113,6 @@ int gfx_graphics_startup (void);
 void gfx_graphics_shutdown (void);
 void gfx_update_screen (void);
 void gfx_plot_pixel (int x, int y, int col);
-void gfx_fast_plot_pixel (int x, int y, int col);
 void gfx_draw_filled_circle (int cx, int cy, int radius, int circle_colour);
 void gfx_draw_circle (int cx, int cy, int radius, int circle_colour);
 void gfx_draw_line (int x1, int y1, int x2, int y2);
@@ -129,11 +128,9 @@ void gfx_clear_area (int tx, int ty, int bx, int by);
 void gfx_display_pretty_text (int tx, int ty, int bx, int by, const char *txt);
 void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
-void gfx_polygon (int num_points, int *poly_list, int face_colour);
 void gfx_draw_sprite (int sprite_no, int x, int y);
 void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
 void gfx_start_render (void);
-void gfx_render_polygon (int num_points, int *point_list, int face_colour, int zavg);
 void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
 void gfx_finish_render (void);
 
@@ -159,5 +156,28 @@ const Neuron::Client::ViewMetrics& gfx_view_metrics (void);
 void gfx_set_draw_origin (int x, int y);
 void gfx_hud_anchor (int *ox, int *oy);
 void gfx_set_scene_clip (void);
+
+/*
+ * General layout anchor (client-space UI migration, Phase 1). Computes the draw
+ * origin (top-left, in current-canvas pixels) that places a w x h layout block at
+ * `where` within the current canvas rect - the client area in full-window/client-space
+ * mode, the 512x514 canvas in retro - plus a (dx,dy) nudge in canvas pixels (+x right,
+ * +y down). The block is authored in its own 0..w / 0..h local space: call
+ * gfx_set_draw_origin(*ox,*oy), draw it, then gfx_set_draw_origin(0,0). Origins are
+ * clamped to >= 0 so an oversized block stays pinned to the top-left. gfx_hud_anchor is
+ * the bottom-centre 512x514 case of this.
+ */
+enum gfx_anchor_point
+{
+	GFX_ANCHOR_TOP_LEFT,    GFX_ANCHOR_TOP,     GFX_ANCHOR_TOP_RIGHT,
+	GFX_ANCHOR_LEFT,        GFX_ANCHOR_CENTRE,  GFX_ANCHOR_RIGHT,
+	GFX_ANCHOR_BOTTOM_LEFT, GFX_ANCHOR_BOTTOM,  GFX_ANCHOR_BOTTOM_RIGHT
+};
+void gfx_anchor (gfx_anchor_point where, int w, int h, int dx, int dy, int *ox, int *oy);
+
+/* Current 2D authoring canvas size in pixels: the client area in full-window/client-space
+ * mode, the fixed 512x514 canvas in retro. Screens migrating to client-space read this to
+ * anchor content to the window edges. Either pointer may be null. */
+void gfx_canvas_size (int *w, int *h);
 
 #endif

@@ -1541,11 +1541,20 @@ void game_render_scene(void)
       break;
 
     case GameState::GameOver:
+    {
+      // Client-space scene (like the intro): the starfield + ships fill the window and
+      // "GAME OVER" is centred vertically. Needs the full-window clip or the client-space
+      // text is clipped by the default 512x514 scissor.
+      gfx_set_scene_fullwindow(1);
+      gfx_set_scene_clip();
+      int ch;
+      gfx_canvas_size(nullptr, &ch);
       gfx_clear_display();
       update_starfield();
       update_local_objects();
-      gfx_display_centre_text(190, "GAME OVER", 140, GFX_COL_GOLD);
+      gfx_display_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
       break;
+    }
   }
 }
 

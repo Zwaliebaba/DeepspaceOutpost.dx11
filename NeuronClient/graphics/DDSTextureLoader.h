@@ -22,4 +22,11 @@ namespace Neuron::Graphics
   // generation). Non-2D DDS (volume/cube) and unsupported formats fail with E_FAIL.
   HRESULT CreateDDSTextureFromMemory(ID3D11Device* device, ID3D11DeviceContext* context, const uint8_t* ddsData, size_t ddsDataSize,
                                      ID3D11Texture2D** outTexture, ID3D11ShaderResourceView** outSRV, bool generateMips = true) noexcept;
+
+  // Create a cubemap texture (ArraySize 6, TEXTURECUBE) + a TextureCube SRV from in-memory
+  // DDS bytes. Requires a legacy cubemap with all six faces present (faces stored +X,-X,+Y,
+  // -Y,+Z,-Z, each with its own mip chain). Uses the file's mip chain (or just mip 0); no
+  // mips are generated. Non-cube / partial-cube / unsupported formats fail with E_FAIL.
+  HRESULT CreateDDSCubemapFromMemory(ID3D11Device* device, const uint8_t* ddsData, size_t ddsDataSize,
+                                     ID3D11Texture2D** outTexture, ID3D11ShaderResourceView** outSRV) noexcept;
 }

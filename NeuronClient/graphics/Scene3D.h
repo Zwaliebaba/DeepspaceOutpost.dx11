@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
+#include <vector>
 
 #include "Mesh.h"
 #include "RenderQueue.h"      // Neuron::Render::ModelDraw
@@ -48,6 +49,30 @@ namespace Neuron::Graphics
       // unaffected. The game toggles this from its "Ship Shading" setting.
       static void SetLightingEnabled(bool _enabled) { s_lit = _enabled; }
 
+      // Opt-in procedural skybox (star migration): a gradient + procedural-star background
+      // drawn behind the scene, replacing the black clear. Off by default (behaviour
+      // unchanged). NOTE: when on it fills the scene viewport, so it currently occludes the
+      // legacy 2D starfield - the 3D "dust" that replaces that starfield is the next step.
+      static void SetSkyboxEnabled(bool _enabled) { s_skybox = _enabled; }
+      static bool IsSkyboxEnabled() { return s_skybox; }
+
+      // Camera->world rotation for the skybox (star migration): a row-major 3x3 (9 floats)
+      // the game accumulates from the player's roll/pitch and the per-view look direction, so
+      // the cubemap stays fixed in the world while the ship turns. Identity looks down +Z.
+      static void SetSkyboxOrientation(const float _rot3x3[9])
+      {
+        for (int i = 0; i < 9; ++i)
+          s_skyRot[i] = _rot3x3[i];
+      }
+
+      // Dust points for this frame (star migration): the streaming starfield rendered in the
+      // scene pass over the skybox instead of the legacy 2D batch. The game projects the stars
+      // with the scene optics and hands over small clip-space quads (6 verts each); Scene3D
+      // draws them - but only when the skybox is enabled (otherwise the legacy 2D starfield
+      // still shows). One vertex = clip-space XY + brightness.
+      struct DustVertex { float x, y, bright; };
+      static void SetDust(const DustVertex* _pts, int _count);
+
       // Render camera-space models to _rtv with depth-testing against _dsv. The
       // projection comes from _view (the live flight optics); the scene is placed in the
       // letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect
@@ -75,6 +100,13 @@ namespace Neuron::Graphics
       // pass; uses the billboard shader + a per-billboard params buffer.
       static void renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj);
 
+      // Draw the procedural skybox background (full-screen, depth-disabled) at the start of
+      // the scene pass, before the depth-tested ships.
+      static void renderSkybox();
+
+      // Draw this frame's dust quads (SetDust) over the skybox, behind the ships.
+      static void renderDust();
+
       inline static winrt::com_ptr<ID3D11VertexShader> s_vs;
       inline static winrt::com_ptr<ID3D11PixelShader> s_ps;
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
@@ -90,6 +122,26 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11PixelShader> s_bbPs;
       inline static winrt::com_ptr<ID3D11Buffer> s_bbVb;
       inline static winrt::com_ptr<ID3D11Buffer> s_bbParamsCb;
+      // Procedural skybox program (star migration) + its b0 params. No vertex buffer -
+      // the VS builds a full-screen triangle from SV_VertexID.
+      inline static winrt::com_ptr<ID3D11VertexShader> s_skyVs;
+      inline static winrt::com_ptr<ID3D11PixelShader> s_skyPs;
+      inline static winrt::com_ptr<ID3D11Buffer> s_skyCb;
+      inline static winrt::com_ptr<ID3D11DepthStencilState> s_skyDepth; // depth test/write off
+      inline static bool s_skybox = true;                               // opt-in (default off)
+      // Camera->world rotation (row-major 3x3); identity until the game feeds an orientation.
+      inline static float s_skyRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+      inline static winrt::com_ptr<ID3D11SamplerState> s_skySampler;       // cube sampler (s0)
+      inline static winrt::com_ptr<ID3D11ShaderResourceView> s_skyCubeSrv; // Skybox.dds cube (t0)
+
+      // Dust program (star migration) + its dynamic vertex buffer and this frame's quads.
+      inline static winrt::com_ptr<ID3D11VertexShader> s_dustVs;
+      inline static winrt::com_ptr<ID3D11PixelShader> s_dustPs;
+      inline static winrt::com_ptr<ID3D11InputLayout> s_dustLayout;
+      inline static winrt::com_ptr<ID3D11Buffer> s_dustVb;
+      inline static size_t s_dustCapacity = 0;
+      inline static std::vector<DustVertex> s_dust;
+
       // Viewport optics for the in-progress RenderModels pass (billboard sizing).
       inline static Neuron::Client::ViewMetrics s_view;
 

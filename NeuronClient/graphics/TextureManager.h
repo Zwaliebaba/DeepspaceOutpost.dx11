@@ -48,6 +48,12 @@ namespace Neuron::Graphics
       // returned Texture is simply not loaded (GetShaderResourceView() == nullptr).
       static std::shared_ptr<Texture> LoadTexture(const std::string& _name);
 
+      // Load (or return the cached) cubemap by asset-relative name. The returned Texture's
+      // GetShaderResourceView() is a TextureCube SRV (sample it with a direction, not UVs).
+      // Same not-loaded fallback as LoadTexture when the device is down or the file is
+      // missing / not a six-face cube.
+      static std::shared_ptr<Texture> LoadCubemap(const std::string& _name);
+
     private:
       inline static std::unordered_map<std::string, std::shared_ptr<Texture>> sm_textures;
   };

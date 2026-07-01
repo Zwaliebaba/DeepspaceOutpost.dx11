@@ -2,6 +2,7 @@
 
 #include "GuiButton.h"
 #include "GuiWindow.h"
+#include <d3d11.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +13,16 @@ public:
 
   static void Startup();
   static void Shutdown();
+
+  // --- 2D pass bracket (Phase 2 render-loop refactor) -----------------------
+  // Open / close the client's single 2D pass. Start opens a Render2D batch targeting the
+  // window (same parameters as Render2D::Begin: a virtual authoring space placed on the
+  // target at (dstX,dstY) scaled by dstScale); End flushes it. The game HUD batch and the
+  // GUI windows draw between one Start/End so all 2D composites in submission order in a
+  // single pass. (The 2D-pass owner now lives on Canvas, per the design decision.)
+  static void Start(ID3D11RenderTargetView* rtv, int virtualW, int virtualH, int dstX = 0, int dstY = 0,
+                    float dstScale = 1.0f, D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR);
+  static void End();
 
   static void EclUpdateMouse(int mouseX, int mouseY, bool lmb, bool rmb);
   static void EclUpdateKeyboard(int keyCode, bool shift, bool ctrl, bool alt);

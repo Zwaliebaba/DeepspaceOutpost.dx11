@@ -7,7 +7,7 @@
  * (solid-colour and textured) feed a single command list, so lines/polygons,
  * sprites, the HUD bitmap and text all composite in the exact order the game draws
  * them. In gfx2d_flush() the batch replays through Neuron::Graphics::Render2D straight
- * onto the back buffer (letterboxed), and Renderer::swap() then presents it. An idle
+ * onto the back buffer (letterboxed), and Neuron::Graphics::Core::Present() then shows it. An idle
  * frame with an empty batch is left unpresented so the last frame persists (see
  * gfx2d_flush). (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *
@@ -24,6 +24,7 @@
 #include "TextureManager.h"
 #include "Render2D.h"
 #include "Scene3D.h"
+#include "Canvas.h" // Canvas::Start/End - the shared 2D-pass bracket (Phase 2)
 
 #include "gfx.h"
 #include "ViewMetrics.h"
@@ -47,7 +48,7 @@ namespace {
 struct ColorVertex { float x, y;          uint32_t rgba; };
 struct TexVertex   { float x, y, u, v;    uint32_t rgba; };
 
-enum class Kind { Color, Tex, Scene };
+enum class Kind { Color, Tex };
 enum class Topo { Points, Lines, Tris };
 
 struct Cmd
@@ -72,12 +73,12 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* 3D scene models for this frame (ships), collected via gfx2d_submit_model and
- * rendered through Scene3D at each scene marker (see gfx_finish_render / gfx2d_flush).
- * g_models_marked is the count already covered by a marker, so a second
- * StartRender/FinishRender bracket in the same frame renders only its own models. */
+/* 3D scene models for this frame (ships/planets/sun), collected via gfx2d_submit_model.
+ * g_haveScene records that a StartRender/FinishRender bracket ran this frame, so gfx2d_flush
+ * draws the 3D scene pass (skybox + dust + these models) once, before the 2D layer - even
+ * when g_models is empty (staring at empty space still shows the skybox). */
 std::vector<Neuron::Render::ModelDraw> g_models;
-uint32_t                               g_models_marked = 0;
+bool                                   g_haveScene = false;
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -96,6 +97,29 @@ Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
  * letterboxes straight onto the back buffer.) */
 int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::kCanvasWidth;  }
 int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::kCanvasHeight; }
+
+/* Placement of the authored 2D canvas onto the back buffer: the single source of the
+ * virtual size + destination offset + scale that both the 2D replay and the 3D scene
+ * pass use (see gfx2d_flush). Native size, centred (D1): a fixed-size 2D screen (the retro
+ * 512x514 canvas) renders 1:1 with black margins around it; the full-window scene/HUD
+ * authors at the client size, so it fills the window (scale 1, no offset). Downscale only
+ * when the window is smaller than the canvas, so nothing is lost; never upscale, so pixel
+ * art stays crisp. */
+struct CanvasPlacement { int vw, vh, dstX, dstY; float scale; };
+
+CanvasPlacement canvasPlacement()
+{
+	Renderer* r = platform_renderer();
+	const int vw = canvasW();
+	const int vh = canvasH();
+	const int cw = r ? r->clientWidth()  : vw;
+	const int ch = r ? r->clientHeight() : vh;
+	float scale = std::min(cw / static_cast<float>(vw), ch / static_cast<float>(vh));
+	if (scale > 1.0f) scale = 1.0f; // native size max; shrink only if the window is smaller than the canvas
+	const int dstX = static_cast<int>((cw - vw * scale) * 0.5f);
+	const int dstY = static_cast<int>((ch - vh * scale) * 0.5f);
+	return { vw, vh, dstX, dstY, scale };
+}
 
 /* The 2D batch renders through Neuron::Graphics::Render2D (see gfx2d_flush), so this
  * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
@@ -299,9 +323,9 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 }
 
 /* The depth-sorted painter's chain was retired once the 3D scene moved to the GPU
- * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_polygon /
- * gfx_render_line now draw immediately as plain 2D, kept only for any 2D-projected
- * marker that still uses them. */
+ * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_line now draws
+ * immediately as a plain 2D line, kept for the laser bolt which still projects on the
+ * CPU (see threed.cpp draw_solid_ship). */
 
 } // namespace
 
@@ -310,18 +334,18 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
  * ===================================================================== */
 
 void gfx_plot_pixel(int x, int y, int col)      { addPoint(x, y, col_rgba(col)); }
-void gfx_fast_plot_pixel(int x, int y, int col) { addPoint(x, y, col_rgba(col)); }
 void gfx_draw_line(int x1, int y1, int x2, int y2)               { drawLine(x1, y1, x2, y2, col_rgba(GFX_COL_WHITE)); }
 void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
 void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int c) { addTri(x1,y1,x2,y2,x3,y3,col_rgba(c)); }
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
 {
-	/* Full-window flight clears the whole canvas (the 3D fills it); retro mode
-	 * keeps clearing just the legacy play area so the dashboard strip persists. */
-	if (g_scene_full)
-		addRect(0, 0, canvasW() - 1, canvasH() - 1, col_rgba(GFX_COL_BLACK));
-	else
+	/* gfx2d_flush already clears the whole back buffer to black each frame, and in full-window
+	 * flight the 3D scene pass (skybox) fills it. Since the 2D layer now composites *on top of*
+	 * the 3D (Phase 2 Step 3), a full-window 2D black rect here would paint over the scene - so
+	 * skip it in full-window mode. Retro mode (2D-only screens, no 3D pass) still clears just
+	 * the legacy play area so the persistent dashboard strip is untouched. */
+	if (!g_scene_full)
 		addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK));
 }
 void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
@@ -355,15 +379,6 @@ void gfx_draw_filled_circle(int cx, int cy, int radius, int col)
 		int ny = cy + (int)std::lround(std::sin(a) * radius);
 		addTri(cx, cy, px, py, nx, ny, c); px = nx; py = ny;
 	}
-}
-
-void gfx_polygon(int num_points, int* poly_list, int face_colour)
-{
-	if (num_points < 3) return;
-	uint32_t c = col_rgba(face_colour);
-	int x0 = poly_list[0], y0 = poly_list[1];
-	for (int i = 1; i < num_points - 1; i++)
-		addTri(x0, y0, poly_list[i*2], poly_list[i*2+1], poly_list[i*2+2], poly_list[i*2+3], c);
 }
 
 void gfx_set_clip_region(int tx, int ty, int bx, int by)
@@ -408,23 +423,52 @@ const Neuron::Client::ViewMetrics& gfx_view_metrics(void) { return g_view; }
 // float the HUD; pass (0,0) to draw in the canvas's own space again.
 void gfx_set_draw_origin(int x, int y) { g_origin_x = x; g_origin_y = y; }
 
-// Where the legacy 512x514 HUD layout should be anchored this frame. Retro mode
-// keeps it at the origin; full-window mode pins it to the bottom-centre of the
-// client area so the dashboard floats over the 3D.
+// Compute the draw origin that anchors a w x h layout block within the current canvas
+// rect (see gfx.h). The block is authored in its own 0..w / 0..h space; the caller sets
+// this origin, draws, then resets to (0,0).
+void gfx_anchor(gfx_anchor_point where, int w, int h, int dx, int dy, int* ox, int* oy)
+{
+	const int cw = canvasW();
+	const int ch = canvasH();
+
+	int x = 0, y = 0;
+	switch (where)
+	{
+	case GFX_ANCHOR_TOP_LEFT:  case GFX_ANCHOR_LEFT:   case GFX_ANCHOR_BOTTOM_LEFT:  x = 0;              break;
+	case GFX_ANCHOR_TOP:       case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_BOTTOM:       x = (cw - w) / 2;   break;
+	case GFX_ANCHOR_TOP_RIGHT: case GFX_ANCHOR_RIGHT:  case GFX_ANCHOR_BOTTOM_RIGHT: x = cw - w;         break;
+	}
+	switch (where)
+	{
+	case GFX_ANCHOR_TOP_LEFT:    case GFX_ANCHOR_TOP:    case GFX_ANCHOR_TOP_RIGHT:    y = 0;             break;
+	case GFX_ANCHOR_LEFT:        case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_RIGHT:        y = (ch - h) / 2;  break;
+	case GFX_ANCHOR_BOTTOM_LEFT: case GFX_ANCHOR_BOTTOM: case GFX_ANCHOR_BOTTOM_RIGHT: y = ch - h;        break;
+	}
+
+	x += dx;
+	y += dy;
+	if (x < 0) x = 0;
+	if (y < 0) y = 0;
+	if (ox) *ox = x;
+	if (oy) *oy = y;
+}
+
+// Where the legacy 512x514 HUD layout is anchored this frame: bottom-centre of the
+// canvas. In full-window flight the canvas is the client area, so the dashboard floats
+// over the 3D; in retro the canvas is exactly 512x514, so this yields (0,0). The
+// bottom-centre special case of gfx_anchor.
 void gfx_hud_anchor(int* ox, int* oy)
 {
-	if (g_scene_full)
-	{
-		*ox = (canvasW() - 512) / 2;
-		*oy = canvasH() - 514;
-		if (*ox < 0) *ox = 0;
-		if (*oy < 0) *oy = 0;
-	}
-	else
-	{
-		*ox = 0;
-		*oy = 0;
-	}
+	gfx_anchor(GFX_ANCHOR_BOTTOM, 512, 514, 0, 0, ox, oy);
+}
+
+// The current 2D authoring canvas size in pixels: the client area in
+// full-window/client-space mode, the fixed 512x514 canvas in retro. Screens migrating
+// to client-space use this (with gfx_anchor) to place elements relative to the window.
+void gfx_canvas_size(int* w, int* h)
+{
+	if (w) *w = canvasW();
+	if (h) *h = canvasH();
 }
 
 // Set the clip rect to the 3D play area for the current mode: the whole canvas
@@ -497,7 +541,7 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 	if (!fn) return;
 	const Texture* t = getTexture(fn);
 	if (!t || !t->srv) return;
-	if (x == -1) x = (256 * GFX_SCALE - t->w) / 2;
+	if (x == -1) x = (canvasW() - t->w) / 2; // centre on the live canvas (client-space aware)
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + t->w), (float)(y + t->h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
@@ -534,13 +578,8 @@ void gfx_draw_scanner(void)
 /* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
 void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
-/* Draw immediately as a flat 2D polygon; the depth key is ignored (the GPU z-buffer
- * orders the 3D scene now). poly_list is 2 ints (x,y) per point, same as gfx_polygon. */
-void gfx_render_polygon(int num_points, int* point_list, int face_colour, int /*zavg*/)
-{
-	gfx_polygon(num_points, point_list, face_colour);
-}
-
+/* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
+ * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */
 void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
 {
 	gfx_draw_colour_line(x1, y1, x2, y2, col);
@@ -553,22 +592,10 @@ void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
 
 void gfx_finish_render(void)
 {
-	/* Mark where the GPU 3D scene renders in submission order: the models collected
-	 * since the last marker draw here - after the 2D background just emitted, before the
-	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point. */
-	if (g_models.size() > g_models_marked)
-	{
-		Cmd c{};
-		c.kind = Kind::Scene;
-		c.topo = Topo::Tris;
-		c.start = g_models_marked;
-		c.count = static_cast<uint32_t>(g_models.size()) - g_models_marked;
-		c.scissor = g_scissor;
-		c.srv = nullptr;
-		c.xorop = false;
-		g_cmds.push_back(c);
-		g_models_marked = static_cast<uint32_t>(g_models.size());
-	}
+	/* A 3D scene bracket ran this frame, so gfx2d_flush draws the scene pass (skybox + dust +
+	 * the models collected in g_models) once, under the 2D layer. Set even when no models were
+	 * submitted, so the skybox still fills the background when nothing is in view. */
+	g_haveScene = true;
 }
 
 /* =====================================================================
@@ -580,30 +607,28 @@ bool gfx2d_flush(bool forcePresent)
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0; return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return false; }
 
 	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
 	 * previously presented frame stays on screen. The menu/station screens repaint only
 	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
 	 * empty batch here is what made those screens flash to black on idle frames. */
-	if (g_cmds.empty() && !forcePresent)
+	if (g_cmds.empty() && !g_haveScene && !forcePresent)
 	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0;
+		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false;
 		return false;
 	}
 
-	/* The batch is authored in the virtual space (retro 512x514, or the client area in
-	 * full-window flight). Letterbox it onto the back buffer with an integer scale so the
-	 * pixel art stays crisp; full-window flight gives scale 1 and no bars. No off-screen
-	 * canvas / blit: the viewport scales the virtual space straight onto the back buffer. */
-	const int vw = canvasW();
-	const int vh = canvasH();
-	const int cw = r->clientWidth();
-	const int ch = r->clientHeight();
-	int scale = std::min(cw / vw, ch / vh);
-	if (scale < 1) scale = 1;
-	const int dstX = (cw - vw * scale) / 2;
-	const int dstY = (ch - vh * scale) / 2;
+	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
+	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
+	 * replay and the 3D scene pass both consume the same rect. No off-screen canvas / blit:
+	 * the viewport scales the virtual space straight onto the back buffer. */
+	const CanvasPlacement cp = canvasPlacement();
+	const int vw = cp.vw;
+	const int vh = cp.vh;
+	const int dstX = cp.dstX;
+	const int dstY = cp.dstY;
+	const float scale = cp.scale;
 
 	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
 	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
@@ -616,13 +641,24 @@ bool gfx2d_flush(bool forcePresent)
 		ctx->ClearRenderTargetView(rtv, black);
 	}
 
+	/* The 3D scene (skybox -> dust -> depth-tested ships/planets/sun) is the under-layer, so
+	 * it runs once here - before the 2D replay - whenever a scene bracket ran this frame. The
+	 * 2D HUD / GUI then composites on top (no re-clear). This replaced the in-band scene
+	 * marker that used to splice the pass into the middle of the 2D batch. */
+	if (g_haveScene && rtv)
+	{
+		Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
+												static_cast<int>(vw * scale), static_cast<int>(vh * scale),
+												g_models.data(), static_cast<int>(g_models.size()));
+	}
+
 	if (!g_cmds.empty() && rtv)
 	{
 		/* Replay the submission-ordered command list through Render2D, letterboxed onto
 		 * the back buffer. Point sampling keeps the sprites / HUD / bitmap font crisp.
 		 * (XOR for the chart cross-hairs is dropped - the logic-op path never worked and
 		 * is slated for a texture.) */
-		Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
+		Canvas::Start(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
 		/* Text commands (those bound to the font sheet) replay through the built-in
 		 * text-outline program for a shader-side outline; sprites/HUD and colored prims
@@ -636,23 +672,6 @@ bool gfx2d_flush(bool forcePresent)
 		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
-			if (c.kind == Kind::Scene)
-			{
-				/* End the 2D background batch drawn so far, run the depth-tested 3D scene
-				 * pass (ships), then resume a fresh 2D batch for the HUD that follows -
-				 * same target, no re-clear, so it composites on top. */
-				Render2D::End();
-				Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
-														vw * scale, vh * scale, g_models.data() + c.start,
-														static_cast<int>(c.count));
-				Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
-				if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
-					g_font_sheet->GetHeight() > 0.0f)
-					Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(),
-											 1.0f / g_font_sheet->GetHeight(), 1.0f);
-				continue;
-			}
-
 			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
 							  c.scissor.bottom - c.scissor.top);
 
@@ -684,13 +703,13 @@ bool gfx2d_flush(bool forcePresent)
 			}
 		}
 
-		Render2D::End();
+		Canvas::End();
 	}
 
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
 	g_models.clear();
-	g_models_marked = 0;
+	g_haveScene = false;
 	return true;
 }

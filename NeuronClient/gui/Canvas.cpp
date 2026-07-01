@@ -3,6 +3,7 @@
 #include "GraphicsCore.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
+#include "Render2D.h"
 
 #include <cstdlib> // rand / RAND_MAX (donor used darwiniaRandom for cosmetic window jitter)
 
@@ -36,6 +37,14 @@ static std::string maximisedWindow = "None"; // Which window is maximised
 static std::string currentButton = "None"; // Current highlighted button
 
 void Canvas::Startup() {}
+
+void Canvas::Start(ID3D11RenderTargetView* rtv, int virtualW, int virtualH, int dstX, int dstY, float dstScale,
+                   D3D11_FILTER filter)
+{
+  Neuron::Graphics::Render2D::Begin(rtv, virtualW, virtualH, dstX, dstY, dstScale, filter);
+}
+
+void Canvas::End() { Neuron::Graphics::Render2D::End(); }
 
 void Canvas::EclUpdateMouse(int _mouseX, int _mouseY, bool _lmb, bool _rmb)
 {

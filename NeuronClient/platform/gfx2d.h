@@ -4,7 +4,7 @@
  * gfx2d.h
  *
  * Hook for the platform layer to flush the accumulated 2D primitive batch to the
- * back buffer once per frame (called from gfx_update_screen, before Renderer::swap()).
+ * back buffer once per frame (called from gfx_update_screen, before Core::Present()).
  * The batch is replayed through Neuron::Graphics::Render2D.
  */
 

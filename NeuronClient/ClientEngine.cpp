@@ -197,25 +197,21 @@ namespace Neuron::Client
         m_main->Update(capMs / 1000.0f);
 
         // Scene hook (GameApp::RenderScene -> game_render_scene): draw the 3D + HUD into
-        // the 2D batch before the flush so it composites correctly. Inert outside that
-        // loop, in which case the active screen's own loop already filled the batch.
+        // the 2D batch before the canvas phase so it composites correctly. Inert outside
+        // that loop, in which case the active screen's own loop already filled the batch.
         m_main->RenderScene();
 
         s_inLifecycle = false;
       }
 
-      // Replay the frame's 2D batch (letterboxed) to the back buffer. An idle frame (empty
-      // batch, overlay hidden) paints nothing and is not presented, so the last presented
-      // frame stays on screen. The overlay forces a fresh cleared frame to composite onto.
-      GuiOverlay::Update();
-      const bool overlayShown = GuiOverlay::IsShown();
-      const bool painted = gfx2d_flush(overlayShown);
-      if (painted)
-      {
-        m_main->RenderCanvas(); // 2D UI (GUI overlay) on top of the scene
-        if (Renderer* r = platform_renderer())
-          r->swap();
-      }
+      // Canvas hook (GameApp::RenderCanvas): the whole 2D phase - overlay update + game HUD
+      // replay + GUI overlay - runs every frame (including nested sequences) and returns
+      // whether anything was painted. Core owns presentation: Present() picks the sync/
+      // tearing mode, discards the RTV/DSV contents, and drives device-lost recovery off the
+      // Present HRESULT. An idle frame paints nothing and is not presented, so the last
+      // presented frame stays on screen.
+      if (m_main->RenderCanvas())
+        Graphics::Core::Present();
 
       // Default the NEXT frame to the retro letterboxed canvas; the in-flight render path
       // re-enables full-window mode each frame it draws.

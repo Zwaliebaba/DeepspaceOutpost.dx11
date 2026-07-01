@@ -439,25 +439,28 @@ void Core::GetHardwareAdapter(IDXGIAdapter1** ppAdapter)
 
   com_ptr<IDXGIAdapter1> adapter;
 
+  // EnumAdapterByGpuPreference needs IDXGIFactory6 (Windows 10 1803+). On a down-level
+  // OS the cast fails, so guard it and fall through to the EnumAdapters1 loop below.
   com_ptr<IDXGIFactory6> factory6;
-  m_dxgiFactory.try_as(factory6);
-
-  for (UINT adapterIndex = 0; SUCCEEDED(
-         factory6->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(adapter.put())));
-       adapterIndex++)
+  if (m_dxgiFactory.try_as(factory6))
   {
-    DXGI_ADAPTER_DESC1 desc;
-    check_hresult(adapter->GetDesc1(&desc));
-
-    if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+    for (UINT adapterIndex = 0; SUCCEEDED(
+           factory6->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(adapter.put())));
+         adapterIndex++)
     {
-      // Don't select the Basic Render Driver adapter.
-      continue;
+      DXGI_ADAPTER_DESC1 desc;
+      check_hresult(adapter->GetDesc1(&desc));
+
+      if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+      {
+        // Don't select the Basic Render Driver adapter.
+        continue;
+      }
+
+      DebugTrace(L"Direct3D Adapter ({}): VID:{:04X}, PID:{:04X} - {}\n", adapterIndex, desc.VendorId, desc.DeviceId, desc.Description);
+
+      break;
     }
-
-    DebugTrace(L"Direct3D Adapter ({}): VID:{:04X}, PID:{:04X} - {}\n", adapterIndex, desc.VendorId, desc.DeviceId, desc.Description);
-
-    break;
   }
 
   if (!adapter)
