@@ -46,9 +46,9 @@ static inline int star_on_screen (int sx, int sy)
 	return (sx >= 1) && (sx <= vm.width - 1) && (sy >= 1) && (sy <= vm.height - 1);
 }
 
-/* The starfield as scene-pass "dust": when the skybox is enabled, each drawn star is
- * collected as a small clip-space quad instead of the legacy 2D pixels. Scene3D draws
- * these over the skybox. With the skybox off, this stays empty and the 2D starfield shows. */
+/* The starfield as scene-pass "dust": each drawn star is collected as a small clip-space
+ * quad, which Scene3D draws over the skybox (the streaming-speed cue). This replaced the
+ * legacy 2D white-pixel starfield. */
 static std::vector<Neuron::Graphics::Scene3D::DustVertex> s_dustQuads;
 
 static void push_dust (int sx, int sy, double zz)
@@ -122,29 +122,10 @@ void front_starfield (void)
 		zz = stars[i].z;
 		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
+		/* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
+		   scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
 		if ((!warp_stars) && star_on_screen (sx, sy))
-		{
-			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
-			   the legacy 2D pixels would then double-draw them, so emit one or the
-			   other, never both. */
-			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
-			{
-				push_dust (sx, sy, zz);
-			}
-			else
-			{
-				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-
-				if (zz < 0xC0)
-					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-				if (zz < 0x90)
-				{
-					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
-				}
-			}
-		}
+			push_dust (sx, sy, zz);
 
 
 		/* Move the stars to their new locations...*/
@@ -223,29 +204,10 @@ void rear_starfield (void)
 		zz = stars[i].z;
 		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
+		/* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
+		   scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
 		if ((!warp_stars) && star_on_screen (sx, sy))
-		{
-			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
-			   the legacy 2D pixels would then double-draw them, so emit one or the
-			   other, never both. */
-			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
-			{
-				push_dust (sx, sy, zz);
-			}
-			else
-			{
-				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-
-				if (zz < 0xC0)
-					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-				if (zz < 0x90)
-				{
-					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
-				}
-			}
-		}
+			push_dust (sx, sy, zz);
 
 
 		/* Move the stars to their new locations...*/
@@ -329,29 +291,10 @@ void side_starfield (void)
 		zz = stars[i].z;
 		star_to_screen (stars[i].x, stars[i].y, &sx, &sy);
 
+		/* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
+		   scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
 		if ((!warp_stars) && star_on_screen (sx, sy))
-		{
-			/* With the skybox on, the streaming stars are 3D dust in the scene pass;
-			   the legacy 2D pixels would then double-draw them, so emit one or the
-			   other, never both. */
-			if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
-			{
-				push_dust (sx, sy, zz);
-			}
-			else
-			{
-				ActiveRenderQueue().Pixel (sx, sy, GFX_COL_WHITE);
-
-				if (zz < 0xC0)
-					ActiveRenderQueue().Pixel (sx+1, sy, GFX_COL_WHITE);
-
-				if (zz < 0x90)
-				{
-					ActiveRenderQueue().Pixel (sx, sy+1, GFX_COL_WHITE);
-					ActiveRenderQueue().Pixel (sx+1, sy+1, GFX_COL_WHITE);
-				}
-			}
-		}
+			push_dust (sx, sy, zz);
 
 		yy = stars[i].y;
 		xx = stars[i].x;
@@ -511,8 +454,7 @@ void update_starfield (void)
 {
 	s_dustQuads.clear();
 
-	if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
-		accumulate_skybox_orientation();
+	accumulate_skybox_orientation();
 
 	switch (current_screen)
 	{
@@ -534,12 +476,11 @@ void update_starfield (void)
 			break;
 	}
 
-	/* Replay the recorded starfield into the gfx backend at this same point,
-	   so the on-screen result is identical to the old direct gfx_ calls. */
+	/* Replay any recorded 2D primitives (now just the warp-jump streaks) into the gfx
+	   backend at this same point in submission order. */
 	FlushRenderQueue();
 
-	/* Hand this frame's stars to the scene pass as dust. Scene3D draws them over the
-	   skybox only when the skybox is enabled; otherwise this is inert (the 2D starfield
-	   above still shows), so the default look is unchanged. */
+	/* Hand this frame's stars to the scene pass as dust; Scene3D draws them over the
+	   skybox as the streaming-speed cue. */
 	Neuron::Graphics::Scene3D::SetDust (s_dustQuads.data(), static_cast<int>(s_dustQuads.size()));
 }

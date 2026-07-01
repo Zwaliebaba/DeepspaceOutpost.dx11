@@ -275,8 +275,12 @@ past the split forces throwaway 2D-background scaffolding.
       so the cubemap stays fixed in the world while the ship turns. (Earlier this was a 2D roll/pan
       of the procedural stars; superseded by the cubemap. Integration gains in `stars.cpp` are
       tunable, and the cube art can be re-oriented to match the convention.)
-  (c) *(pending)* the skybox is now default-on; still to do — validate all views and, once happy,
-      delete the legacy 2D starfield path.
+  (c) **[DONE]** the skybox is default-on and the legacy 2D white-pixel starfield is deleted -
+      `stars.cpp` now emits only the 3D dust (over the skybox) plus the warp-jump streaks; the
+      star sim still drives the dust. The scene pass also draws the skybox background even with
+      no models in view (`gfx_finish_render` emits the scene marker when the skybox is on, and
+      `Scene3D::RenderModels` draws the background before the model-count guard), so empty space
+      no longer goes black.
 
 ### 2.4 Steps (each behaviour-preserving)
 
