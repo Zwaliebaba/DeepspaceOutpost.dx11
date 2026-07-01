@@ -264,9 +264,15 @@ past the split forces throwaway 2D-background scaffolding.
   quad (`push_dust`, sized by depth) and hands the frame's quads to `Scene3D::SetDust`; a new
   dust program (`dustVS/PS.hlsl`, pass-through) draws them over the skybox, behind the ships,
   when the skybox is enabled. Reuses the proven CPU starfield motion (density + parallax, D4),
-  so it is inert when the skybox is off (2D starfield unchanged). Follow-ups: (a) drop the now
-  redundant 2D starfield emission when the skybox is on; (b) orientation-aware skybox stars;
-  (c) once both look right, make the skybox the default and delete the 2D starfield path.
+  so it is inert when the skybox is off (2D starfield unchanged). Follow-ups:
+  (a) **[DONE]** drop the redundant 2D starfield emission when the skybox is on — `stars.cpp`
+      now emits each star as *either* dust (skybox on) *or* the legacy 2D pixels (skybox off),
+      never both, gated on `Scene3D::IsSkyboxEnabled()`;
+  (b) **[DONE]** orientation-aware skybox stars — an accumulated roll (rotation) + pitch (pan)
+      from `PlayerFlight` is pushed via `Scene3D::SetSkyboxOrientation` and applied to the
+      star-sampling coordinate in `skyboxPS` (`u_SkyXform`; `u_Params.w` = aspect for isotropic
+      rotation). The gradient stays screen-fixed; gains in `stars.cpp` are tuned to taste;
+  (c) *(pending)* once both look right, make the skybox the default and delete the 2D starfield path.
 
 ### 2.4 Steps (each behaviour-preserving)
 
