@@ -69,9 +69,10 @@ namespace Neuron::Graphics
     {
       float top[4];    // gradient colour at the top of the view
       float bottom[4]; // gradient colour at the bottom
-      float params[4]; // x = star threshold, y = star brightness, z = grid density, w spare
+      float params[4]; // x = star threshold, y = star brightness, z = grid density, w = aspect
+      float xform[4];  // x = cos(roll), y = sin(roll), z = pan X, w = pan Y (star coord)
     };
-    static_assert(sizeof(SkyboxParams) == 48, "SkyboxParams must match the SkyboxCb cbuffer");
+    static_assert(sizeof(SkyboxParams) == 64, "SkyboxParams must match the SkyboxCb cbuffer");
 
     // First-pass skybox look (tune to taste - these are the knobs for iterating on the
     // background). Deep-space blue fading to near-black, with a sparse scatter of stars.
@@ -302,7 +303,13 @@ namespace Neuron::Graphics
     sp.params[0] = kStarThreshold;
     sp.params[1] = kStarBrightness;
     sp.params[2] = kStarDensity;
-    sp.params[3] = 0.0f;
+    sp.params[3] = (s_view.height > 0)
+                     ? static_cast<float>(s_view.width) / static_cast<float>(s_view.height)
+                     : 1.0f; // aspect (w/h), for isotropic star rotation in the shader
+    sp.xform[0] = s_skyCos;
+    sp.xform[1] = s_skySin;
+    sp.xform[2] = s_skyPanX;
+    sp.xform[3] = s_skyPanY;
 
     D3D11_MAPPED_SUBRESOURCE mapped;
     if (FAILED(ctx->Map(s_skyCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))

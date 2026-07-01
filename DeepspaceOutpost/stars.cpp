@@ -420,9 +420,37 @@ void flip_stars (void)
 }
 
 
+/* Accumulated skybox star-field orientation. Roll rotates the field at the same rate the
+   2D star sim spins (roll/256 rad per frame); pitch pans it vertically. Gains are gentle
+   and purely for feel - the skybox is a distant backdrop, not a physically exact match, so
+   these are tuned to taste. Kept bounded so the floats never drift large. */
+static float s_skyRoll = 0.0f;
+static float s_skyPanY = 0.0f;
+
+static void accumulate_skybox_orientation (void)
+{
+	const double roll  = (double) PlayerFlight().roll;
+	const double climb = (double) PlayerFlight().climb;
+
+	s_skyRoll += (float) (roll / 256.0);
+	s_skyPanY += (float) (climb / 256.0) * 0.02f;
+
+	/* Wrap roll to keep it in a sane range (cos/sin are periodic anyway). */
+	const float twoPi = 6.2831853f;
+	if (s_skyRoll >  twoPi) s_skyRoll -= twoPi;
+	if (s_skyRoll < -twoPi) s_skyRoll += twoPi;
+
+	Neuron::Graphics::Scene3D::SetSkyboxOrientation (
+		cosf (s_skyRoll), sinf (s_skyRoll), 0.0f, s_skyPanY);
+}
+
+
 void update_starfield (void)
 {
 	s_dustQuads.clear();
+
+	if (Neuron::Graphics::Scene3D::IsSkyboxEnabled())
+		accumulate_skybox_orientation();
 
 	switch (current_screen)
 	{

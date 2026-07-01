@@ -6,16 +6,17 @@
 // black clear. No vertex buffer: the VS builds a full-screen triangle from SV_VertexID.
 // b0 carries the look parameters so Scene3D can tune it without recompiling.
 //
-// This first pass places stars in screen space (they do not track the camera). An
-// orientation-aware version that keeps stars fixed in world space lands with the dust
-// migration, once the camera orientation is plumbed into the scene pass.
+// The star field is orientation-aware: u_SkyXform carries an accumulated roll rotation and
+// a pan (fed from the player's roll/pitch), applied to the star-sampling coordinate only -
+// so the stars drift and rotate with control input while the gradient stays screen-fixed.
 
 cbuffer SkyboxCb : register(b0)
 {
     float4 u_TopColor;    // gradient colour at the top of the view (rgb; a unused)
     float4 u_BottomColor; // gradient colour at the bottom of the view
     float4 u_Params;      // x = star threshold (0..1; higher = fewer stars),
-                          // y = star brightness, z = star grid density, w = unused
+                          // y = star brightness, z = star grid density, w = aspect (w/h)
+    float4 u_SkyXform;    // x = cos(roll), y = sin(roll), z = pan X, w = pan Y (star coord)
 };
 
 struct VSOut

@@ -17,10 +17,20 @@ float4 PSMain(VSOut _i) : SV_Target
 {
     float3 col = lerp(u_BottomColor.rgb, u_TopColor.rgb, saturate(_i.uv.y));
 
+    // Star-sampling coordinate: centre, aspect-correct so the rotation is isotropic, then
+    // rotate by the accumulated roll and offset by the pan. The gradient above stays
+    // screen-fixed; only the stars track control input.
+    const float aspect = max(u_Params.w, 0.0001);
+    float2 p = _i.uv - 0.5;
+    p.x *= aspect;
+    const float2x2 rot = float2x2(u_SkyXform.x, -u_SkyXform.y,
+                                  u_SkyXform.y,  u_SkyXform.x);
+    p = mul(rot, p) + u_SkyXform.zw;
+
     // One candidate star per grid cell: keep it when its hash passes the threshold,
     // brightest at the cell centre so it reads as a small round point.
     const float density = max(u_Params.z, 1.0);
-    const float2 grid = _i.uv * density;
+    const float2 grid = p * density;
     const float2 cell = floor(grid);
     if (hash21(cell) > u_Params.x)
     {

@@ -56,6 +56,19 @@ namespace Neuron::Graphics
       static void SetSkyboxEnabled(bool _enabled) { s_skybox = _enabled; }
       static bool IsSkyboxEnabled() { return s_skybox; }
 
+      // Orientation of the skybox star field (star migration): an accumulated roll (as
+      // cos/sin) and a pan offset, both in the shader's star-sampling space, so the stars
+      // drift and rotate with control input while the gradient stays screen-fixed. The game
+      // accumulates these from the player's roll/pitch and pushes them each frame. Defaults
+      // (identity roll, zero pan) leave the star field screen-fixed.
+      static void SetSkyboxOrientation(float _cosRoll, float _sinRoll, float _panX, float _panY)
+      {
+        s_skyCos = _cosRoll;
+        s_skySin = _sinRoll;
+        s_skyPanX = _panX;
+        s_skyPanY = _panY;
+      }
+
       // Dust points for this frame (star migration): the streaming starfield rendered in the
       // scene pass over the skybox instead of the legacy 2D batch. The game projects the stars
       // with the scene optics and hands over small clip-space quads (6 verts each); Scene3D
@@ -120,6 +133,11 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11Buffer> s_skyCb;
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_skyDepth; // depth test/write off
       inline static bool s_skybox = false;                              // opt-in (default off)
+      // Accumulated star-field orientation (SetSkyboxOrientation); identity = screen-fixed.
+      inline static float s_skyCos = 1.0f;
+      inline static float s_skySin = 0.0f;
+      inline static float s_skyPanX = 0.0f;
+      inline static float s_skyPanY = 0.0f;
 
       // Dust program (star migration) + its dynamic vertex buffer and this frame's quads.
       inline static winrt::com_ptr<ID3D11VertexShader> s_dustVs;
