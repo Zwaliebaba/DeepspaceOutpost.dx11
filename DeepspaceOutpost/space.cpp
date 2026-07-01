@@ -678,6 +678,19 @@ void render_replicated_objects (void)
 
 	s_nearest_station_dist = 1.0e18;   // recomputed below from the live stations
 
+	// Mirror the replicated world into local_objects[] each frame so the legacy HUD that
+	// reads that array - the scanner blips and the compass - reflects the live server world.
+	// The thin client does not run the local object sim, so without this the array is empty
+	// and the scanner shows no blips at all. Slots 0/1 are reserved for planet/station (the
+	// compass convention, update_compass reads [0]/[1]); everything else fills from slot 2 up.
+	{
+		struct local_object empty;
+		memset (&empty, 0, sizeof (empty));
+		for (int i = 0; i < MAX_LOCAL_OBJECTS; i++)
+			local_objects[i] = empty;
+	}
+	int localFill = 2;
+
 	int drawn = 0;
 	for (const Neuron::Client::RenderRecord& rec : records)
 	{
@@ -700,6 +713,18 @@ void render_replicated_objects (void)
 		obj.distance = (int) rec.distance;
 
 		Neuron::Client::ApplyCamera (cam, &obj);
+
+		// Record this entity for the scanner / compass (see the clear above): planet -> slot 0,
+		// station -> slot 1, everything else fills from slot 2 up. Uses camera-frame location,
+		// the same the scanner expects.
+		{
+			const int slot = (obj.type == SHIP_PLANET) ? 0
+						   : (obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) ? 1
+						   : (localFill < MAX_LOCAL_OBJECTS ? localFill++ : -1);
+			if (slot >= 0)
+				local_objects[slot] = obj;
+		}
+
 		draw_ship (&obj);
 		++drawn;
 
