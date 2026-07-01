@@ -74,7 +74,7 @@ std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
 /* 3D scene models for this frame (ships/planets/sun), collected via gfx2d_submit_model.
- * g_haveScene records that a StartRender/FinishRender bracket ran this frame, so gfx2d_flush
+ * g_haveScene records that the scene was submitted this frame (gfx_finish_render), so gfx2d_flush
  * draws the 3D scene pass (skybox + dust + these models) once, before the 2D layer - even
  * when g_models is empty (staring at empty space still shows the skybox). */
 std::vector<Neuron::Render::ModelDraw> g_models;
@@ -576,7 +576,6 @@ void gfx_draw_scanner(void)
 }
 
 /* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
-void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
 /* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
  * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */

@@ -328,9 +328,19 @@ past the split forces throwaway 2D-background scaffolding.
    `RenderScene()` consume recorded `ModelDraw`s directly for `Scene3D`, instead of
    `DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model`. Keep the queue for
    headless (§5).
-6. Delete dead machinery: `Kind::Scene`, `gfx2d_submit_model`,
-   `gfx_start_render/gfx_finish_render`, `forcePresent`, and — if nesting is reworked —
-   `s_inLifecycle`. Sweep references before each removal.
+6. **[DONE, partial]** Delete dead machinery. Removed as they became dead:
+   - `Kind::Scene` + `g_models_marked` — deleted in Step 3 (marker retired).
+   - `forcePresent` + the idle-batch gate + the `painted` return — deleted in Step 4.
+   - **`StartRender` bracket half** — `gfx_start_render` was a no-op and the scene is gated
+     entirely by `g_haveScene` (set in `FinishRender`), so the whole `StartRender` chain is
+     gone: `RenderSink::StartRender`, `CommandType::StartRender`, `RenderQueue::StartRender`,
+     `GfxRenderSink::StartRender`, `gfx_start_render`, both `space.cpp` call sites, and the
+     null/test sink overrides. `FinishRender` stays (it marks the frame's scene submission).
+
+   Deferred (not dead yet): `gfx2d_submit_model` and `gfx_finish_render` are still the live
+   model-collection + scene-mark path — they only become removable with Step 5's `RenderQueue`
+   short-circuit. `s_inLifecycle` is still needed for the nested blocking sequences (D6), so it
+   stays until/unless the nesting is reworked.
 
 ### 2.5 Phase-2 preservation checklist
 

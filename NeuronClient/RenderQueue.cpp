@@ -56,7 +56,6 @@ namespace Neuron::Render
     m_models.push_back(_model);
   }
 
-  void RenderQueue::StartRender() { Push(CommandType::StartRender); }
   void RenderQueue::FinishRender() { Push(CommandType::FinishRender); }
 
   void RenderQueue::Replay(RenderSink& _sink) const
@@ -73,7 +72,6 @@ namespace Neuron::Render
         case CommandType::Triangle:     _sink.Triangle(c.x0, c.y0, c.x1, c.y1, c.x2, c.y2, c.colour); break;
         case CommandType::RenderLine:   _sink.RenderLine(c.x0, c.y0, c.x1, c.y1, c.dist, c.colour); break;
         case CommandType::DrawModel:    _sink.DrawModel(m_models[c.dataOffset]); break;
-        case CommandType::StartRender:  _sink.StartRender(); break;
         case CommandType::FinishRender: _sink.FinishRender(); break;
       }
     }

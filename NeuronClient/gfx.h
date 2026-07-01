@@ -130,7 +130,6 @@ void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
 void gfx_draw_sprite (int sprite_no, int x, int y);
 void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
-void gfx_start_render (void);
 void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
 void gfx_finish_render (void);
 

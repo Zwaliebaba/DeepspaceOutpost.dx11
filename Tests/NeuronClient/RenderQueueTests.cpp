@@ -28,7 +28,6 @@ namespace
       models.push_back(_m);
       order.emplace_back("DrawModel");
     }
-    void StartRender() override {}
     void FinishRender() override {}
   };
 

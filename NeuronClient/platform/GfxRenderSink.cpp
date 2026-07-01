@@ -40,5 +40,4 @@ void GfxRenderSink::DrawModel(const Neuron::Render::ModelDraw& _model)
   gfx2d_submit_model(_model);
 }
 
-void GfxRenderSink::StartRender()  { gfx_start_render(); }
 void GfxRenderSink::FinishRender() { gfx_finish_render(); }
