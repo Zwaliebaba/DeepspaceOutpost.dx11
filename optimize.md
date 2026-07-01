@@ -253,10 +253,20 @@ past the split forces throwaway 2D-background scaffolding.
 
 ### 2.4 Steps (each behaviour-preserving)
 
-1. `Canvas::Start()/End()` as a pure rename of the current `gfx2d_flush` `Begin/End`
-   bracket (now client-space, no letterbox params).
-2. Fold the GUI overlay into that one pass — remove `GuiOverlay::Render`'s private
-   `Begin/End` (`GuiOverlay.cpp:175-177`). One coordinate space makes this trivial now.
+1. **`Canvas::Start()/End()` bracket. [DONE]** Added `Canvas::Start/End` (D2 — on the existing
+   `Canvas` class) forwarding to `Render2D::Begin/End`, and routed **both** 2D-pass call sites
+   through it: the game HUD batch in `gfx2d_flush` (2 Start + 2 End, around the scene marker)
+   and the GUI overlay in `GuiOverlay::Render`. Behaviour-preserving (pure delegation); `Canvas`
+   is now the single 2D-pass owner. Still two *passes* (different placements) — merging them is
+   step 2. (`gfx2d`→`Canvas` is a transitional include that goes away when the bracket moves up
+   to `RenderCanvas` in step 3; the dependency is acyclic.)
+2. **Fold the GUI overlay into one pass.** Today the game HUD batch (native-centred 512×514,
+   point filter) and the overlay (client-space full-window, linear filter) are two separate
+   `Canvas::Start/End` brackets with a re-clear between. Merge them so the overlay windows draw
+   in the same pass, after the HUD — note they have **different placements/filters**, so this is
+   not a trivial deletion of the overlay's bracket; it needs the pass to switch placement mid-
+   stream (or the overlay to adopt the same client-space sub-batch). This is the real work Step 1
+   set up.
 3. Lift the `Scene3D::RenderModels` call out of the `Kind::Scene` marker into
    `RenderScene()` (after the background, §2.2); delete the marker + batch-split.
 4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool

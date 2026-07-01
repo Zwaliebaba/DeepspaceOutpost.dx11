@@ -4,13 +4,11 @@
 #include "Canvas.h"
 #include "GuiButton.h"
 #include "GuiWindow.h"
-#include "Render2D.h"
 #include "Strings.h"
 
 #include "input_win.h"
 
 using Neuron::Graphics::Core;
-using Neuron::Graphics::Render2D;
 
 namespace
 {
@@ -172,7 +170,7 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   // windows. Open one native 2D pass (client-space ortho, Y down, alpha blend, no
   // depth/cull, 1:1 mapping) and let Canvas submit every window/button/glyph into the
   // batch, flushed at End.
-  Render2D::Begin(Core::GetRenderTargetView(), clientWidth, clientHeight);
+  Canvas::Start(Core::GetRenderTargetView(), clientWidth, clientHeight);
   Canvas::Render();
-  Render2D::End();
+  Canvas::End();
 }

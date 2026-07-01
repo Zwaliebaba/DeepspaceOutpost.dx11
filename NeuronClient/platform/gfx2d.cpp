@@ -24,6 +24,7 @@
 #include "TextureManager.h"
 #include "Render2D.h"
 #include "Scene3D.h"
+#include "Canvas.h" // Canvas::Start/End - the shared 2D-pass bracket (Phase 2)
 
 #include "gfx.h"
 #include "ViewMetrics.h"
@@ -657,7 +658,7 @@ bool gfx2d_flush(bool forcePresent)
 		 * the back buffer. Point sampling keeps the sprites / HUD / bitmap font crisp.
 		 * (XOR for the chart cross-hairs is dropped - the logic-op path never worked and
 		 * is slated for a texture.) */
-		Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
+		Canvas::Start(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
 		/* Text commands (those bound to the font sheet) replay through the built-in
 		 * text-outline program for a shader-side outline; sprites/HUD and colored prims
@@ -676,11 +677,11 @@ bool gfx2d_flush(bool forcePresent)
 				/* End the 2D background batch drawn so far, run the depth-tested 3D scene
 				 * pass (ships), then resume a fresh 2D batch for the HUD that follows -
 				 * same target, no re-clear, so it composites on top. */
-				Render2D::End();
+				Canvas::End();
 				Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
 														static_cast<int>(vw * scale), static_cast<int>(vh * scale),
 														g_models.data() + c.start, static_cast<int>(c.count));
-				Render2D::Begin(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
+				Canvas::Start(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 				if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
 					g_font_sheet->GetHeight() > 0.0f)
 					Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(),
@@ -719,7 +720,7 @@ bool gfx2d_flush(bool forcePresent)
 			}
 		}
 
-		Render2D::End();
+		Canvas::End();
 	}
 
 	g_cverts.clear();
