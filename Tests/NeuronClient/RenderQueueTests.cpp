@@ -19,25 +19,15 @@ namespace
     std::vector<std::string> order; // coarse call log for interleave checks
 
     void Pixel(int, int, int) override { order.emplace_back("Pixel"); }
-    void FastPixel(int, int, int) override {}
     void Line(int, int, int, int) override { order.emplace_back("Line"); }
     void ColourLine(int, int, int, int, int) override {}
-    void Circle(int, int, int, int) override {}
-    void FilledCircle(int, int, int, int) override {}
     void Triangle(int, int, int, int, int, int, int) override {}
-    void RenderPolygon(int, const int*, int, int) override {}
     void RenderLine(int, int, int, int, int, int) override {}
     void DrawModel(const ModelDraw& _m) override
     {
       models.push_back(_m);
       order.emplace_back("DrawModel");
     }
-    void Sprite(int, int, int) override {}
-    void Text(int, int, const char*) override {}
-    void CentreText(int, const char*, int, int) override {}
-    void SetClipRegion(int, int, int, int) override {}
-    void ClearArea(int, int, int, int) override {}
-    void DrawScanner() override {}
     void StartRender() override {}
     void FinishRender() override {}
   };

@@ -299,9 +299,9 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 }
 
 /* The depth-sorted painter's chain was retired once the 3D scene moved to the GPU
- * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_polygon /
- * gfx_render_line now draw immediately as plain 2D, kept only for any 2D-projected
- * marker that still uses them. */
+ * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_line now draws
+ * immediately as a plain 2D line, kept for the laser bolt which still projects on the
+ * CPU (see threed.cpp draw_solid_ship). */
 
 } // namespace
 
@@ -310,7 +310,6 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
  * ===================================================================== */
 
 void gfx_plot_pixel(int x, int y, int col)      { addPoint(x, y, col_rgba(col)); }
-void gfx_fast_plot_pixel(int x, int y, int col) { addPoint(x, y, col_rgba(col)); }
 void gfx_draw_line(int x1, int y1, int x2, int y2)               { drawLine(x1, y1, x2, y2, col_rgba(GFX_COL_WHITE)); }
 void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
 void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int c) { addTri(x1,y1,x2,y2,x3,y3,col_rgba(c)); }
@@ -355,15 +354,6 @@ void gfx_draw_filled_circle(int cx, int cy, int radius, int col)
 		int ny = cy + (int)std::lround(std::sin(a) * radius);
 		addTri(cx, cy, px, py, nx, ny, c); px = nx; py = ny;
 	}
-}
-
-void gfx_polygon(int num_points, int* poly_list, int face_colour)
-{
-	if (num_points < 3) return;
-	uint32_t c = col_rgba(face_colour);
-	int x0 = poly_list[0], y0 = poly_list[1];
-	for (int i = 1; i < num_points - 1; i++)
-		addTri(x0, y0, poly_list[i*2], poly_list[i*2+1], poly_list[i*2+2], poly_list[i*2+3], c);
 }
 
 void gfx_set_clip_region(int tx, int ty, int bx, int by)
@@ -534,13 +524,8 @@ void gfx_draw_scanner(void)
 /* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
 void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
-/* Draw immediately as a flat 2D polygon; the depth key is ignored (the GPU z-buffer
- * orders the 3D scene now). poly_list is 2 ints (x,y) per point, same as gfx_polygon. */
-void gfx_render_polygon(int num_points, int* point_list, int face_colour, int /*zavg*/)
-{
-	gfx_polygon(num_points, point_list, face_colour);
-}
-
+/* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
+ * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */
 void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
 {
 	gfx_draw_colour_line(x1, y1, x2, y2, col);
