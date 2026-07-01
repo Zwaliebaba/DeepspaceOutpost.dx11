@@ -462,6 +462,15 @@ void gfx_hud_anchor(int* ox, int* oy)
 	gfx_anchor(GFX_ANCHOR_BOTTOM, 512, 514, 0, 0, ox, oy);
 }
 
+// The current 2D authoring canvas size in pixels: the client area in
+// full-window/client-space mode, the fixed 512x514 canvas in retro. Screens migrating
+// to client-space use this (with gfx_anchor) to place elements relative to the window.
+void gfx_canvas_size(int* w, int* h)
+{
+	if (w) *w = canvasW();
+	if (h) *h = canvasH();
+}
+
 // Set the clip rect to the 3D play area for the current mode: the whole canvas
 // in full-window flight, or the legacy 1,1..510,383 rectangle in retro.
 void gfx_set_scene_clip(void)
@@ -532,7 +541,7 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 	if (!fn) return;
 	const Texture* t = getTexture(fn);
 	if (!t || !t->srv) return;
-	if (x == -1) x = (256 * GFX_SCALE - t->w) / 2;
+	if (x == -1) x = (canvasW() - t->w) / 2; // centre on the live canvas (client-space aware)
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + t->w), (float)(y + t->h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }

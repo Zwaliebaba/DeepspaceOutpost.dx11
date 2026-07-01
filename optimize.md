@@ -110,6 +110,12 @@ deleted when the last screen is migrated.
    intro → charts (galactic/short-range) → docked/station/trade/market → missions →
    flight HUD/overlays. Convert fixed 512×514 coords to anchored client-space (HUD anchored
    to edges; menus/panels fixed-size centred, per D1).
+   - Enablers added with the first group: `gfx_canvas_size(&w,&h)` (screens read the live
+     canvas rect) and a fix to `gfx_draw_sprite`'s `x==-1` auto-centre (was hard-coded 512,
+     now `canvasW()` — correct in client-space, identical in retro).
+   - **intro [DONE]** — `update_intro1/2` now opt into full-window (`gfx_set_scene_fullwindow`,
+     FOV-preserving so the hero ship keeps its apparent size), centre the title sprite on the
+     window, and anchor the prompts to the bottom edge. Needs an eyeball for exact framing.
 4. **Migrate input hit-testing** to client space in lockstep with each screen: mouse
    mapping, and the chart crosshair (`cross_x/cross_y`) which is authored in virtual space.
 5. **Remove the letterbox machinery.** Delete `dstX/dstY/dstScale` from `Render2D::Begin`

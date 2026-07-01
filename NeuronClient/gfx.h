@@ -175,4 +175,9 @@ enum gfx_anchor_point
 };
 void gfx_anchor (gfx_anchor_point where, int w, int h, int dx, int dy, int *ox, int *oy);
 
+/* Current 2D authoring canvas size in pixels: the client area in full-window/client-space
+ * mode, the fixed 512x514 canvas in retro. Screens migrating to client-space read this to
+ * anchor content to the window edges. Either pointer may be null. */
+void gfx_canvas_size (int *w, int *h);
+
 #endif

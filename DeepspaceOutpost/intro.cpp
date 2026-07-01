@@ -62,6 +62,13 @@ void initialise_intro2 (void)
 
 void update_intro1 (void)
 {
+	// Client-space intro: the ship fills the window (FOV-preserving optics), the title
+	// sprite centres on the window and the prompts anchor to the bottom edge. The (514-y)
+	// offsets keep the legacy distance-from-bottom of the old 512x514 layout.
+	gfx_set_scene_fullwindow (1);
+	int ch;
+	gfx_canvas_size (nullptr, &ch);
+
 	local_objects[0].location.z -= 100;
 
 	if (local_objects[0].location.z < 384)
@@ -71,11 +78,11 @@ void update_intro1 (void)
 
 	PlayerFlight().roll = 1;
 	update_local_objects();
-	
+
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
 
-	gfx_display_centre_text (320, "DEEPSPACE OUTPOST", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (360, "Press Space to Begin, Commander.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (ch - 194, "DEEPSPACE OUTPOST", 120, GFX_COL_WHITE);
+	gfx_display_centre_text (ch - 154, "Press Space to Begin, Commander.", 140, GFX_COL_GOLD);
 }
 
 
@@ -110,13 +117,19 @@ void update_intro2 (void)
 	}
 
 
+	// Client-space intro (see update_intro1): full-window ship parade + starfield, title
+	// centred, ship name + prompt anchored to the bottom edge.
+	gfx_set_scene_fullwindow (1);
+	int ch;
+	gfx_canvas_size (nullptr, &ch);
+
 	gfx_clear_display();
 	update_starfield();
 	update_local_objects();
 
 	gfx_draw_sprite (IMG_ELITE_TXT, -1, 10);
 
-	gfx_display_centre_text (360, "Press Fire or Space, Commander.", 140, GFX_COL_GOLD);
-	gfx_display_centre_text (330, ship_list[ship_no]->name, 120, GFX_COL_WHITE);
+	gfx_display_centre_text (ch - 184, ship_list[ship_no]->name, 120, GFX_COL_WHITE);
+	gfx_display_centre_text (ch - 154, "Press Fire or Space, Commander.", 140, GFX_COL_GOLD);
 }
 
