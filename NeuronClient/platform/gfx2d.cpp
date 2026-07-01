@@ -99,13 +99,11 @@ int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? 
 
 /* Placement of the authored 2D canvas onto the back buffer: the single source of the
  * virtual size + destination offset + scale that both the 2D replay and the 3D scene
- * pass use (see gfx2d_flush). Aspect-preserving scale-to-fit - fill the window as far as
- * one axis allows and centre the rest - is the transitional mapping (Phase 1 shim) while
- * screens migrate from the fixed 512x514 space to native client-space; on the fitted axis
- * the black bars go away. Full-window flight authors at the client size, so scale is 1 and
- * there is no offset. (Was an integer letterbox; fractional fit trades a little pixel-art
- * crispness on scaled retro screens for filling the window, and disappears per screen as
- * layouts move to client pixels.) */
+ * pass use (see gfx2d_flush). Native size, centred (D1): a fixed-size 2D screen (the retro
+ * 512x514 canvas) renders 1:1 with black margins around it; the full-window scene/HUD
+ * authors at the client size, so it fills the window (scale 1, no offset). Downscale only
+ * when the window is smaller than the canvas, so nothing is lost; never upscale, so pixel
+ * art stays crisp. */
 struct CanvasPlacement { int vw, vh, dstX, dstY; float scale; };
 
 CanvasPlacement canvasPlacement()
@@ -116,7 +114,7 @@ CanvasPlacement canvasPlacement()
 	const int cw = r ? r->clientWidth()  : vw;
 	const int ch = r ? r->clientHeight() : vh;
 	float scale = std::min(cw / static_cast<float>(vw), ch / static_cast<float>(vh));
-	if (scale < 1.0f) scale = 1.0f;
+	if (scale > 1.0f) scale = 1.0f; // native size max; shrink only if the window is smaller than the canvas
 	const int dstX = static_cast<int>((cw - vw * scale) * 0.5f);
 	const int dstY = static_cast<int>((ch - vh * scale) * 0.5f);
 	return { vw, vh, dstX, dstY, scale };

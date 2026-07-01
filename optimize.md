@@ -89,16 +89,15 @@ deleted when the last screen is migrated.
 
 ### 1.4 Steps
 
-1. **Single source of canvas placement + scale-to-fit shim. [DONE]** Centralise the
-   virtual→client mapping into one `canvasPlacement()` helper (vw/vh/offset/scale) that both
-   the 2D replay and the 3D scene pass consume, and switch the retro mapping from integer
-   letterbox to aspect-preserving scale-to-fit (fills the fitted axis, bars vanish there).
-   Keep the 512×514 authoring space for un-migrated screens — making `canvasW/H` return the
-   client size is the *end* state (step 5); doing it here would break every fixed-coordinate
-   screen. Full-window flight is unchanged (scale 1). Input is unaffected (retro screens are
-   keyboard-driven; the GUI overlay is already client-space). Transitional tradeoff: a little
-   pixel-art crispness on scaled retro screens, gone per-screen as layouts move to client
-   pixels.
+1. **Single source of canvas placement. [DONE]** Centralise the virtual→client mapping into
+   one `canvasPlacement()` helper (vw/vh/offset/scale) that both the 2D replay and the 3D
+   scene pass consume. Per D1 the retro 512×514 canvas is placed **native size, centred**
+   (scale 1, black margins; downscale only if the window is smaller than the canvas — never
+   upscale, so pixel art stays crisp). The full-window scene/HUD authors at the client size,
+   so it fills the window. The 512×514 authoring space is kept for the fixed-2D screens
+   (making `canvasW/H` return the client size is the *end* state, step 5). Input is
+   unaffected (retro screens are keyboard-driven; the GUI overlay is already client-space).
+   *(Started as a scale-to-fit shim; revised to native-centred once D1 was fixed.)*
 2. **Anchor model. [DONE]** Added `gfx_anchor(where, w, h, dx, dy, &ox, &oy)` (9-point
    `gfx_anchor_point`: corners/edges/centre + a canvas-pixel nudge) that computes the draw
    origin placing a `w×h` block within the current canvas rect, on top of the existing
@@ -116,11 +115,24 @@ deleted when the last screen is migrated.
    - **intro [DONE]** — `update_intro1/2` now opt into full-window (`gfx_set_scene_fullwindow`,
      FOV-preserving so the hero ship keeps its apparent size), centre the title sprite on the
      window, and anchor the prompts to the bottom edge. Needs an eyeball for exact framing.
-   - **Migration gotcha (learned here):** the 2D scissor (`g_scissor`) defaults to the retro
-     512×514 rect and is not reset per frame, so a screen going client-space **must** also set
-     the full-canvas clip (`gfx_set_scene_clip()` after `gfx_set_scene_fullwindow(1)`) or its
-     client-space 2D is silently clipped away (the 3D still shows — it uses its own viewport).
-     Apply this to every screen in the migration.
+   - **fixed-2D screens (charts / docked / station / market / missions) [DONE globally, no
+     per-screen edits]** — per D1 these stay authored in 512×514 and are placed native-size
+     centred by `canvasPlacement()` (step 1). Nothing to migrate per screen; they render 1:1
+     centred with black margins. Only *scenes* (which should fill the window) and per-gauge
+     HUD anchoring need active work.
+   - **scenes still on the retro path** — the game-over screen (`game_render_scene`, GameState
+     GameOver: starfield + ships + "GAME OVER") is a scene, so like the intro it should opt
+     into full-window (`gfx_set_scene_fullwindow`) rather than render native-centred. Small
+     follow-up, same pattern as the intro.
+   - **flight HUD** — already floats as a 512×514 block bottom-centred (`gfx_hud_anchor`).
+     Breaking it into individually edge/corner-anchored gauges (finer D1) is an optional
+     later refinement, not required for correctness.
+   - **Migration gotcha (learned on the intro):** the 2D scissor (`g_scissor`) defaults to the
+     retro 512×514 rect and is not reset per frame, so a screen that opts into **full-window**
+     (scenes) **must** also set the full-canvas clip (`gfx_set_scene_clip()` after
+     `gfx_set_scene_fullwindow(1)`) or its client-space 2D is silently clipped away (the 3D
+     still shows — it uses its own viewport). Fixed-2D screens stay retro, so their default
+     512×514 scissor matches their authoring and they are unaffected.
 4. **Migrate input hit-testing** to client space in lockstep with each screen: mouse
    mapping, and the chart crosshair (`cross_x/cross_y`) which is authored in virtual space.
 5. **Remove the letterbox machinery.** Delete `dstX/dstY/dstScale` from `Render2D::Begin`
