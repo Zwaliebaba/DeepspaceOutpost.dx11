@@ -7,7 +7,7 @@
  * (solid-colour and textured) feed a single command list, so lines/polygons,
  * sprites, the HUD bitmap and text all composite in the exact order the game draws
  * them. In gfx2d_flush() the batch replays through Neuron::Graphics::Render2D straight
- * onto the back buffer (letterboxed), and Renderer::swap() then presents it. An idle
+ * onto the back buffer (letterboxed), and Neuron::Graphics::Core::Present() then shows it. An idle
  * frame with an empty batch is left unpresented so the last frame persists (see
  * gfx2d_flush). (Formerly gfx_dx11.cpp, which had its own Direct3D 11 pipeline.)
  *

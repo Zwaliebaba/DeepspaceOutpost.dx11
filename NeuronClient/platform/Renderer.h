@@ -3,19 +3,19 @@
  *
  * Renderer.h
  *
- * Thin owner of the window's device/context/swap chain (adopted from
- * Neuron::Graphics::Core) plus the master palette. The 2D layer (Render2D) draws
- * straight to Core's back-buffer render target - the game's virtual 512x514 space
- * (or the client area in full-window flight) is letterboxed onto it by the viewport
- * in gfx2d_flush - so the renderer keeps no render targets of its own.
+ * The canvas/palette companion to Neuron::Graphics::Core. Core is the single owner of
+ * the D3D11 device/context/swap chain and the one place presentation and device-lost
+ * recovery live; Renderer keeps no device objects of its own and defers to Core for
+ * them. Its remaining jobs are the master palette and the cached client size the 2D
+ * letterbox math needs. The 2D layer (Render2D) draws straight to Core's back-buffer
+ * render target - the game's virtual 512x514 space (or the client area in full-window
+ * flight) is letterboxed onto it by the viewport in gfx2d_flush.
  */
 
 #ifndef RENDERER_H
 #define RENDERER_H
 
 #include <windows.h>
-#include <d3d11.h>
-#include <winrt/base.h>
 #include <cstdint>
 
 class Renderer
@@ -28,16 +28,13 @@ public:
 	static constexpr int kCanvasWidth  = 512;
 	static constexpr int kCanvasHeight = 514;
 
-	/* Adopt the device/context/swap chain Neuron::Graphics::Core created (ClientEngine
-	 * owns the lifetime) and load the palette. */
+	/* Confirm Core's device is up and load the palette + cache the client size.
+	 * (Core, owned by ClientEngine, created the device/swap chain already.) */
 	bool initAdopt();
 	void shutdown();
 
 	int clientWidth()  const { return client_w_; }
 	int clientHeight() const { return client_h_; }
-
-	/* Present the current back buffer. */
-	void swap();
 
 	/* Around Core::WindowSizeChanged (WM_SIZE): unbind render targets before it runs,
 	 * update the cached client size after. Core owns the back-buffer view and recreates
@@ -50,18 +47,9 @@ public:
 	uint32_t paletteColour(int index) const { return palette_[index & 0xff]; }
 	bool paletteLoaded() const { return palette_loaded_; }
 
-	ID3D11Device*        device()    const { return device_.get(); }
-	ID3D11DeviceContext* context()   const { return context_.get(); }
-	IDXGISwapChain*      swapChain() const { return swap_chain_.get(); }
-
 private:
 	bool loadPalette();
 
-	winrt::com_ptr<ID3D11Device>        device_;
-	winrt::com_ptr<ID3D11DeviceContext> context_;
-	winrt::com_ptr<IDXGISwapChain>      swap_chain_;
-
-	HWND hwnd_ = nullptr;
 	int  client_w_ = 0;
 	int  client_h_ = 0;
 

@@ -213,8 +213,10 @@ namespace Neuron::Client
       if (painted)
       {
         m_main->RenderCanvas(); // 2D UI (GUI overlay) on top of the scene
-        if (Renderer* r = platform_renderer())
-          r->swap();
+        // Core owns presentation: Present() picks the sync/tearing mode, discards the
+        // render-target/depth contents, and drives device-lost recovery off the Present
+        // HRESULT (the old Renderer::swap ignored it).
+        Graphics::Core::Present();
       }
 
       // Default the NEXT frame to the retro letterboxed canvas; the in-flight render path
