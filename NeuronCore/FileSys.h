@@ -7,7 +7,9 @@ namespace Neuron
   class FileSys
   {
     public:
-      static void SetHomeDirectory(const std::wstring& _path) { m_homeDir = _path + L"\\Assets\\"; }
+      // The game's assets (GameData/*) are staged directly next to the executable, so the
+      // home directory is the given path itself.
+      static void SetHomeDirectory(const std::wstring& _path) { m_homeDir = _path + L"\\"; }
       [[nodiscard]] static std::wstring GetHomeDirectory() { return m_homeDir; }
 
     protected:

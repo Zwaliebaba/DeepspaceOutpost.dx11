@@ -4,9 +4,9 @@
 //
 // Strings are loaded from JSON shipped under GameData/Strings/<language>/<class>.json
 // (each file a flat object mapping id -> localized value). Imported from the donor
-// and adapted to the target: it reads through the same CWD-relative asset convention
-// the rest of the game uses and parses with Neuron::Json, with no WinRT MRT /
-// Globalization dependency.
+// and adapted to the target: it reads through FileSys (home directory = the
+// executable's folder, where the assets are staged) and parses with Neuron::Json,
+// with no WinRT MRT / Globalization dependency.
 
 #include <string>
 
