@@ -48,7 +48,7 @@ namespace {
 struct ColorVertex { float x, y;          uint32_t rgba; };
 struct TexVertex   { float x, y, u, v;    uint32_t rgba; };
 
-enum class Kind { Color, Tex, Scene };
+enum class Kind { Color, Tex };
 enum class Topo { Points, Lines, Tris };
 
 struct Cmd
@@ -73,12 +73,12 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* 3D scene models for this frame (ships), collected via gfx2d_submit_model and
- * rendered through Scene3D at each scene marker (see gfx_finish_render / gfx2d_flush).
- * g_models_marked is the count already covered by a marker, so a second
- * StartRender/FinishRender bracket in the same frame renders only its own models. */
+/* 3D scene models for this frame (ships/planets/sun), collected via gfx2d_submit_model.
+ * g_haveScene records that a StartRender/FinishRender bracket ran this frame, so gfx2d_flush
+ * draws the 3D scene pass (skybox + dust + these models) once, before the 2D layer - even
+ * when g_models is empty (staring at empty space still shows the skybox). */
 std::vector<Neuron::Render::ModelDraw> g_models;
-uint32_t                               g_models_marked = 0;
+bool                                   g_haveScene = false;
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -591,27 +591,10 @@ void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
 
 void gfx_finish_render(void)
 {
-	/* Mark where the GPU 3D scene renders in submission order: the models collected
-	 * since the last marker draw here - after the 2D background just emitted, before the
-	 * HUD that follows. gfx2d_flush runs the depth-tested Scene3D pass at this point.
-	 *
-	 * Emit the marker even with no new models when the skybox is on: the skybox + dust are
-	 * the scene-pass background and must render every flight frame, including when you stare
-	 * at empty space (no ship / planet / sun in view). With the skybox off, keep the old
-	 * behaviour - no models, no marker, no pass. */
-	if (g_models.size() > g_models_marked || Neuron::Graphics::Scene3D::IsSkyboxEnabled())
-	{
-		Cmd c{};
-		c.kind = Kind::Scene;
-		c.topo = Topo::Tris;
-		c.start = g_models_marked;
-		c.count = static_cast<uint32_t>(g_models.size()) - g_models_marked;
-		c.scissor = g_scissor;
-		c.srv = nullptr;
-		c.xorop = false;
-		g_cmds.push_back(c);
-		g_models_marked = static_cast<uint32_t>(g_models.size());
-	}
+	/* A 3D scene bracket ran this frame, so gfx2d_flush draws the scene pass (skybox + dust +
+	 * the models collected in g_models) once, under the 2D layer. Set even when no models were
+	 * submitted, so the skybox still fills the background when nothing is in view. */
+	g_haveScene = true;
 }
 
 /* =====================================================================
@@ -623,15 +606,15 @@ bool gfx2d_flush(bool forcePresent)
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0; return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return false; }
 
 	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
 	 * previously presented frame stays on screen. The menu/station screens repaint only
 	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
 	 * empty batch here is what made those screens flash to black on idle frames. */
-	if (g_cmds.empty() && !forcePresent)
+	if (g_cmds.empty() && !g_haveScene && !forcePresent)
 	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_models_marked = 0;
+		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false;
 		return false;
 	}
 
@@ -657,6 +640,17 @@ bool gfx2d_flush(bool forcePresent)
 		ctx->ClearRenderTargetView(rtv, black);
 	}
 
+	/* The 3D scene (skybox -> dust -> depth-tested ships/planets/sun) is the under-layer, so
+	 * it runs once here - before the 2D replay - whenever a scene bracket ran this frame. The
+	 * 2D HUD / GUI then composites on top (no re-clear). This replaced the in-band scene
+	 * marker that used to splice the pass into the middle of the 2D batch. */
+	if (g_haveScene && rtv)
+	{
+		Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
+												static_cast<int>(vw * scale), static_cast<int>(vh * scale),
+												g_models.data(), static_cast<int>(g_models.size()));
+	}
+
 	if (!g_cmds.empty() && rtv)
 	{
 		/* Replay the submission-ordered command list through Render2D, letterboxed onto
@@ -677,23 +671,6 @@ bool gfx2d_flush(bool forcePresent)
 		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
-			if (c.kind == Kind::Scene)
-			{
-				/* End the 2D background batch drawn so far, run the depth-tested 3D scene
-				 * pass (ships), then resume a fresh 2D batch for the HUD that follows -
-				 * same target, no re-clear, so it composites on top. */
-				Canvas::End();
-				Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
-														static_cast<int>(vw * scale), static_cast<int>(vh * scale),
-														g_models.data() + c.start, static_cast<int>(c.count));
-				Canvas::Start(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
-				if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
-					g_font_sheet->GetHeight() > 0.0f)
-					Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(),
-											 1.0f / g_font_sheet->GetHeight(), 1.0f);
-				continue;
-			}
-
 			Render2D::SetClip(c.scissor.left, c.scissor.top, c.scissor.right - c.scissor.left,
 							  c.scissor.bottom - c.scissor.top);
 
@@ -732,6 +709,6 @@ bool gfx2d_flush(bool forcePresent)
 	g_tverts.clear();
 	g_cmds.clear();
 	g_models.clear();
-	g_models_marked = 0;
+	g_haveScene = false;
 	return true;
 }

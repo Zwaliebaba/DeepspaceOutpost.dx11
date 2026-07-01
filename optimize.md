@@ -301,8 +301,19 @@ past the split forces throwaway 2D-background scaffolding.
    Present`. `RenderCanvas` changed `void → bool` (contained: one override, one caller).
    Behaviour-preserving — same call order, same nested-frame handling, same idle-frame present
    gate (now returned from `RenderCanvas`).
-3. Lift the `Scene3D::RenderModels` call out of the `Kind::Scene` marker into
-   `RenderScene()` (after the background, §2.2); delete the marker + batch-split.
+3. **[DONE]** Lift the `Scene3D::RenderModels` call out of the in-band `Kind::Scene` marker;
+   delete the marker + batch-split. The 3D scene pass (skybox → dust → depth-tested
+   ships/planets/sun) now runs **once at the top of `gfx2d_flush`**, before the 2D replay,
+   gated by a per-frame `g_haveScene` flag that `gfx_finish_render` sets when a
+   `StartRender/FinishRender` bracket ran (replacing the positional marker + `g_models_marked`
+   bookkeeping). The 2D HUD/GUI then composites on top with no re-clear — layer order is now
+   fixed by structure, not by an in-band splice. (The GPU call stays in the flush rather than
+   physically inside the `RenderScene()` hook because `game_render_scene()` *records* both 2D
+   and 3D in one pass and the flush owns the back-buffer clear; relocating it into the hook
+   would need the game's render split + clear-ownership moved too — deferred, not needed for
+   the marker deletion.) Also subsumes the earlier "emit the marker even with no models when
+   the skybox is on" fix: `g_haveScene` is set by the bracket itself, so empty space still
+   shows the skybox.
 4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool
    and the `painted` guard (`ClientEngine.cpp:210-220`); always render + present.
 5. **(Optional, larger)** Short-circuit the client `RenderQueue` round-trip: have
