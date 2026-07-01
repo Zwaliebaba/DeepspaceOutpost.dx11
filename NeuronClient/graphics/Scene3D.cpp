@@ -14,6 +14,8 @@
 #include "scene3dVS.h" // g_scene3dVS
 #include "scenebbPS.h" // g_scenebbPS - planet/sun billboard pixel shader
 #include "scenebbVS.h" // g_scenebbVS - planet/sun billboard vertex shader
+#include "skyboxPS.h"  // g_skyboxPS  - procedural skybox background
+#include "skyboxVS.h"  // g_skyboxVS  - full-screen-triangle skybox vertex shader
 
 using winrt::com_ptr;
 using winrt::check_hresult;
@@ -60,6 +62,23 @@ namespace Neuron::Graphics
     };
     static_assert(sizeof(ShipLightConstants) == 128, "ShipLightConstants must match the ShipLightCb cbuffer");
 
+    // Mirrors SkyboxCb in shaders/partials/skybox.hlsli (gradient colours + star params).
+    struct SkyboxParams
+    {
+      float top[4];    // gradient colour at the top of the view
+      float bottom[4]; // gradient colour at the bottom
+      float params[4]; // x = star threshold, y = star brightness, z = grid density, w spare
+    };
+    static_assert(sizeof(SkyboxParams) == 48, "SkyboxParams must match the SkyboxCb cbuffer");
+
+    // First-pass skybox look (tune to taste - these are the knobs for iterating on the
+    // background). Deep-space blue fading to near-black, with a sparse scatter of stars.
+    constexpr float kSkyTop[3] = {0.020f, 0.028f, 0.070f};
+    constexpr float kSkyBottom[3] = {0.000f, 0.002f, 0.020f};
+    constexpr float kStarThreshold = 0.985f; // fraction of cells WITHOUT a star (higher = fewer)
+    constexpr float kStarBrightness = 0.9f;
+    constexpr float kStarDensity = 220.0f;
+
     // A fixed directional light from the upper-right, angled slightly toward the camera
     // (view space: +z is forward). ambient + diffuse == 1, so a fully-lit face keeps its
     // original palette colour and shadowed faces darken toward 0.4x.
@@ -104,6 +123,10 @@ namespace Neuron::Graphics
     s_bbVb = nullptr;
     s_bbParamsCb = nullptr;
     s_shipLightCb = nullptr;
+    s_skyVs = nullptr;
+    s_skyPs = nullptr;
+    s_skyCb = nullptr;
+    s_skyDepth = nullptr;
     s_meshes.clear();
     s_ready = false;
     // s_provider is set by the game once at startup; keep it across device resets.
@@ -188,6 +211,25 @@ namespace Neuron::Graphics
     lcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     check_hresult(device->CreateBuffer(&lcbd, nullptr, s_shipLightCb.put()));
 
+    // Procedural skybox: full-screen-triangle VS (no input layout / vertex buffer) + PS,
+    // its b0 params, and a depth-disabled state (it fills the background without touching
+    // the depth buffer, so the depth-tested ships draw over it).
+    check_hresult(device->CreateVertexShader(g_skyboxVS, sizeof(g_skyboxVS), nullptr, s_skyVs.put()));
+    check_hresult(device->CreatePixelShader(g_skyboxPS, sizeof(g_skyboxPS), nullptr, s_skyPs.put()));
+
+    D3D11_BUFFER_DESC skcbd{};
+    skcbd.ByteWidth = sizeof(SkyboxParams);
+    skcbd.Usage = D3D11_USAGE_DYNAMIC;
+    skcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    skcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    check_hresult(device->CreateBuffer(&skcbd, nullptr, s_skyCb.put()));
+
+    D3D11_DEPTH_STENCIL_DESC skdsd{};
+    skdsd.DepthEnable = FALSE;
+    skdsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    skdsd.StencilEnable = FALSE;
+    check_hresult(device->CreateDepthStencilState(&skdsd, s_skyDepth.put()));
+
     s_ready = true;
     return true;
   }
@@ -228,6 +270,44 @@ namespace Neuron::Graphics
     return &it->second;
   }
 
+  void Scene3D::renderSkybox()
+  {
+    ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
+    if (!ctx)
+      return;
+
+    SkyboxParams sp{};
+    sp.top[0] = kSkyTop[0]; sp.top[1] = kSkyTop[1]; sp.top[2] = kSkyTop[2]; sp.top[3] = 1.0f;
+    sp.bottom[0] = kSkyBottom[0]; sp.bottom[1] = kSkyBottom[1]; sp.bottom[2] = kSkyBottom[2]; sp.bottom[3] = 1.0f;
+    sp.params[0] = kStarThreshold;
+    sp.params[1] = kStarBrightness;
+    sp.params[2] = kStarDensity;
+    sp.params[3] = 0.0f;
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (FAILED(ctx->Map(s_skyCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+      return;
+    std::memcpy(mapped.pData, &sp, sizeof(sp));
+    ctx->Unmap(s_skyCb.get(), 0);
+
+    // Full-screen triangle from SV_VertexID: no input layout / vertex buffer. Depth off
+    // (fills the background without touching depth); opaque; cull-none raster.
+    ctx->OMSetDepthStencilState(s_skyDepth.get(), 0);
+    ctx->RSSetState(s_raster.get());
+    const float blendFactor[4] = {0, 0, 0, 0};
+    ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11Buffer* noVb = nullptr;
+    const UINT zero = 0;
+    ctx->IASetVertexBuffers(0, 1, &noVb, &zero, &zero);
+    ctx->VSSetShader(s_skyVs.get(), nullptr, 0);
+    ctx->PSSetShader(s_skyPs.get(), nullptr, 0);
+    ID3D11Buffer* cb = s_skyCb.get();
+    ctx->PSSetConstantBuffers(0, 1, &cb);
+    ctx->Draw(3, 0);
+  }
+
   void Scene3D::RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
                              const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
                              const Neuron::Render::ModelDraw* _models, int _count)
@@ -257,6 +337,12 @@ namespace Neuron::Graphics
 
     s_view = _view;
     const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
+
+    // Procedural skybox behind the ships, when enabled. Depth-disabled, so it fills the
+    // colour buffer without touching the just-cleared depth; the ships draw over it. The
+    // shared ship state below overrides the skybox's pipeline state before the draw loop.
+    if (s_skybox)
+      renderSkybox();
 
     // Shared pipeline state. The ship + billboard programs use the same input layout,
     // topology, depth, cull and blend; only the shaders + buffers differ per draw.

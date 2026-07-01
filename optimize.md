@@ -251,6 +251,19 @@ loop-refactor commits:
 Landing it first makes `RenderScene()` own the whole under-layer cleanly; deferring it
 past the split forces throwaway 2D-background scaffolding.
 
+**Progress:**
+- **Skybox scaffold [DONE, off by default]** — `skyboxVS/PS.hlsl` (full-screen triangle from
+  `SV_VertexID`; gradient + procedural screen-space stars, params in b0) + `Scene3D::renderSkybox`
+  drawn depth-disabled at the start of the scene pass, gated by `Scene3D::SetSkyboxEnabled` (D3).
+  Off by default so behaviour is unchanged; the CMake `*.hlsl` glob compiles + CI-validates the
+  new shaders. Tuning knobs are the `kSky*` / `kStar*` constants in `Scene3D.cpp`. Two follow-ups:
+  (a) the stars are screen-space for now — an orientation-aware version needs the camera
+  orientation plumbed into the pass; (b) enabling the skybox currently occludes the 2D starfield,
+  so the **dust** migration (below) is required before it can be the default.
+- **Dust migration [TODO]** — move the `stars.cpp` starfield into the scene pass as depth-tested
+  3D points (density + parallax, D4), drawn over the skybox. This is what lets the skybox go on
+  by default and completes the "RenderScene owns the under-layer" goal.
+
 ### 2.4 Steps (each behaviour-preserving)
 
 1. **`Canvas::Start()/End()` bracket. [DONE]** Added `Canvas::Start/End` (D2 — on the existing
