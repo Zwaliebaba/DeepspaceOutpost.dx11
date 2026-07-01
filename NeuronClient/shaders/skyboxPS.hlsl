@@ -11,5 +11,8 @@ float4 PSMain(VSOut _i) : SV_Target
     // camera->world = R * v, with R's rows in u_Rot0..2.
     const float3 dir = float3(dot(u_Rot0.xyz, v), dot(u_Rot1.xyz, v), dot(u_Rot2.xyz, v));
 
-    return float4(g_Sky.Sample(g_SkySampler, dir).rgb, 1.0);
+    // The source cubemap is very dark (average ~3/255); lift it by a tunable exposure so the
+    // whole sky is visible, not just the brightest cluster. Bright stars simply clip to white.
+    const float3 col = g_Sky.Sample(g_SkySampler, dir).rgb * u_Params.z;
+    return float4(saturate(col), 1.0);
 }

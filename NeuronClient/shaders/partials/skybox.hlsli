@@ -13,7 +13,7 @@
 
 cbuffer SkyboxCb : register(b0)
 {
-    float4 u_Params; // x = tan(halfFovY), y = aspect (w/h), z/w unused
+    float4 u_Params; // x = tan(halfFovY), y = aspect (w/h), z = exposure (colour multiplier), w unused
     float4 u_Rot0;   // camera->world rotation, row 0 (xyz; w unused)
     float4 u_Rot1;   // row 1
     float4 u_Rot2;   // row 2

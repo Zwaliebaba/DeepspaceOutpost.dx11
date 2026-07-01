@@ -78,6 +78,11 @@ namespace Neuron::Graphics
     // Asset-relative path (CWD is the exe folder; GameData is staged next to it).
     constexpr char kSkyboxCubemap[] = "Textures/Skybox.dds";
 
+    // The Skybox.dds art averages ~3/255 - near-black on screen. Multiply the sampled colour
+    // so the whole sky reads, not just the brightest cluster. Tune to taste (or re-export a
+    // brighter texture and drop this back toward 1).
+    constexpr float kSkyExposure = 8.0f;
+
     // A fixed directional light from the upper-right, angled slightly toward the camera
     // (view space: +z is forward). ambient + diffuse == 1, so a fully-lit face keeps its
     // original palette colour and shadowed faces darken toward 0.4x.
@@ -314,6 +319,7 @@ namespace Neuron::Graphics
     // Frustum half-extents at z = 1: tan(halfFovY) = (h/2)/focal; tan(halfFovX) = tanY * aspect.
     sp.params[0] = (s_view.focal > 0.0) ? static_cast<float>((s_view.height * 0.5) / s_view.focal) : 0.375f;
     sp.params[1] = (s_view.height > 0) ? static_cast<float>(s_view.width) / static_cast<float>(s_view.height) : 1.0f;
+    sp.params[2] = kSkyExposure;
     sp.rot0[0] = s_skyRot[0]; sp.rot0[1] = s_skyRot[1]; sp.rot0[2] = s_skyRot[2];
     sp.rot1[0] = s_skyRot[3]; sp.rot1[1] = s_skyRot[4]; sp.rot1[2] = s_skyRot[5];
     sp.rot2[0] = s_skyRot[6]; sp.rot2[1] = s_skyRot[7]; sp.rot2[2] = s_skyRot[8];
