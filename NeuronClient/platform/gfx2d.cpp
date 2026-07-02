@@ -73,12 +73,10 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* 3D scene models for this frame (ships/planets/sun), collected via gfx2d_submit_model.
- * g_haveScene records that a StartRender/FinishRender bracket ran this frame, so gfx2d_flush
- * draws the 3D scene pass (skybox + dust + these models) once, before the 2D layer - even
- * when g_models is empty (staring at empty space still shows the skybox). */
-std::vector<Neuron::Render::ModelDraw> g_models;
-bool                                   g_haveScene = false;
+/* The frame's 3D scene (skybox + dust + the models the game handed straight to Scene3D via
+ * Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls directly at
+ * the end of its world draw - even with no models in view (staring at empty space still shows
+ * the skybox). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -576,7 +574,6 @@ void gfx_draw_scanner(void)
 }
 
 /* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
-void gfx_start_render(void) { /* no-op: the painter's chain was retired (see Scene3D). */ }
 
 /* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
  * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */
@@ -585,44 +582,41 @@ void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
 	gfx_draw_colour_line(x1, y1, x2, y2, col);
 }
 
-void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model)
-{
-	g_models.push_back(_model);
-}
-
-void gfx_finish_render(void)
-{
-	/* A 3D scene bracket ran this frame, so gfx2d_flush draws the scene pass (skybox + dust +
-	 * the models collected in g_models) once, under the 2D layer. Set even when no models were
-	 * submitted, so the skybox still fills the background when nothing is in view. */
-	g_haveScene = true;
-}
 
 /* =====================================================================
- *  Flush
+ *  Scene pass + 2D flush
  * ===================================================================== */
-bool gfx2d_flush(bool forcePresent)
+
+/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun). The game calls
+ * this directly at the end of its world draw (update_local_objects / render_replicated_objects),
+ * once all models are submitted (Scene3D::SubmitModel) and the dust is set - so it drives the
+ * pass itself, with no separate scene-marker flag. No clear (ClientEngine::Frame clears the
+ * back buffer once per frame, before the scene hook) and no 2D; the HUD / menus / GUI composite
+ * over it later in gfx2d_flush. Runs unconditionally (drawing the skybox even with no models in
+ * view), and safely on a null rtv (device lost) - Scene3D still clears the frame's model list. */
+void gfx_render_3d_scene(void)
+{
+	using Neuron::Graphics::Core;
+
+	const CanvasPlacement cp = canvasPlacement();
+	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
+											g_view, cp.dstX, cp.dstY,
+											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
+}
+
+void gfx2d_flush(void)
 {
 	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false; return false; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
 
-	/* Nothing drawn this frame and no forced repaint: leave the back buffer alone so the
-	 * previously presented frame stays on screen. The menu/station screens repaint only
-	 * on demand, and FLIP_DISCARD keeps no retained content, so clearing+presenting an
-	 * empty batch here is what made those screens flash to black on idle frames. */
-	if (g_cmds.empty() && !g_haveScene && !forcePresent)
-	{
-		g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_models.clear(); g_haveScene = false;
-		return false;
-	}
-
-	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
-	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
-	 * replay and the 3D scene pass both consume the same rect. No off-screen canvas / blit:
-	 * the viewport scales the virtual space straight onto the back buffer. */
+	/* 2D only. The back buffer is cleared once per frame by ClientEngine::Frame (before the
+	 * scene hook), and the 3D scene pass is drawn by the game via gfx_render_3d_scene() during
+	 * RenderScene - this just composites the 2D HUD / menus / GUI on top of it (no re-clear).
+	 * Every screen redraws every frame, so there is no empty frame to skip and the caller always
+	 * presents. */
 	const CanvasPlacement cp = canvasPlacement();
 	const int vw = cp.vw;
 	const int vh = cp.vh;
@@ -631,26 +625,6 @@ bool gfx2d_flush(bool forcePresent)
 	const float scale = cp.scale;
 
 	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
-	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
-
-	/* Clear the whole back buffer (letterbox bars + anything the batch does not paint)
-	 * before this frame's content. */
-	if (rtv && ctx)
-	{
-		const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-		ctx->ClearRenderTargetView(rtv, black);
-	}
-
-	/* The 3D scene (skybox -> dust -> depth-tested ships/planets/sun) is the under-layer, so
-	 * it runs once here - before the 2D replay - whenever a scene bracket ran this frame. The
-	 * 2D HUD / GUI then composites on top (no re-clear). This replaced the in-band scene
-	 * marker that used to splice the pass into the middle of the 2D batch. */
-	if (g_haveScene && rtv)
-	{
-		Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
-												static_cast<int>(vw * scale), static_cast<int>(vh * scale),
-												g_models.data(), static_cast<int>(g_models.size()));
-	}
 
 	if (!g_cmds.empty() && rtv)
 	{
@@ -709,7 +683,4 @@ bool gfx2d_flush(bool forcePresent)
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
-	g_models.clear();
-	g_haveScene = false;
-	return true;
 }

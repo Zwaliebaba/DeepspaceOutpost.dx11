@@ -278,7 +278,7 @@ past the split forces throwaway 2D-background scaffolding.
   (c) **[DONE]** the skybox is default-on and the legacy 2D white-pixel starfield is deleted -
       `stars.cpp` now emits only the 3D dust (over the skybox) plus the warp-jump streaks; the
       star sim still drives the dust. The scene pass also draws the skybox background even with
-      no models in view (`gfx_finish_render` emits the scene marker when the skybox is on, and
+      no models in view (the game runs `gfx_render_3d_scene()` at the end of every world draw, and
       `Scene3D::RenderModels` draws the background before the model-count guard), so empty space
       no longer goes black.
 
@@ -303,26 +303,60 @@ past the split forces throwaway 2D-background scaffolding.
    gate (now returned from `RenderCanvas`).
 3. **[DONE]** Lift the `Scene3D::RenderModels` call out of the in-band `Kind::Scene` marker;
    delete the marker + batch-split. The 3D scene pass (skybox → dust → depth-tested
-   ships/planets/sun) now runs **once at the top of `gfx2d_flush`**, before the 2D replay,
-   gated by a per-frame `g_haveScene` flag that `gfx_finish_render` sets when a
-   `StartRender/FinishRender` bracket ran (replacing the positional marker + `g_models_marked`
-   bookkeeping). The 2D HUD/GUI then composites on top with no re-clear — layer order is now
-   fixed by structure, not by an in-band splice. (The GPU call stays in the flush rather than
-   physically inside the `RenderScene()` hook because `game_render_scene()` *records* both 2D
-   and 3D in one pass and the flush owns the back-buffer clear; relocating it into the hook
-   would need the game's render split + clear-ownership moved too — deferred, not needed for
-   the marker deletion.) Also subsumes the earlier "emit the marker even with no models when
-   the skybox is on" fix: `g_haveScene` is set by the bracket itself, so empty space still
-   shows the skybox.
-4. Retire the idle-frame present gate (D5) — drop `gfx2d_flush`'s `forcePresent`/return-bool
-   and the `painted` guard (`ClientEngine.cpp:210-220`); always render + present.
-5. **(Optional, larger)** Short-circuit the client `RenderQueue` round-trip: have
-   `RenderScene()` consume recorded `ModelDraw`s directly for `Scene3D`, instead of
-   `DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model`. Keep the queue for
-   headless (§5).
-6. Delete dead machinery: `Kind::Scene`, `gfx2d_submit_model`,
-   `gfx_start_render/gfx_finish_render`, `forcePresent`, and — if nesting is reworked —
-   `s_inLifecycle`. Sweep references before each removal.
+   ships/planets/sun) was first lifted to run **once at the top of `gfx2d_flush`**, before the
+   2D replay, gated by a per-frame `g_haveScene` flag that `gfx_finish_render` set (replacing
+   the positional marker + `g_models_marked` bookkeeping). The 2D HUD/GUI then composites on top
+   with no re-clear — layer order is now fixed by structure, not by an in-band splice.
+   *(Follow-ups, both since landed: the back-buffer clear moved to `ClientEngine::Frame` and the
+   pass moved into its own function `gfx_render_3d_scene()`, driven by the game at the end of its
+   world draw; the `g_haveScene` flag + the `gfx2d_flush`-owned pass are gone — see Step 6.)*
+   Also subsumes the earlier "emit the marker even with no models when the skybox is on" fix:
+   the pass runs whenever the game finishes a world draw, so empty space still shows the skybox.
+4. **[DONE]** Retire the idle-frame present gate (D5). `gfx2d_flush` is now `void` with no
+   `forcePresent` and no empty-batch gate — it always clears + draws. The docked legacy
+   screens that used to repaint on demand (`SCR_CMDR_STATUS`, `SCR_PLANET_DATA`) now redraw
+   every frame in `game_render_flight` (like the charts already did; both are idempotent),
+   so there are no empty frames during normal play. Originally one deliberate present-skip
+   remained — a **paused** game, via `GameApp::RenderCanvas` returning `false` when
+   `game_paused && !overlay`. **Pause was later removed outright** (it has no meaning in an
+   MMO — the server sim keeps running regardless), taking the `game_paused` flag, the P/R
+   keys, and the `RenderCanvas` `bool` return with it: `RenderCanvas` is `void` again and
+   `ClientEngine::Frame` presents unconditionally. So D5's "always present" is now literal,
+   with **no** exceptions.
+5. **[DONE]** Short-circuit the client model round-trip. The game's draw pass now calls
+   `Scene3D::SubmitModel(md)` directly (from `threed.cpp`), instead of
+   `ActiveRenderQueue().DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model →
+   g_models`. `Scene3D` owns the frame's models (`s_models`, alongside `s_dust`); `RenderModels`
+   consumes + clears them (no models parameter). `gfx2d`'s `g_models` + `gfx2d_submit_model`
+   are deleted. `GfxRenderSink::DrawModel` now forwards to `Scene3D::SubmitModel`, so the
+   `RenderQueue` seam + `RenderQueueTests` stay correct (per §5). Note the queue itself is
+   **not** removed — the game still records 2D primitives through it (laser bolt/sights, warp
+   streaks, explosion sparks) + `FinishRender`; only the `DrawModel` command became game-unused
+   (test-only now).
+6. **[DONE]** Delete dead machinery. Removed as they became dead:
+   - `Kind::Scene` + `g_models_marked` — deleted in Step 3 (marker retired).
+   - `forcePresent` + the idle-batch gate + the `painted` return — deleted in Step 4.
+   - **`StartRender` bracket half** — `gfx_start_render` was a no-op and the scene is gated
+     entirely by `g_haveScene` (set in `FinishRender`), so the whole `StartRender` chain is
+     gone: `RenderSink::StartRender`, `CommandType::StartRender`, `RenderQueue::StartRender`,
+     `GfxRenderSink::StartRender`, `gfx_start_render`, both `space.cpp` call sites, and the
+     null/test sink overrides.
+   - **`gfx2d_submit_model`** — deleted in Step 5 (`Scene3D::SubmitModel` short-circuit).
+   - **The `gfx_finish_render` / `g_haveScene` scene-marker handshake** — deleted. Once the 3D
+     pass moved out of `gfx2d_flush` into its own function (the §2.1 clean split), the flag was
+     the last piece of the old marker protocol: the game set `g_haveScene` at the end of its
+     world draw and a separate hook (`gfx2d_render_scene`, called from `RenderScene`) later read
+     it to decide whether to run the pass. Collapsed into a single **game-driven** call —
+     `gfx_render_3d_scene()` (implemented in `gfx2d.cpp`, declared in `gfx.h`) runs the pass
+     directly at the point the game finishes its world draw (`update_local_objects` /
+     `render_replicated_objects` in `space.cpp`), on the already-cleared back buffer, before the
+     2D composites over it. `gfx_finish_render`, `g_haveScene`, and the `gfx2d_render_scene` hook
+     are gone; `GameApp::RenderScene` is now just `game_render_scene()`. The model-list hygiene is
+     preserved (the call is unconditional and every model-submitting path ends in it) and empty
+     space still shows the skybox (the pass runs even with no models in view).
+
+   Still live by design: `s_inLifecycle` is needed for the nested blocking sequences (D6), so it
+   stays until/unless the nesting is reworked.
 
 ### 2.5 Phase-2 preservation checklist
 
@@ -359,12 +393,19 @@ interpolation. Not required by either phase above.
 
 ---
 
-## 5. Server / headless — untouched
+## 5. Server / headless
 
-The `RenderQueue` + `RenderSink` seam stays so the dedicated server, bot client, and
-golden-run tests keep recording into a queue and replaying into `NullRenderSink`
-(`RenderQueue.h`). Phase 2 step 5 only changes **which** sink the *client* uses; it does
-not remove the queue or the null path. `RenderQueueTests` keep passing.
+**Update (post-Step 5):** the `RenderQueue` + `RenderSink` seam has been **removed** entirely
+(`RenderQueue`, `RenderContext`, `GfxRenderSink`, `NullRenderSink`, and `RenderQueueTests` are
+gone). It turned out to add no runtime value on the client (the game recorded and *immediately*
+replayed same-frame) and had no real headless user — nothing but the unit tests ever ran the
+game's draw code through it. The game now calls the `gfx_*` 2D primitives directly (laser
+bolt/sights, warp streaks, explosion sparks) and hands 3D models straight to
+`Scene3D::SubmitModel`, matching how the HUD/menu code already draws. `ModelDraw` (the one piece
+worth keeping - the game↔`Scene3D` data contract) moved to its own header, `ModelDraw.h`.
+
+The dedicated server / `GameLogic` never ran the game's draw code (it's the authoritative sim),
+so it is unaffected.
 
 ---
 
@@ -384,6 +425,8 @@ the Decisions table with the next Dn id.
   the star migration (§2.3) extends `Scene3D` with a skybox draw + a dust-particle program;
   that is a deliberate, isolated feature change, not part of the structural refactor.
 - `Core` device/present/device-lost — already unified.
-- The `RenderQueue`/`RenderSink` contract and its headless path (§5).
+- ~~The `RenderQueue`/`RenderSink` contract and its headless path (§5).~~ **Superseded:** the
+  seam was retired after Step 5 (see §5) — it earned no keep on the client. This reverses the
+  original out-of-scope call, by explicit decision.
 - Frame pacing / message pump (`ClientEngine.cpp:227-250`).
 - Delta-time logic conversion (§3) — explicitly deferred.

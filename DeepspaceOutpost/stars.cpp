@@ -8,7 +8,6 @@
 #include "elite.h"
 #include "gfx.h"
 #include "GameUniverse.h"
-#include "RenderContext.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SetDust - starfield as scene-pass dust
 #include "vector.h"
 #include "stars.h"
@@ -154,7 +153,7 @@ void front_starfield (void)
 		{
 			int ex, ey;
 			star_to_screen (xx, yy, &ex, &ey);
-			ActiveRenderQueue().Line (sx, sy, ex, ey);
+			gfx_draw_line (sx, sy, ex, ey);
 		}
 
 		sx = xx;
@@ -233,7 +232,7 @@ void rear_starfield (void)
 			star_to_screen (xx, yy, &ex, &ey);
 
 			if (star_on_screen (sx, sy) && star_on_screen (ex, ey))
-				ActiveRenderQueue().Line (sx, sy, ex, ey);
+				gfx_draw_line (sx, sy, ex, ey);
 		}
 
 		stars[i].y = yy;
@@ -318,7 +317,7 @@ void side_starfield (void)
 		{
 			int ex, ey;
 			star_to_screen (xx, yy, &ex, &ey);
-			ActiveRenderQueue().Line (sx, sy, ex, ey);
+			gfx_draw_line (sx, sy, ex, ey);
 		}
 
 		
@@ -476,11 +475,8 @@ void update_starfield (void)
 			break;
 	}
 
-	/* Replay any recorded 2D primitives (now just the warp-jump streaks) into the gfx
-	   backend at this same point in submission order. */
-	FlushRenderQueue();
-
 	/* Hand this frame's stars to the scene pass as dust; Scene3D draws them over the
-	   skybox as the streaming-speed cue. */
+	   skybox as the streaming-speed cue. (The warp-jump streaks above are drawn straight
+	   through gfx_draw_line now - no render queue.) */
 	Neuron::Graphics::Scene3D::SetDust (s_dustQuads.data(), static_cast<int>(s_dustQuads.size()));
 }

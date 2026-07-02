@@ -12,7 +12,6 @@ add_executable(NeuronClient.Tests
     UniverseTests.cpp
     ReplicatedSceneTests.cpp
     ViewMetricsTests.cpp
-    RenderQueueTests.cpp
     SceneProjectionTests.cpp
     MeshTests.cpp
 )

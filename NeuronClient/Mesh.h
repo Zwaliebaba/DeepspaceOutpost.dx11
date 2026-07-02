@@ -16,6 +16,7 @@
 // POD inputs, so it is unit-tested headlessly and the client adapts the real
 // tables (resolving palette colours via col_rgba, etc.) when it registers meshes.
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -100,6 +101,59 @@ namespace Neuron::Graphics
         out.indices.push_back(base);
         out.indices.push_back(base + static_cast<uint32_t>(i));
         out.indices.push_back(base + static_cast<uint32_t>(i + 1));
+      }
+    }
+
+    return out;
+  }
+
+  // Build a smooth UV sphere of the given model-space radius as a lit, single-colour mesh
+  // (used for the 3D planet). Each vertex's normal is its outward unit direction, so the
+  // per-vertex directional lighting in the scene shader gives a smooth day/night terminator.
+  // _stacks is the latitude band count (pole to pole), _slices the longitude count; the seam
+  // longitude is duplicated so the grid is regular. Winding is CCW when viewed from outside,
+  // but Scene3D rasterizes cull-none, so the z-buffer resolves visibility either way.
+  [[nodiscard]] inline MeshData BuildUVSphere(float _radius, int _stacks, int _slices, uint32_t _rgba)
+  {
+    MeshData out;
+    if (_radius <= 0.0f || _stacks < 2 || _slices < 3)
+      return out;
+
+    constexpr float kPi = 3.14159265358979323846f;
+
+    // (_stacks+1) rings x (_slices+1) vertices. phi runs 0..pi (top pole to bottom pole),
+    // theta runs 0..2pi around the axis.
+    for (int i = 0; i <= _stacks; ++i)
+    {
+      const float phi = kPi * static_cast<float>(i) / static_cast<float>(_stacks);
+      const float sp = std::sin(phi);
+      const float cp = std::cos(phi);
+      for (int j = 0; j <= _slices; ++j)
+      {
+        const float theta = 2.0f * kPi * static_cast<float>(j) / static_cast<float>(_slices);
+        const float nx = sp * std::cos(theta);
+        const float ny = cp;
+        const float nz = sp * std::sin(theta);
+        out.vertices.push_back(MeshVertex{nx * _radius, ny * _radius, nz * _radius, nx, ny, nz, _rgba});
+      }
+    }
+
+    // Two triangles per grid quad.
+    const int ring = _slices + 1;
+    for (int i = 0; i < _stacks; ++i)
+    {
+      for (int j = 0; j < _slices; ++j)
+      {
+        const uint32_t a = static_cast<uint32_t>(i * ring + j);
+        const uint32_t b = static_cast<uint32_t>((i + 1) * ring + j);
+        const uint32_t c = static_cast<uint32_t>((i + 1) * ring + j + 1);
+        const uint32_t d = static_cast<uint32_t>(i * ring + j + 1);
+        out.indices.push_back(a);
+        out.indices.push_back(b);
+        out.indices.push_back(c);
+        out.indices.push_back(a);
+        out.indices.push_back(c);
+        out.indices.push_back(d);
       }
     }
 

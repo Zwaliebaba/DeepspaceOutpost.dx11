@@ -11,25 +11,16 @@
 #ifndef GFX2D_H
 #define GFX2D_H
 
-#include "RenderQueue.h" // Neuron::Render::ModelDraw
+#include "ModelDraw.h" // Neuron::Render::ModelDraw (kept for transitive consumers)
 
-// Collect a 3D model instance for this frame's GPU scene pass. Called by the render
-// sink when it replays a DrawModel command; the models are rendered (depth-tested)
-// through Scene3D inside gfx2d_flush, composited between the 2D scene background and
-// the HUD - matching the legacy "ships over the planet, under the HUD" draw order.
-void gfx2d_submit_model(const Neuron::Render::ModelDraw& _model);
-
-// Replay this frame's 2D batch to the back buffer. Returns true if a frame was
-// painted (caller should present it), false if there was nothing to draw and the
-// back buffer was left untouched.
+// Replay this frame's 2D batch (HUD / menus) to the back buffer, over the 3D scene pass.
 //
-// The menu/station screens only repaint on demand (not every frame), so on an idle
-// frame the batch is empty. The swap chain uses FLIP_DISCARD, which keeps no retained
-// content, so painting+presenting an empty batch would clear the screen to black.
-// Instead, an empty batch is a no-op (returns false) and the previously presented
-// frame stays on screen - the role the old off-screen canvas used to fill. Pass
-// forcePresent=true to clear and present a frame even when the batch is empty (the GUI
-// overlay needs a fresh frame to composite onto).
-bool gfx2d_flush(bool forcePresent);
+// The 3D scene pass itself is driven by the game via gfx_render_3d_scene() (declared in gfx.h),
+// called at the end of its world draw - not from here.
+//
+// Every screen redraws every frame now (flight HUD, charts, docked legacy screens, the 3D
+// scene pass), so the batch is never empty during normal play and this always clears +
+// draws + is present-ready; the caller always presents. There is no idle-frame gate here.
+void gfx2d_flush(void);
 
 #endif /* GFX2D_H */

@@ -35,8 +35,6 @@ extern int kbd_find_pressed;
 extern int kbd_fire_missile_pressed;
 extern int kbd_target_missile_pressed;
 extern int kbd_unarm_missile_pressed;
-extern int kbd_pause_pressed;
-extern int kbd_resume_pressed;
 extern int kbd_inc_speed_pressed;
 extern int kbd_dec_speed_pressed;
 extern int kbd_up_pressed;

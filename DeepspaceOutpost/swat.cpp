@@ -12,7 +12,6 @@
 
 #include "config.h"
 #include "gfx.h"
-#include "RenderContext.h"
 #include "GameUniverse.h"
 #include "elite.h"
 #include "vector.h"
@@ -881,19 +880,16 @@ void draw_laser_lines (void)
 
 	if (wireframe)
 	{
-		ActiveRenderQueue().ColourLine (x1, by, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (x2, by, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (x3, by, laser_x, laser_y, GFX_COL_WHITE);
-		ActiveRenderQueue().ColourLine (x4, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x1, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x2, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x3, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x4, by, laser_x, laser_y, GFX_COL_WHITE);
 	}
 	else
 	{
-		ActiveRenderQueue().Triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
-		ActiveRenderQueue().Triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
+		gfx_draw_triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
+		gfx_draw_triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
 	}
-
-	/* Replay the recorded laser lines at this same point (identical output). */
-	FlushRenderQueue();
 }
 
 

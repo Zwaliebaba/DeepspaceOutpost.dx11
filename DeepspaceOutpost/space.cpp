@@ -18,7 +18,6 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
-#include "RenderContext.h"
 #include "GameUniverse.h"
 #include "docked.h"
 #include "intro.h"
@@ -530,8 +529,6 @@ void update_local_objects (void)
 	struct local_object flip;
 	
 	
-	ActiveRenderQueue().StartRender();
-
 	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
 		type = local_objects[i].type;
@@ -629,12 +626,9 @@ void update_local_objects (void)
 		}
 	}
 
-	ActiveRenderQueue().FinishRender();
-
-	/* Replay the whole recorded object-render stream (including the depth-sorted
-	   start/finish-render bracket) into the gfx backend here, where the 3D view
-	   used to draw directly - so the on-screen result is identical. */
-	FlushRenderQueue();
+	/* The frame's 3D scene is fully submitted (skybox + dust + the models handed to
+	   Scene3D::SubmitModel above): draw it now, onto the cleared back buffer, under the 2D HUD. */
+	gfx_render_3d_scene();
 
 	detonate_bomb = 0;
 }
@@ -658,8 +652,6 @@ static double s_nearest_station_dist = 1.0e18;
 
 void render_replicated_objects (void)
 {
-	ActiveRenderQueue().StartRender();
-
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 
 	// Sample at alpha 1.0 (the latest tick) for now; a render-time-based alpha for
@@ -779,8 +771,9 @@ void render_replicated_objects (void)
 		}
 	}
 
-	ActiveRenderQueue().FinishRender();
-	FlushRenderQueue();
+	/* The frame's replicated 3D scene is fully submitted: draw it now, onto the cleared
+	   back buffer, under the 2D HUD (the game drives the pass; no scene-marker flag). */
+	gfx_render_3d_scene();
 }
 
 

@@ -33,8 +33,8 @@ namespace Neuron::Graphics
     constexpr float kNearZ = 1.0f;
     constexpr float kFarZ = 131072.0f;
 
-    // Legacy planet/sun object types (drawn as billboards, not ship meshes).
-    constexpr int kShipPlanet = -1;
+    // The sun object type (drawn as a billboard, not a ship mesh). The planet (-1) is a real
+    // sphere mesh now, so it goes through the normal mesh path keyed by its type.
     constexpr int kShipSun = -2;
 
     // Mirrors SceneCb in shaders/partials/scene3d.hlsli (row-major mvp + flat tint).
@@ -85,15 +85,6 @@ namespace Neuron::Graphics
     constexpr float kAmbient = 0.40f;
     constexpr float kDiffuse = 0.60f;
 
-    // 0xAABBGGRR -> float4 (r,g,b,a) in 0..1.
-    void unpackRgba(uint32_t _rgba, float _out[4])
-    {
-      _out[0] = static_cast<float>(_rgba & 0xFFu) / 255.0f;
-      _out[1] = static_cast<float>((_rgba >> 8) & 0xFFu) / 255.0f;
-      _out[2] = static_cast<float>((_rgba >> 16) & 0xFFu) / 255.0f;
-      _out[3] = static_cast<float>((_rgba >> 24) & 0xFFu) / 255.0f;
-    }
-
     // Resolve a palette index to an opaque RGBA8 (0xAABBGGRR), matching col_rgba.
     uint32_t paletteRgba(int _index)
     {
@@ -134,6 +125,7 @@ namespace Neuron::Graphics
     s_dustVb = nullptr;
     s_dustCapacity = 0;
     s_dust.clear();
+    s_models.clear();
     s_meshes.clear();
     s_ready = false;
     // s_provider is set by the game once at startup; keep it across device resets.
@@ -405,20 +397,32 @@ namespace Neuron::Graphics
     ctx->Draw(static_cast<UINT>(s_dust.size()), 0);
   }
 
+  void Scene3D::SubmitModel(const Neuron::Render::ModelDraw& _model) { s_models.push_back(_model); }
+
   void Scene3D::RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
-                             const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
-                             const Neuron::Render::ModelDraw* _models, int _count)
+                             const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH)
   {
-    // The scene pass owns the background (skybox + dust), so it runs even with no models
-    // this frame - staring at empty space must still show the sky, not a black void.
+    // This frame's submitted models (SubmitModel, straight from the game's draw pass) are
+    // consumed and cleared here - every exit path clears s_models so nothing carries into the
+    // next frame. The scene pass owns the background (skybox + dust), so it runs even with no
+    // models this frame - staring at empty space must still show the sky, not a black void.
     if (!_rtv || !_dsv || _vpW <= 0 || _vpH <= 0)
+    {
+      s_models.clear();
       return;
+    }
     if (!EnsureResources())
+    {
+      s_models.clear();
       return;
+    }
 
     ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
     if (!ctx)
+    {
+      s_models.clear();
       return;
+    }
 
     // Bind the colour target + depth; clear depth only (colour holds the 2D background).
     ID3D11RenderTargetView* rtvs[1] = {_rtv};
@@ -447,7 +451,7 @@ namespace Neuron::Graphics
 
     // Nothing else to draw this frame (no ships / planet / sun in view): the background above
     // is the whole scene, so skip the ship pipeline setup.
-    if (!_models || _count <= 0)
+    if (s_models.empty())
       return;
 
     const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
@@ -461,12 +465,11 @@ namespace Neuron::Graphics
     const float blendFactor[4] = {0, 0, 0, 0};
     ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);
 
-    for (int i = 0; i < _count; ++i)
+    for (const Neuron::Render::ModelDraw& m : s_models)
     {
-      const Neuron::Render::ModelDraw& m = _models[i];
-
-      // Planet / sun render as depth-tested billboards, not ship meshes.
-      if (m.type == kShipPlanet || m.type == kShipSun)
+      // The sun renders as a depth-tested billboard (a glowing radial-gradient disk). The
+      // planet is now a real sphere mesh, so it falls through to the ship mesh path below.
+      if (m.type == kShipSun)
       {
         renderBillboard(m, proj);
         continue;
@@ -537,6 +540,8 @@ namespace Neuron::Graphics
       ctx->IASetIndexBuffer(mesh->ib.get(), DXGI_FORMAT_R32_UINT, 0);
       ctx->DrawIndexed(mesh->indexCount, 0, 0);
     }
+
+    s_models.clear();
   }
 
   void Scene3D::renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj)
@@ -589,15 +594,11 @@ namespace Neuron::Graphics
     std::memcpy(mappedCb.pData, &cb, sizeof(cb));
     ctx->Unmap(s_cb.get(), 0);
 
-    // b1: mode + secondary colour. Planet style 0 wireframe->ring, 1 green->disk,
-    // 2/3 SNES/fractal->banded; sun -> mode 0.
+    // b1: billboard mode. The sun is the only billboard now (mode 0 - the shader's
+    // white->yellow->orange radial gradient); the planet migrated to a real sphere mesh, so
+    // the old planet ring/disk/band billboard modes are gone.
     BillboardParams bp{};
-    int mode = 0;
-    if (_model.type == kShipPlanet)
-      mode = (_model.style == 0) ? 1 : (_model.style == 1) ? 2 : 3;
-    bp.params[0] = static_cast<float>(mode);
-    if (mode == 3 && _model.colour2 >= 0)
-      unpackRgba(paletteRgba(_model.colour2), bp.colorB);
+    bp.params[0] = 0.0f;
 
     D3D11_MAPPED_SUBRESOURCE mappedBp;
     if (FAILED(ctx->Map(s_bbParamsCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedBp)))

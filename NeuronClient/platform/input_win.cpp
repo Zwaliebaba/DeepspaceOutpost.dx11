@@ -171,7 +171,6 @@ int kbd_fire_pressed, kbd_ecm_pressed, kbd_energy_bomb_pressed;
 int kbd_hyperspace_pressed, kbd_ctrl_pressed, kbd_jump_pressed, kbd_escape_pressed;
 int kbd_dock_pressed, kbd_d_pressed, kbd_origin_pressed, kbd_find_pressed;
 int kbd_fire_missile_pressed, kbd_target_missile_pressed, kbd_unarm_missile_pressed;
-int kbd_pause_pressed, kbd_resume_pressed;
 int kbd_inc_speed_pressed, kbd_dec_speed_pressed;
 int kbd_up_pressed, kbd_down_pressed, kbd_left_pressed, kbd_right_pressed;
 int kbd_enter_pressed, kbd_backspace_pressed, kbd_space_pressed;
@@ -207,9 +206,6 @@ void kbd_poll_keyboard(void)
 	kbd_fire_missile_pressed   = down('M');
 	kbd_target_missile_pressed = down('T');
 	kbd_unarm_missile_pressed  = down('U');
-
-	kbd_pause_pressed  = down('P');
-	kbd_resume_pressed = down('R');
 
 	kbd_inc_speed_pressed = down(VK_SPACE);
 	kbd_dec_speed_pressed = down(VK_OEM_2);   /* '/' */

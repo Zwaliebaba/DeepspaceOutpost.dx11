@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "Mesh.h"
-#include "RenderQueue.h"      // Neuron::Render::ModelDraw
+#include "ModelDraw.h"        // Neuron::Render::ModelDraw
 #include "SceneProjection.h"  // Neuron::Client::Matrix4 / ViewMetrics
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the
@@ -73,14 +73,19 @@ namespace Neuron::Graphics
       struct DustVertex { float x, y, bright; };
       static void SetDust(const DustVertex* _pts, int _count);
 
-      // Render camera-space models to _rtv with depth-testing against _dsv. The
-      // projection comes from _view (the live flight optics); the scene is placed in the
-      // letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect
-      // the 2D batch uses, so 3D and HUD align. Clears DEPTH only (the colour target
-      // already holds the 2D background). A no-op if the device/resources are unavailable.
+      // Submit one camera-space model (ship / planet / sun) for this frame's scene pass. The
+      // game's draw pass calls this directly - the successor to routing ModelDraws through the
+      // RenderQueue -> GfxRenderSink -> gfx2d round-trip. Accumulated into s_models, consumed
+      // and cleared by RenderModels (mirrors how SetDust feeds the dust pass).
+      static void SubmitModel(const Neuron::Render::ModelDraw& _model);
+
+      // Render this frame's submitted models (SubmitModel) to _rtv with depth-testing against
+      // _dsv. The projection comes from _view (the live flight optics); the scene is placed in
+      // the letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect the
+      // 2D batch uses, so 3D and HUD align. Clears DEPTH only (the colour target already holds
+      // the 2D background) and clears s_models. A no-op if the device/resources are unavailable.
       static void RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
-                               const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
-                               const Neuron::Render::ModelDraw* _models, int _count);
+                               const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH);
 
     private:
       struct GpuMesh
@@ -141,6 +146,9 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11Buffer> s_dustVb;
       inline static size_t s_dustCapacity = 0;
       inline static std::vector<DustVertex> s_dust;
+
+      // This frame's submitted models (SubmitModel), consumed + cleared by RenderModels.
+      inline static std::vector<Neuron::Render::ModelDraw> s_models;
 
       // Viewport optics for the in-progress RenderModels pass (billboard sizing).
       inline static Neuron::Client::ViewMetrics s_view;
