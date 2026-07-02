@@ -120,6 +120,7 @@ int main()
   world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
   world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
+  world.Add<GameLogic::Bounty>(pirate, GameLogic::Bounty{ GameLogic::PIRATE_BOUNTY });   // killing it pays out
 
   // Home system station, BEHIND the spawn (negative z) so a launching player
   // faces the planet with the station at their back (classic Elite launch);
@@ -258,6 +259,11 @@ int main()
           break;
         }
 
+      // Pay the killer a wanted-derived bounty (if the victim was a fugitive)
+      // BEFORE the record is wiped by the respawn below; a clean-player kill pays
+      // nothing but still bumps the killer's score.
+      GameLogic::CreditKill(world, _k.killer, _k.victim);
+
       if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(_k.victim))
       {
         c->energy = 255;
@@ -288,6 +294,12 @@ int main()
       }
       return;
     }
+
+    // Pay the killer the wreck's bounty - but only for a real combatant kill. A
+    // detonated missile is also reported here (so its explosion shows), yet it
+    // carries no Combatant, so it neither pays out nor counts as a score.
+    if (world.Has<GameLogic::Combatant>(_k.victim))
+      GameLogic::CreditKill(world, _k.killer, _k.victim);
 
     sessions.Broadcast(Msg::EntityDeath{ _k.victim.index, _k.killer });
     world.Destroy(_k.victim);

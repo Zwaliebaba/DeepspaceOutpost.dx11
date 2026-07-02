@@ -80,6 +80,19 @@ namespace Neuron::GameLogic
   // band is an "offender": legal to attack, still allowed to dock. Tunable.
   inline constexpr int FUGITIVE_THRESHOLD = 8;
 
+  // The reward paid to whoever destroys this entity (legacy tenths-of-a-credit).
+  // Set at spawn on NPCs that carry a price on their head (pirates); absent => 0.
+  // A wanted PLAYER's bounty is derived from their record instead (see KillRewards).
+  struct Bounty
+  {
+    int value = 0;
+  };
+
+  // Bounty for a pirate kill (5.0 Cr) and the per-wanted-level reward for downing a
+  // fugitive player (2.0 Cr each). Tunable; police/stations carry no bounty.
+  inline constexpr int PIRATE_BOUNTY = 50;
+  inline constexpr int WANTED_BOUNTY_PER_LEVEL = 20;
+
   // A connected player's identity/record: chosen display name + kill score. The
   // name is client-supplied at connect (ClientHello), sanitized/de-duplicated
   // server-side (ServerSessions). Session-scoped for now; Phase F will persist it.

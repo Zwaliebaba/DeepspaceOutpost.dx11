@@ -71,6 +71,10 @@ namespace Neuron::GameLogic
       // pirate can't shoot the player from outside the range the player can shoot
       // back. (Previously 8000 - the player got hit from where they couldn't reply.)
       _world.Add<Combatant>(e, Combatant{ Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 5000, /*autoEngage*/ true });
+      // Render as a ship (not the default type-0 model) and carry a bounty so a
+      // kill pays out.
+      _world.Add<NetType>(e, NetType{ ShipType::Viper });
+      _world.Add<Bounty>(e, Bounty{ PIRATE_BOUNTY });
       return e;
     }
 
@@ -85,6 +89,9 @@ namespace Neuron::GameLogic
         _world.Add<WorldTransform>(e, WorldTransform{ { _pos.x + static_cast<int64_t>(i) * 300, _pos.y, _pos.z } });
         _world.Add<Flight>(e, Flight{});
         _world.Add<Combatant>(e, Combatant{ Team::Police, /*energy*/ 120, /*laser*/ 4, /*range*/ 6000, /*autoEngage*/ true });
+        // Render as a ship (not the default type-0 model). No bounty: killing the
+        // police is a crime, not a payday.
+        _world.Add<NetType>(e, NetType{ ShipType::Viper });
         spawned.push_back(e);
       }
       return spawned;
