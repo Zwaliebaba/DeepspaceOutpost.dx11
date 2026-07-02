@@ -507,6 +507,14 @@ with no global singletons — without changing on-screen behavior.**
 ---
 
 ## 6. Suggested immediate next step
+
+> **Update 2026-07-02 (project owner):** Phase F is **deferred**; the next
+> phase is **G — Multiplayer gameplay**, covering the remaining Phase G
+> bullets *and* the §7 parity backlog. The full plan (with the locked PvP,
+> death-rule and identity decisions) lives in **`docs/gameplay.md`**. The
+> paragraphs below describe the pre-decision reasoning and are kept for
+> context.
+
 Phases 0 and A are complete, and the server split (B–E) plus most of the
 multiplayer gameplay (G) are working end-to-end (see the **Implementation
 status** section at the top). The decoupling keystone is behind us.
