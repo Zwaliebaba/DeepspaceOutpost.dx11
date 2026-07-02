@@ -3,6 +3,7 @@
 #include <string>
 
 #include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus
+#include "Messages/Framing.h"              // Neuron::Msg::PROTOCOL_VERSION
 #include "Serialize.h"                      // Encode / Decode
 
 using namespace Neuron::Msg;

@@ -32,6 +32,7 @@
 #include "Camera.h"
 #include "ReplicationClient.h"
 #include "Messages/MessageBus.h"
+#include "Messages/Framing.h"            // Neuron::Msg::PROTOCOL_VERSION (handshake)
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
 #include "GuiOverlay.h"

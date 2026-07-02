@@ -28,8 +28,8 @@
 
 namespace Neuron::Msg
 {
-  // Bumped when the wire ABI changes incompatibly; the server may reject a mismatch.
-  inline constexpr uint32_t PROTOCOL_VERSION = 1;
+  // The handshake carries the wire protocol version, defined once as
+  // Neuron::Msg::PROTOCOL_VERSION in Framing.h (do not redefine it here).
 
   // client -> server: the opening handshake (protocol version + chosen name).
   struct ClientHello
