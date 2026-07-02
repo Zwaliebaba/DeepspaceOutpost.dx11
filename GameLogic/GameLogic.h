@@ -26,6 +26,7 @@
 #include "ServerSessions.h"
 #include "CombatSystem.h"
 #include "MissileSystem.h"
+#include "AiSystem.h"
 #include "SpawnDirector.h"
 #include "StationServices.h"
 #include "KillRewards.h"

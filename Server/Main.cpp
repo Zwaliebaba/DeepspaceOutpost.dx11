@@ -121,6 +121,10 @@ int main()
   world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
   world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
   world.Add<GameLogic::Bounty>(pirate, GameLogic::Bounty{ GameLogic::PIRATE_BOUNTY });   // killing it pays out
+  // G5: it flies by intent like the dynamic spawns - hunts, breaks off, flees.
+  world.Add<GameLogic::FlightIntent>(pirate, GameLogic::FlightIntent{});
+  world.Add<GameLogic::FlightCaps>(pirate, GameLogic::NpcFlightCaps());
+  world.Add<GameLogic::AiPilot>(pirate, GameLogic::AiPilot{ /*bravery*/ 96, /*missiles*/ 2, /*maxEnergy*/ 80 });
 
   // Home system station, BEHIND the spawn (negative z) so a launching player
   // faces the planet with the station at their back (classic Elite launch);
@@ -222,6 +226,10 @@ int main()
   // Deterministic RNG for loot drops (the engine forbids wall-clock randomness);
   // owned here so a kill and a player death both draw from one reproducible stream.
   uint32_t lootRng = 0x1007C0DEu;
+
+  // Separate stream for NPC tactics (jinks, bravery rolls, panic missiles), so
+  // loot and AI draws can't perturb each other's sequences.
+  uint32_t aiRng = 0xA11CEu;
 
   // Push a player their full per-commodity cargo hold. The aggregate
   // PlayerStatus.cargoUsed can't convey the per-good breakdown the HUD tracks, so a
@@ -453,8 +461,11 @@ int main()
       }
     }
 
-    // 2. Advance the authoritative simulation one tick, then run dynamic spawning
-    //    (periodic pirate encounters near players).
+    // 2. NPC tactics decide their flight intents (pursue/break-off/flee + panic
+    //    missiles), then the simulation advances one tick - the same
+    //    intent->caps->flight path a client's input takes. Fled ships despawn
+    //    inside StepAi; their removal rides the despawn diff below.
+    GameLogic::StepAi(world, tick, aiRng);
     GameLogic::Tick(world);
     ++tick;
     spawner.Step(world, tick);

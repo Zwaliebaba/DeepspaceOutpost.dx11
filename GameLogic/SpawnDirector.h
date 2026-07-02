@@ -19,7 +19,9 @@
 #include "Vector3i64.h"
 
 #include "SimComponents.h"
+#include "FlightInput.h"     // FlightIntent, FlightCaps (NPCs fly by intent, G5)
 #include "CombatSystem.h"
+#include "AiSystem.h"        // AiPilot, NpcFlightCaps
 
 namespace Neuron::GameLogic
 {
@@ -75,6 +77,13 @@ namespace Neuron::GameLogic
       // kill pays out.
       _world.Add<NetType>(e, NetType{ ShipType::Viper });
       _world.Add<Bounty>(e, Bounty{ PIRATE_BOUNTY });
+      // G5: pirates fly by intent like everyone else - the AI writes FlightIntent,
+      // the shared input/flight systems integrate it. Bravery in the legacy
+      // hunter band [64, 127]; a couple of panic missiles.
+      _world.Add<FlightIntent>(e, FlightIntent{});
+      _world.Add<FlightCaps>(e, NpcFlightCaps());
+      _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 64 + static_cast<int>(NextRand() % 64u),
+                                      /*missiles*/ 2, /*maxEnergy*/ 80 });
       return e;
     }
 
@@ -92,6 +101,11 @@ namespace Neuron::GameLogic
         // Render as a ship (not the default type-0 model). No bounty: killing the
         // police is a crime, not a payday.
         _world.Add<NetType>(e, NetType{ ShipType::Viper });
+        // G5: police fly by intent too - legacy station-Viper bravery (113), one
+        // missile in the rack.
+        _world.Add<FlightIntent>(e, FlightIntent{});
+        _world.Add<FlightCaps>(e, NpcFlightCaps());
+        _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 113, /*missiles*/ 1, /*maxEnergy*/ 120 });
         spawned.push_back(e);
       }
       return spawned;

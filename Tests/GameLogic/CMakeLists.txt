@@ -6,6 +6,7 @@
 # game-system headers and the engine headers they build on are reachable.
 
 add_executable(GameLogic.Tests
+    AiSystemTests.cpp
     AreaOfInterestTests.cpp
     CombatSystemTests.cpp
     CombatMessagesTests.cpp
