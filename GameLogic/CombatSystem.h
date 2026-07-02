@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cmath>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -72,6 +73,38 @@ namespace Neuron::GameLogic
   {
     int level = 0;
   };
+
+  // At or above this wanted level a player is a FUGITIVE: stations refuse them
+  // docking (StationServices), and they are fair game to attack without penalty.
+  // A clean player (level 0) is protected - shooting one is a crime. The 1..threshold-1
+  // band is an "offender": legal to attack, still allowed to dock. Tunable.
+  inline constexpr int FUGITIVE_THRESHOLD = 8;
+
+  // A connected player's identity/record: chosen display name + kill score. The
+  // name is client-supplied at connect (ClientHello), sanitized/de-duplicated
+  // server-side (ServerSessions). Session-scoped for now; Phase F will persist it.
+  struct PlayerRecord
+  {
+    std::string name;
+    int score = 0;
+  };
+
+  // Cool a player's wanted record down by one level (min 0), once per call; the
+  // caller gates the cadence (e.g. every N ticks). Returns the entity indices whose
+  // level actually changed so the server can refresh their roster entry.
+  [[nodiscard]] inline std::vector<uint32_t> DecayWanted(ECS::Registry& _world)
+  {
+    std::vector<uint32_t> changed;
+    _world.Each<PlayerTag, Wanted>([&changed](ECS::EntityId _id, PlayerTag&, Wanted& _w)
+    {
+      if (_w.level > 0)
+      {
+        --_w.level;
+        changed.push_back(_id.index);
+      }
+    });
+    return changed;
+  }
 
   // A resolved kill this tick: the victim handle (for the caller to destroy) and
   // the killer's entity index (for the death event).
@@ -205,7 +238,13 @@ namespace Neuron::GameLogic
 
     _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
     {
-      if (_id == _shooter || _c.team == sc->team)
+      if (_id == _shooter)
+        return;
+      // Enemies (different team) are valid targets; so are OTHER PLAYERS, even
+      // though every player shares the Player team - that is how PvP is possible
+      // at all. Same-team NPC allies (none today) stay protected from friendly fire.
+      const bool otherPlayer = (_world.TryGet<PlayerTag>(_id) != nullptr);
+      if (_c.team == sc->team && !otherPlayer)
         return;
 
       const int64_t dx = _t.position.x - origin.x;

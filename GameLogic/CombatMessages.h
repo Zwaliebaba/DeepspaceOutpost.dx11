@@ -116,12 +116,20 @@ namespace Neuron::GameLogic
     if (!_world.IsValid(_fw.shooter))
       return;
 
-    // Crime + wanted-record bookkeeping shared by laser and missile: firing on the
-    // Station or Police is an offence; the offender's record advances and the fact
-    // is published (a subscriber dispatches police on the first offence).
-    auto flagIfCrime = [&](int _victimTeam)
+    // Crime + wanted-record bookkeeping shared by laser and missile. A shot is a
+    // crime when the victim is PROTECTED: the Station or Police, or a CLEAN player
+    // (Elite-style PvP consequence - attacking an innocent makes you wanted; a
+    // player who is already wanted is fair game). The offender's record advances and
+    // the fact is published (a subscriber dispatches police on the first offence).
+    auto flagIfCrime = [&](ECS::EntityId _victim, int _victimTeam)
     {
-      if (_victimTeam != Team::Station && _victimTeam != Team::Police)
+      bool protectedVictim = (_victimTeam == Team::Station || _victimTeam == Team::Police);
+      if (_victimTeam == Team::Player)
+      {
+        const Wanted* vw = _world.TryGet<Wanted>(_victim);
+        protectedVictim = (vw != nullptr && vw->level == 0);   // only a clean player is protected
+      }
+      if (!protectedVictim)
         return;
       bool first = false;
       if (Wanted* w = _world.TryGet<Wanted>(_fw.shooter))
@@ -137,7 +145,7 @@ namespace Neuron::GameLogic
       const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone);
       if (!shot.hit)
         return;
-      flagIfCrime(shot.targetTeam);
+      flagIfCrime(shot.target, shot.targetTeam);
       if (shot.destroyed)
         _bus.Publish(EntityKilled{ shot.target, _fw.shooter.index });
       return;
@@ -152,6 +160,6 @@ namespace Neuron::GameLogic
     const Missile* mc = _world.TryGet<Missile>(missile);
     if (mc != nullptr && _world.IsValid(mc->target))
       if (const Combatant* tc = _world.TryGet<Combatant>(mc->target))
-        flagIfCrime(tc->team);
+        flagIfCrime(mc->target, tc->team);
   }
 }

@@ -11,7 +11,9 @@
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/CoreEvents.h"
+#include "Messages/Defs/PlayerSession.h"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -192,6 +194,13 @@ int main()
   uint32_t tick = 0;
   std::size_t lastSessions = 0;
 
+  // How often a wanted level cools down by one (in ticks; ~20s at 30 Hz).
+  constexpr uint32_t WANTED_DECAY_INTERVAL = 600;
+
+  // Last PlayerStatus sent to each session (by endpoint key), so we resend the
+  // owner's private vitals only when they change rather than every tick.
+  std::unordered_map<uint64_t, Msg::PlayerStatus> lastStatus;
+
   // Rate-limit the player-respawn log so a player parked in combat doesn't spam
   // the console: print at most once per window, with a count of any suppressed
   // respawns since the last line.
@@ -211,9 +220,14 @@ int main()
     GameLogic::ResolveFireWeapon(world, bus, _fw, FIRE_RANGE, AIM_CONE);
   });
 
-  // A crime dispatches police to the offender, once, on the first offence.
+  // A crime dispatches police to the offender, once, on the first offence. The
+  // offender's wanted level just changed, so refresh their roster entry for everyone.
   bus.Subscribe<GameLogic::Crime>([&](const GameLogic::Crime& _c)
   {
+    Msg::PlayerInfo pi;
+    if (sessions.PlayerInfoFor(world, _c.offender.index, pi))
+      sessions.Broadcast(pi);
+
     if (!_c.firstOffence || !world.IsValid(_c.offender))
       return;
     const GameLogic::WorldTransform* t = world.TryGet<GameLogic::WorldTransform>(_c.offender);
@@ -251,6 +265,11 @@ int main()
       }
       if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(_k.victim))
         wnt->level = 0;
+
+      // Death wipes the wanted record - refresh the roster so a respawned player
+      // shows as clean again on everyone's screen.
+      if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, _k.victim.index, pi))
+        sessions.Broadcast(pi);
 
       if (tick - lastRespawnLogTick >= kRespawnLogWindow)
       {
@@ -340,6 +359,11 @@ int main()
     {
       lastSessions = sessions.Count();
       printf("Clients connected: %zu\n", lastSessions);
+      // Membership changed: replay the full roster to everyone, so a joiner learns
+      // the others and the others learn the joiner. (A leaver's ship is removed via
+      // EntityDespawn; the client drops its roster entry there.)
+      for (const Msg::PlayerInfo& pi : sessions.Roster(world))
+        sessions.Broadcast(pi);
     }
 
     // 1b. Process station requests (dock/buy/sell/equip) delivered on each
@@ -351,11 +375,20 @@ int main()
       while (s.events.Receive(msg))
       {
         Net::StationRequest req;
+        Msg::ClientHello hello;
         if (Msg::TryDecode(msg, req))
         {
           const Net::StationResponse resp =
               GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
           s.events.Send(resp);   // Gameplay lane
+        }
+        else if (Msg::TryDecode(msg, hello))
+        {
+          // Adopt the client's commander name (sanitized + de-duplicated). If it
+          // actually changed, tell everyone via the roster.
+          if (sessions.ApplyName(world, s.endpoint, hello.commanderName))
+            if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, s.entity.index, pi))
+              sessions.Broadcast(pi);
         }
       }
     }
@@ -379,6 +412,13 @@ int main()
       bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     bus.Dispatch();
 
+    // 2c. Periodically cool down wanted records; refresh the roster for anyone whose
+    //     legal status actually changed.
+    if (tick % WANTED_DECAY_INTERVAL == 0)
+      for (uint32_t changedId : GameLogic::DecayWanted(world))
+        if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, changedId, pi))
+          sessions.Broadcast(pi);
+
     // 3. Reap idle clients, then broadcast every despawn (reaped players + props)
     //    as a reliable event to all remaining clients.
     sessions.Reap(world, tick, SESSION_TIMEOUT_TICKS);
@@ -387,7 +427,7 @@ int main()
 
     // 4. Send each client its own area-of-interest snapshot + reliable event packet.
     aoi.Rebuild(world);
-    for (auto& s : sessions.All() | std::views::values)
+    for (auto& [key, s] : sessions.All())
     {
       Math::Vector3i64 viewerPos{ 0, 0, 0 };
       if (world.IsValid(s.entity))
@@ -400,9 +440,32 @@ int main()
       for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         socket.SendTo(s.endpoint, datagram.data(), datagram.size());
 
+      // The owner's private HUD vitals, on change only (fields for systems not built
+      // yet stay zero). Queued on the Gameplay lane; flushed with the events below.
+      Msg::PlayerStatus ps;
+      if (world.IsValid(s.entity))
+      {
+        if (const auto* c = world.TryGet<GameLogic::Combatant>(s.entity)) ps.energy = c->energy;
+        if (const auto* wal = world.TryGet<GameLogic::Wallet>(s.entity)) ps.credits = wal->credits;
+        if (const auto* eq = world.TryGet<GameLogic::Equipment>(s.entity)) ps.missiles = eq->missiles;
+        if (const auto* h = world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);
+        if (const auto* wnt = world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
+        if (const auto* pr = world.TryGet<GameLogic::PlayerRecord>(s.entity)) ps.score = pr->score;
+      }
+      auto lastIt = lastStatus.find(key);
+      if (lastIt == lastStatus.end() || lastIt->second.Fields() != ps.Fields())
+      {
+        s.events.Send(ps);
+        lastStatus[key] = ps;
+      }
+
       for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
         socket.SendTo(s.endpoint, dg.data(), dg.size());
     }
+
+    // Drop cached status for endpoints that are no longer sessions (reaped clients),
+    // so the change-cache can't grow without bound over a long uptime.
+    std::erase_if(lastStatus, [&](const auto& _kv) { return sessions.All().count(_kv.first) == 0; });
 
     Sleep(33);   // ~30 Hz tick
   }

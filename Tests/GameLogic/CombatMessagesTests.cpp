@@ -36,6 +36,19 @@ namespace
     return e;
   }
 
+  // Another player, ahead at +z, with an explicit energy and wanted level - the
+  // target of a PvP shot from the origin player.
+  ECS::EntityId SpawnPlayerTarget(ECS::Registry& _w, int64_t _z, int _energy, int _wanted)
+  {
+    const ECS::EntityId e = _w.Create();
+    _w.Add<WorldTransform>(e, WorldTransform{ { 0, 0, _z } });
+    _w.Add<Flight>(e, Flight{});
+    _w.Add<Combatant>(e, Combatant{ Team::Player, _energy, 0, 6000, false });
+    _w.Add<PlayerTag>(e, PlayerTag{});
+    _w.Add<Wanted>(e, Wanted{ _wanted });
+    return e;
+  }
+
   // Wire the FireWeapon -> ResolveFireWeapon subscriber the server uses.
   void InstallResolver(ECS::Registry& _w, Msg::MessageBus& _bus)
   {
@@ -136,6 +149,82 @@ TEST(CombatMessages, MissileLaunchSpawnsProjectileAndFlagsCrimeAtLaunch)
   ASSERT_EQ(crimes.size(), 1u);
   EXPECT_EQ(crimes[0].victimTeam, Team::Police);
   EXPECT_TRUE(crimes[0].firstOffence);
+}
+
+TEST(CombatMessages, FiringOnACleanPlayerIsACrime)
+{
+  ECS::Registry w;
+  Msg::MessageBus bus;
+  InstallResolver(w, bus);
+
+  std::vector<Crime> crimes;
+  bus.Subscribe<Crime>([&](const Crime& _c) { crimes.push_back(_c); });
+
+  const ECS::EntityId attacker = SpawnPlayer(w);
+  const ECS::EntityId victim = SpawnPlayerTarget(w, 3000, /*energy*/ 255, /*wanted*/ 0);
+
+  bus.Publish(FireWeapon{ attacker, Weapon::Laser });
+  bus.Dispatch();
+
+  ASSERT_EQ(crimes.size(), 1u);
+  EXPECT_TRUE(crimes[0].firstOffence);
+  EXPECT_EQ(crimes[0].victimTeam, Team::Player);
+  EXPECT_EQ(w.Get<Wanted>(attacker).level, 1);
+  EXPECT_LT(w.Get<Combatant>(victim).energy, 255);   // the clean player took the hit
+}
+
+TEST(CombatMessages, FiringOnAWantedPlayerIsNotACrime)
+{
+  ECS::Registry w;
+  Msg::MessageBus bus;
+  InstallResolver(w, bus);
+
+  std::vector<Crime> crimes;
+  bus.Subscribe<Crime>([&](const Crime& _c) { crimes.push_back(_c); });
+
+  const ECS::EntityId attacker = SpawnPlayer(w);
+  const ECS::EntityId victim = SpawnPlayerTarget(w, 3000, /*energy*/ 255, /*wanted*/ 1);
+
+  bus.Publish(FireWeapon{ attacker, Weapon::Laser });
+  bus.Dispatch();
+
+  EXPECT_TRUE(crimes.empty());                        // hitting an offender is legal
+  EXPECT_EQ(w.Get<Wanted>(attacker).level, 0);        // attacker stays clean
+  EXPECT_LT(w.Get<Combatant>(victim).energy, 255);    // but damage still lands
+}
+
+TEST(CombatMessages, PlayerCanKillAnotherPlayer)
+{
+  ECS::Registry w;
+  Msg::MessageBus bus;
+  InstallResolver(w, bus);
+
+  std::vector<EntityKilled> killed;
+  bus.Subscribe<EntityKilled>([&](const EntityKilled& _k) { killed.push_back(_k); });
+
+  const ECS::EntityId attacker = SpawnPlayer(w);
+  const ECS::EntityId victim = SpawnPlayerTarget(w, 3000, /*energy*/ 5, /*wanted*/ 0);
+
+  bus.Publish(FireWeapon{ attacker, Weapon::Laser });
+  bus.Dispatch();
+
+  ASSERT_EQ(killed.size(), 1u);
+  EXPECT_TRUE(killed[0].victim == victim);
+  EXPECT_EQ(killed[0].killer, attacker.index);
+}
+
+TEST(CombatMessages, DecayWantedLowersLevelsAndReportsChanges)
+{
+  ECS::Registry w;
+  const ECS::EntityId wantedPlayer = SpawnPlayerTarget(w, 0, /*energy*/ 255, /*wanted*/ 3);
+  const ECS::EntityId cleanPlayer = SpawnPlayerTarget(w, 5000, /*energy*/ 255, /*wanted*/ 0);
+
+  const std::vector<uint32_t> changed = DecayWanted(w);
+
+  EXPECT_EQ(w.Get<Wanted>(wantedPlayer).level, 2);   // cooled by one
+  EXPECT_EQ(w.Get<Wanted>(cleanPlayer).level, 0);    // already clean, untouched
+  ASSERT_EQ(changed.size(), 1u);
+  EXPECT_EQ(changed[0], wantedPlayer.index);
 }
 
 TEST(CombatMessages, RepublishedFactsResolveInOneDispatch)

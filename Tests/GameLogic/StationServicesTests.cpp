@@ -194,6 +194,27 @@ TEST(Station, DockAttachesToTheNearestStation)
   EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == nearStn.index);   // the closer one
 }
 
+TEST(Station, StationRefusesToDockAFugitive)
+{
+  ECS::Registry w;
+  SpawnStation(w, /*x*/ 100, 5, 5);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+  w.Add<GameLogic::Wanted>(p, GameLogic::Wanted{ GameLogic::FUGITIVE_THRESHOLD });   // wanted enough to be turned away
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, dock);
+
+  EXPECT_TRUE(r.status == Net::StationStatus::DockingRefused);
+  EXPECT_FALSE(w.Get<GameLogic::DockState>(p).docked);
+
+  // Once the record cools below the fugitive threshold, the same station lets them in.
+  w.Get<GameLogic::Wanted>(p).level = GameLogic::FUGITIVE_THRESHOLD - 1;
+  Net::StationResponse r2 = GameLogic::ProcessStationRequest(w, p, 5000, dock);
+  EXPECT_TRUE(r2.status == Net::StationStatus::Ok);
+  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).docked);
+}
+
 TEST(Station, ProcessBuyNeedsDockThenSucceeds)
 {
   ECS::Registry w;

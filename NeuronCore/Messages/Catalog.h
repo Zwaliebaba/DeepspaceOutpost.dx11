@@ -16,4 +16,5 @@
 #include "Messages/Defs/InputCommand.h"
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
+#include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus
 #include "StationProtocol.h"   // StationRequest / StationResponse (REGISTER_MESSAGE'd)

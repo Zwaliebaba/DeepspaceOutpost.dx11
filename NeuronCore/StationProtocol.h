@@ -54,6 +54,7 @@ namespace Neuron::Net
     BadCommodity = 6,
     CantDock = 7,
     AlreadyOwned = 8,
+    DockingRefused = 9,   // the station refuses a fugitive (wanted) player
   };
 }
 

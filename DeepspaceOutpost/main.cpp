@@ -38,6 +38,9 @@
 #include "GameWindows.h"
 #include "Scene3D.h"
 
+#include <string>
+#include <unordered_map>
+
 int draw_lasers;
 int mcount;
 int message_count;
@@ -1165,6 +1168,17 @@ static bool     s_frameFire = false;
 static bool     s_frameMissile = false;
 static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
 
+// The other players in view, keyed by entity id: their commander name + legal
+// status, as replicated by PlayerInfo. Used to label ships and (later) chat; an
+// entry is dropped when its ship despawns/dies. This is presentation-only mirror
+// state - the server stays authoritative.
+struct PlayerRosterEntry
+{
+  std::string name;
+  int wanted = 0;
+};
+static std::unordered_map<uint32_t, PlayerRosterEntry> g_playerRoster;
+
 static void register_client_event_handlers(void)
 {
   static bool registered = false;
@@ -1198,6 +1212,7 @@ static void register_client_event_handlers(void)
     }
     if (_death.victim == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
+    g_playerRoster.erase(_death.victim);
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
   });
@@ -1207,7 +1222,22 @@ static void register_client_event_handlers(void)
   {
     if (_ds.entityId == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
+    g_playerRoster.erase(_ds.entityId);
     Client::ReplicationClientInstance().Forget(_ds.entityId);
+  });
+
+  // Roster: another player's name/legal status. Mirror it for ship labels + chat.
+  g_clientBus.Subscribe<Neuron::Msg::PlayerInfo>([](const Neuron::Msg::PlayerInfo& _pi)
+  {
+    g_playerRoster[_pi.entityId] = PlayerRosterEntry{ _pi.name, _pi.wantedLevel };
+  });
+
+  // Status: our own authoritative vitals for the HUD. Credits mirror the dashboard
+  // (shields/fuel/energy HUD wiring lands with G3/G7; only what the HUD reads today
+  // is applied here).
+  g_clientBus.Subscribe<Neuron::Msg::PlayerStatus>([](const Neuron::Msg::PlayerStatus& _ps)
+  {
+    cmdr.credits = _ps.credits;
   });
 
   // Input command-builder: a discrete combat action sets this frame's intent, which
@@ -1240,6 +1270,8 @@ static void process_server_events(void)
     Net::StationResponse resp;
     Neuron::Msg::EntityDeath death;
     Neuron::Msg::EntityDespawn despawn;
+    Neuron::Msg::PlayerInfo info;
+    Neuron::Msg::PlayerStatus status;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
@@ -1247,6 +1279,10 @@ static void process_server_events(void)
       g_clientBus.Publish(death);
     else if (Neuron::Msg::TryDecode(msg, despawn))
       g_clientBus.Publish(despawn);
+    else if (Neuron::Msg::TryDecode(msg, info))
+      g_clientBus.Publish(info);
+    else if (Neuron::Msg::TryDecode(msg, status))
+      g_clientBus.Publish(status);
   }
   g_clientBus.Dispatch();
 }
@@ -1591,6 +1627,10 @@ int game_main(void)
     rc.Open(bindPort);
     rc.SetServerEndpoint(Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
                                            static_cast<uint8_t>(e), 40000));
+    // Send the opening handshake with the player's commander name. It rides the
+    // reliable Control lane, so it is redelivered until the server (which connects
+    // the session on first input) accepts it; a blank name keeps the server default.
+    rc.SendHello(Neuron::Msg::PROTOCOL_VERSION, cmdr.name);
     // LocalPlayer is set by the server's AssignPlayer handshake; default 0.
   }
 

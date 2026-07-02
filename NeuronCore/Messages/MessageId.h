@@ -24,7 +24,7 @@ namespace Neuron::Msg
   //   0x0001-0x00FF   core / session / control
   //   0x0100-0x01FF   input
   //   0x0200-0x02FF   replication control / lifecycle
-  //   0x0300-0x03FF   chat / social
+  //   0x0300-0x03FF   chat / social / player identity
   //   0x0400-0x04FF   station / economy
   //   0x0F00-0x0FFF   debug / tooling (wire-visible diagnostics)
   //   0x1000-0x7FFF   game-specific extensions (wire)

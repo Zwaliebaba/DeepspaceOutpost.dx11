@@ -16,6 +16,7 @@
 
 #include "SimComponents.h"     // WorldTransform
 #include "Economy.h"           // COMMODITY_COUNT, MarketEntry
+#include "CombatSystem.h"      // Wanted, FUGITIVE_THRESHOLD (fugitives are refused docking)
 
 namespace Neuron::GameLogic
 {
@@ -336,6 +337,14 @@ namespace Neuron::GameLogic
     {
       case Net::StationRequestKind::Dock:
       {
+        // Fugitives are turned away: cool your wanted level down (it decays over
+        // time, and dies with you) before a station will let you dock again.
+        const Wanted* wnt = _world.TryGet<Wanted>(_player);
+        if (wnt != nullptr && wnt->level >= FUGITIVE_THRESHOLD)
+        {
+          resp.status = Net::StationStatus::DockingRefused;
+          break;
+        }
         const WorldTransform* t = _world.TryGet<WorldTransform>(_player);
         const ECS::EntityId station = (t != nullptr)
           ? NearestStation(_world, t->position, _dockRange) : ECS::EntityId{};
