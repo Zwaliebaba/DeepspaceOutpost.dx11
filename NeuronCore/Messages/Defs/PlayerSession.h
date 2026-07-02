@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "Messages/Registry.h"   // MessageId/Traits/Serialize + REGISTER_MESSAGE
 
@@ -85,8 +86,27 @@ namespace Neuron::Msg
     auto Fields()       { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score); }
     auto Fields() const { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score); }
   };
+
+  // server -> client (owning session only): the local player's full per-commodity
+  // cargo hold. The HUD tracks each commodity's tonnage, which the client can't
+  // derive from the aggregate PlayerStatus.cargoUsed - so when scooping loot (or a
+  // respawn empties the hold) the server resends the whole manifest. `units[i]` is
+  // the held amount of commodity i (0..COMMODITY_COUNT-1).
+  struct CargoManifest
+  {
+    static constexpr MessageId    Id    = static_cast<MessageId>(0x0303);   // player identity
+    static constexpr MessageScope Scope = MessageScope::Wire;
+    static constexpr MessageKind  Kind  = MessageKind::Event;
+    static constexpr MessageLane  Lane  = MessageLane::Gameplay;
+    static constexpr Direction    Dir   = Direction::ServerToClient;
+
+    std::vector<int32_t> units;
+    auto Fields()       { return std::tie(units); }
+    auto Fields() const { return std::tie(units); }
+  };
 }
 
 REGISTER_MESSAGE(ClientHello);
 REGISTER_MESSAGE(PlayerInfo);
 REGISTER_MESSAGE(PlayerStatus);
+REGISTER_MESSAGE(CargoManifest);

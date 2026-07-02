@@ -33,6 +33,9 @@ namespace Neuron::GameLogic
     inline constexpr int Planet = -1;
     inline constexpr int Missile = 1;
     inline constexpr int Coriolis = 2;
+    inline constexpr int Alloy = 4;      // splintered-alloy loot canister (SHIP_ALLOY)
+    inline constexpr int Cargo = 5;      // cargo loot canister (SHIP_CARGO)
+    inline constexpr int Rock = 8;       // asteroid-rock loot (SHIP_ROCK)
     inline constexpr int Viper = 16;
   }
 

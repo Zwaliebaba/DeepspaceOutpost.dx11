@@ -219,6 +219,29 @@ int main()
   // independent subscribers act on. The combat math itself is unchanged.
   Msg::MessageBus bus;
 
+  // Deterministic RNG for loot drops (the engine forbids wall-clock randomness);
+  // owned here so a kill and a player death both draw from one reproducible stream.
+  uint32_t lootRng = 0x1007C0DEu;
+
+  // Push a player their full per-commodity cargo hold. The aggregate
+  // PlayerStatus.cargoUsed can't convey the per-good breakdown the HUD tracks, so a
+  // scoop (or a respawn that emptied the hold) resends the whole manifest to just
+  // that one session on its Gameplay lane.
+  auto sendCargoTo = [&](uint32_t _entityIndex)
+  {
+    for (auto& entry : sessions.All())
+      if (entry.second.entity.index == _entityIndex)
+      {
+        if (const GameLogic::CargoHold* h = world.TryGet<GameLogic::CargoHold>(entry.second.entity))
+        {
+          Msg::CargoManifest cm;
+          cm.units.assign(h->units, h->units + GameLogic::COMMODITY_COUNT);
+          entry.second.events.Send(cm);
+        }
+        break;
+      }
+  };
+
   // A FireWeapon command resolves against the authoritative world (laser geometry
   // / missile spawn unchanged), publishing the resulting facts.
   bus.Subscribe<GameLogic::FireWeapon>([&](const GameLogic::FireWeapon& _fw)
@@ -283,13 +306,20 @@ int main()
         wnt->level = 0;
 
       // Death rule: respawn DOCKED at the nearest station, minus cargo (rather than
-      // in place). If no station is reachable, fall back to respawn-in-place.
+      // in place). The cargo the player was carrying first spills as scoopable
+      // canisters at the wreck, THEN the hold is emptied by the respawn. If no
+      // station is reachable, RespawnAtNearestStation falls back to leaving them put.
+      if (const GameLogic::WorldTransform* pt = world.TryGet<GameLogic::WorldTransform>(_k.victim))
+        GameLogic::DropPlayerCargo(world, _k.victim, pt->position, lootRng);
       GameLogic::RespawnAtNearestStation(world, _k.victim);
 
       // Death wipes the wanted record - refresh the roster so a respawned player
       // shows as clean again on everyone's screen.
       if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, _k.victim.index, pi))
         sessions.Broadcast(pi);
+
+      // The hold is now empty - push the zeroed manifest so the HUD matches.
+      sendCargoTo(_k.victim.index);
 
       if (tick - lastRespawnLogTick >= kRespawnLogWindow)
       {
@@ -309,11 +339,15 @@ int main()
       return;
     }
 
-    // Pay the killer the wreck's bounty - but only for a real combatant kill. A
-    // detonated missile is also reported here (so its explosion shows), yet it
-    // carries no Combatant, so it neither pays out nor counts as a score.
+    // Pay the killer the wreck's bounty and scatter its cargo - but only for a real
+    // combatant kill. A detonated missile is also reported here (so its explosion
+    // shows), yet it carries no Combatant, so it neither pays out, counts as a
+    // score, nor sheds loot.
     if (world.Has<GameLogic::Combatant>(_k.victim))
+    {
       GameLogic::CreditKill(world, _k.killer, _k.victim);
+      GameLogic::DropLoot(world, _k.victim, lootRng);   // legacy launch_loot: alloy + cargo canisters
+    }
 
     sessions.Broadcast(Msg::EntityDeath{ _k.victim.index, _k.killer });
     world.Destroy(_k.victim);
@@ -443,7 +477,14 @@ int main()
       bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     bus.Dispatch();
 
-    // 2c. Periodically cool down wanted records; refresh the roster for anyone whose
+    // 2c. Age cargo canisters (despawning the expired) and let players scoop the ones
+    //     they fly into; a player whose hold changed gets a fresh cargo manifest.
+    //     Both the expired and the scooped canisters ride the despawn diff below.
+    GameLogic::StepLoot(world);
+    for (uint32_t scoopedBy : GameLogic::ScoopSystem(world))
+      sendCargoTo(scoopedBy);
+
+    // 2d. Periodically cool down wanted records; refresh the roster for anyone whose
     //     legal status actually changed.
     if (tick % WANTED_DECAY_INTERVAL == 0)
       for (uint32_t changedId : GameLogic::DecayWanted(world))

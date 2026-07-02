@@ -1251,6 +1251,28 @@ static void register_client_event_handlers(void)
     PlayerDefense().energy = _ps.energy;
   });
 
+  // Cargo manifest: the authoritative per-commodity hold, resent after a scoop or a
+  // respawn emptied it. Mirror it into the commander and, if the hold actually grew
+  // (a scoop, not a respawn), play a pickup cue - the legacy client had no netcode,
+  // so the server is the source of truth for what we're carrying.
+  g_clientBus.Subscribe<Neuron::Msg::CargoManifest>([](const Neuron::Msg::CargoManifest& _cm)
+  {
+    int before = 0;
+    for (int i = 0; i < NO_OF_STOCK_ITEMS; ++i)
+      before += cmdr.current_cargo[i];
+
+    int after = 0;
+    const int n = static_cast<int>(_cm.units.size());
+    for (int i = 0; i < NO_OF_STOCK_ITEMS; ++i)
+    {
+      cmdr.current_cargo[i] = (i < n) ? _cm.units[i] : 0;
+      after += cmdr.current_cargo[i];
+    }
+
+    if (after > before)
+      snd_play_sample(SND_BEEP);   // scooped something
+  });
+
   // Input command-builder: a discrete combat action sets this frame's intent, which
   // send_player_input folds into the outgoing InputCommand.
   g_clientBus.Subscribe<Neuron::Msg::ActionTriggered>([](const Neuron::Msg::ActionTriggered& _a)
@@ -1283,6 +1305,7 @@ static void process_server_events(void)
     Neuron::Msg::EntityDespawn despawn;
     Neuron::Msg::PlayerInfo info;
     Neuron::Msg::PlayerStatus status;
+    Neuron::Msg::CargoManifest cargo;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
@@ -1294,6 +1317,8 @@ static void process_server_events(void)
       g_clientBus.Publish(info);
     else if (Neuron::Msg::TryDecode(msg, status))
       g_clientBus.Publish(status);
+    else if (Neuron::Msg::TryDecode(msg, cargo))
+      g_clientBus.Publish(cargo);
   }
   g_clientBus.Dispatch();
 }

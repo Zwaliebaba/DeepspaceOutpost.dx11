@@ -29,6 +29,7 @@
 #include "SpawnDirector.h"
 #include "StationServices.h"
 #include "KillRewards.h"
+#include "LootSystem.h"
 #include "CombatMessages.h"
 
 namespace Neuron::GameLogic

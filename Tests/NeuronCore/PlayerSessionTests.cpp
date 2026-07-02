@@ -2,7 +2,9 @@
 
 #include <string>
 
-#include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus
+#include <vector>
+
+#include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus / CargoManifest
 #include "Messages/Framing.h"              // Neuron::Msg::PROTOCOL_VERSION
 #include "Messages/Serialize.h"            // Encode / Decode, MAX_STRING_LEN
 
@@ -50,6 +52,16 @@ TEST(PlayerSession, PlayerStatusRoundTripsAllFields)
   PlayerStatus out;
   ASSERT_TRUE(Decode(Encode(in), out));
   EXPECT_TRUE(in.Fields() == out.Fields());   // every field preserved
+}
+
+TEST(PlayerSession, CargoManifestRoundTripsTheWholeHold)
+{
+  CargoManifest in;
+  in.units = { 0, 3, 0, 0, 0, 0, 0, 7, 0, 2, 0, 0, 5, 0, 0, 0, 0 };   // 17 commodities
+
+  CargoManifest out;
+  ASSERT_TRUE(Decode(Encode(in), out));
+  EXPECT_EQ(out.units, in.units);
 }
 
 TEST(PlayerSession, LongCommanderNameIsCappedByTheStringLeaf)
