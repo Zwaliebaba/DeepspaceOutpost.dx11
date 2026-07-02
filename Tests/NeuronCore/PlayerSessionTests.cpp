@@ -4,7 +4,7 @@
 
 #include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus
 #include "Messages/Framing.h"              // Neuron::Msg::PROTOCOL_VERSION
-#include "Serialize.h"                      // Encode / Decode
+#include "Messages/Serialize.h"            // Encode / Decode, MAX_STRING_LEN
 
 using namespace Neuron::Msg;
 
