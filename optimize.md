@@ -324,10 +324,16 @@ past the split forces throwaway 2D-background scaffolding.
    territory), so `GameApp::RenderCanvas` returns false when `game_paused && !overlay`, and
    the caller keeps the last frame on screen. This replaces the general `forcePresent`/
    return-bool/`painted` machinery with one explicit, readable pause check.
-5. **(Optional, larger)** Short-circuit the client `RenderQueue` round-trip: have
-   `RenderScene()` consume recorded `ModelDraw`s directly for `Scene3D`, instead of
-   `DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model`. Keep the queue for
-   headless (§5).
+5. **[DONE]** Short-circuit the client model round-trip. The game's draw pass now calls
+   `Scene3D::SubmitModel(md)` directly (from `threed.cpp`), instead of
+   `ActiveRenderQueue().DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model →
+   g_models`. `Scene3D` owns the frame's models (`s_models`, alongside `s_dust`); `RenderModels`
+   consumes + clears them (no models parameter). `gfx2d`'s `g_models` + `gfx2d_submit_model`
+   are deleted. `GfxRenderSink::DrawModel` now forwards to `Scene3D::SubmitModel`, so the
+   `RenderQueue` seam + `RenderQueueTests` stay correct (per §5). Note the queue itself is
+   **not** removed — the game still records 2D primitives through it (laser bolt/sights, warp
+   streaks, explosion sparks) + `FinishRender`; only the `DrawModel` command became game-unused
+   (test-only now).
 6. **[DONE, partial]** Delete dead machinery. Removed as they became dead:
    - `Kind::Scene` + `g_models_marked` — deleted in Step 3 (marker retired).
    - `forcePresent` + the idle-batch gate + the `painted` return — deleted in Step 4.

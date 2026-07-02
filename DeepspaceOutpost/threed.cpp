@@ -10,6 +10,7 @@
 #include "elite.h"
 #include "gfx.h"
 #include "RenderContext.h"
+#include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass
 #include "planet.h"
 #include "vector.h"
 #include "shipdata.h"
@@ -179,7 +180,7 @@ void draw_solid_ship (struct local_object *obj)
 		md.rotmat[i][2] = obj->rotmat[i].z;
 	}
 	md.distance = obj->distance;
-	ActiveRenderQueue().DrawModel (md);
+	Neuron::Graphics::Scene3D::SubmitModel (md);
 
 	/* The laser bolt stays on the 2D path for now: project just the muzzle vertex
 	 * through the same transform the GPU uses and draw the depth-sorted 2D line. */
@@ -260,7 +261,7 @@ void draw_planet (struct local_object *planet)
 		default: md.colour = GFX_COL_GREEN_1; md.colour2 = GFX_COL_BLUE_1; break; /* SNES / fractal */
 	}
 
-	ActiveRenderQueue().DrawModel (md);
+	Neuron::Graphics::Scene3D::SubmitModel (md);
 }
 
 
@@ -279,7 +280,7 @@ void draw_sun (struct local_object *planet)
 	md.distance = planet->distance;
 	md.colour = GFX_COL_WHITE;
 
-	ActiveRenderQueue().DrawModel (md);
+	Neuron::Graphics::Scene3D::SubmitModel (md);
 }
 
 

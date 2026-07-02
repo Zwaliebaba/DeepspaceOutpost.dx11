@@ -3,7 +3,7 @@
 #include "GfxRenderSink.h"
 
 #include "gfx.h"
-#include "gfx2d.h" // gfx2d_submit_model
+#include "Scene3D.h" // Scene3D::SubmitModel
 
 // Each method forwards to the matching gfx.h primitive so a replayed queue
 // reproduces the original draw sequence exactly.
@@ -35,9 +35,11 @@ void GfxRenderSink::RenderLine(int _x0, int _y0, int _x1, int _y1, int _dist, in
 
 void GfxRenderSink::DrawModel(const Neuron::Render::ModelDraw& _model)
 {
-  // Collect the model for this frame's GPU 3D pass (rendered via Scene3D inside
-  // gfx2d_flush, between the 2D background and the HUD).
-  gfx2d_submit_model(_model);
+  // Submit the model to this frame's GPU 3D pass (rendered via Scene3D inside gfx2d_flush,
+  // between the 2D background and the HUD). The client's game draw pass now calls
+  // Scene3D::SubmitModel directly, so this replay path is only exercised if a DrawModel is
+  // recorded into the queue - it stays correct either way.
+  Neuron::Graphics::Scene3D::SubmitModel(_model);
 }
 
 void GfxRenderSink::FinishRender() { gfx_finish_render(); }

@@ -134,6 +134,7 @@ namespace Neuron::Graphics
     s_dustVb = nullptr;
     s_dustCapacity = 0;
     s_dust.clear();
+    s_models.clear();
     s_meshes.clear();
     s_ready = false;
     // s_provider is set by the game once at startup; keep it across device resets.
@@ -405,20 +406,32 @@ namespace Neuron::Graphics
     ctx->Draw(static_cast<UINT>(s_dust.size()), 0);
   }
 
+  void Scene3D::SubmitModel(const Neuron::Render::ModelDraw& _model) { s_models.push_back(_model); }
+
   void Scene3D::RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
-                             const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH,
-                             const Neuron::Render::ModelDraw* _models, int _count)
+                             const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH)
   {
-    // The scene pass owns the background (skybox + dust), so it runs even with no models
-    // this frame - staring at empty space must still show the sky, not a black void.
+    // This frame's submitted models (SubmitModel, straight from the game's draw pass) are
+    // consumed and cleared here - every exit path clears s_models so nothing carries into the
+    // next frame. The scene pass owns the background (skybox + dust), so it runs even with no
+    // models this frame - staring at empty space must still show the sky, not a black void.
     if (!_rtv || !_dsv || _vpW <= 0 || _vpH <= 0)
+    {
+      s_models.clear();
       return;
+    }
     if (!EnsureResources())
+    {
+      s_models.clear();
       return;
+    }
 
     ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
     if (!ctx)
+    {
+      s_models.clear();
       return;
+    }
 
     // Bind the colour target + depth; clear depth only (colour holds the 2D background).
     ID3D11RenderTargetView* rtvs[1] = {_rtv};
@@ -447,7 +460,7 @@ namespace Neuron::Graphics
 
     // Nothing else to draw this frame (no ships / planet / sun in view): the background above
     // is the whole scene, so skip the ship pipeline setup.
-    if (!_models || _count <= 0)
+    if (s_models.empty())
       return;
 
     const Neuron::Client::Matrix4 proj = Neuron::Client::MakeScenePerspective(_view, kNearZ, kFarZ);
@@ -461,10 +474,8 @@ namespace Neuron::Graphics
     const float blendFactor[4] = {0, 0, 0, 0};
     ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);
 
-    for (int i = 0; i < _count; ++i)
+    for (const Neuron::Render::ModelDraw& m : s_models)
     {
-      const Neuron::Render::ModelDraw& m = _models[i];
-
       // Planet / sun render as depth-tested billboards, not ship meshes.
       if (m.type == kShipPlanet || m.type == kShipSun)
       {
@@ -537,6 +548,8 @@ namespace Neuron::Graphics
       ctx->IASetIndexBuffer(mesh->ib.get(), DXGI_FORMAT_R32_UINT, 0);
       ctx->DrawIndexed(mesh->indexCount, 0, 0);
     }
+
+    s_models.clear();
   }
 
   void Scene3D::renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj)
