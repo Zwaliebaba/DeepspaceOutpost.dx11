@@ -198,6 +198,11 @@ int main()
   // How often a wanted level cools down by one (in ticks; ~20s at 30 Hz).
   constexpr uint32_t WANTED_DECAY_INTERVAL = 600;
 
+  // How often players' shields/energy regenerate (legacy regenerated ~every 8
+  // frames). A slow cadence also keeps the on-change PlayerStatus from firing every
+  // tick while a shield refills.
+  constexpr uint32_t SHIELD_REGEN_INTERVAL = 8;
+
   // Last PlayerStatus sent to each session (by endpoint key), so we resend the
   // owner's private vitals only when they change rather than every tick.
   std::unordered_map<uint64_t, Msg::PlayerStatus> lastStatus;
@@ -266,8 +271,13 @@ int main()
 
       if (GameLogic::Combatant* c = world.TryGet<GameLogic::Combatant>(_k.victim))
       {
-        c->energy = 255;
+        c->energy = GameLogic::MAX_ENERGY;
         c->invulnTicks = GameLogic::RESPAWN_GRACE_TICKS;
+      }
+      if (GameLogic::Shields* sh = world.TryGet<GameLogic::Shields>(_k.victim))
+      {
+        sh->front = GameLogic::MAX_SHIELD;   // respawn with full shields
+        sh->aft = GameLogic::MAX_SHIELD;
       }
       if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(_k.victim))
         wnt->level = 0;
@@ -411,6 +421,11 @@ int main()
     ++tick;
     spawner.Step(world, tick);
 
+    // Regenerate players' shields/energy on a slow cadence (before combat, so a hit
+    // this tick lands on the freshly-regenerated shield).
+    if (tick % SHIELD_REGEN_INTERVAL == 0)
+      GameLogic::StepShieldRegen(world);
+
     // 2b. Advance in-flight missiles (homing + detonation) and realtime combat,
     //     then resolve every resulting kill: broadcast a death event and destroy
     //     the wreck (its removal also rides the despawn diff below).
@@ -458,6 +473,7 @@ int main()
       if (world.IsValid(s.entity))
       {
         if (const auto* c = world.TryGet<GameLogic::Combatant>(s.entity)) ps.energy = c->energy;
+        if (const auto* sh = world.TryGet<GameLogic::Shields>(s.entity)) { ps.frontShield = sh->front; ps.aftShield = sh->aft; }
         if (const auto* wal = world.TryGet<GameLogic::Wallet>(s.entity)) ps.credits = wal->credits;
         if (const auto* eq = world.TryGet<GameLogic::Equipment>(s.entity)) ps.missiles = eq->missiles;
         if (const auto* h = world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);

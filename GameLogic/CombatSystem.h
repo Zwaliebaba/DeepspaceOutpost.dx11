@@ -93,6 +93,20 @@ namespace Neuron::GameLogic
   inline constexpr int PIRATE_BOUNTY = 50;
   inline constexpr int WANTED_BOUNTY_PER_LEVEL = 20;
 
+  // Legacy defensive caps: two directional shields and the energy bank (255 each).
+  inline constexpr int MAX_SHIELD = 255;
+  inline constexpr int MAX_ENERGY = 255;
+
+  // A player's directional shields (legacy front_shield / aft_shield). The energy
+  // bank is the entity's Combatant.energy; a hit strikes the facing shield first and
+  // only the overflow drains the bank (ApplyDamageToShields). NPCs have no Shields
+  // component - they take damage straight on the energy pool, as before.
+  struct Shields
+  {
+    int front = MAX_SHIELD;
+    int aft = MAX_SHIELD;
+  };
+
   // A connected player's identity/record: chosen display name + kill score. The
   // name is client-supplied at connect (ClientHello), sanitized/de-duplicated
   // server-side (ServerSessions). Session-scoped for now; Phase F will persist it.
@@ -127,6 +141,65 @@ namespace Neuron::GameLogic
     uint32_t killer = 0;
   };
 
+  // Which shield a hit lands on: true = FRONT (the attacker lies ahead of the
+  // victim's nose), false = aft. Unshielded/facing-less victims default to front.
+  [[nodiscard]] inline bool HitOnFront(ECS::Registry& _world, ECS::EntityId _victim, const Math::Vector3i64& _attackerPos)
+  {
+    const Flight* f = _world.TryGet<Flight>(_victim);
+    const WorldTransform* t = _world.TryGet<WorldTransform>(_victim);
+    if (f == nullptr || t == nullptr)
+      return true;
+    const double dx = static_cast<double>(_attackerPos.x - t->position.x);
+    const double dy = static_cast<double>(_attackerPos.y - t->position.y);
+    const double dz = static_cast<double>(_attackerPos.z - t->position.z);
+    return (dx * f->nose.x + dy * f->nose.y + dz * f->nose.z) >= 0.0;   // ahead => front
+  }
+
+  // Apply `_damage` to `_target` from an attacker at `_attackerPos`. A shielded
+  // player absorbs it through the facing directional shield, overflow draining the
+  // energy bank (legacy damage_ship); an unshielded NPC takes it straight on the
+  // energy pool. Returns true if driven to death (energy <= 0). Does NOT check
+  // invuln - the caller gates that.
+  [[nodiscard]] inline bool ApplyDamage(ECS::Registry& _world, ECS::EntityId _target, int _damage, const Math::Vector3i64& _attackerPos)
+  {
+    Combatant* c = _world.TryGet<Combatant>(_target);
+    if (c == nullptr)
+      return false;
+
+    Shields* sh = _world.TryGet<Shields>(_target);
+    if (sh == nullptr)
+    {
+      c->energy -= _damage;   // unshielded: straight to the energy pool
+      return c->energy <= 0;
+    }
+
+    const bool hitFront = HitOnFront(_world, _target, _attackerPos);
+    const ShieldHitResult r = ApplyDamageToShields(ShieldState{ sh->front, sh->aft, c->energy }, _damage, hitFront);
+    sh->front = r.state.frontShield;
+    sh->aft = r.state.aftShield;
+    c->energy = r.state.energy;
+    return r.destroyed;
+  }
+
+  // Recharge players' shields/energy one regen step (legacy regenerate_shields):
+  // while the energy bank is over half, bleed a point into each not-full shield;
+  // then the bank itself recovers by one, capped. Only entities with Shields (i.e.
+  // players) regen; the caller gates the cadence. Pure - unit-tested headlessly.
+  inline void StepShieldRegen(ECS::Registry& _world)
+  {
+    _world.Each<Shields, Combatant>([](ECS::EntityId, Shields& _s, Combatant& _c)
+    {
+      if (_c.energy > MAX_ENERGY / 2)
+      {
+        if (_s.front < MAX_SHIELD) { ++_s.front; --_c.energy; }
+        if (_s.aft < MAX_SHIELD)   { ++_s.aft;   --_c.energy; }
+      }
+      ++_c.energy;
+      if (_c.energy > MAX_ENERGY)
+        _c.energy = MAX_ENERGY;
+    });
+  }
+
   // Advance combat one tick. Returns the kills; the caller destroys the victims
   // and broadcasts death events.
   [[nodiscard]] inline std::vector<Kill> StepCombat(ECS::Registry& _world)
@@ -145,9 +218,11 @@ namespace Neuron::GameLogic
     });
 
     // Accumulate this tick's damage and the attacker that dealt it, so resolution
-    // is simultaneous (firing order doesn't matter).
+    // is simultaneous (firing order doesn't matter). The attacker's position is
+    // kept too, so a player victim's directional shields know which side was hit.
     std::unordered_map<uint32_t, int> damage;
     std::unordered_map<uint32_t, uint32_t> attacker;
+    std::unordered_map<uint32_t, Math::Vector3i64> attackerPos;
 
     for (const Unit& a : units)
     {
@@ -192,6 +267,7 @@ namespace Neuron::GameLogic
       {
         damage[best->id.index] += LaserDamageTo(TargetClass::Normal, a.c->laserStrength);
         attacker[best->id.index] = a.id.index;
+        attackerPos[best->id.index] = a.pos;
         a.c->fireTimer = a.c->fireInterval;   // begin the cooldown after firing
       }
     }
@@ -211,8 +287,9 @@ namespace Neuron::GameLogic
       if (it == damage.end())
         continue;
 
-      u.c->energy -= it->second;
-      if (u.c->energy <= 0)
+      // Route through ApplyDamage so a player victim absorbs the hit on the shield
+      // facing the attacker; an unshielded NPC still takes it flat on energy.
+      if (ApplyDamage(_world, u.id, it->second, attackerPos[u.id.index]))
         kills.push_back(Kill{ u.id, attacker[u.id.index] });
     }
 
@@ -298,12 +375,13 @@ namespace Neuron::GameLogic
     if (tc->invulnTicks > 0)
       return out;   // target is in spawn/respawn grace - the shot passes through
 
-    tc->energy -= LaserDamageTo(TargetClass::Normal, sc->laserStrength);
+    const int dmg = LaserDamageTo(TargetClass::Normal, sc->laserStrength);
+    const bool destroyed = ApplyDamage(_world, best, dmg, origin);   // origin = shooter position
 
     out.hit = true;
     out.target = best;
     out.targetTeam = tc->team;
-    out.destroyed = tc->energy <= 0;
+    out.destroyed = destroyed;
     return out;
   }
 }

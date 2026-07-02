@@ -132,8 +132,9 @@ namespace Neuron::GameLogic
           {
             if (tc->invulnTicks <= 0)   // respect spawn/respawn grace
             {
-              tc->energy -= mc->damage;
-              if (tc->energy <= 0)
+              // A player target absorbs the blast through the shield facing the
+              // incoming missile; an NPC takes it flat on energy.
+              if (ApplyDamage(_world, mc->target, mc->damage, mt->position))
                 kills.push_back(Kill{ mc->target, mc->owner });
             }
           }
