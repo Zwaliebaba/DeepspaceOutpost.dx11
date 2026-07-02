@@ -99,6 +99,26 @@ namespace Neuron::GameLogic
   // than the 6000-9000 spawn spread, so a fresh pirate hunts immediately.
   inline constexpr int64_t AI_ENGAGE_RANGE = 16384;
 
+  // --- Autopilot (trader lane) constants: the fly_to_vector() variant ---------
+  // (pilot.cpp:33) - a wider deadzone than combat tracking, dropped entirely when
+  // the waypoint is far behind, and full throttle only once well-aimed.
+  inline constexpr double AP_DEADZONE = 0.1666;
+  inline constexpr double AP_RELAX = -0.6666;      // waypoint behind: deadzone off
+  inline constexpr double AP_FAST_ALIGN = 0.8055;  // legacy cnt2 for the autopilot
+
+  // A trader "docks" (despawns) within this range of its lane endpoint, and
+  // lumbers along at shuttle speed (legacy shuttle velocity 8 vs the Viper's 32,
+  // on our 114-unit Viper scale).
+  inline constexpr int64_t TRADER_DOCK_RANGE = 1500;
+  inline constexpr double TRADER_MAX_SPEED = 30.0;
+
+  // An ambient trader's flight plan: fly to `dest`, dock (despawn) on arrival.
+  // Traders are cowards - hurt below half energy they abandon the lane and flee.
+  struct TradeLane
+  {
+    Math::Vector3i64 dest{};
+  };
+
   // The NPC flight envelope (see the rate derivation above).
   [[nodiscard]] inline FlightCaps NpcFlightCaps()
   {
@@ -132,11 +152,13 @@ namespace Neuron::GameLogic
 
     // Steer the nose onto `_want` (unit, world frame) - the exact track_object()
     // port. Pitch engages off the roof-axis error, roll off the side-axis error
-    // (each behind the 0.111 deadzone), the roll sign couples to the pitch sign,
-    // and a target behind the ship gets the full-rate pitch with wings level.
-    // `_lockRoll` preserves the legacy jink latch (track_object skipped the roll
-    // while |rotz| >= 16). Writes only the rotation axes.
-    inline void SteerToward(const Flight& _f, const Math::Vector3d& _want, FlightIntent& _out, bool _lockRoll)
+    // (each behind `_deadzone` - combat tracking's 0.111, or the autopilot's
+    // wider 0.1666), the roll sign couples to the pitch sign, and a target
+    // behind the ship gets the full-rate pitch with wings level. `_lockRoll`
+    // preserves the legacy jink latch (track_object skipped the roll while
+    // |rotz| >= 16). Writes only the rotation axes.
+    inline void SteerToward(const Flight& _f, const Math::Vector3d& _want, FlightIntent& _out,
+                            bool _lockRoll, double _deadzone = AI_DEADZONE)
     {
       const double ahead = Math::Dot(_want, _f.nose);
       const double up = Math::Dot(_want, _f.roof);
@@ -151,7 +173,7 @@ namespace Neuron::GameLogic
 
       // Legacy sign map: positive rotx pitched the nose toward -roof, exactly our
       // positive Flight.pitch - so the signs carry over unchanged.
-      _out.pitchAxis = (std::fabs(up) * 2.0 >= AI_DEADZONE)
+      _out.pitchAxis = (std::fabs(up) * 2.0 >= _deadzone)
         ? ((up < 0.0) ? AI_TRACK_AXIS : -AI_TRACK_AXIS)
         : 0.0;
 
@@ -160,7 +182,7 @@ namespace Neuron::GameLogic
 
       const double side = Math::Dot(_want, _f.side);
       _out.rollAxis = 0.0;
-      if (std::fabs(side) * 2.0 > AI_DEADZONE)
+      if (std::fabs(side) * 2.0 > _deadzone)
       {
         _out.rollAxis = (side < 0.0) ? AI_TRACK_AXIS : -AI_TRACK_AXIS;
         if (_out.pitchAxis < 0.0)
@@ -188,9 +210,7 @@ namespace Neuron::GameLogic
       else if (AiRand255(_rng) >= 200)       Nudge(_ai, -AI_BRAKE_STEP);
     }
 
-    // Nearest enemy Combatant to `_self` within AI_ENGAGE_RANGE. Police skip
-    // CLEAN players (wanted 0) - a stage-4-lite guard so the law doesn't hunt
-    // the innocent; StepCombat's firing keeps its own rules for now.
+    // The AI's chosen prey plus the target memory it maintains (stage 4).
     struct AiTarget
     {
       ECS::EntityId id;
@@ -198,43 +218,73 @@ namespace Neuron::GameLogic
       bool found = false;
     };
 
+    // Pick `_me`'s target and keep its focus memory honest. A live, in-range,
+    // still-legitimate focus wins outright - that is the memory (police stay on
+    // the offender they were dispatched for; the lock self-heals the moment the
+    // offender dies clean or escapes). Otherwise scan: police only engage lawful
+    // prey (PoliceMayEngage), pirates prefer CIVILIANS (players/traders) over
+    // the police shooting at them, and nobody attack-runs a station. The chosen
+    // index is written back to `_me.focus`, so StepCombat fires at the same prey
+    // the pilot is flying against.
     [[nodiscard]] inline AiTarget FindTarget(ECS::Registry& _world, ECS::EntityId _self,
-                                             const Math::Vector3i64& _pos, int _team)
+                                             const Math::Vector3i64& _pos, Combatant& _me)
     {
-      AiTarget best;
-      int64_t bestDist = 0;
+      auto inRange = [&_pos](const Math::Vector3i64& _p) -> bool
+      {
+        const int64_t ax = _p.x > _pos.x ? _p.x - _pos.x : _pos.x - _p.x;
+        const int64_t ay = _p.y > _pos.y ? _p.y - _pos.y : _pos.y - _p.y;
+        const int64_t az = _p.z > _pos.z ? _p.z - _pos.z : _pos.z - _p.z;
+        return ax <= AI_ENGAGE_RANGE && ay <= AI_ENGAGE_RANGE && az <= AI_ENGAGE_RANGE;
+      };
+
+      // 1. Honor the memory while it stays legitimate.
+      if (_me.focus != ECS::INVALID_INDEX)
+      {
+        const ECS::EntityId locked = _world.LiveEntity(_me.focus);
+        const WorldTransform* lt = _world.IsValid(locked) ? _world.TryGet<WorldTransform>(locked) : nullptr;
+        const Combatant* lc = _world.IsValid(locked) ? _world.TryGet<Combatant>(locked) : nullptr;
+        if (lt != nullptr && lc != nullptr && lc->team != _me.team && inRange(lt->position)
+            && (_me.team != Team::Police || PoliceMayEngage(_world, locked, lc->team)))
+          return AiTarget{ locked, lt->position, true };
+        _me.focus = ECS::INVALID_INDEX;   // dead, escaped, or no longer lawful prey
+      }
+
+      // 2. Scan - tracking the nearest civilian and the nearest anything
+      //    separately so a pirate's preference costs one pass.
+      AiTarget bestAny, bestCivilian;
+      int64_t bestAnyDist = 0, bestCivilianDist = 0;
       _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
       {
-        if (_id == _self || _c.team == _team)
+        if (_id == _self || _c.team == _me.team)
           return;
         if (_c.team == Team::Station)
           return;   // stations are crime tripwires, not prey - nobody attack-runs one
-        if (_team == Team::Police && _world.TryGet<PlayerTag>(_id) != nullptr)
-        {
-          const Wanted* w = _world.TryGet<Wanted>(_id);
-          if (w == nullptr || w->level <= 0)
-            return;   // police don't hunt clean players
-        }
-
-        const int64_t dx = _t.position.x - _pos.x;
-        const int64_t dy = _t.position.y - _pos.y;
-        const int64_t dz = _t.position.z - _pos.z;
-        const int64_t ax = dx < 0 ? -dx : dx;
-        const int64_t ay = dy < 0 ? -dy : dy;
-        const int64_t az = dz < 0 ? -dz : dz;
-        if (ax > AI_ENGAGE_RANGE || ay > AI_ENGAGE_RANGE || az > AI_ENGAGE_RANGE)
+        if (_me.team == Team::Police && !PoliceMayEngage(_world, _id, _c.team))
+          return;   // the law does not hunt the innocent
+        if (!inRange(_t.position))
           return;
 
+        const int64_t ax = _t.position.x > _pos.x ? _t.position.x - _pos.x : _pos.x - _t.position.x;
+        const int64_t ay = _t.position.y > _pos.y ? _t.position.y - _pos.y : _pos.y - _t.position.y;
+        const int64_t az = _t.position.z > _pos.z ? _t.position.z - _pos.z : _pos.z - _t.position.z;
         const int64_t d = ax + ay + az;   // overflow-safe (small in-range deltas)
-        if (!best.found || d < bestDist)
+
+        if (!bestAny.found || d < bestAnyDist)
         {
-          best.found = true;
-          best.id = _id;
-          best.pos = _t.position;
-          bestDist = d;
+          bestAny = AiTarget{ _id, _t.position, true };
+          bestAnyDist = d;
+        }
+        const bool civilian = (_c.team == Team::Trader) || (_world.TryGet<PlayerTag>(_id) != nullptr);
+        if (civilian && (!bestCivilian.found || d < bestCivilianDist))
+        {
+          bestCivilian = AiTarget{ _id, _t.position, true };
+          bestCivilianDist = d;
         }
       });
-      return best;
+
+      const AiTarget& chosen = (_me.team == Team::Pirate && bestCivilian.found) ? bestCivilian : bestAny;
+      _me.focus = chosen.found ? chosen.id.index : ECS::INVALID_INDEX;
+      return chosen;
     }
   }
 
@@ -274,7 +324,58 @@ namespace Neuron::GameLogic
       if (ai->jinkTicks > 0)
         --ai->jinkTicks;
 
-      const Detail::AiTarget target = Detail::FindTarget(_world, self, t->position, c->team);
+      // Traders (stage 5): fly the lane, dock at the far end, and bolt the moment
+      // they are hurt - no bravery rolls, no missiles, no attack runs.
+      if (const TradeLane* lane = _world.TryGet<TradeLane>(self))
+      {
+        if (!ai->fleeing && c->energy < ai->maxEnergy / 2)
+          ai->fleeing = true;   // cowards: abandon the lane, run for it
+
+        if (ai->fleeing)
+        {
+          const Detail::AiTarget threat = Detail::FindTarget(_world, self, t->position, *c);
+          if (!threat.found)
+          {
+            _world.Destroy(self);   // shaken the danger: gone for good
+            continue;
+          }
+          const double dx = static_cast<double>(threat.pos.x - t->position.x);
+          const double dy = static_cast<double>(threat.pos.y - t->position.y);
+          const double dz = static_cast<double>(threat.pos.z - t->position.z);
+          const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+          if (dist > 0.0)
+          {
+            const Math::Vector3d run{ -dx / dist, -dy / dist, -dz / dist };
+            Detail::SteerToward(*f, run, *intent, /*lockRoll*/ false, AP_DEADZONE);
+          }
+          Detail::Nudge(*ai, AI_ACCEL_STEP);
+          intent->throttle = ai->throttle;
+          continue;
+        }
+
+        const double dx = static_cast<double>(lane->dest.x - t->position.x);
+        const double dy = static_cast<double>(lane->dest.y - t->position.y);
+        const double dz = static_cast<double>(lane->dest.z - t->position.z);
+        const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist <= static_cast<double>(TRADER_DOCK_RANGE))
+        {
+          _world.Destroy(self);   // arrived: docked/landed, off the board
+          continue;
+        }
+
+        // The autopilot steering (fly_to_vector): wider deadzone, dropped when
+        // the waypoint is far behind; throttle up only once well-aimed.
+        const Math::Vector3d toDest{ dx / dist, dy / dist, dz / dist };
+        const double ahead = Math::Dot(toDest, f->nose);
+        Detail::SteerToward(*f, toDest, *intent, /*lockRoll*/ false,
+                            (ahead < AP_RELAX) ? 0.0 : AP_DEADZONE);
+        if (ahead <= AI_SLOW_ALIGN)      Detail::Nudge(*ai, -AI_BRAKE_STEP);
+        else if (ahead >= AP_FAST_ALIGN) Detail::Nudge(*ai, AI_ACCEL_STEP);
+        intent->throttle = ai->throttle;
+        continue;
+      }
+
+      const Detail::AiTarget target = Detail::FindTarget(_world, self, t->position, *c);
       if (!target.found)
       {
         if (ai->fleeing)

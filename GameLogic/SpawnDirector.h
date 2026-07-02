@@ -21,10 +21,16 @@
 #include "SimComponents.h"
 #include "FlightInput.h"     // FlightIntent, FlightCaps (NPCs fly by intent, G5)
 #include "CombatSystem.h"
-#include "AiSystem.h"        // AiPilot, NpcFlightCaps
+#include "AiSystem.h"        // AiPilot, NpcFlightCaps, TradeLane
+#include "StationServices.h" // NearestStation (trader lanes run station <-> planet)
 
 namespace Neuron::GameLogic
 {
+  // Ambient-traffic knobs (stage 5): how often a trader may launch onto a lane,
+  // and how many fly at once (they despawn on docking, so traffic trickles).
+  inline constexpr uint32_t TRADER_SPAWN_INTERVAL = 900;   // ~30s at 30 Hz
+  inline constexpr int MAX_TRADERS = 2;
+
   class SpawnDirector
   {
   public:
@@ -88,8 +94,11 @@ namespace Neuron::GameLogic
     }
 
     // Spawn `_count` police near `_pos` to hunt a criminal (called when a player
-    // commits a crime). Returns the spawned entities.
-    std::vector<ECS::EntityId> SpawnPolice(ECS::Registry& _world, const Math::Vector3i64& _pos, int _count)
+    // commits a crime). Each spawned Viper is FIXED on `_offenderIndex` (stage 4
+    // target memory): it chases and fires on the actual offender, not whoever is
+    // nearest, until that lock dies clean or escapes. Returns the spawned entities.
+    std::vector<ECS::EntityId> SpawnPolice(ECS::Registry& _world, const Math::Vector3i64& _pos, int _count,
+                                           uint32_t _offenderIndex = ECS::INVALID_INDEX)
     {
       std::vector<ECS::EntityId> spawned;
       for (int i = 0; i < _count; ++i)
@@ -98,6 +107,7 @@ namespace Neuron::GameLogic
         _world.Add<WorldTransform>(e, WorldTransform{ { _pos.x + static_cast<int64_t>(i) * 300, _pos.y, _pos.z } });
         _world.Add<Flight>(e, Flight{});
         _world.Add<Combatant>(e, Combatant{ Team::Police, /*energy*/ 120, /*laser*/ 4, /*range*/ 6000, /*autoEngage*/ true });
+        _world.Get<Combatant>(e).focus = _offenderIndex;   // the dispatch warrant
         // Render as a ship (not the default type-0 model). No bounty: killing the
         // police is a crime, not a payday.
         _world.Add<NetType>(e, NetType{ ShipType::Viper });
@@ -109,6 +119,89 @@ namespace Neuron::GameLogic
         spawned.push_back(e);
       }
       return spawned;
+    }
+
+    // Spawn one ambient trader at `_from` flying the lane to `_to` (stage 5): a
+    // slow, unarmed civilian that docks (despawns) at the far end and flees when
+    // hurt. Attacking it is a crime; killing it drops loot but pays no bounty.
+    ECS::EntityId SpawnTrader(ECS::Registry& _world, const Math::Vector3i64& _from,
+                              const Math::Vector3i64& _to, int _hull)
+    {
+      const ECS::EntityId e = _world.Create();
+      _world.Add<WorldTransform>(e, WorldTransform{ _from });
+      _world.Add<Flight>(e, Flight{});
+      _world.Add<FlightIntent>(e, FlightIntent{});
+      _world.Add<FlightCaps>(e, FlightCaps{ NPC_MAX_TURN_RATE, NPC_MAX_TURN_RATE, TRADER_MAX_SPEED });
+      _world.Add<Combatant>(e, Combatant{ Team::Trader, /*energy*/ 60, /*laser*/ 0, /*range*/ 1, /*autoEngage*/ false });
+      _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 0, /*missiles*/ 0, /*maxEnergy*/ 60 });
+      _world.Add<TradeLane>(e, TradeLane{ _to });
+      _world.Add<NetType>(e, NetType{ _hull });
+      return e;
+    }
+
+    // Every TRADER_SPAWN_INTERVAL ticks, put one shuttle/transporter on the
+    // station <-> planet lane of a random player's system, while under the cap
+    // (legacy launch_shuttle: stations trickled out civilian traffic). Returns
+    // the spawned entity (invalid if nothing spawned).
+    ECS::EntityId StepTraders(ECS::Registry& _world, uint32_t _tick)
+    {
+      if ((_tick % TRADER_SPAWN_INTERVAL) != 0 || CountTraders(_world) >= MAX_TRADERS)
+        return ECS::EntityId{};
+
+      std::vector<Math::Vector3i64> players;
+      _world.Each<WorldTransform, PlayerTag>([&players](ECS::EntityId, WorldTransform& _t, PlayerTag&)
+      {
+        players.push_back(_t.position);
+      });
+      if (players.empty())
+        return ECS::EntityId{};
+      const Math::Vector3i64 anchor = players[NextRand() % players.size()];
+
+      // The lane: the anchor's system station and the planet nearest to it.
+      const ECS::EntityId station = NearestStation(_world, anchor, INT64_MAX / 4);
+      const WorldTransform* st = (station.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(station) : nullptr;
+      if (st == nullptr)
+        return ECS::EntityId{};
+      const Math::Vector3i64 stationPos = st->position;
+
+      bool foundPlanet = false;
+      Math::Vector3i64 planetPos{};
+      int64_t bestDist = 0;
+      _world.Each<WorldTransform, NetType>([&](ECS::EntityId, WorldTransform& _t, NetType& _nt)
+      {
+        if (_nt.type != ShipType::Planet)
+          return;
+        const int64_t ax = _t.position.x > stationPos.x ? _t.position.x - stationPos.x : stationPos.x - _t.position.x;
+        const int64_t ay = _t.position.y > stationPos.y ? _t.position.y - stationPos.y : stationPos.y - _t.position.y;
+        const int64_t az = _t.position.z > stationPos.z ? _t.position.z - stationPos.z : stationPos.z - _t.position.z;
+        const int64_t d = ax / 2 + ay / 2 + az / 2;   // halved Manhattan: no overflow on far systems
+        if (!foundPlanet || d < bestDist)
+        {
+          foundPlanet = true;
+          planetPos = _t.position;
+          bestDist = d;
+        }
+      });
+      if (!foundPlanet)
+        return ECS::EntityId{};
+
+      // Launch clear of the endpoint (matching the station LAUNCH_OFFSET) so a
+      // fresh trader is not already "docked" at its origin.
+      const bool outbound = (NextRand() & 1u) != 0;    // station -> planet or back
+      Math::Vector3i64 from = outbound ? stationPos : planetPos;
+      const Math::Vector3i64 to = outbound ? planetPos : stationPos;
+      from += Math::Vector3i64{ 0, LAUNCH_OFFSET, 0 };
+
+      const int hull = (NextRand() & 1u) ? ShipType::Shuttle : ShipType::Transporter;
+      return SpawnTrader(_world, from, to, hull);
+    }
+
+    // Live ambient traders (for the spawn cap).
+    [[nodiscard]] int CountTraders(ECS::Registry& _world) const
+    {
+      int n = 0;
+      _world.Each<TradeLane>([&n](ECS::EntityId, TradeLane&) { ++n; });
+      return n;
     }
 
     // Number of auto-engaging NPCs currently alive (pirates + police).

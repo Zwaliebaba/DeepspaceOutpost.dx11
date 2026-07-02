@@ -123,7 +123,8 @@ namespace Neuron::GameLogic
     // the fact is published (a subscriber dispatches police on the first offence).
     auto flagIfCrime = [&](ECS::EntityId _victim, int _victimTeam)
     {
-      bool protectedVictim = (_victimTeam == Team::Station || _victimTeam == Team::Police);
+      bool protectedVictim = (_victimTeam == Team::Station || _victimTeam == Team::Police
+                              || _victimTeam == Team::Trader);   // civilians are protected too
       if (_victimTeam == Team::Player)
       {
         const Wanted* vw = _world.TryGet<Wanted>(_victim);

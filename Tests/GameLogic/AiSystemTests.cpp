@@ -334,6 +334,187 @@ TEST(AiSystem, SameSeedSameWorldIsDeterministic)
   EXPECT_EQ(a.z, b.z);
 }
 
+// --- Stage 4: target memory --------------------------------------------------
+
+TEST(AiSystem, PoliceWarrantOutranksNearerPrey)
+{
+  ECS::Registry w;
+  // The offender: a fugitive player, far away and off-axis.
+  const ECS::EntityId fugitive = w.Create();
+  w.Add<WorldTransform>(fugitive, WorldTransform{ { 0, 9000, 0 } });
+  w.Add<Combatant>(fugitive, Combatant{ Team::Player, 255, 10, 6000, false });
+  w.Add<PlayerTag>(fugitive, PlayerTag{});
+  w.Add<Wanted>(fugitive, Wanted{ 3 });
+  // A pirate sits much nearer, dead ahead of the cop.
+  const ECS::EntityId pirate = w.Create();
+  w.Add<WorldTransform>(pirate, WorldTransform{ { 0, 0, 2000 } });
+  w.Add<Combatant>(pirate, Combatant{ Team::Pirate, 80, 3, 5000, true });
+
+  SpawnDirector dir(1u, 600, 12);
+  const ECS::EntityId cop = dir.SpawnPolice(w, { 0, 0, 0 }, 1, fugitive.index)[0];
+
+  uint32_t rng = 1u;
+  std::ignore = StepAi(w, cop.index & 7u, rng);
+
+  // The warrant holds: still fixed on the offender (who is off-axis, so the
+  // intent shows a real turn - the dead-ahead pirate would have been level).
+  EXPECT_EQ(w.Get<Combatant>(cop).focus, fugitive.index);
+  EXPECT_NE(w.Get<FlightIntent>(cop).pitchAxis, 0.0);
+}
+
+TEST(AiSystem, PoliceWarrantTearsUpWhenTheOffenderGoesClean)
+{
+  ECS::Registry w;
+  const ECS::EntityId offender = w.Create();
+  w.Add<WorldTransform>(offender, WorldTransform{ { 0, 9000, 0 } });
+  w.Add<Combatant>(offender, Combatant{ Team::Player, 255, 10, 6000, false });
+  w.Add<PlayerTag>(offender, PlayerTag{});
+  w.Add<Wanted>(offender, Wanted{ 3 });
+
+  SpawnDirector dir(1u, 600, 12);
+  const ECS::EntityId cop = dir.SpawnPolice(w, { 0, 0, 0 }, 1, offender.index)[0];
+
+  uint32_t rng = 1u;
+  std::ignore = StepAi(w, cop.index & 7u, rng);
+  EXPECT_EQ(w.Get<Combatant>(cop).focus, offender.index);   // hot pursuit
+
+  w.Get<Wanted>(offender).level = 0;   // record cleared (decay / respawn)
+  std::ignore = StepAi(w, cop.index & 7u, rng);
+
+  EXPECT_EQ(w.Get<Combatant>(cop).focus, ECS::INVALID_INDEX);   // warrant torn up
+  EXPECT_EQ(w.Get<FlightIntent>(cop).pitchAxis, 0.0);           // stood down
+}
+
+TEST(AiSystem, PiratesPreferCiviliansOverPolice)
+{
+  ECS::Registry w;
+  const ECS::EntityId npc = SpawnNpc(w, { 0, 0, 0 });
+  // A cop closer than the trader/player prey.
+  const ECS::EntityId cop = w.Create();
+  w.Add<WorldTransform>(cop, WorldTransform{ { 0, 0, 3000 } });
+  w.Add<Combatant>(cop, Combatant{ Team::Police, 120, 4, 6000, true });
+  // A clean player, further out.
+  const ECS::EntityId player = w.Create();
+  w.Add<WorldTransform>(player, WorldTransform{ { 0, 0, 9000 } });
+  w.Add<Combatant>(player, Combatant{ Team::Player, 255, 10, 6000, false });
+  w.Add<PlayerTag>(player, PlayerTag{});
+  w.Add<Wanted>(player, Wanted{ 0 });
+
+  uint32_t rng = 1u;
+  std::ignore = StepAi(w, npc.index & 7u, rng);
+
+  EXPECT_EQ(w.Get<Combatant>(npc).focus, player.index);   // prey over police
+}
+
+// --- Stage 5: ambient traders ------------------------------------------------
+
+TEST(AiSystem, TraderFliesItsLaneAndDocksAtTheFarEnd)
+{
+  ECS::Registry w;
+  SpawnDirector dir(1u, 600, 12);
+  const ECS::EntityId trader = dir.SpawnTrader(w, { 0, 0, 0 }, { 0, 0, 6000 }, ShipType::Shuttle);
+  ASSERT_TRUE(w.IsValid(trader));
+  EXPECT_EQ(w.Get<NetType>(trader).type, ShipType::Shuttle);
+
+  uint32_t tick = 0;
+  uint32_t rng = 3u;
+  RunSim(w, tick, rng, 100);
+  ASSERT_TRUE(w.IsValid(trader));
+  EXPECT_GT(w.Get<WorldTransform>(trader).position.z, 300);   // under way down the lane
+
+  RunSim(w, tick, rng, 3000);
+  EXPECT_FALSE(w.IsValid(trader));   // arrived: docked and despawned
+}
+
+TEST(AiSystem, TraderFleesWhenHurtAndEscapes)
+{
+  ECS::Registry w;
+  SpawnDirector dir(1u, 600, 12);
+  const ECS::EntityId trader = dir.SpawnTrader(w, { 0, 0, 0 }, { 0, 0, 40000 }, ShipType::Transporter);
+  // A pirate menaces the lane.
+  const ECS::EntityId pirate = w.Create();
+  w.Add<WorldTransform>(pirate, WorldTransform{ { 0, 0, 2000 } });
+  w.Add<Combatant>(pirate, Combatant{ Team::Pirate, 80, 3, 5000, true });
+
+  w.Get<Combatant>(trader).energy = 20;   // hurt below half (60/2)
+
+  uint32_t tick = 0;
+  uint32_t rng = 9u;
+  RunSim(w, tick, rng, 16);   // at least one think
+  ASSERT_TRUE(w.IsValid(trader));
+  EXPECT_TRUE(w.Get<AiPilot>(trader).fleeing);
+
+  // It runs until clear of the engagement range, then leaves the board.
+  bool gone = false;
+  for (int i = 0; i < 6000 && !gone; ++i)
+  {
+    RunSim(w, tick, rng, 1);
+    gone = !w.IsValid(trader);
+  }
+  EXPECT_TRUE(gone);
+}
+
+TEST(AiSystem, FiringOnATraderIsACrime)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = w.Create();
+  w.Add<WorldTransform>(shooter, WorldTransform{ { 0, 0, 0 } });
+  w.Add<Flight>(shooter, Flight{});
+  w.Add<Combatant>(shooter, Combatant{ Team::Player, 255, 10, 6000, false });
+  w.Add<PlayerTag>(shooter, PlayerTag{});
+  w.Add<Wanted>(shooter, Wanted{ 0 });
+
+  SpawnDirector dir(1u, 600, 12);
+  dir.SpawnTrader(w, { 0, 0, 1000 }, { 0, 0, 40000 }, ShipType::Shuttle);   // dead ahead
+
+  Msg::MessageBus bus;
+  int crimes = 0;
+  bus.Subscribe<Crime>([&crimes](const Crime& _c)
+  {
+    ++crimes;
+    EXPECT_EQ(_c.victimTeam, Team::Trader);
+    EXPECT_TRUE(_c.firstOffence);
+  });
+
+  ResolveFireWeapon(w, bus, FireWeapon{ shooter, Weapon::Laser }, 6000, 0.9);
+  bus.Dispatch();
+
+  EXPECT_EQ(crimes, 1);
+  EXPECT_EQ(w.Get<Wanted>(shooter).level, 1);   // shooting civilians makes you wanted
+}
+
+TEST(AiSystem, StepTradersLaunchesOntoTheStationPlanetLane)
+{
+  ECS::Registry w;
+  // A player anchors the system; its station and planet define the lane.
+  const ECS::EntityId player = w.Create();
+  w.Add<WorldTransform>(player, WorldTransform{ { 0, 0, 0 } });
+  w.Add<PlayerTag>(player, PlayerTag{});
+
+  const ECS::EntityId station = w.Create();
+  w.Add<WorldTransform>(station, WorldTransform{ { 0, 0, -3000 } });
+  w.Add<ServerStation>(station, ServerStation{});
+
+  const ECS::EntityId planet = w.Create();
+  w.Add<WorldTransform>(planet, WorldTransform{ { 0, 0, 60000 } });
+  w.Add<NetType>(planet, NetType{ ShipType::Planet });
+
+  SpawnDirector dir(7u, 600, 12);
+  const ECS::EntityId trader = dir.StepTraders(w, TRADER_SPAWN_INTERVAL);
+
+  ASSERT_TRUE(w.IsValid(trader));
+  ASSERT_TRUE(w.Has<TradeLane>(trader));
+  EXPECT_TRUE(w.Has<FlightIntent>(trader));
+  EXPECT_TRUE(w.Has<AiPilot>(trader));
+  const int hull = w.Get<NetType>(trader).type;
+  EXPECT_TRUE(hull == ShipType::Shuttle || hull == ShipType::Transporter);
+  // The lane runs between the station and the planet (either direction).
+  const Math::Vector3i64 dest = w.Get<TradeLane>(trader).dest;
+  EXPECT_TRUE((dest.z == -3000 && dest.x == 0) || (dest.z == 60000 && dest.x == 0));
+
+  EXPECT_EQ(dir.CountTraders(w), 1);
+}
+
 // --- Spawn wiring -----------------------------------------------------------
 
 TEST(AiSystem, SpawnDirectorShipsFlyByIntent)

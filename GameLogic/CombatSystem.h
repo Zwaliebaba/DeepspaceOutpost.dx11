@@ -33,6 +33,7 @@ namespace Neuron::GameLogic
     inline constexpr int Pirate = 1;
     inline constexpr int Police = 2;
     inline constexpr int Station = 3;
+    inline constexpr int Trader = 4;   // ambient civilians; attacking one is a crime
   }
 
   // A combatant in the realtime sim: its team, energy pool, weapon strength and
@@ -59,6 +60,12 @@ namespace Neuron::GameLogic
     // damage and it ticks down each combat step, so a respawn-in-place cannot be
     // instantly re-killed by hostiles that are still in range.
     int invulnTicks = 0;
+
+    // Target memory (G5 stage 4): the entity index this combatant is fixed on -
+    // police lock onto the actual offender, the AI keeps flight and fire on the
+    // same prey. While it resolves to a live, in-range enemy it outranks the
+    // nearest-enemy scan; INVALID_INDEX means "no memory, scan as before".
+    uint32_t focus = ECS::INVALID_INDEX;
   };
 
   // Ticks of damage-immunity granted on spawn and respawn (~5s at 30 Hz), giving
@@ -140,6 +147,22 @@ namespace Neuron::GameLogic
     ECS::EntityId victim;
     uint32_t killer = 0;
   };
+
+  // Target discipline for the law (G5 stage 4): police engage only pirates and
+  // WANTED players - never traders, clean players, or other civilians. Shared by
+  // the combat tick's fire selection and the AI's flight targeting, so the two
+  // can't disagree about who the police are allowed to hunt.
+  [[nodiscard]] inline bool PoliceMayEngage(ECS::Registry& _world, ECS::EntityId _candidate, int _candidateTeam)
+  {
+    if (_candidateTeam == Team::Pirate)
+      return true;
+    if (_world.TryGet<PlayerTag>(_candidate) != nullptr)
+    {
+      const Wanted* w = _world.TryGet<Wanted>(_candidate);
+      return w != nullptr && w->level > 0;
+    }
+    return false;
+  }
 
   // Which shield a hit lands on: true = FRONT (the attacker lies ahead of the
   // victim's nose), false = aft. Unshielded/facing-less victims default to front.
@@ -235,33 +258,56 @@ namespace Neuron::GameLogic
         continue;
       }
 
-      const Unit* best = nullptr;
-      int64_t bestDist2 = 0;
-      for (const Unit& b : units)
+      // In-range test is Chebyshev (no large multiplies on absolute coords);
+      // only then is the squared distance computed, and only over the small
+      // in-range delta, so it cannot overflow.
+      auto inRange = [&a](const Unit& _b) -> bool
       {
-        if (b.c->team == a.c->team)
-          continue;   // never target allies
-
-        const int64_t dx = b.pos.x - a.pos.x;
-        const int64_t dy = b.pos.y - a.pos.y;
-        const int64_t dz = b.pos.z - a.pos.z;
-
-        // In-range test is Chebyshev (no large multiplies on absolute coords);
-        // only then is the squared distance computed, and only over the small
-        // in-range delta, so it cannot overflow.
+        const int64_t dx = _b.pos.x - a.pos.x;
+        const int64_t dy = _b.pos.y - a.pos.y;
+        const int64_t dz = _b.pos.z - a.pos.z;
         const int64_t ax = dx < 0 ? -dx : dx;
         const int64_t ay = dy < 0 ? -dy : dy;
         const int64_t az = dz < 0 ? -dz : dz;
-        if (ax > a.c->range || ay > a.c->range || az > a.c->range)
-          continue;
+        return ax <= a.c->range && ay <= a.c->range && az <= a.c->range;
+      };
 
-        const int64_t dist2 = dx * dx + dy * dy + dz * dz;
-        if (best == nullptr || dist2 < bestDist2)
+      const Unit* best = nullptr;
+      int64_t bestDist2 = 0;
+
+      // Target memory first (stage 4): a live, in-range, still-legitimate focus
+      // outranks the nearest scan, so fire follows the AI's flight target (the
+      // police shoot the offender they are chasing, not whoever drifts closest).
+      if (a.c->focus != ECS::INVALID_INDEX)
+        for (const Unit& b : units)
+          if (b.id.index == a.c->focus)
+          {
+            if (b.c->team != a.c->team && inRange(b)
+                && (a.c->team != Team::Police || PoliceMayEngage(_world, b.id, b.c->team)))
+              best = &b;
+            break;
+          }
+
+      if (best == nullptr)
+        for (const Unit& b : units)
         {
-          best = &b;
-          bestDist2 = dist2;
+          if (b.c->team == a.c->team)
+            continue;   // never target allies
+          if (a.c->team == Team::Police && !PoliceMayEngage(_world, b.id, b.c->team))
+            continue;   // the law spares traders and the innocent
+          if (!inRange(b))
+            continue;
+
+          const int64_t dx = b.pos.x - a.pos.x;
+          const int64_t dy = b.pos.y - a.pos.y;
+          const int64_t dz = b.pos.z - a.pos.z;
+          const int64_t dist2 = dx * dx + dy * dy + dz * dz;
+          if (best == nullptr || dist2 < bestDist2)
+          {
+            best = &b;
+            bestDist2 = dist2;
+          }
         }
-      }
 
       if (best != nullptr)
       {

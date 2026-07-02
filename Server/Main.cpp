@@ -270,9 +270,19 @@ int main()
     const GameLogic::WorldTransform* t = world.TryGet<GameLogic::WorldTransform>(_c.offender);
     if (t == nullptr)
       return;
-    spawner.SpawnPolice(world, t->position, 2);
-    printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched\n",
-           tick, _c.offender.index, _c.victimTeam);
+    // Stage 5: the law launches from the system's station when one is in reach
+    // (legacy stations launched their own Vipers); deep-space crime still gets
+    // the spawn-near-offender fallback. Either way the Vipers carry a warrant -
+    // they are FIXED on this offender (stage 4 target memory).
+    Math::Vector3i64 launchPos = t->position;
+    const ECS::EntityId station = GameLogic::NearestStation(world, t->position, LANDMARK_VIS_DIST);
+    if (station.index != ECS::INVALID_INDEX)
+      if (const auto* st = world.TryGet<GameLogic::WorldTransform>(station))
+        launchPos = st->position + Math::Vector3i64{ 0, 0, GameLogic::LAUNCH_OFFSET };
+    spawner.SpawnPolice(world, launchPos, 2, _c.offender.index);
+    printf("[tick %u] CRIME: player %u fired on team %d -> police dispatched (%s)\n",
+           tick, _c.offender.index, _c.victimTeam,
+           station.index != ECS::INVALID_INDEX ? "station launch" : "deep-space response");
   });
 
   // A death: respawn a player in place (restore hull, clear record, brief grace),
@@ -321,8 +331,17 @@ int main()
         GameLogic::DropPlayerCargo(world, _k.victim, pt->position, lootRng);
       GameLogic::RespawnAtNearestStation(world, _k.victim);
 
-      // Death wipes the wanted record - refresh the roster so a respawned player
-      // shows as clean again on everyone's screen.
+      // Death wipes the wanted record - and every grudge: the player respawns
+      // clean, so police warrants and pirate locks on them are torn up (the
+      // entity index survives the respawn, so stale memories must be swept).
+      world.Each<GameLogic::Combatant>([&_k](ECS::EntityId, GameLogic::Combatant& _cbt)
+      {
+        if (_cbt.focus == _k.victim.index)
+          _cbt.focus = ECS::INVALID_INDEX;
+      });
+
+      // Refresh the roster so a respawned player shows as clean again on
+      // everyone's screen.
       if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, _k.victim.index, pi))
         sessions.Broadcast(pi);
 
@@ -469,6 +488,7 @@ int main()
     GameLogic::Tick(world);
     ++tick;
     spawner.Step(world, tick);
+    spawner.StepTraders(world, tick);   // ambient station <-> planet traffic
 
     // Regenerate players' shields/energy on a slow cadence (before combat, so a hit
     // this tick lands on the freshly-regenerated shield).
