@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "Mesh.h"
-#include "RenderQueue.h"      // Neuron::Render::ModelDraw
+#include "ModelDraw.h"        // Neuron::Render::ModelDraw
 #include "SceneProjection.h"  // Neuron::Client::Matrix4 / ViewMetrics
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the

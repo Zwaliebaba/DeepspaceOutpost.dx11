@@ -9,7 +9,6 @@
 #include "config.h"
 #include "elite.h"
 #include "gfx.h"
-#include "RenderContext.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass
 #include "planet.h"
 #include "vector.h"
@@ -133,7 +132,7 @@ void draw_wireframe_ship (struct local_object *obj)
 			ex = point_list[ship->lines[i].end_point].x;
 			ey = point_list[ship->lines[i].end_point].y;
 
-			ActiveRenderQueue().Line (sx, sy, ex, ey);
+			gfx_draw_line (sx, sy, ex, ey);
 		}
 	}
 
@@ -142,7 +141,7 @@ void draw_wireframe_ship (struct local_object *obj)
 	{
 		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 		lasv = ship_list[obj->type]->front_laser;
-		ActiveRenderQueue().Line (point_list[lasv].x, point_list[lasv].y,
+		gfx_draw_line (point_list[lasv].x, point_list[lasv].y,
 					   obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256);
 	}
 }
@@ -218,7 +217,7 @@ void draw_solid_ship (struct local_object *obj)
 		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
 		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
 
-		ActiveRenderQueue().RenderLine (sx, sy,
+		gfx_render_line (sx, sy,
 						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
 						 (int) rz, col);
 	}
@@ -421,7 +420,7 @@ void draw_explosion (struct local_object *obj)
 
 			for (psy = 0; psy < sizey; psy++)
 				for (psx = 0; psx < sizex; psx++)		
-					ActiveRenderQueue().Pixel (px+psx, py+psy, GFX_COL_WHITE);
+					gfx_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
 		}
 	}
 

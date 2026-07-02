@@ -15,9 +15,7 @@ set(NEURONCLIENT_SOURCES
     # Engine front door: window + native D3D11 device + GameMain dispatch.
     ClientEngine.cpp
 
-    # Render seam + generic client engine (portable C++; no Win32/D3D).
-    RenderQueue.cpp
-    RenderContext.cpp
+    # Generic client engine (portable C++; no Win32/D3D).
     ReplicationClient.cpp
     Strings.cpp
     vector.cpp
@@ -45,7 +43,6 @@ set(NEURONCLIENT_SOURCES
     platform/platform_win.cpp
     platform/Renderer.cpp
     platform/gfx2d.cpp
-    platform/GfxRenderSink.cpp
     platform/audio_xa2.cpp
     platform/input_win.cpp
 )
@@ -78,10 +75,8 @@ set(NEURONCLIENT_HEADERS
     Mesh.h
     CameraFollow.h
     ReplicatedScene.h
-    RenderQueue.h
-    RenderContext.h
+    ModelDraw.h
     ReplicationClient.h
-    GfxRenderSink.h
     vector.h
 
     # Presentation contracts the game draws/plays/reads through.

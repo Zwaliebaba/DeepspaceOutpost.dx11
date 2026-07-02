@@ -11,7 +11,7 @@
 #ifndef GFX2D_H
 #define GFX2D_H
 
-#include "RenderQueue.h" // Neuron::Render::ModelDraw (kept for transitive consumers)
+#include "ModelDraw.h" // Neuron::Render::ModelDraw (kept for transitive consumers)
 
 // Replay this frame's 2D batch to the back buffer, and (once) the 3D scene pass under it.
 // The game hands its 3D models straight to Scene3D (Scene3D::SubmitModel), not through here.

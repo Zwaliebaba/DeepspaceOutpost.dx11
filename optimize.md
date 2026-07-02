@@ -383,12 +383,19 @@ interpolation. Not required by either phase above.
 
 ---
 
-## 5. Server / headless — untouched
+## 5. Server / headless
 
-The `RenderQueue` + `RenderSink` seam stays so the dedicated server, bot client, and
-golden-run tests keep recording into a queue and replaying into `NullRenderSink`
-(`RenderQueue.h`). Phase 2 step 5 only changes **which** sink the *client* uses; it does
-not remove the queue or the null path. `RenderQueueTests` keep passing.
+**Update (post-Step 5):** the `RenderQueue` + `RenderSink` seam has been **removed** entirely
+(`RenderQueue`, `RenderContext`, `GfxRenderSink`, `NullRenderSink`, and `RenderQueueTests` are
+gone). It turned out to add no runtime value on the client (the game recorded and *immediately*
+replayed same-frame) and had no real headless user — nothing but the unit tests ever ran the
+game's draw code through it. The game now calls the `gfx_*` 2D primitives directly (laser
+bolt/sights, warp streaks, explosion sparks) and hands 3D models straight to
+`Scene3D::SubmitModel`, matching how the HUD/menu code already draws. `ModelDraw` (the one piece
+worth keeping - the game↔`Scene3D` data contract) moved to its own header, `ModelDraw.h`.
+
+The dedicated server / `GameLogic` never ran the game's draw code (it's the authoritative sim),
+so it is unaffected.
 
 ---
 
@@ -408,6 +415,8 @@ the Decisions table with the next Dn id.
   the star migration (§2.3) extends `Scene3D` with a skybox draw + a dust-particle program;
   that is a deliberate, isolated feature change, not part of the structural refactor.
 - `Core` device/present/device-lost — already unified.
-- The `RenderQueue`/`RenderSink` contract and its headless path (§5).
+- ~~The `RenderQueue`/`RenderSink` contract and its headless path (§5).~~ **Superseded:** the
+  seam was retired after Step 5 (see §5) — it earned no keep on the client. This reverses the
+  original out-of-scope call, by explicit decision.
 - Frame pacing / message pump (`ClientEngine.cpp:227-250`).
 - Delta-time logic conversion (§3) — explicitly deferred.
