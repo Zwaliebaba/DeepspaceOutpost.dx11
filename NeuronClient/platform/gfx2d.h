@@ -13,8 +13,12 @@
 
 #include "ModelDraw.h" // Neuron::Render::ModelDraw (kept for transitive consumers)
 
-// Replay this frame's 2D batch to the back buffer, and (once) the 3D scene pass under it.
-// The game hands its 3D models straight to Scene3D (Scene3D::SubmitModel), not through here.
+// Run the 3D scene pass (skybox + dust + depth-tested models) onto the back buffer. Called
+// from RenderScene() after the game submits its models (Scene3D::SubmitModel). No clear (the
+// frame is cleared once by ClientEngine::Frame) and no 2D; a no-op if no scene was submitted.
+void gfx2d_render_scene(void);
+
+// Replay this frame's 2D batch (HUD / menus) to the back buffer, over the 3D scene pass.
 //
 // Every screen redraws every frame now (flight HUD, charts, docked legacy screens, the 3D
 // scene pass), so the batch is never empty during normal play and this always clears +

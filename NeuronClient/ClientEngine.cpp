@@ -186,6 +186,19 @@ namespace Neuron::Client
     // they still pump + pace below.
     if (m_main)
     {
+      // Clear the back buffer once, up front: the scene hook (RenderScene -> gfx2d_render_scene)
+      // then draws the depth-tested 3D onto it and RenderCanvas composites the 2D over the top,
+      // neither re-clearing. Done here (not in a hook) so nested blocking sequences - which skip
+      // Update/RenderScene but still redraw + present below - also start from a clean frame.
+      if (ID3D11RenderTargetView* rtv = Graphics::Core::GetRenderTargetView())
+      {
+        if (auto* ctx = Graphics::Core::GetD3DDeviceContext())
+        {
+          const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+          ctx->ClearRenderTargetView(rtv, black);
+        }
+      }
+
       static bool s_inLifecycle = false;
       if (!s_inLifecycle)
       {

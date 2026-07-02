@@ -593,25 +593,42 @@ void gfx_finish_render(void)
 }
 
 /* =====================================================================
- *  Flush
+ *  Scene pass + 2D flush
  * ===================================================================== */
+
+/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun), run from
+ * RenderScene() after the game has submitted its models (Scene3D::SubmitModel) and marked the
+ * scene (gfx_finish_render). No clear - ClientEngine::Frame clears the back buffer once per
+ * frame, before the scene hook - and no 2D; the HUD / menus / GUI composite over it later in
+ * gfx2d_flush. A no-op when no scene was submitted. Called even with a null rtv (device lost)
+ * so Scene3D still clears the frame's model list. */
+void gfx2d_render_scene(void)
+{
+	using Neuron::Graphics::Core;
+
+	if (!g_haveScene)
+		return;
+	g_haveScene = false;
+
+	const CanvasPlacement cp = canvasPlacement();
+	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
+											g_view, cp.dstX, cp.dstY,
+											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
+}
+
 void gfx2d_flush(void)
 {
 	using Neuron::Graphics::Core;
 	using Neuron::Graphics::Render2D;
 
 	Renderer* r = platform_renderer();
-	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); g_haveScene = false; return; }
+	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
 
-	/* Always render + present (D5): every screen redraws every frame now (flight HUD, charts,
-	 * docked legacy screens, scene pass) so there is no empty frame to skip. The one exception
-	 * - a paused game, which draws nothing - is handled by the caller not presenting, keeping
-	 * the last frame on screen. So there is no idle-frame gate here any more. */
-
-	/* Place the authored 2D canvas (retro 512x514, or the client area in full-window
-	 * flight) onto the back buffer via the single canvasPlacement() source below - the 2D
-	 * replay and the 3D scene pass both consume the same rect. No off-screen canvas / blit:
-	 * the viewport scales the virtual space straight onto the back buffer. */
+	/* 2D only. The back buffer is cleared once per frame by ClientEngine::Frame (before the
+	 * scene hook), and the 3D scene pass runs in gfx2d_render_scene() from RenderScene() - this
+	 * just composites the 2D HUD / menus / GUI on top of it (no re-clear). Every screen redraws
+	 * every frame, so there is no empty frame to skip - a paused game is handled by the caller
+	 * (GameApp::RenderCanvas) simply not presenting, keeping the last frame on screen. */
 	const CanvasPlacement cp = canvasPlacement();
 	const int vw = cp.vw;
 	const int vh = cp.vh;
@@ -620,26 +637,6 @@ void gfx2d_flush(void)
 	const float scale = cp.scale;
 
 	ID3D11RenderTargetView* rtv = Core::GetRenderTargetView();
-	ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
-
-	/* Clear the whole back buffer (letterbox bars + anything the batch does not paint)
-	 * before this frame's content. */
-	if (rtv && ctx)
-	{
-		const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-		ctx->ClearRenderTargetView(rtv, black);
-	}
-
-	/* The 3D scene (skybox -> dust -> depth-tested ships/planets/sun) is the under-layer, so
-	 * it runs once here - before the 2D replay - whenever the scene was submitted this frame.
-	 * The models were handed straight to Scene3D by the game (Scene3D::SubmitModel); Scene3D
-	 * consumes + clears them. The 2D HUD / GUI then composites on top (no re-clear). Called even
-	 * when rtv is null (device lost) so Scene3D still clears the frame's models. */
-	if (g_haveScene)
-	{
-		Neuron::Graphics::Scene3D::RenderModels(rtv, Core::GetDepthStencilView(), g_view, dstX, dstY,
-												static_cast<int>(vw * scale), static_cast<int>(vh * scale));
-	}
 
 	if (!g_cmds.empty() && rtv)
 	{
@@ -698,5 +695,4 @@ void gfx2d_flush(void)
 	g_cverts.clear();
 	g_tverts.clear();
 	g_cmds.clear();
-	g_haveScene = false;
 }
