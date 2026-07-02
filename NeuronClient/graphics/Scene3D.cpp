@@ -33,8 +33,8 @@ namespace Neuron::Graphics
     constexpr float kNearZ = 1.0f;
     constexpr float kFarZ = 131072.0f;
 
-    // Legacy planet/sun object types (drawn as billboards, not ship meshes).
-    constexpr int kShipPlanet = -1;
+    // The sun object type (drawn as a billboard, not a ship mesh). The planet (-1) is a real
+    // sphere mesh now, so it goes through the normal mesh path keyed by its type.
     constexpr int kShipSun = -2;
 
     // Mirrors SceneCb in shaders/partials/scene3d.hlsli (row-major mvp + flat tint).
@@ -84,15 +84,6 @@ namespace Neuron::Graphics
     constexpr float kLightDir[3] = {0.5f, 0.7f, -0.5f};
     constexpr float kAmbient = 0.40f;
     constexpr float kDiffuse = 0.60f;
-
-    // 0xAABBGGRR -> float4 (r,g,b,a) in 0..1.
-    void unpackRgba(uint32_t _rgba, float _out[4])
-    {
-      _out[0] = static_cast<float>(_rgba & 0xFFu) / 255.0f;
-      _out[1] = static_cast<float>((_rgba >> 8) & 0xFFu) / 255.0f;
-      _out[2] = static_cast<float>((_rgba >> 16) & 0xFFu) / 255.0f;
-      _out[3] = static_cast<float>((_rgba >> 24) & 0xFFu) / 255.0f;
-    }
 
     // Resolve a palette index to an opaque RGBA8 (0xAABBGGRR), matching col_rgba.
     uint32_t paletteRgba(int _index)
@@ -476,8 +467,9 @@ namespace Neuron::Graphics
 
     for (const Neuron::Render::ModelDraw& m : s_models)
     {
-      // Planet / sun render as depth-tested billboards, not ship meshes.
-      if (m.type == kShipPlanet || m.type == kShipSun)
+      // The sun renders as a depth-tested billboard (a glowing radial-gradient disk). The
+      // planet is now a real sphere mesh, so it falls through to the ship mesh path below.
+      if (m.type == kShipSun)
       {
         renderBillboard(m, proj);
         continue;
@@ -602,15 +594,11 @@ namespace Neuron::Graphics
     std::memcpy(mappedCb.pData, &cb, sizeof(cb));
     ctx->Unmap(s_cb.get(), 0);
 
-    // b1: mode + secondary colour. Planet style 0 wireframe->ring, 1 green->disk,
-    // 2/3 SNES/fractal->banded; sun -> mode 0.
+    // b1: billboard mode. The sun is the only billboard now (mode 0 - the shader's
+    // white->yellow->orange radial gradient); the planet migrated to a real sphere mesh, so
+    // the old planet ring/disk/band billboard modes are gone.
     BillboardParams bp{};
-    int mode = 0;
-    if (_model.type == kShipPlanet)
-      mode = (_model.style == 0) ? 1 : (_model.style == 1) ? 2 : 3;
-    bp.params[0] = static_cast<float>(mode);
-    if (mode == 3 && _model.colour2 >= 0)
-      unpackRgba(paletteRgba(_model.colour2), bp.colorB);
+    bp.params[0] = 0.0f;
 
     D3D11_MAPPED_SUBRESOURCE mappedBp;
     if (FAILED(ctx->Map(s_bbParamsCb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedBp)))

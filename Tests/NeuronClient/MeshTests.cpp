@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <vector>
 
 #include "Mesh.h"
@@ -113,4 +114,44 @@ TEST(Mesh, NullOrEmptyInputsReturnEmptyMesh)
   EXPECT_TRUE(BuildSolidMesh(kQuadPoints, 4, nullptr, 1).vertices.empty());
   EXPECT_TRUE(BuildSolidMesh(kQuadPoints, 0, &face, 1).vertices.empty());
   EXPECT_TRUE(BuildSolidMesh(kQuadPoints, 4, &face, 0).vertices.empty());
+}
+
+TEST(Mesh, UVSphereHasExpectedGridCountsAndBakedColour)
+{
+  const int stacks = 8;
+  const int slices = 12;
+  const MeshData sphere = BuildUVSphere(10.0f, stacks, slices, 0xAABBCCDDu);
+
+  // (stacks+1) rings x (slices+1) vertices (seam longitude duplicated), 2 triangles per quad.
+  EXPECT_EQ(sphere.vertices.size(), static_cast<size_t>((stacks + 1) * (slices + 1)));
+  EXPECT_EQ(sphere.indices.size(), static_cast<size_t>(stacks * slices * 6));
+  for (const MeshVertex& v : sphere.vertices)
+    EXPECT_EQ(v.rgba, 0xAABBCCDDu);
+}
+
+TEST(Mesh, UVSphereVerticesLieOnRadiusWithUnitNormals)
+{
+  const float radius = 7.5f;
+  const MeshData sphere = BuildUVSphere(radius, 16, 24, 0xFFFFFFFFu);
+  ASSERT_FALSE(sphere.vertices.empty());
+
+  for (const MeshVertex& v : sphere.vertices)
+  {
+    const float r = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    EXPECT_NEAR(r, radius, 1e-3f);
+    const float n = std::sqrt(v.nx * v.nx + v.ny * v.ny + v.nz * v.nz);
+    EXPECT_NEAR(n, 1.0f, 1e-4f);
+    // The normal is the outward radial direction: position == radius * normal.
+    EXPECT_NEAR(v.x, radius * v.nx, 1e-3f);
+    EXPECT_NEAR(v.y, radius * v.ny, 1e-3f);
+    EXPECT_NEAR(v.z, radius * v.nz, 1e-3f);
+  }
+}
+
+TEST(Mesh, UVSphereRejectsDegenerateParameters)
+{
+  EXPECT_TRUE(BuildUVSphere(0.0f, 8, 8, 0xFFFFFFFFu).vertices.empty());
+  EXPECT_TRUE(BuildUVSphere(-1.0f, 8, 8, 0xFFFFFFFFu).vertices.empty());
+  EXPECT_TRUE(BuildUVSphere(1.0f, 1, 8, 0xFFFFFFFFu).vertices.empty());
+  EXPECT_TRUE(BuildUVSphere(1.0f, 8, 2, 0xFFFFFFFFu).vertices.empty());
 }

@@ -8,9 +8,17 @@
 #include "Scene3D.h"
 
 #include "Renderer.h" // master palette (palette index -> RGBA)
-#include "elite.h"    // ship_list
+#include "gfx.h"      // GFX_COL_* palette indices
+#include "elite.h"    // ship_list, planet_render_style
 #include "shipdata.h"
 #include "shipface.h"
+
+// World-space radius of the 3D planet sphere. Chosen so the sphere projects to the same
+// on-screen size the old billboard did: that disk's world half-size worked out to a constant
+// 6291456/256 = 24576 units regardless of distance (see the retired Scene3D::renderBillboard
+// radius formula), so matching it here makes the billboard->mesh switch size-preserving. Tune
+// here if the planet should read larger/smaller.
+static constexpr float kPlanetRadius = 24576.0f;
 
 // Build a GPU-ready mesh for one legacy ship type from its point table + solid faces.
 // Returns false if the type is not a real ship (planet/sun and out-of-range types have
@@ -18,6 +26,20 @@
 // as immutable vertex/index buffers on first use.
 static bool build_ship_mesh(int _type, Neuron::Graphics::MeshData& _out)
 {
+  // The planet is a procedural 3D sphere (migrated from the old camera-facing billboard):
+  // a smooth UV-sphere lit per-vertex by the scene's directional light. Its colour is baked
+  // from the current planet style at build time - green for the classic look, blue-ish for
+  // the SNES/fractal styles. The mesh is cached, so a mid-session style change takes effect
+  // on the next Scene3D load (acceptable; the style toggle is a settings-window nicety).
+  if (_type == SHIP_PLANET)
+  {
+    Renderer* r = platform_renderer();
+    const int colIdx = (planet_render_style >= 2) ? GFX_COL_BLUE_1 : GFX_COL_GREEN_1;
+    const uint32_t rgba = (r ? r->paletteColour(colIdx) : 0xFF33AA33u) | 0xFF000000u;
+    _out = Neuron::Graphics::BuildUVSphere(kPlanetRadius, 32, 48, rgba);
+    return !_out.vertices.empty() && !_out.indices.empty();
+  }
+
   if (_type < 1 || _type > NO_OF_SHIPS)
     return false;
 

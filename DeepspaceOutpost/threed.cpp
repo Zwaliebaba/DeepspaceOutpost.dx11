@@ -240,25 +240,25 @@ void draw_planet (struct local_object *planet)
 	if (planet->location.z <= 0)
 		return;
 
-	/* Emit the planet as a GPU billboard (a depth-tested camera-facing disk), so it
-	 * occludes correctly against the 3D ships and no longer floods the framebuffer with
-	 * per-pixel software rasterization. Scene3D derives the on-screen radius from the
-	 * distance + focal length and reproduces the style:
-	 *   0 wireframe -> ring, 1 green -> filled disk, 2/3 SNES/fractal -> banded disk. */
+	/* Emit the planet as a real 3D sphere: a lit UV-sphere mesh (built by SceneMeshes),
+	 * drawn through the same depth-tested mesh pipeline as the ships - replacing the old
+	 * camera-facing billboard disk. Scene3D applies the model->camera rotation + translation
+	 * and the hardware z-buffer resolves occlusion against the ships. The colour is baked into
+	 * the mesh, so this uses the ship (per-vertex, lit) colour path (md.colour = -1). */
 	Neuron::Render::ModelDraw md;
 	md.type = SHIP_PLANET;
 	md.style = planet_render_style;
+	md.colour = -1;
 	md.location[0] = planet->location.x;
 	md.location[1] = planet->location.y;
 	md.location[2] = planet->location.z;
-	md.distance = planet->distance;
-
-	switch (planet_render_style)
+	for (int i = 0; i < 3; i++)
 	{
-		case 0:  md.colour = GFX_COL_WHITE;   break;                              /* wireframe ring */
-		case 1:  md.colour = GFX_COL_GREEN_1; break;                              /* filled green   */
-		default: md.colour = GFX_COL_GREEN_1; md.colour2 = GFX_COL_BLUE_1; break; /* SNES / fractal */
+		md.rotmat[i][0] = planet->rotmat[i].x;
+		md.rotmat[i][1] = planet->rotmat[i].y;
+		md.rotmat[i][2] = planet->rotmat[i].z;
 	}
+	md.distance = planet->distance;
 
 	Neuron::Graphics::Scene3D::SubmitModel (md);
 }
@@ -461,10 +461,7 @@ void draw_ship (struct local_object *ship)
 
 	if (ship->type == SHIP_PLANET)
 	{
-		/* TEMPORARILY DISABLED: the planet billboard is screen-filling at spawn - it starts at
-		   ~docking range, where the legacy radius formula draws it huge. Skip drawing it for now
-		   while the spawn distance / placement is sorted out; the planet object still exists for
-		   docking + navigation, it just is not rendered. Restore draw_planet(ship) to re-enable. */
+		draw_planet (ship);
 		return;
 	}
 
