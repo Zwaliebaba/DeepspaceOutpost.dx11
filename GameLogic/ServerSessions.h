@@ -211,10 +211,11 @@ namespace Neuron::GameLogic
       // Combat/faction state: a player is on the Player team, fires only on
       // command (autoEngage = false), and starts with a clean record.
       _world.Add<PlayerTag>(e, PlayerTag{});
-      _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ 255, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
+      _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ MAX_ENERGY, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
       // Spawn protection: brief immunity so connecting into nearby hostiles isn't
       // an instant death.
       _world.Get<Combatant>(e).invulnTicks = RESPAWN_GRACE_TICKS;
+      _world.Add<Shields>(e, Shields{});   // full directional shields (player-only feature)
       _world.Add<Wanted>(e, Wanted{});
       _world.Add<PlayerRecord>(e, PlayerRecord{});   // name filled in by the caller
       _world.Add<NetType>(e, NetType{ ShipType::Viper });

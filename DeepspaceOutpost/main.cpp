@@ -1233,12 +1233,15 @@ static void register_client_event_handlers(void)
     g_playerRoster[_pi.entityId] = PlayerRosterEntry{ _pi.name, _pi.wantedLevel };
   });
 
-  // Status: our own authoritative vitals for the HUD. Credits mirror the dashboard
-  // (shields/fuel/energy HUD wiring lands with G3/G7; only what the HUD reads today
-  // is applied here).
+  // Status: our own authoritative vitals for the HUD. The server owns shields and
+  // energy, so mirror them into the legacy defense state the cockpit HUD draws
+  // (fuel/score wiring lands with G7/later).
   g_clientBus.Subscribe<Neuron::Msg::PlayerStatus>([](const Neuron::Msg::PlayerStatus& _ps)
   {
     cmdr.credits = _ps.credits;
+    PlayerDefense().frontShield = _ps.frontShield;
+    PlayerDefense().aftShield = _ps.aftShield;
+    PlayerDefense().energy = _ps.energy;
   });
 
   // Input command-builder: a discrete combat action sets this frame's intent, which
@@ -1487,7 +1490,10 @@ static void game_render_flight(void)
     if (mcount < 0)
       mcount = 255;
 
-    if ((mcount & 7) == 0)
+    // The server regenerates and replicates shields/energy in thin-client mode
+    // (see the PlayerStatus handler); only the degraded single-player fallback
+    // regenerates locally.
+    if ((mcount & 7) == 0 && !Client::ReplicationClientInstance().IsOpen())
       regenerate_shields();
 
     if ((mcount & 31) == 10)
