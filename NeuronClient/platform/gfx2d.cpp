@@ -73,11 +73,10 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* g_haveScene records that the 3D scene was submitted this frame (gfx_finish_render), so
- * gfx2d_flush runs the scene pass (skybox + dust + the models the game handed straight to
- * Scene3D via Scene3D::SubmitModel) once, before the 2D layer - even with no models in view
- * (staring at empty space still shows the skybox). Models now live in Scene3D, not here. */
-bool                                   g_haveScene = false;
+/* The frame's 3D scene (skybox + dust + the models the game handed straight to Scene3D via
+ * Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls directly at
+ * the end of its world draw - even with no models in view (staring at empty space still shows
+ * the skybox). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -584,31 +583,20 @@ void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
 }
 
 
-void gfx_finish_render(void)
-{
-	/* A 3D scene bracket ran this frame, so gfx2d_flush draws the scene pass (skybox + dust +
-	 * the models the game handed to Scene3D::SubmitModel) once, under the 2D layer. Set even
-	 * when no models were submitted, so the skybox still fills the background in empty space. */
-	g_haveScene = true;
-}
-
 /* =====================================================================
  *  Scene pass + 2D flush
  * ===================================================================== */
 
-/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun), run from
- * RenderScene() after the game has submitted its models (Scene3D::SubmitModel) and marked the
- * scene (gfx_finish_render). No clear - ClientEngine::Frame clears the back buffer once per
- * frame, before the scene hook - and no 2D; the HUD / menus / GUI composite over it later in
- * gfx2d_flush. A no-op when no scene was submitted. Called even with a null rtv (device lost)
- * so Scene3D still clears the frame's model list. */
-void gfx2d_render_scene(void)
+/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun). The game calls
+ * this directly at the end of its world draw (update_local_objects / render_replicated_objects),
+ * once all models are submitted (Scene3D::SubmitModel) and the dust is set - so it drives the
+ * pass itself, with no separate scene-marker flag. No clear (ClientEngine::Frame clears the
+ * back buffer once per frame, before the scene hook) and no 2D; the HUD / menus / GUI composite
+ * over it later in gfx2d_flush. Runs unconditionally (drawing the skybox even with no models in
+ * view), and safely on a null rtv (device lost) - Scene3D still clears the frame's model list. */
+void gfx_render_3d_scene(void)
 {
 	using Neuron::Graphics::Core;
-
-	if (!g_haveScene)
-		return;
-	g_haveScene = false;
 
 	const CanvasPlacement cp = canvasPlacement();
 	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
@@ -625,10 +613,11 @@ void gfx2d_flush(void)
 	if (!r) { g_cverts.clear(); g_tverts.clear(); g_cmds.clear(); return; }
 
 	/* 2D only. The back buffer is cleared once per frame by ClientEngine::Frame (before the
-	 * scene hook), and the 3D scene pass runs in gfx2d_render_scene() from RenderScene() - this
-	 * just composites the 2D HUD / menus / GUI on top of it (no re-clear). Every screen redraws
-	 * every frame, so there is no empty frame to skip - a paused game is handled by the caller
-	 * (GameApp::RenderCanvas) simply not presenting, keeping the last frame on screen. */
+	 * scene hook), and the 3D scene pass is drawn by the game via gfx_render_3d_scene() during
+	 * RenderScene - this just composites the 2D HUD / menus / GUI on top of it (no re-clear).
+	 * Every screen redraws every frame, so there is no empty frame to skip - a paused game is
+	 * handled by the caller (GameApp::RenderCanvas) simply not presenting, keeping the last
+	 * frame on screen. */
 	const CanvasPlacement cp = canvasPlacement();
 	const int vw = cp.vw;
 	const int vh = cp.vh;

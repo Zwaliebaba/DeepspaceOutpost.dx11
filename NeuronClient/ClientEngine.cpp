@@ -186,10 +186,11 @@ namespace Neuron::Client
     // they still pump + pace below.
     if (m_main)
     {
-      // Clear the back buffer once, up front: the scene hook (RenderScene -> gfx2d_render_scene)
-      // then draws the depth-tested 3D onto it and RenderCanvas composites the 2D over the top,
-      // neither re-clearing. Done here (not in a hook) so nested blocking sequences - which skip
-      // Update/RenderScene but still redraw + present below - also start from a clean frame.
+      // Clear the back buffer once, up front: the scene hook (RenderScene -> game_render_scene,
+      // which draws its 3D via gfx_render_3d_scene) then draws the depth-tested 3D onto it and
+      // RenderCanvas composites the 2D over the top, neither re-clearing. Done here (not in a
+      // hook) so nested blocking sequences - which skip Update/RenderScene but still redraw +
+      // present below - also start from a clean frame.
       if (ID3D11RenderTargetView* rtv = Graphics::Core::GetRenderTargetView())
       {
         if (auto* ctx = Graphics::Core::GetD3DDeviceContext())
@@ -209,9 +210,10 @@ namespace Neuron::Client
         // in-flight/docked loop.
         m_main->Update(capMs / 1000.0f);
 
-        // Scene hook (GameApp::RenderScene -> game_render_scene): draw the 3D + HUD into
-        // the 2D batch before the canvas phase so it composites correctly. Inert outside
-        // that loop, in which case the active screen's own loop already filled the batch.
+        // Scene hook (GameApp::RenderScene -> game_render_scene): record the 2D HUD into the
+        // batch and draw the depth-tested 3D scene straight to the back buffer (the game calls
+        // gfx_render_3d_scene at the end of its world draw), before the canvas phase composites
+        // the 2D over it. Inert outside the in-flight/docked loop.
         m_main->RenderScene();
 
         s_inLifecycle = false;

@@ -35,11 +35,12 @@ class GameApp : public Neuron::GameMain
     // driving their own frames.
     void Update(float _deltaSeconds) override { game_update(); }
 
-    // Scene hook: the game records its 2D HUD/menu batch and submits its 3D models
-    // (Scene3D::SubmitModel), then gfx2d_render_scene() draws the depth-tested 3D pass onto the
-    // (already-cleared) back buffer. RenderCanvas composites the 2D over it. This is the clean
-    // 3-hook split - the 3D no longer hides inside the 2D flush.
-    void RenderScene() override { game_render_scene(); gfx2d_render_scene(); }
+    // Scene hook: the game records its 2D HUD/menu batch and draws its 3D scene itself. At the
+    // end of its world draw it submits the models (Scene3D::SubmitModel) and calls
+    // gfx_render_3d_scene(), which draws the depth-tested 3D pass onto the (already-cleared) back
+    // buffer. RenderCanvas then composites the 2D over it. The game drives the 3D pass directly -
+    // there is no scene-marker flag or separate render-scene hook.
+    void RenderScene() override { game_render_scene(); }
 
     // The whole 2D phase: refresh the GUI overlay (input / auto-hide), replay the game's
     // 2D batch (HUD + menus, letterboxed) to the back buffer, then draw the GUI overlay

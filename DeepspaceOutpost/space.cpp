@@ -626,9 +626,9 @@ void update_local_objects (void)
 		}
 	}
 
-	/* Mark the 3D scene as submitted this frame (skybox + dust + the models handed to
-	   Scene3D::SubmitModel above), so gfx2d_flush runs the scene pass. */
-	gfx_finish_render();
+	/* The frame's 3D scene is fully submitted (skybox + dust + the models handed to
+	   Scene3D::SubmitModel above): draw it now, onto the cleared back buffer, under the 2D HUD. */
+	gfx_render_3d_scene();
 
 	detonate_bomb = 0;
 }
@@ -771,7 +771,9 @@ void render_replicated_objects (void)
 		}
 	}
 
-	gfx_finish_render();
+	/* The frame's replicated 3D scene is fully submitted: draw it now, onto the cleared
+	   back buffer, under the 2D HUD (the game drives the pass; no scene-marker flag). */
+	gfx_render_3d_scene();
 }
 
 
