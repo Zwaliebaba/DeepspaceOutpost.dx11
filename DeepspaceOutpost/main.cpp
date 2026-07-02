@@ -1090,20 +1090,22 @@ static void start_new_game(void)
   enter_intro1();
 }
 
-// After the game-over animation. In thin-client mode the server has already respawned us
-// in place (it keeps no permadeath yet), so clear the death and drop straight back into
-// flight - the replicated snapshots drive the view again. The degraded single-player
-// fallback has no server to respawn us, so it starts a fresh game (intro).
+// After the game-over animation. In thin-client mode the server has respawned us
+// DOCKED at the nearest station (the G3 death rule, minus cargo), so enter the
+// station menus rather than resuming flight - mirroring enter_flight. dock_player()
+// re-confirms the dock with the server and resets our ship state; the replicated
+// snapshots (now at the station) drive the view when we launch. The degraded
+// single-player fallback has no server to respawn us, so it starts a fresh game.
 static void respawn_after_death(void)
 {
   if (Client::ReplicationClientInstance().IsOpen())
   {
     game_over = 0;
-    docked = 0;
-    PlayerFlight().speed = 0;
-    PlayerFlight().roll = 0;
-    PlayerFlight().climb = 0;
-    current_screen = SCR_FRONT_VIEW;
+    // The server dropped our cargo on death; clear the local display to match (the
+    // authoritative hold is already empty server-side).
+    memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
+    dock_player();
+    display_commander_status();
     s_state = GameState::Flight;
   }
   else
@@ -1214,6 +1216,11 @@ static void register_client_event_handlers(void)
     if (_death.victim == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
     g_playerRoster.erase(_death.victim);
+    // Capture the dying ship's last position/type BEFORE forgetting it, so we can
+    // play a debris burst where it died (the server just vanishes the entity).
+    Net::EntitySnapshot vs;
+    if (rc.Sample(_death.victim, 1.0, vs))
+      spawn_replicated_explosion(vs);
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
   });

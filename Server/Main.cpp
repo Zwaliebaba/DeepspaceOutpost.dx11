@@ -282,6 +282,10 @@ int main()
       if (GameLogic::Wanted* wnt = world.TryGet<GameLogic::Wanted>(_k.victim))
         wnt->level = 0;
 
+      // Death rule: respawn DOCKED at the nearest station, minus cargo (rather than
+      // in place). If no station is reachable, fall back to respawn-in-place.
+      GameLogic::RespawnAtNearestStation(world, _k.victim);
+
       // Death wipes the wanted record - refresh the roster so a respawned player
       // shows as clean again on everyone's screen.
       if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, _k.victim.index, pi))

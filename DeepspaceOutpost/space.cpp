@@ -650,6 +650,42 @@ void update_local_objects (void)
 // the server's proximity gate so it never optimistically docks from across AOI.
 static double s_nearest_station_dist = 1.0e18;
 
+// Client-side explosion effects for replicated ships that die. The server sends an
+// EntityDeath (which vanishes the ship); the client turns it into a short debris
+// burst here so a kill is visible, not just audible. Each holds the dying ship's
+// absolute world position and a persistent local_object carrying the legacy
+// explosion state (exp_seed/exp_delta, grown by draw_ship/draw_explosion). It is
+// world-anchored - rebased around the moving player every frame like the ships -
+// until the legacy animation finishes (FLG_REMOVE) or a safety lifetime elapses.
+namespace
+{
+	struct ReplicatedExplosion
+	{
+		Neuron::Math::Vector3i64 worldPos{};
+		struct local_object obj;   // memset in spawn_replicated_explosion
+		int frames = 0;
+	};
+	std::vector<ReplicatedExplosion> s_explosions;
+	constexpr int kMaxExplosionFrames = 120;   // ~2s safety cap if it never faces us
+}
+
+// Start an explosion for a dying replicated ship, from its last snapshot (captured
+// before the entity is forgotten). Skips non-ship types (planet/sun/untyped).
+void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap)
+{
+	const int type = snap.type;
+	if (type <= 0 || type > NO_OF_SHIPS)
+		return;
+
+	ReplicatedExplosion ex;
+	ex.worldPos = Neuron::Math::Vector3i64{ snap.x, snap.y, snap.z };
+	memset (&ex.obj, 0, sizeof (ex.obj));
+	ex.obj.type = type;
+	ex.obj.flags = FLG_DEAD;          // draw_ship promotes this to an animated explosion
+	set_init_matrix (ex.obj.rotmat);
+	s_explosions.push_back (ex);
+}
+
 void render_replicated_objects (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
@@ -769,6 +805,53 @@ void render_replicated_objects (void)
 				break;
 			}
 		}
+	}
+
+	// Replicated explosions: draw each dying ship's debris burst, world-anchored via
+	// the same floating-origin rebasing the ships use (feed the local player + each
+	// explosion's world position through BuildRenderRecords), until the legacy
+	// animation finishes (FLG_REMOVE) or the safety lifetime elapses.
+	if (!s_explosions.empty())
+	{
+		Neuron::Net::EntitySnapshot meSnap;
+		if (rc.Sample (rc.LocalPlayer(), 1.0, meSnap))
+		{
+			std::vector<Neuron::Net::EntitySnapshot> es;
+			es.reserve (s_explosions.size() + 1);
+			es.push_back (meSnap);   // the floating origin (skipped by BuildRenderRecords)
+			for (size_t i = 0; i < s_explosions.size(); i++)
+			{
+				Neuron::Net::EntitySnapshot s;   // defaults: nose +z, roof +y
+				s.id = 0x80000000u | (uint32_t) i;   // synthetic id, distinct from real + local
+				s.x = s_explosions[i].worldPos.x;
+				s.y = s_explosions[i].worldPos.y;
+				s.z = s_explosions[i].worldPos.z;
+				s.type = (int16_t) s_explosions[i].obj.type;
+				es.push_back (s);
+			}
+
+			std::vector<Neuron::Client::RenderRecord> exrecs =
+				Neuron::Client::BuildRenderRecords (es, meSnap.id);   // order matches s_explosions
+
+			for (size_t i = 0; i < exrecs.size() && i < s_explosions.size(); i++)
+			{
+				struct local_object& o = s_explosions[i].obj;
+				o.location = exrecs[i].location;
+				o.rotmat[0] = exrecs[i].rotmat[0];
+				o.rotmat[1] = exrecs[i].rotmat[1];
+				o.rotmat[2] = exrecs[i].rotmat[2];
+				o.distance = (int) exrecs[i].distance;
+				Neuron::Client::ApplyCamera (cam, &o);
+				draw_ship (&o);   // FLG_DEAD -> explosion; grows exp_delta; sets FLG_REMOVE when done
+			}
+		}
+
+		for (ReplicatedExplosion& ex : s_explosions)
+			ex.frames++;
+		std::erase_if (s_explosions, [](const ReplicatedExplosion& e)
+		{
+			return (e.obj.flags & FLG_REMOVE) || e.frames > kMaxExplosionFrames;
+		});
 	}
 
 	/* The frame's replicated 3D scene is fully submitted: draw it now, onto the cleared

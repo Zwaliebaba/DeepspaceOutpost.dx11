@@ -99,5 +99,10 @@ void launch_player (void);
 
 void engage_docking_computer (void);
 
+// Start a client-side explosion for a replicated ship that just died, from its last
+// snapshot. Defined in space.cpp; called by the EntityDeath handler (main.cpp).
+namespace Neuron::Net { struct EntitySnapshot; }
+void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap);
+
 #endif
 

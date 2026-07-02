@@ -310,6 +310,37 @@ namespace Neuron::GameLogic
   // a fresh launch never instantly re-docks.
   constexpr int64_t LAUNCH_OFFSET = 2000;
 
+  // Respawn a dead player DOCKED at the nearest station anywhere in the world
+  // (G3 death rule): relocate them onto the station, mark them docked, and empty
+  // their hold. The cargo is lost for now - it will scatter as scoopable canisters
+  // once loot entities exist (G4). Returns false (leaving the player in place) only
+  // if the player lacks a transform/dock or no station exists.
+  inline bool RespawnAtNearestStation(ECS::Registry& _world, ECS::EntityId _player)
+  {
+    WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+    DockState* dock = _world.TryGet<DockState>(_player);
+    if (pt == nullptr || dock == nullptr)
+      return false;
+
+    // Unbounded nearest: a range wider than the galaxy so the Chebyshev gate never
+    // culls, giving the globally nearest station.
+    const ECS::EntityId station = NearestStation(_world, pt->position, INT64_MAX / 4);
+    const WorldTransform* st = (station.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(station) : nullptr;
+    if (st == nullptr)
+      return false;
+
+    pt->position = st->position;
+    dock->docked = true;
+    dock->stationId = station.index;
+
+    // Drop cargo: empty the hold but keep its capacity (the large bay survives death).
+    if (CargoHold* hold = _world.TryGet<CargoHold>(_player))
+      for (int& units : hold->units)
+        units = 0;
+
+    return true;
+  }
+
   // Apply a station request to `_player`'s authoritative components and the market
   // of the station they are docked at, returning the response to send back. Dock
   // attaches to the nearest in-range station; trades hit THAT station's market.
