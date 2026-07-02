@@ -221,12 +221,11 @@ namespace Neuron::Client
 
       // Canvas hook (GameApp::RenderCanvas): the whole 2D phase - overlay update + game HUD
       // replay + GUI overlay - runs every frame (including nested sequences). Every screen
-      // redraws every frame, so it normally paints and returns true; Core owns presentation:
-      // Present() picks the sync/tearing mode, discards the RTV/DSV contents, and drives
-      // device-lost recovery off the Present HRESULT. The one case it returns false is a
-      // paused game, which draws nothing - then we skip Present so the last frame stays up.
-      if (m_main->RenderCanvas())
-        Graphics::Core::Present();
+      // redraws every frame, so it always paints; Core then presents. Present() picks the
+      // sync/tearing mode, discards the RTV/DSV contents, and drives device-lost recovery off
+      // the Present HRESULT.
+      m_main->RenderCanvas();
+      Graphics::Core::Present();
 
       // Default the NEXT frame to the retro letterboxed canvas; the in-flight render path
       // re-enables full-window mode each frame it draws.

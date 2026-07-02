@@ -44,7 +44,6 @@ int message_count;
 char message_string[80];
 int rolling;
 int climbing;
-int game_paused;
 
 int find_input;
 char find_name[20];
@@ -166,7 +165,6 @@ void initialise_game(void)
   detonate_bomb = 0;
   find_input = 0;
   witchspace = 0;
-  game_paused = 0;
   auto_pilot = 0;
 
   create_new_stars();
@@ -709,13 +707,6 @@ void handle_flight_keys(void)
 
   kbd_poll_keyboard();
 
-  if (game_paused)
-  {
-    if (kbd_resume_pressed)
-      game_paused = 0;
-    return;
-  }
-
   if (kbd_F1_pressed)
   {
     find_input = 0;
@@ -922,9 +913,6 @@ void handle_flight_keys(void)
 
   if (kbd_origin_pressed)
     o_pressed();
-
-  if (kbd_pause_pressed)
-    game_paused = 1;
 
   if (kbd_target_missile_pressed)
   {
@@ -1358,9 +1346,6 @@ static void game_update_flight(void)
   if (Client::ReplicationClientInstance().IsOpen())
     send_player_input();
 
-  if (game_paused)
-    return;
-
   if (message_count > 0)
     message_count--;
 
@@ -1375,9 +1360,6 @@ static void game_update_flight(void)
 // loop body emitted (with the simulation-and-draw steps that are still fused).
 static void game_render_flight(void)
 {
-  if (game_paused)
-    return;
-
   // Charts (galactic / short range): redraw the chart, the live selected-system readout
   // and the crosshair every frame. The replicated chart functions are idempotent (they
   // only re-park the cursor when it is off-screen), so a per-frame redraw suits the

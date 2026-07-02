@@ -23,11 +23,11 @@ namespace Neuron
 
       // Per-frame hooks (the legacy game still runs through game_main() for now, so
       // these are stubs a future migration fills in). RenderCanvas owns the whole 2D
-      // phase (game HUD replay + GUI overlay) and returns whether the frame painted
-      // anything - the engine presents only when it did (idle frames persist).
+      // phase (game HUD replay + GUI overlay); every screen redraws every frame, so the
+      // engine always presents afterwards.
       virtual void Update(float _deltaSeconds) {}
       virtual void RenderScene() {}
-      virtual bool RenderCanvas() { return false; }
+      virtual void RenderCanvas() {}
 
       // Window/app lifecycle notifications from the engine's window procedure.
       virtual void OnActivated() {}

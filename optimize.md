@@ -316,12 +316,13 @@ past the split forces throwaway 2D-background scaffolding.
    `forcePresent` and no empty-batch gate — it always clears + draws. The docked legacy
    screens that used to repaint on demand (`SCR_CMDR_STATUS`, `SCR_PLANET_DATA`) now redraw
    every frame in `game_render_flight` (like the charts already did; both are idempotent),
-   so there are no empty frames during normal play. The **one** deliberate present-skip left
-   is a **paused** game: the flight loop draws nothing (and the sim/draw are still fused, so
-   drawing the frozen scene without advancing state would need the loop un-fused — Step 5
-   territory), so `GameApp::RenderCanvas` returns false when `game_paused && !overlay`, and
-   the caller keeps the last frame on screen. This replaces the general `forcePresent`/
-   return-bool/`painted` machinery with one explicit, readable pause check.
+   so there are no empty frames during normal play. Originally one deliberate present-skip
+   remained — a **paused** game, via `GameApp::RenderCanvas` returning `false` when
+   `game_paused && !overlay`. **Pause was later removed outright** (it has no meaning in an
+   MMO — the server sim keeps running regardless), taking the `game_paused` flag, the P/R
+   keys, and the `RenderCanvas` `bool` return with it: `RenderCanvas` is `void` again and
+   `ClientEngine::Frame` presents unconditionally. So D5's "always present" is now literal,
+   with **no** exceptions.
 5. **[DONE]** Short-circuit the client model round-trip. The game's draw pass now calls
    `Scene3D::SubmitModel(md)` directly (from `threed.cpp`), instead of
    `ActiveRenderQueue().DrawModel → FlushRenderQueue → GfxRenderSink → gfx2d_submit_model →

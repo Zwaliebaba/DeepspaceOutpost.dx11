@@ -45,23 +45,14 @@ class GameApp : public Neuron::GameMain
     // The whole 2D phase: refresh the GUI overlay (input / auto-hide), replay the game's
     // 2D batch (HUD + menus, letterboxed) to the back buffer, then draw the GUI overlay
     // (windows/menus, client-space) on top. Every screen redraws every frame, so this always
-    // paints and returns true -> the frame is presented. The one exception is a paused game:
-    // it draws nothing, so we return false and the caller does not present, leaving the last
-    // frame on screen (FLIP_DISCARD keeps no retained content). The two 2D layers are separate
-    // Canvas passes (the game HUD is native-centred 512x514; the overlay is full-window pixels).
-    bool RenderCanvas() override
+    // paints and the caller always presents (FLIP_DISCARD keeps no retained content). The two
+    // 2D layers are separate Canvas passes (the game HUD is native-centred 512x514; the overlay
+    // is full-window pixels).
+    void RenderCanvas() override
     {
       GuiOverlay::Update();
-
-      // Paused with nothing else to draw: keep the last presented frame on screen (don't
-      // present). If a GUI overlay window is up it must keep compositing/animating, so still
-      // present in that case (matches the old forcePresent=overlayShown behaviour).
-      if (game_paused && !GuiOverlay::IsShown())
-        return false;
-
       gfx2d_flush();
       if (Renderer* r = platform_renderer())
         GuiOverlay::Render(r->clientWidth(), r->clientHeight());
-      return true;
     }
 };

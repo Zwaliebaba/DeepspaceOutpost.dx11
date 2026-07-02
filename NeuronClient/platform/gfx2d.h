@@ -20,9 +20,7 @@
 //
 // Every screen redraws every frame now (flight HUD, charts, docked legacy screens, the 3D
 // scene pass), so the batch is never empty during normal play and this always clears +
-// draws + is present-ready. The one screen that draws nothing - a paused game - is handled
-// by the caller (GameApp::RenderCanvas) simply not presenting, so the last frame stays on
-// screen (FLIP_DISCARD keeps no retained content). There is no idle-frame gate here.
+// draws + is present-ready; the caller always presents. There is no idle-frame gate here.
 void gfx2d_flush(void);
 
 #endif /* GFX2D_H */

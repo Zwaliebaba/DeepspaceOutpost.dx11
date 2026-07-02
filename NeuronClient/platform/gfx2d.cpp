@@ -615,9 +615,8 @@ void gfx2d_flush(void)
 	/* 2D only. The back buffer is cleared once per frame by ClientEngine::Frame (before the
 	 * scene hook), and the 3D scene pass is drawn by the game via gfx_render_3d_scene() during
 	 * RenderScene - this just composites the 2D HUD / menus / GUI on top of it (no re-clear).
-	 * Every screen redraws every frame, so there is no empty frame to skip - a paused game is
-	 * handled by the caller (GameApp::RenderCanvas) simply not presenting, keeping the last
-	 * frame on screen. */
+	 * Every screen redraws every frame, so there is no empty frame to skip and the caller always
+	 * presents. */
 	const CanvasPlacement cp = canvasPlacement();
 	const int vw = cp.vw;
 	const int vh = cp.vh;
