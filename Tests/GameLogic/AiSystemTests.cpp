@@ -508,9 +508,12 @@ TEST(AiSystem, StepTradersLaunchesOntoTheStationPlanetLane)
   EXPECT_TRUE(w.Has<AiPilot>(trader));
   const int hull = w.Get<NetType>(trader).type;
   EXPECT_TRUE(hull == ShipType::Shuttle || hull == ShipType::Transporter);
-  // The lane runs between the station and the planet (either direction).
+  // The lane runs between the station and the planet's GATE (offset above the
+  // surface, clear of the G6 kill radius) - either direction.
   const Math::Vector3i64 dest = w.Get<TradeLane>(trader).dest;
-  EXPECT_TRUE((dest.z == -3000 && dest.x == 0) || (dest.z == 60000 && dest.x == 0));
+  const bool toStation = (dest.z == -3000 && dest.y == 0);
+  const bool toPlanetGate = (dest.z == 60000 && dest.y == PLANET_LANE_GATE);
+  EXPECT_TRUE(toStation || toPlanetGate);
 
   EXPECT_EQ(dir.CountTraders(w), 1);
 }

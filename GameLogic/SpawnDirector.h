@@ -23,6 +23,7 @@
 #include "CombatSystem.h"
 #include "AiSystem.h"        // AiPilot, NpcFlightCaps, TradeLane
 #include "StationServices.h" // NearestStation (trader lanes run station <-> planet)
+#include "CollisionSystem.h" // PLANET_LANE_GATE (lanes stop clear of the kill radius)
 
 namespace Neuron::GameLogic
 {
@@ -185,11 +186,15 @@ namespace Neuron::GameLogic
       if (!foundPlanet)
         return ECS::EntityId{};
 
+      // The planet end of the lane is a GATE above the surface, clear of the G6
+      // kill radius - traders "land" there and despawn instead of burning up.
+      const Math::Vector3i64 planetGate = planetPos + Math::Vector3i64{ 0, PLANET_LANE_GATE, 0 };
+
       // Launch clear of the endpoint (matching the station LAUNCH_OFFSET) so a
       // fresh trader is not already "docked" at its origin.
       const bool outbound = (NextRand() & 1u) != 0;    // station -> planet or back
-      Math::Vector3i64 from = outbound ? stationPos : planetPos;
-      const Math::Vector3i64 to = outbound ? planetPos : stationPos;
+      Math::Vector3i64 from = outbound ? stationPos : planetGate;
+      const Math::Vector3i64 to = outbound ? planetGate : stationPos;
       from += Math::Vector3i64{ 0, LAUNCH_OFFSET, 0 };
 
       const int hull = (NextRand() & 1u) ? ShipType::Shuttle : ShipType::Transporter;

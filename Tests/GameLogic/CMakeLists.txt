@@ -11,6 +11,7 @@ add_executable(GameLogic.Tests
     CombatSystemTests.cpp
     CombatMessagesTests.cpp
     CombatTests.cpp
+    CollisionSystemTests.cpp
     KillRewardsTests.cpp
     LootSystemTests.cpp
     ShieldsTests.cpp

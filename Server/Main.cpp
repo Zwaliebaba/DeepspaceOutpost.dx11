@@ -495,11 +495,16 @@ int main()
     if (tick % SHIELD_REGEN_INTERVAL == 0)
       GameLogic::StepShieldRegen(world);
 
-    // 2b. Advance in-flight missiles (homing + detonation) and realtime combat,
+    // 2b. Advance in-flight missiles (homing + detonation), realtime combat and
+    //     collision grinding (G6: ramming, station scrapes, planet impacts),
     //     then resolve every resulting kill: broadcast a death event and destroy
-    //     the wreck (its removal also rides the despawn diff below).
+    //     the wreck (its removal also rides the despawn diff below). A victim
+    //     reported by two systems in one tick is fine - the death handler skips
+    //     already-resolved entities.
     std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(world);
     for (const GameLogic::Kill& k : GameLogic::StepCombat(world))
+      kills.push_back(k);
+    for (const GameLogic::Kill& k : GameLogic::StepCollisions(world))
       kills.push_back(k);
     // Each kill is an EntityKilled fact; the subscriber respawns a player in place
     // or broadcasts the death and destroys the wreck (whose removal also rides the
