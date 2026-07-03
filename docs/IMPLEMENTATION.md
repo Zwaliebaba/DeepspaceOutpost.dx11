@@ -377,41 +377,184 @@ reap proceeds as today.
 *Acceptance:* kill the client socket, reconnect within grace from a new
 port → same ship, same cargo; after grace → normal despawn.
 
-### B4 — Persistence on SQL Server (#1) — **L**
+### B4 — Persistence on SQL Server (#1) — **L** — 📐 **design complete 2026-07-03; implementation pending**
 
-The top structural gap. Design points, honoring §12 (async batched writes
-off the sim thread, never per-tick positions, world simulates while players
-are offline):
+The top structural gap. This section is the full design (the pre-code pass);
+honors §12: async batched writes off the sim thread, never per-tick
+positions to SQL, the world simulates while players are offline, MS SQL
+Server, and the key space anticipates the Account → Empire → N entities
+identity model (Track C) so that retrofit is additive.
 
-- **Schema v1:** `accounts` (account id, commander name, auth secret hash —
-  even if auth is just token-continuity at first), `players` (score, credits,
-  fuel, wanted, equipment flags, hold capacity, last station/system),
-  `player_cargo` (player × commodity → units), `stations_market`
-  (station × commodity → stock/price — becomes load-bearing with F4's
-  drifting markets; until then rows are seeded lazily from `GenerateMarket`),
-  `world_meta` (galaxy seed, schema version), `command_log`
-  (append-only: tick, player, message id, payload blob) for audit/replay.
-  Design the key space assuming **empires** arrive in Track C (player rows
-  key by `PlayerId`, not entity index).
-- **Write path:** GameLogic marks components dirty via the existing
-  serializable-component invariant (`Wallet`, `CargoHold`, `Fuel`, `Wanted`,
-  `PlayerRecord`, `Equipment`); a persistence layer in **NeuronServer**
-  (this is exactly the library's chartered role — it currently contains only
-  `DatagramPump`/`OnChangeCache`) snapshots dirty rows at a low cadence
-  (every few seconds + on logout/despawn) into a queue drained by a writer
-  thread using ODBC (`SQLDriverConnect` — native-first, no ORM). The sim
-  thread never blocks on the DB.
-- **Read path:** load-on-hello (B1 gives the single choke point): known
-  commander name/account resumes its row set; unknown creates one. Spawn
-  location = persisted last station.
-- **Testing:** the persistence layer is written against an interface whose
-  production implementation is ODBC and whose test implementation is
-  in-memory, so round-trip/dirty-tracking/replay-from-command-log tests stay
-  headless in `Tests/NeuronServer`. CI does not get a SQL Server dependency.
+#### B4.1 Scope
+
+Persisted: **commanders** (account + player rows + cargo), **world state
+that drifts** (station markets — schema now, load-bearing when F4 makes
+markets mutable; until then rows are materialized lazily on first write),
+**world metadata** (galaxy seed, schema version, last world tick), and an
+append-only **command log** for audit/replay. NOT persisted: per-tick
+positions (locked §12), NPCs, canisters, missiles, sessions/endpoints (B2's
+tokens are transport state, not durable identity), or anything derivable
+from the galaxy seed.
+
+#### B4.2 Schema v1 (SQL Server; shipped as `NeuronServer/schema.sql`)
+
+```sql
+CREATE TABLE dbo.accounts (
+  account_id      INT IDENTITY PRIMARY KEY,
+  commander_name  NVARCHAR(20) NOT NULL UNIQUE,  -- the sanitized ClientHello name
+  auth_token_hash BINARY(32) NULL,               -- reserved: real auth later; NULL = name-claim
+  created_utc     DATETIME2 NOT NULL,
+  last_seen_utc   DATETIME2 NOT NULL
+);
+
+CREATE TABLE dbo.empires (            -- Track C lands into this; v1: one per account
+  empire_id  INT IDENTITY PRIMARY KEY,
+  account_id INT NOT NULL REFERENCES dbo.accounts(account_id)
+);
+
+CREATE TABLE dbo.players (            -- one avatar row today; N owned units later
+  player_id      INT IDENTITY PRIMARY KEY,
+  empire_id      INT NOT NULL REFERENCES dbo.empires(empire_id),
+  credits        INT NOT NULL,        -- tenths of a credit (Wallet.credits)
+  fuel_tenths    SMALLINT NOT NULL,   -- Fuel.tenths (max stays code-owned)
+  wanted_level   SMALLINT NOT NULL,   -- Wanted.level
+  score          INT NOT NULL,        -- PlayerRecord.score
+  hold_capacity  SMALLINT NOT NULL,   -- CargoHold.capacity
+  missiles       SMALLINT NOT NULL,   -- Equipment.missiles
+  equip_flags    INT NOT NULL,        -- bitmask, see PersistEquipFlags below
+  last_system_id INT NOT NULL,        -- system to wake docked at (-1 = home)
+  in_witchspace  BIT NOT NULL,
+  updated_tick   BIGINT NOT NULL,     -- world tick of the snapshot
+  updated_utc    DATETIME2 NOT NULL   -- stamped by the persistence thread
+);
+
+CREATE TABLE dbo.player_cargo (       -- non-zero stacks only
+  player_id INT NOT NULL REFERENCES dbo.players(player_id),
+  commodity TINYINT NOT NULL,         -- 0..16
+  units     SMALLINT NOT NULL,
+  PRIMARY KEY (player_id, commodity)
+);
+
+CREATE TABLE dbo.station_markets (    -- lazily materialized; authoritative from F4
+  system_id    INT NOT NULL,
+  commodity    TINYINT NOT NULL,
+  stock        SMALLINT NOT NULL,
+  price        SMALLINT NOT NULL,     -- legacy x4 fixed-point, as in MarketEntry
+  updated_tick BIGINT NOT NULL,
+  PRIMARY KEY (system_id, commodity)
+);
+
+CREATE TABLE dbo.world_meta (         -- 'schema_version', 'galaxy_seed', 'world_tick'
+  meta_key   NVARCHAR(32) PRIMARY KEY,
+  meta_value NVARCHAR(128) NOT NULL
+);
+
+CREATE TABLE dbo.command_log (        -- audit/replay; order = log_id
+  log_id     BIGINT IDENTITY PRIMARY KEY,
+  world_tick BIGINT NOT NULL,
+  player_id  INT NOT NULL,
+  message_id INT NOT NULL,            -- the catalog MessageId
+  payload    VARBINARY(512) NOT NULL, -- the message's generic-codec encoding
+  logged_utc DATETIME2 NOT NULL
+);
+```
+
+Design notes: `equip_flags` bit assignments live in ONE C++ enum
+(`PersistEquipFlags` in the snapshot header) — bit0 largeCargoBay, bit1 ecm,
+bit2 fuelScoop, bit3 energyBomb, bit4 escapePod; new G-track equipment
+appends bits, never renumbers (same permanence discipline as message ids).
+`empires` exists from day one so Track C adds columns/rows, not a rekeying
+migration; v1 creates one empire per account transparently. Auth in v1 is
+**name-claim** (first hello owning a name owns the account — consistent with
+the current trust level; `auth_token_hash` is the reserved seam for real
+auth). Schema changes bump `schema_version` and ship an idempotent migration
+block in `schema.sql`; the server refuses to start against a newer schema
+than it knows.
+
+#### B4.3 The persistence service (NeuronServer)
+
+New pieces, all in NeuronServer (its chartered role):
+
+- **`PlayerPersistState`** — a plain snapshot struct mirroring the durable
+  components (`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `PlayerRecord`,
+  `Equipment`, witchspace flag, last system), with `FromComponents(world,
+  entity)` / `ApplyToComponents(world, entity)` converters. Copying it is
+  ~120 bytes — cheap enough to snapshot every player at cadence.
+- **`IPersistenceStore`** — the seam: `UpsertPlayer(state)`,
+  `LoadPlayer(name) -> optional<state>`, `AppendCommands(batch)`,
+  `UpsertMarketRows(batch)`, `ReadMeta/WriteMeta`. Two implementations:
+  **`OdbcStore`** (production: raw ODBC via `SQLDriverConnect` — native-first,
+  no ORM; a Windows-only .cpp) and **`InMemoryStore`** (a header-only map,
+  used by every test). This interface is justified wrapper-wise: it exists to
+  swap the backing store, which is real behavior, and it is what keeps CI
+  free of a SQL Server dependency.
+- **`PersistenceService`** — owns the writer thread and two queues:
+  *requests in* (player snapshots — coalesced **one pending snapshot per
+  player, latest wins**, so memory is bounded and a slow DB never grows the
+  queue past player count; plus command-log batches on a capped ring that
+  drops-oldest and counts drops) and *load results out* (drained by the sim
+  thread at a fixed tick point). The sim thread only ever copies structs and
+  swaps queue buffers under a mutex — it **never** touches ODBC, never
+  blocks on the DB, and never reads the wall clock for sim purposes
+  (timestamps are stamped on the persistence thread; the sim contributes
+  only tick numbers). DB failures retry with exponential backoff on the
+  writer thread; coalescing makes retry loss-free for snapshots.
+
+#### B4.4 Server wiring (GameServer)
+
+- **Load on hello (requires B1):** the version-checked `ClientHello` is the
+  single choke point. On hello: issue an async `LoadPlayer(name)`; the
+  session sits in a *loading* state (no entity yet). A completed load is
+  applied at a fixed tick step (with the other reliable requests): spawn the
+  player entity, `ApplyToComponents`, dock it at `last_system_id`'s station,
+  reply the handshake. Unknown commander → create account+empire+player rows
+  with the fresh-spawn defaults. **DB unavailable → the hello stays parked**
+  (the reliable lane keeps it alive; the client shows its normal connecting
+  state) — a transient outage must never alias an existing commander into a
+  fresh one. Ordering note: if B4 code lands before B1, the interim load
+  point is the current `ClientHello` handler (after spawn), applying the
+  loaded state to the already-spawned entity — workable but uglier; B1 first
+  is the intended order.
+- **Save cadence:** every `PERSIST_INTERVAL` ticks (150 ≈ 5 s) snapshot every
+  live player through the existing `OnChangeCache` pattern (write only what
+  changed since the last accepted snapshot); immediately on session reap and
+  on graceful shutdown (bounded flush, ~5 s deadline, then final
+  `world_tick` to `world_meta`).
+- **Command log:** appended where reliable commands are handled —
+  `StationRequest`, `TravelRequest`, `ClientHello` (name adoption).
+  `InputCommand` is deliberately NOT logged (30 Hz noise; positions are
+  derived state). The log is audit/refund/replay material, not authority.
+- **Deployment switch:** connection string from `DSO_DB` (ODBC string;
+  suggested default `Driver={ODBC Driver 17 for SQL Server};
+  Server=localhost;Database=dso;Trusted_Connection=yes`). **Unset → the
+  server runs with persistence disabled** (no store, loads short-circuit to
+  fresh spawns) so the dev loop, tests, and CI are unchanged by default.
+
+#### B4.5 Testing (headless; CI gains no SQL dependency)
+
+In `Tests/NeuronServer` against `InMemoryStore`: `PlayerPersistState`
+component round-trip; service coalescing (N snapshots of one player → one
+upsert, latest wins); load-completion application order (deterministic tick
+point); parked-hello-on-store-error; log-ring overflow counting; and an
+end-to-end "restart": run a mini-world, trade, snapshot, tear down, rebuild
+from the store, assert credits/cargo/fuel/equipment/score/wanted survive and
+the player wakes docked at the right station. `OdbcStore` itself is
+validated by a manual soak on Windows (documented in the PR), not by CI.
+
+#### B4.6 Sub-milestones
+
+1. Store interface + `InMemoryStore` + `PlayerPersistState` + service
+   (queues/thread) + full headless test suite.
+2. GameServer wiring: load-on-hello (post-B1), cadence saves,
+   reap/shutdown flush, spawn-from-state.
+3. `OdbcStore` + `schema.sql` + manual Windows soak.
+4. Command log + the replay-smoke test (station requests replayed from the
+   log against a fresh world reproduce identical wallet outcomes).
 
 *Acceptance:* stop/restart the server → commanders keep credits, cargo,
-fuel, equipment, wanted, score, and wake at their last station; command log
-replays a session's station requests to identical wallet outcomes.
+fuel, equipment, wanted, score, and wake docked at their last station; a DB
+outage neither blocks the tick nor wipes a commander; with `DSO_DB` unset
+nothing changes at all.
 
 ---
 
