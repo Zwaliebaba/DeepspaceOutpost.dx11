@@ -329,7 +329,7 @@ dropped the deleted `ClientInput.h`/`SnapshotReceiver.h`.
 
 ## 4. Track B — Connection, identity, persistence
 
-### B1 — `ClientHello`-first handshake (#2 / S1) — **S**
+### B1 — `ClientHello`-first handshake (#2 / S1) — **S** — ✅ **done 2026-07-03**
 
 Invert the front door (`ServerSessions.h:66-83`): unknown endpoints sending
 anything but a valid Control-lane `ClientHello{protocolVersion == PROTOCOL_VERSION}`
@@ -343,6 +343,22 @@ one-datagram `HelloReject` (`0x0004`: `reason u8`) and no state.
 *Acceptance:* a raw `InputCommand` from an unknown endpoint provokes zero
 reply traffic (amplification test asserts 0 bytes); the §4.6 connect sequence
 in ARCHITECTURE.md is rewritten to hello-first; session tests updated.
+
+*As built:* `OnInput` returns an invalid id for an unknown endpoint (no spawn,
+no session, no reply); `OnReliable` provisions a pending, entity-less **shell**
+so a brand-new endpoint's Control-lane `ClientHello` can be received; `OnHello`
+version-checks (→ `HelloReject` on mismatch, no entity), else spawns + adopts
+the name + queues `HelloAck{0, entityId, PROTOCOL_VERSION}`. `Session::Live()`
+(entity valid) gates gameplay everywhere: `ProcessReliableRequests` ignores
+station/travel/chart requests from a shell; `PublishState` streams no world
+state to a shell but still flushes its Control lane (the reply + acks); `Roster`
+excludes shells. Membership-change roster broadcast moved to the OnHello-Accepted
+path (Count-based detection no longer works with shells). Client learns its
+entity + token from `HelloAck` (`ReplicationClient::Pump`) and gates the chart
+pull on being connected. `AssignPlayer 0x0001` retired in place (id reserved,
+still registered); `HelloAck 0x0003` / `HelloReject 0x0004` added. Session tests
+rewritten to the hello handshake (unknown-input-ignored, bad-version-rejected,
+hello-renames-a-live-session, pending-shell-excluded-from-roster).
 
 ### B2 — Session token: endpoint ≠ identity (#3) — **S**
 

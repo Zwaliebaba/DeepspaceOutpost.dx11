@@ -104,17 +104,27 @@ namespace Neuron::Client
       m_lastInterpTick = latest;
     }
 
-    // Drain reliable events: AssignPlayer is the handshake and GalaxyChunk is
-    // the chart data (both consumed here); the rest are queued for the application
-    // via PollEvent().
+    // Drain reliable events: HelloAck/HelloReject is the handshake reply and
+    // GalaxyChunk is the chart data (all consumed here); the rest are queued for
+    // the application via PollEvent().
     Net::ReliableMessage msg;
     while (m_events.Receive(msg))
     {
-      Msg::AssignPlayer assign;
+      Msg::HelloAck ack;
+      Msg::HelloReject reject;
       Msg::GalaxyChunk chunk;
-      if (Msg::TryDecode(msg, assign))
+      if (Msg::TryDecode(msg, ack))
       {
-        m_localPlayer = assign.entityId;
+        // The handshake reply (B1): our controlled entity + the session token
+        // (B2 will carry the token on every outbound datagram; 0 until then).
+        m_localPlayer = ack.entityId;
+        m_sessionToken = ack.sessionToken;
+      }
+      else if (Msg::TryDecode(msg, reject))
+      {
+        // The server refused the handshake (e.g. protocol-version mismatch);
+        // the client surfaces a connect error rather than a world.
+        m_helloRejected = true;
       }
       else if (Msg::TryDecode(msg, chunk))
       {
@@ -133,12 +143,11 @@ namespace Neuron::Client
       }
     }
 
-    // Pull the galaxy chart in bounded ranges: ask for the next range once the
-    // previous request has fully arrived, until the whole table is here. The
-    // request rides the reliable Bulk lane, so it is redelivered until answered
-    // (the server ignores unknown endpoints until the session exists; the
-    // channel's resend covers that window).
-    if (!GalaxyComplete() && m_galaxy.size() >= m_galaxyRequestedUpTo)
+    // Pull the galaxy chart in bounded ranges - but only once CONNECTED (we have
+    // our entity from HelloAck): the server ignores everything but the hello from
+    // an unconnected endpoint, so requesting earlier would stall the pull. Ask for
+    // the next range as each completes, until the whole table is here.
+    if (LocalPlayer() != 0xFFFFFFFFu && !GalaxyComplete() && m_galaxy.size() >= m_galaxyRequestedUpTo)
     {
       Msg::GalaxyChunkRequest req;
       req.baseIndex = static_cast<uint32_t>(m_galaxy.size());

@@ -216,22 +216,43 @@ game-specific band (`0x1000+`).
 
 #### Session & identity
 
-**`AssignPlayer`** — `0x0001` · Control scope · Event · Control lane · S→C.
-The connect handshake reply: "you control entity N."
-
-| Field | Type | Meaning |
-|---|---|---|
-| `entityId` | u32 | the entity index this session controls |
+**`AssignPlayer`** — `0x0001` · **RETIRED** (id reserved, permanent ABI).
+Was the connect handshake reply ("you control entity N") back when a session was
+spawned on first input. Since B1 the handshake reply is `HelloAck`, which folds
+in the protocol-version echo and the (future) session token. The id stays retired
+and is never re-issued.
 
 **`ClientHello`** — `0x0002` · Control scope · Command · Control lane · C→S.
-The opening handshake: protocol version + the commander name the player chose.
-The server sanitizes (printable ASCII, ≤ 20 chars, trailing spaces trimmed) and
-de-duplicates (`-2`, `-3`, …) before adopting it.
+The opening handshake and, since B1, the **front door**: the server spawns nothing
+until a valid, version-checked hello arrives (no more spawn-on-first-input). Carries
+the protocol version + the commander name the player chose. The server sanitizes
+(printable ASCII, ≤ 20 chars, trailing spaces trimmed) and de-duplicates (`-2`,
+`-3`, …) before adopting it.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `protocolVersion` | u32 | client's `PROTOCOL_VERSION` |
 | `commanderName` | string | requested display name (raw; server sanitizes) |
+
+**`HelloAck`** — `0x0003` · Control scope · Event · Control lane · S→C.
+The handshake was accepted: "you control entity N." Subsumes and retires
+`AssignPlayer`, adding the protocol-version echo and the session token (0 until
+B2 makes it load-bearing). Sent once, on the first valid `ClientHello`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `sessionToken` | u64 | per-session token (0 until B2) |
+| `entityId` | u32 | the entity index this session controls |
+| `protocolVersion` | u16 | the server's `PROTOCOL_VERSION` (echo) |
+
+**`HelloReject`** — `0x0004` · Control scope · Event · Control lane · S→C.
+The handshake was refused and no session was provisioned. Today the only reason
+is a protocol-version mismatch; the client surfaces a connect error instead of a
+world.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `reason` | u8 | a `HelloRejectReason` (`ProtocolMismatch = 1`) |
 
 **`PlayerInfo`** — `0x0301` · Wire · Event · Gameplay · S→C.
 One roster entry, broadcast to everyone on join, name change, or wanted-level
@@ -444,12 +465,14 @@ The server's own combat pipeline is decoupled through an in-process
 
 ### 4.6 Canonical sequences
 
-**Connect:** client sends `InputCommand` → server spawns the player entity,
-replies `AssignPlayer` (Control) → client sends `ClientHello{version, name}` →
-server sanitizes/dedupes, broadcasts the full `PlayerInfo` roster → snapshots +
-`PlayerStatus`/`CargoManifest` begin flowing. In parallel the client **pulls**
-the galaxy chart in bounded ranges (`GalaxyChunkRequest` → `GalaxyChunk`,
-Bulk) until it holds all systems.
+**Connect:** client sends `ClientHello{version, name}` (Control) → server
+version-checks it (mismatch ⇒ `HelloReject`, no session), else spawns the player
+entity, sanitizes/dedupes the name, and replies `HelloAck{token, entityId,
+version}` (Control) → server broadcasts the full `PlayerInfo` roster → snapshots +
+`PlayerStatus`/`CargoManifest` begin flowing. Input from an endpoint that has not
+completed this handshake is ignored (no spawn-on-first-input). Once connected the
+client **pulls** the galaxy chart in bounded ranges (`GalaxyChunkRequest` →
+`GalaxyChunk`, Bulk) until it holds all systems.
 
 **Fire → kill → respawn:** `InputCommand.fire` → server publishes `FireWeapon`
 → `ResolveFireWeapon` applies damage, may publish `Crime` (wanted +1, police
@@ -476,14 +499,20 @@ wanted level cooled) → the new position rides the next snapshot; fuel rides
 Every ~33 ms, in this order:
 
 1. **Drain the socket.** Route datagrams by magic: `InputCommand` →
-   `ServerSessions::OnInput` (spawn-on-first-contact, stale-sequence drop,
-   intent applied to `FlightIntent`; `fire`/`fireMissile` become `FireWeapon`
-   bus messages) · reliable datagrams → per-session `MessageEndpoint`.
+   `ServerSessions::OnInput` (applied only to a live, handshaken session — an
+   unknown endpoint is ignored; stale-sequence drop; intent applied to
+   `FlightIntent`; `fire`/`fireMissile` become `FireWeapon` bus messages) ·
+   reliable datagrams → `ServerSessions::OnReliable` (an unknown endpoint gets a
+   pending, entity-less shell so its `ClientHello` can be received) → per-session
+   `MessageEndpoint`.
 2. **Dispatch the bus** — fire commands resolve to `Crime`/`EntityKilled` facts.
 3. **Roster upkeep** — on membership change, rebroadcast all `PlayerInfo`.
-4. **Reliable requests** — per session: `StationRequest` (Teleport/JumpDrive
+4. **Reliable requests** — per session: `ClientHello` (the front door —
+   `OnHello` spawns + `HelloAck` on first valid hello, or a rename on a live one,
+   or `HelloReject` on a version mismatch), `StationRequest` (Teleport/JumpDrive
    routed through `HyperspaceSystem`, everything else through
-   `ProcessStationRequest`), `ClientHello` (name adoption).
+   `ProcessStationRequest`), `TravelRequest` (hyperspace/in-system jump). Gameplay
+   requests are gated on the session being live.
 5. **`StepAi`** — NPC tactics write `FlightIntent`s (see §6.7).
 6. **`GameLogic::Tick`** — `StepFlightInput` (intent → controls through caps)
    → `StepFlight` (orientation/position integration) → `StepMotion` (simple
@@ -507,8 +536,14 @@ Every ~33 ms, in this order:
 
 ### 5.2 Sessions (`ServerSessions`)
 
-- Keyed by UDP endpoint (`addr<<16 | port`). First contact spawns the player
-  entity (see component list below) and queues `AssignPlayer` + the manifest.
+- Keyed by UDP endpoint (`addr<<16 | port`). A valid, version-checked
+  `ClientHello` (`OnHello`) spawns the player entity (see component list below)
+  and queues `HelloAck`; a reliable datagram from an unknown endpoint first gets
+  a pending, entity-less **shell** (`OnReliable`) so that hello can be received.
+  Input (`OnInput`) applies only to a live session — an unknown endpoint is
+  ignored, so there is no spawn-on-first-input. `Session::Live()` (entity valid)
+  distinguishes a connected player from a pending shell; pending shells are
+  excluded from the roster and reaped on the idle timeout like any session.
 - Latest-sequence-wins input application; idle reaping after 300 ticks.
 - Owns the commander-name pipeline: sanitize → cap (20) → de-dupe → mirror to
   the authoritative `PlayerRecord` → roster broadcast.
@@ -875,8 +910,10 @@ station screen into flight; position updates always come from snapshots.
 
 | Id | Message | Scope | Lane | Dir |
 |---|---|---|---|---|
-| `0x0001` | AssignPlayer | Control | Control | S→C |
+| `0x0001` | AssignPlayer *(RETIRED)* | Control | Control | S→C |
 | `0x0002` | ClientHello | Control | Control | C→S |
+| `0x0003` | HelloAck | Control | Control | S→C |
+| `0x0004` | HelloReject | Control | Control | S→C |
 | `0x0100` | InputCommand | Wire | Unreliable | C→S |
 | `0x0200` | EntityDespawn | Wire | Gameplay | S→C |
 | `0x0201` | EntityDeath | Wire | Gameplay | S→C |
@@ -966,16 +1003,17 @@ simplifications mean *introducing a successor id and retiring the old one*,
 never mutating in place.
 
 **S1 — Invert the handshake: `ClientHello` becomes the front door.**
-Today any first `InputCommand` datagram from an unknown endpoint spawns an
-entity, provisions a session, and streams the multi-kilobyte manifest (§4.6) —
-*before* the server has seen a protocol version. That is (a) a version check
-performed after the entity exists, (b) a textbook amplification/DoS primitive
-(one spoofed ~40-byte datagram triggers kilobytes of Bulk traffic to an
-arbitrary address), and (c) permanent state-machine complexity — the session
-must tolerate hello-before-or-after-input forever. Simplify: ignore unknown
-endpoints until a valid, version-checked `ClientHello` arrives on the Control
-lane; *that* spawns the session. Deletes the `Commander-<n>` placeholder path
-and gives session-security work (§13.2.2) a single choke point.
+✅ *Done 2026-07-03 (B1):* previously any first `InputCommand` from an unknown
+endpoint spawned an entity, provisioned a session, and (with the old manifest)
+streamed kilobytes *before* the server had seen a protocol version — a version
+check after the entity exists, an amplification/DoS primitive, and permanent
+"hello-before-or-after-input" state-machine complexity. Now unknown endpoints
+are ignored until a valid, version-checked `ClientHello` arrives on the Control
+lane; a reliable datagram from a new endpoint gets only a pending, entity-less
+shell so that hello can be received, and *that* spawns the session (`OnHello`).
+The reply is `HelloAck` (or `HelloReject` on a version mismatch). This deleted
+the `Commander-<n>` placeholder-on-input path (the hello always carries the
+name) and gives session-security work (§13.2.2 / B2) a single choke point.
 
 **S2 — One serialization path: fold the galaxy manifest into the catalog codec.**
 ✅ *Done 2026-07-03:* the hand-encoded `0x0210` chunk is retired; the client
@@ -1138,11 +1176,11 @@ below exploits that seam; none touches the lore or the flight feel.
 
 1. **The identity layer (player ≠ avatar) — do this first.** §12 locks
    "Account → Empire → owns N entities", yet the as-built protocol
-   re-concretized the single avatar: `AssignPlayer{entityId}` is singular,
+   re-concretized the single avatar: `HelloAck{entityId}` is singular,
    `PlayerRecord` lives *on the hull*, sessions map 1:1 to a ship. Introduce
    `PlayerId` (session owns it; name/score/wallet key off it),
    `Owner{playerId}` as a component with a **relational index** ("all my
-   units" as a cheap query, per §12), and grow `AssignPlayer` into
+   units" as a cheap query, per §12), and grow `HelloAck` into
    `AssignControl{playerId, primaryEntityId}` (new id per ABI rules).
    Short-term behavior identical; every month of delay makes this retrofit
    more expensive. It unblocks every item below.
@@ -1286,7 +1324,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | # | Item | Ref | Type | Effort | Unblocks |
 |---|---|---|---|---|---|
 | 1 | Persistence (SQL Server) + world-state rows + command log | §13.2.2 | Infra | L | everything durable |
-| 2 | `ClientHello`-first handshake | S1 | Simplify | S | 3, 4 |
+| 2 | `ClientHello`-first handshake ✅ (done 2026-07-03) | S1 | Simplify | S | 3, 4 |
 | 3 | Session token; endpoint ≠ identity; rate limits | §13.2.2 | Infra | S | 4, security |
 | 4 | Reconnect grace + resume | §13.2.2 | Infra | S | player retention |
 | 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |

@@ -53,7 +53,6 @@ namespace DSOServer
 
     // --- tick phases (in run order) ---
     void ReceiveDatagrams();
-    void BroadcastRosterIfMembershipChanged();
     void ProcessReliableRequests();
     void AdvanceSimulation();
     void ResolveKills();
@@ -86,7 +85,6 @@ namespace DSOServer
     uint8_t m_recv[2048] = {};
 
     uint32_t m_tick = 0;
-    std::size_t m_lastSessions = 0;
 
     // Deterministic RNG streams (seeds in ServerConfig.h).
     uint32_t m_lootRng;

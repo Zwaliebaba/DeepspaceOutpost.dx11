@@ -46,7 +46,8 @@ namespace Neuron::Client
 
     // Drain all datagrams currently queued on the socket, routing each by magic
     // into the interpolator or the reliable channel, and auto-applying the
-    // AssignPlayer handshake. No-op when closed; bounded so a flood can't stall.
+    // HelloAck/HelloReject handshake reply. No-op when closed; bounded so a flood
+    // can't stall.
     void Pump();
 
     // Send the player's intent to the server (no-op until the server endpoint is
@@ -68,8 +69,9 @@ namespace Neuron::Client
     void SendStationRequest(const Net::StationRequest& _request) { Send(_request); }
 
     // Queue the opening handshake: protocol version + the player's commander name.
-    // Rides the reliable Control lane, so it is redelivered until the server (which
-    // connects the session on first input) acknowledges it. No-op until open.
+    // Since B1 this is the FRONT DOOR - the server spawns nothing until this valid,
+    // version-checked hello arrives. Rides the reliable Control lane, redelivered
+    // until the server replies with HelloAck (or HelloReject). No-op until open.
     void SendHello(uint32_t _protocolVersion, const std::string& _name)
     {
       if (m_open)
@@ -104,9 +106,17 @@ namespace Neuron::Client
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 
     // Pop the next reliably-delivered application event (despawn/death/chat), in
-    // order, or false if none are ready. (AssignPlayer and the galaxy manifest are
-    // consumed internally.)
+    // order, or false if none are ready. (The HelloAck/HelloReject handshake and
+    // the galaxy chunks are consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
+
+    // The session token from HelloAck (0 until connected / until B2 makes it a
+    // real per-session token). B2 stamps it on every outbound datagram.
+    [[nodiscard]] uint64_t SessionToken() const { return m_sessionToken; }
+
+    // True once the server refused our ClientHello (e.g. a protocol-version
+    // mismatch): the client shows a connect error instead of a world.
+    [[nodiscard]] bool HelloRejected() const { return m_helloRejected; }
 
     // The galaxy's system list, pulled from the server in bounded chunk ranges
     // (empty until the first chunk arrives, growing until complete). The
@@ -120,9 +130,8 @@ namespace Neuron::Client
     }
 
     // The entity id the local player controls - its replicated position is the
-    // floating origin and it is not drawn. Learned primarily from the snapshot
-    // header (reliable via the working snapshot channel); the AssignPlayer
-    // handshake is a fallback.
+    // floating origin and it is not drawn. Learned from the HelloAck handshake
+    // reply (B1), and also carried in every snapshot header (either sets it).
     void SetLocalPlayer(uint32_t _id) { m_localPlayer = _id; }
     [[nodiscard]] uint32_t LocalPlayer() const
     {
@@ -134,7 +143,9 @@ namespace Neuron::Client
     Net::UdpSocket m_socket;
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
-    std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
+    std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (handshake/chunks filtered out)
+    uint64_t m_sessionToken = 0;                   // from HelloAck (B2 makes it load-bearing)
+    bool m_helloRejected = false;                  // server refused the handshake
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
     uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk
     bool m_galaxyKnownTotal = false;

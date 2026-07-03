@@ -37,14 +37,15 @@ namespace DSOServer
     m_sessions.SetManifest(std::move(setup.manifest));
 
     // Datagram routing: 'NMSG' packets carry the unreliable InputCommand lane;
-    // 'NRLB' datagrams feed each session's reliable lanes.
+    // 'NRLB' datagrams feed each session's reliable lanes (and provision a pending
+    // shell for a brand-new endpoint so its ClientHello can be received).
     m_routes = {
       { Msg::MESSAGE_MAGIC,
         [this](const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
         { OnInputPacket(_from, _data, _size); } },
       { Msg::RELIABLE_MAGIC,
         [this](const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
-        { m_sessions.OnReliable(_from, _data, _size); } },
+        { m_sessions.OnReliable(_from, _data, _size, m_tick); } },
     };
 
     RegisterSubscribers();
@@ -52,17 +53,17 @@ namespace DSOServer
 
   void GameServer::RunTick()
   {
-    // 1. Receive client input and acks; new endpoints connect on their first
-    //    input. Then resolve this tick's fire commands -> Crime / EntityKilled
-    //    facts (police dispatch and death/destroy happen in their subscribers)
-    //    before the simulation advances.
+    // 1. Receive client input and acks. Input from an endpoint that hasn't
+    //    completed the ClientHello handshake is ignored (the hello is the front
+    //    door - see ProcessReliableRequests). Then resolve this tick's fire
+    //    commands -> Crime / EntityKilled facts (police dispatch and death/destroy
+    //    happen in their subscribers) before the simulation advances.
     ReceiveDatagrams();
     m_bus.Dispatch();
 
-    BroadcastRosterIfMembershipChanged();
-
-    // 1b. Process station requests (dock/buy/sell/equip/refuel/jumps) delivered
-    //     on each session's reliable channel.
+    // 1b. Process the reliable channel: the ClientHello handshake (which connects
+    //     a client and broadcasts the refreshed roster), plus station/travel/chart
+    //     requests from already-connected sessions.
     ProcessReliableRequests();
 
     // 2. NPC tactics + the simulation tick + dynamic spawning + shield regen.
@@ -135,19 +136,6 @@ namespace DSOServer
 
   // --- roster / reliable requests ---------------------------------------------
 
-  void GameServer::BroadcastRosterIfMembershipChanged()
-  {
-    if (m_sessions.Count() == m_lastSessions)
-      return;
-    m_lastSessions = m_sessions.Count();
-    printf("Clients connected: %zu\n", m_lastSessions);
-    // Membership changed: replay the full roster to everyone, so a joiner learns
-    // the others and the others learn the joiner. (A leaver's ship is removed
-    // via EntityDespawn; the client drops its roster entry there.)
-    for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
-      m_sessions.Broadcast(pi);
-  }
-
   void GameServer::ProcessReliableRequests()
   {
     for (auto& s : m_sessions.All() | std::views::values)
@@ -155,30 +143,42 @@ namespace DSOServer
       Net::ReliableMessage msg;
       while (s.events.Receive(msg))
       {
+        // The ClientHello is the front door (Control lane, drained first): a valid
+        // one connects a pending client (spawns its entity, queues HelloAck) or
+        // renames a live one. A version mismatch is rejected inside OnHello.
+        Msg::ClientHello hello;
+        if (Msg::TryDecode(msg, hello))
+        {
+          const GameLogic::HelloOutcome out = m_sessions.OnHello(m_world, s.endpoint, hello, m_tick);
+          if (out.result == GameLogic::HelloResult::Accepted)
+          {
+            printf("Client connected: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
+            // Replay the full roster: the joiner learns everyone, everyone learns
+            // the joiner. (A leaver's ship goes out as EntityDespawn on reap.)
+            for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+              m_sessions.Broadcast(pi);
+          }
+          else if (out.result == GameLogic::HelloResult::NameChanged && out.nameChanged)
+          {
+            BroadcastPlayerInfo(out.entity.index);
+          }
+          continue;
+        }
+
+        // Everything else is gameplay: a pending (pre-hello) shell can't do it, so
+        // ignore until the session is live.
+        if (!s.Live())
+          continue;
+
         Net::StationRequest req;
         Msg::TravelRequest travel;
         Msg::GalaxyChunkRequest chunkReq;
-        Msg::ClientHello hello;
         if (Msg::TryDecode(msg, req))
-        {
           HandleStationRequest(s, req);
-        }
         else if (Msg::TryDecode(msg, travel))
-        {
           HandleTravelRequest(s, travel);
-        }
         else if (Msg::TryDecode(msg, chunkReq))
-        {
-          // The client pulls the galaxy chart in bounded ranges (Bulk lane).
-          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);
-        }
-        else if (Msg::TryDecode(msg, hello))
-        {
-          // Adopt the client's commander name (sanitized + de-duplicated). If it
-          // actually changed, tell everyone via the roster.
-          if (m_sessions.ApplyName(m_world, s.endpoint, hello.commanderName))
-            BroadcastPlayerInfo(s.entity.index);
-        }
+          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane
       }
     }
   }
@@ -302,23 +302,23 @@ namespace DSOServer
     m_aoi.Rebuild(m_world);
     for (auto& [key, s] : m_sessions.All())
     {
-      Math::Vector3i64 viewerPos{ 0, 0, 0 };
-      if (m_world.IsValid(s.entity))
-        viewerPos = m_world.Get<GameLogic::WorldTransform>(s.entity).position;
-
-      Net::WorldSnapshot snap =
-          m_aoi.SnapshotFor(m_world, m_tick, viewerPos, Cfg::AOI_RADIUS_CELLS, s.entity.index);
-      // Keep the local system's planet/station visible across the whole system,
-      // not just the +/-1 ship cell, so the body you fly toward never pops out.
-      AppendLandmarks(m_world, snap, viewerPos, m_landmarks);
-      for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
-        m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
-
-      // The owner's private HUD vitals, on change only. Queued on the Gameplay
-      // lane; flushed with the events below.
-      Msg::PlayerStatus ps;
+      // A pending (pre-hello) shell has no entity: don't stream it world state,
+      // only flush its control lane (the HelloAck/HelloReject + acks) below.
       if (m_world.IsValid(s.entity))
       {
+        const Math::Vector3i64 viewerPos = m_world.Get<GameLogic::WorldTransform>(s.entity).position;
+
+        Net::WorldSnapshot snap =
+            m_aoi.SnapshotFor(m_world, m_tick, viewerPos, Cfg::AOI_RADIUS_CELLS, s.entity.index);
+        // Keep the local system's planet/station visible across the whole system,
+        // not just the +/-1 ship cell, so the body you fly toward never pops out.
+        AppendLandmarks(m_world, snap, viewerPos, m_landmarks);
+        for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+          m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
+
+        // The owner's private HUD vitals, on change only. Queued on the Gameplay
+        // lane; flushed with the events below.
+        Msg::PlayerStatus ps;
         if (const auto* c = m_world.TryGet<GameLogic::Combatant>(s.entity)) ps.energy = c->energy;
         if (const auto* sh = m_world.TryGet<GameLogic::Shields>(s.entity)) { ps.frontShield = sh->front; ps.aftShield = sh->aft; }
         if (const auto* fu = m_world.TryGet<GameLogic::Fuel>(s.entity)) ps.fuel = fu->tenths;
@@ -328,9 +328,9 @@ namespace DSOServer
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
         if (const auto* pr = m_world.TryGet<GameLogic::PlayerRecord>(s.entity)) ps.score = pr->score;
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
+        if (m_lastStatus.Changed(key, ps))
+          s.events.Send(ps);
       }
-      if (m_lastStatus.Changed(key, ps))
-        s.events.Send(ps);
 
       for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
         m_socket.SendTo(s.endpoint, dg.data(), dg.size());

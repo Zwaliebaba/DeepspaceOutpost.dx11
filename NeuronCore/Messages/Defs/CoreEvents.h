@@ -3,8 +3,9 @@
 // CoreEvents - the reliable session/lifecycle/chat events, as catalog messages.
 //
 // These fold the old GameEvents.h hand-rolled codecs onto the message system: the
-// connect handshake (AssignPlayer), the lifecycle facts a snapshot can't express by
-// superseding state (EntityDespawn, EntityDeath), and chat. Each is a typed struct
+// retired connect handshake (AssignPlayer, superseded by HelloAck), the lifecycle
+// facts a snapshot can't express by superseding state (EntityDespawn, EntityDeath),
+// and chat. Each is a typed struct
 // described once via Fields(); the generic codec produces a payload byte-identical
 // to the legacy Encode* (see the parity tests), so this is a framing/ownership
 // change, not a wire-format change. They ride the reliable lanes via
@@ -21,7 +22,11 @@
 
 namespace Neuron::Msg
 {
-  // "You control entity N" - the connect handshake reply (session/control lane).
+  // "You control entity N" - the original connect handshake reply.
+  // RETIRED (id 0x0001 reserved): the handshake reply is now HelloAck
+  // (Messages/Defs/PlayerSession.h, 0x0003), which also carries the session token
+  // and protocol echo. Kept registered so the id can never be reused; no longer
+  // sent. Its round-trip tests still exercise the codec.
   struct AssignPlayer
   {
     static constexpr MessageId    Id    = static_cast<MessageId>(0x0001);   // core/session

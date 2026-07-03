@@ -1602,7 +1602,8 @@ int game_main(void)
     s_serverEndpoint = Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
                                          static_cast<uint8_t>(e), 40000);
     ensure_connection();
-    // LocalPlayer is set by the server's AssignPlayer handshake; default 0.
+    // LocalPlayer is learned from the server's HelloAck handshake reply; the
+    // sentinel (unassigned) holds until then.
   }
 
   finish = 0;

@@ -5,8 +5,11 @@
 // Replaces the single hardcoded client with a real multi-client model: each
 // connected client is a Session keyed by its UDP endpoint, owning the entity it
 // controls, its own reliable event channel, and its input/liveness bookkeeping.
-// A client "connects" implicitly by sending its first input - the server spawns
-// it an entity and hands back the id via AssignPlayer. Idle clients are reaped.
+// Since B1 a client connects through the FRONT DOOR: a valid, version-checked
+// ClientHello (OnHello) spawns its entity and replies with HelloAck. An unknown
+// endpoint that sends input is ignored; a reliable datagram from one gets only a
+// pending (entity-less) shell so its hello can be received. Idle clients (and
+// shells that never hello) are reaped.
 //
 // Pure apart from the world it mutates (spawns/destroys entities) - no sockets -
 // so connection handling, input application and reaping are all unit-tested
@@ -22,10 +25,11 @@
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
 #include "Messages/Defs/InputCommand.h"
 #include "ReliableChannel.h"
+#include "Messages/Framing.h"        // Msg::PROTOCOL_VERSION (the hello version check)
 #include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo / GalaxyChunk pull protocol
 #include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
-#include "Messages/Defs/CoreEvents.h"   // Msg::AssignPlayer
-#include "Messages/Defs/PlayerSession.h" // Msg::PlayerInfo
+#include "Messages/Defs/CoreEvents.h"   // lifecycle events (kept for consumers' transitive use)
+#include "Messages/Defs/PlayerSession.h" // Msg::ClientHello / HelloAck / HelloReject / PlayerInfo
 
 #include "SimComponents.h"
 #include "FlightInput.h"       // FlightIntent / FlightCaps (applied in OnInput/SpawnPlayer)
@@ -48,41 +52,45 @@ namespace Neuron::GameLogic
   struct Session
   {
     Net::Endpoint endpoint;
-    ECS::EntityId entity;
+    ECS::EntityId entity;               // INVALID until a valid ClientHello spawns it (pending shell)
     Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
-    std::string name;                  // display name (default assigned; ClientHello overrides)
+    std::string name;                  // display name (from ClientHello; placeholder if blank)
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
+
+    // A session is LIVE once its ClientHello spawned an entity; before that it is
+    // a pending shell that exists only to receive that reliable hello.
+    [[nodiscard]] bool Live() const { return entity.index != ECS::INVALID_INDEX; }
+  };
+
+  // What OnHello did with a ClientHello.
+  enum class HelloResult : uint8_t
+  {
+    Rejected,     // version mismatch: a HelloReject was queued, no entity spawned
+    Accepted,     // the front door: spawned the entity, queued HelloAck
+    NameChanged,  // a hello on an already-live session: just a rename
+  };
+
+  struct HelloOutcome
+  {
+    HelloResult result = HelloResult::Rejected;
+    ECS::EntityId entity{};
+    bool nameChanged = false;
   };
 
   class ServerSessions
   {
   public:
-    // Handle an input datagram from `_ep`. On first contact the client is
-    // connected: a player entity is spawned and AssignPlayer queued on its
-    // reliable channel. The latest intent is applied to the entity. Returns the
-    // session's entity.
+    // Handle an input datagram from `_ep`. Since B1 input NEVER connects a client:
+    // an unknown endpoint is ignored (the ClientHello is the front door - see
+    // OnHello). For a live session the latest intent is applied. Returns the
+    // session's entity, or an INVALID id for an unknown/pending endpoint.
     ECS::EntityId OnInput(ECS::Registry& _world, const Net::Endpoint& _ep,
                           const Msg::InputCommand& _in, uint32_t _tick)
     {
-      const uint64_t key = EndpointKey(_ep);
-      auto it = m_sessions.find(key);
+      auto it = m_sessions.find(EndpointKey(_ep));
       if (it == m_sessions.end())
-      {
-        Session s;
-        s.endpoint = _ep;
-        s.entity = SpawnPlayer(_world);
-        // A unique placeholder name until (or unless) the client's ClientHello
-        // supplies a real one; also mirrored onto the authoritative PlayerRecord.
-        s.name = "Commander-" + std::to_string(s.entity.index);
-        if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
-          pr->name = s.name;
-        s.events.Send(Msg::AssignPlayer{ s.entity.index });   // Control lane
-        // The galaxy chart is PULLED by the client in bounded ranges
-        // (GalaxyChunkRequest -> SendGalaxyChunks), not pushed on connect - that
-        // bounds the connect burst and readies fog-of-war filtering.
-        it = m_sessions.emplace(key, std::move(s)).first;
-      }
+        return ECS::EntityId{};   // ignore unknown endpoints (no spawn-on-input)
 
       Session& session = it->second;
       session.lastSeenTick = _tick;
@@ -97,12 +105,57 @@ namespace Neuron::GameLogic
       return session.entity;
     }
 
-    // Apply a reliable-channel packet (a client ack) from `_ep`.
-    void OnReliable(const Net::Endpoint& _ep, const uint8_t* _data, std::size_t _size)
+    // Route an inbound reliable datagram (a client ack, or a ClientHello from a
+    // brand-new endpoint) to its session. An unknown endpoint gets a PENDING shell
+    // (a reliable receive endpoint, no entity) so its hello can be received and
+    // version-checked; the entity spawns only on a valid hello (OnHello). A shell
+    // that never sends one is reaped on the idle timeout. (A reliable datagram is
+    // still a cheap allocation for an unauthenticated peer; per-endpoint rate
+    // limiting lands with the session token in B2.)
+    void OnReliable(const Net::Endpoint& _ep, const uint8_t* _data, std::size_t _size, uint32_t _tick)
     {
-      auto it = m_sessions.find(EndpointKey(_ep));
-      if (it != m_sessions.end())
-        it->second.events.OnDatagram(_data, _size);
+      Session& s = m_sessions.try_emplace(EndpointKey(_ep)).first->second;
+      s.endpoint = _ep;
+      s.lastSeenTick = _tick;
+      s.events.OnDatagram(_data, _size);
+    }
+
+    // Handle a decoded ClientHello - the front door. Provisions the shell if
+    // absent (so tests can call this directly). Version-checks: on mismatch a
+    // HelloReject is queued and the (entity-less) session is left to reap. On a
+    // first valid hello the player entity is spawned, the name adopted, and a
+    // HelloAck queued. A hello on an already-live session is a rename.
+    HelloOutcome OnHello(ECS::Registry& _world, const Net::Endpoint& _ep,
+                         const Msg::ClientHello& _hello, uint32_t _tick)
+    {
+      const uint64_t key = EndpointKey(_ep);
+      Session& s = m_sessions.try_emplace(key).first->second;
+      s.endpoint = _ep;
+      s.lastSeenTick = _tick;
+
+      if (_hello.protocolVersion != Msg::PROTOCOL_VERSION)
+      {
+        s.events.Send(Msg::HelloReject{ static_cast<uint8_t>(Msg::HelloRejectReason::ProtocolMismatch) });
+        return HelloOutcome{ HelloResult::Rejected, {}, false };
+      }
+
+      if (s.Live())
+      {
+        HelloOutcome out{ HelloResult::NameChanged, s.entity, false };
+        out.nameChanged = ApplyNameTo(_world, s, key, _hello.commanderName);
+        return out;
+      }
+
+      // First valid hello: spawn the controllable entity and adopt the name.
+      s.entity = SpawnPlayer(_world);
+      const std::string clean = SanitizeName(_hello.commanderName);
+      s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
+                             : UniqueName(clean, key);
+      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
+        pr->name = s.name;
+      s.events.Send(Msg::HelloAck{ /*sessionToken*/ 0, s.entity.index,
+                                   static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
+      return HelloOutcome{ HelloResult::Accepted, s.entity, true };
     }
 
     // Drop sessions idle for more than `_timeoutTicks`, destroying their entities.
@@ -148,18 +201,7 @@ namespace Neuron::GameLogic
       auto it = m_sessions.find(key);
       if (it == m_sessions.end())
         return false;
-
-      std::string clean = SanitizeName(_raw);
-      if (clean.empty())
-        return false;
-      clean = UniqueName(clean, key);
-      if (clean == it->second.name)
-        return false;
-
-      it->second.name = clean;
-      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(it->second.entity))
-        pr->name = clean;
-      return true;
+      return ApplyNameTo(_world, it->second, key, _raw);
     }
 
     // The full roster (one PlayerInfo per live session) to replay to a joiner and
@@ -233,6 +275,24 @@ namespace Neuron::GameLogic
     }
 
   private:
+    // Sanitize/de-dupe `_raw` and mirror it onto the session + PlayerRecord.
+    // Returns true if the stored name actually changed. Shared by ApplyName (live
+    // rename) and OnHello (a rename on an already-connected session).
+    bool ApplyNameTo(ECS::Registry& _world, Session& _s, uint64_t _key, const std::string& _raw)
+    {
+      std::string clean = SanitizeName(_raw);
+      if (clean.empty())
+        return false;
+      clean = UniqueName(clean, _key);
+      if (clean == _s.name)
+        return false;
+
+      _s.name = clean;
+      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(_s.entity))
+        pr->name = clean;
+      return true;
+    }
+
     // Spawn a controllable player entity, spread out so clients don't overlap.
     ECS::EntityId SpawnPlayer(ECS::Registry& _world)
     {

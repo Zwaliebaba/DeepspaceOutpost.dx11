@@ -33,6 +33,10 @@ namespace Neuron::Msg
   // Neuron::Msg::PROTOCOL_VERSION in Framing.h (do not redefine it here).
 
   // client -> server: the opening handshake (protocol version + chosen name).
+  // Since B1 this is the FRONT DOOR: the server ignores an unknown endpoint until
+  // a valid, version-checked ClientHello arrives on the Control lane, and THAT
+  // spawns the session (no more spawn-on-first-input). The reply is HelloAck (or
+  // HelloReject on a version mismatch).
   struct ClientHello
   {
     static constexpr MessageId    Id    = static_cast<MessageId>(0x0002);   // core/session
@@ -45,6 +49,47 @@ namespace Neuron::Msg
     std::string commanderName;
     auto Fields()       { return std::tie(protocolVersion, commanderName); }
     auto Fields() const { return std::tie(protocolVersion, commanderName); }
+  };
+
+  // Why the server refused a ClientHello (HelloReject.reason).
+  enum class HelloRejectReason : uint8_t
+  {
+    ProtocolMismatch = 1,   // the client's PROTOCOL_VERSION is not the server's
+  };
+
+  // server -> client: the handshake was ACCEPTED. "You control entity N"; the
+  // sessionToken is the session's identity for subsequent datagrams (B2 makes it
+  // load-bearing - it is 0 until then). Subsumes and retires AssignPlayer (0x0001,
+  // reserved), folding the protocol-version echo and the future token into the
+  // one handshake reply.
+  struct HelloAck
+  {
+    static constexpr MessageId    Id    = static_cast<MessageId>(0x0003);   // core/session
+    static constexpr MessageScope Scope = MessageScope::Control;
+    static constexpr MessageKind  Kind  = MessageKind::Event;
+    static constexpr MessageLane  Lane  = MessageLane::Control;
+    static constexpr Direction    Dir   = Direction::ServerToClient;
+
+    uint64_t sessionToken = 0;   // B2: a random per-session token; 0 until then
+    uint32_t entityId = 0;       // the entity this session controls
+    uint16_t protocolVersion = 0;// the server's PROTOCOL_VERSION (echo)
+    auto Fields()       { return std::tie(sessionToken, entityId, protocolVersion); }
+    auto Fields() const { return std::tie(sessionToken, entityId, protocolVersion); }
+  };
+
+  // server -> client: the handshake was REFUSED (no session provisioned). Today the
+  // only reason is a protocol-version mismatch; the client shows a connect error.
+  struct HelloReject
+  {
+    static constexpr MessageId    Id    = static_cast<MessageId>(0x0004);   // core/session
+    static constexpr MessageScope Scope = MessageScope::Control;
+    static constexpr MessageKind  Kind  = MessageKind::Event;
+    static constexpr MessageLane  Lane  = MessageLane::Control;
+    static constexpr Direction    Dir   = Direction::ServerToClient;
+
+    uint8_t reason = 0;   // a HelloRejectReason
+    auto Fields()       { return std::tie(reason); }
+    auto Fields() const { return std::tie(reason); }
   };
 
   // server -> client: one player's roster entry (name + legal status), broadcast to
@@ -108,6 +153,8 @@ namespace Neuron::Msg
 }
 
 REGISTER_MESSAGE(ClientHello);
+REGISTER_MESSAGE(HelloAck);
+REGISTER_MESSAGE(HelloReject);
 REGISTER_MESSAGE(PlayerInfo);
 REGISTER_MESSAGE(PlayerStatus);
 REGISTER_MESSAGE(CargoManifest);
