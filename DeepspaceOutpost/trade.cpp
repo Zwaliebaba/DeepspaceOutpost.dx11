@@ -16,11 +16,6 @@
 #include "sound.h"
 #include "random.h"
 #include "main.h"
-#include "swat.h"
- 
-#define SLAVES		3
-#define NARCOTICS	6
-#define FIREARMS	10
 
 /*
  * The following holds the Planet Stock Market.
@@ -107,73 +102,4 @@ void set_stock_quantities(int *quant)
 	stock_market[ALIEN_ITEMS_IDX].current_quantity = 0;
 }
 
- 
-int carrying_contraband (void)
-{
-	return (cmdr.current_cargo[SLAVES] + cmdr.current_cargo[NARCOTICS]) * 2 +
-			cmdr.current_cargo[FIREARMS];
-}
-
-
-int total_cargo (void)
-{
-	int i;
-	int cargo_held;
-
-	cargo_held = 0;
-	for (i = 0; i < 17; i++)
-	{
-		if ((cmdr.current_cargo[i] > 0) &&
-			(stock_market[i].units == TONNES))
-		{
-			cargo_held += cmdr.current_cargo[i];
-		}
-	}
-
-	return cargo_held;
-}
-
-
-void scoop_item (int un)
-{
-	int type;
-	int trade;
-
-	if (local_objects[un].flags & FLG_DEAD)
-		return;
-	
-	type = local_objects[un].type;
-	
-	if (type == SHIP_MISSILE)
-		return;
-
-	if ((cmdr.fuel_scoop == 0) || (local_objects[un].location.y >= 0) ||
-		(total_cargo() == cmdr.cargo_capacity))
-	{
-		explode_object (un);
-		damage_ship (128 + (local_objects[un].energy / 2), local_objects[un].location.z > 0);
-		return;
-	}
-
-	if (type == SHIP_CARGO)
-	{
-		trade = rand255() & 7;
-		cmdr.current_cargo[trade]++;
-		info_message (stock_market[trade].name);
-		remove_ship (un);
-		return;					
-	}
-
-	if (ship_list[type]->scoop_type != 0)
-	{
-		trade = ship_list[type]->scoop_type + 1;
-		cmdr.current_cargo[trade]++;
-		info_message (stock_market[trade].name);
-		remove_ship (un);
-		return;					
-	}
-	
-	explode_object (un);
-	damage_ship (local_objects[un].energy / 2, local_objects[un].location.z > 0);
-}
 

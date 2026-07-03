@@ -1,7 +1,11 @@
 /*
  * space.c
  *
- * This module handles all the flight system and management of the local space objects.
+ * The client's flight presentation: the local display-object pool (intro ship
+ * parade, game-over debris, replicated-world mirror for the scanner/compass),
+ * the replicated-world renderer, the cockpit HUD, and the weapon/dock visuals.
+ * All game rules live on the server (GameLogic); nothing here mutates
+ * credits/fuel/cargo/energy/shields or ends the player's life.
  */
 
 #include "pch.h"
@@ -23,29 +27,106 @@
 #include "intro.h"
 #include "shipdata.h"
 #include "shipface.h"
-#include "space.h" 
+#include "space.h"
 #include "threed.h"
 #include "sound.h"
 #include "main.h"
-#include "swat.h"
 #include "random.h"
-#include "trade.h"
 #include "stars.h"
-#include "pilot.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
 #include "ReplicatedScene.h"
 
 
-struct galaxy_seed destination_planet;
-int hyper_ready;
-int hyper_countdown;
-char hyper_name[16];
-int hyper_distance;
-int hyper_galactic;
+// ---- Weapon / HUD presentation state (moved from the retired swat.cpp) -------
+//
+// These drive the cockpit indicators and the laser-beam visual only. The server
+// owns the authoritative weapon state (laser heat, energy, ECM validation); the
+// client mirrors it via PlayerStatus and the EcmPulse event.
+
+int ecm_active;                       // E indicator + countdown (set 32 on EcmPulse)
+int missile_target = MISSILE_UNARMED; // HUD lock indicator state
+
+static int laser_counter;            // pulse pacing for the beam visual
+static int laser;                     // the view's laser type while firing
+static int laser_x;                   // beam aim point (view centre + jitter)
+static int laser_y;
+
+// ---- The local display-object pool (moved from the retired swat.cpp) ---------
+//
+// local_objects[] is presentation-only: the intro parade and game-over debris
+// animate in it, and render_replicated_objects mirrors the replicated world
+// into it each frame for the legacy scanner/compass HUD.
+
+int ship_count[NO_OF_SHIPS + 1];  /* many */
+
+void clear_local_objects (void)
+{
+	int i;
+
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
+		local_objects[i].type = 0;
+
+	for (i = 0; i <= NO_OF_SHIPS; i++)
+		ship_count[i] = 0;
+}
 
 
+int add_new_ship (int ship_type, int x, int y, int z, struct vector *rotmat, int rotx, int rotz)
+{
+	int i;
 
+	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
+	{
+		if (local_objects[i].type == 0)
+		{
+			local_objects[i].type = ship_type;
+			local_objects[i].location.x = x;
+			local_objects[i].location.y = y;
+			local_objects[i].location.z = z;
+
+			local_objects[i].distance = sqrt((double)x*x + (double)y*y + (double)z*z);
+
+			local_objects[i].rotmat[0] = rotmat[0];
+			local_objects[i].rotmat[1] = rotmat[1];
+			local_objects[i].rotmat[2] = rotmat[2];
+
+			local_objects[i].rotx = rotx;
+			local_objects[i].rotz = rotz;
+
+			local_objects[i].velocity = 0;
+			local_objects[i].acceleration = 0;
+			local_objects[i].bravery = 0;
+			local_objects[i].target = 0;
+			local_objects[i].flags = 0;
+
+			if ((ship_type != SHIP_PLANET) && (ship_type != SHIP_SUN))
+			{
+				local_objects[i].energy = ship_list[ship_type]->energy;
+				local_objects[i].missiles = ship_list[ship_type]->missiles;
+				ship_count[ship_type]++;
+			}
+
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+
+void remove_ship (int un)
+{
+	const int type = local_objects[un].type;
+
+	if (type == 0)
+		return;
+
+	if (type > 0)
+		ship_count[type]--;
+
+	local_objects[un].type = 0;
+}
 
 
 
@@ -196,11 +277,12 @@ void move_local_object (struct local_object *obj)
 
 void dock_player (void)
 {
-	disengage_auto_pilot();
 	docked = 1;
 
-	// Thin-client mode: tell the server we've docked so it permits station trade.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	// Tell the server we've docked so it permits station trade. Used only where
+	// the server already has (or is about to confirm) us docked: the respawn and
+	// escape-pod flows, and the initial docked state. In-flight docking goes
+	// through request_dock() and flips on the server's StationResponse instead.
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Dock;
@@ -210,294 +292,74 @@ void dock_player (void)
 	PlayerFlight().speed = 0;
 	PlayerFlight().roll = 0;
 	PlayerFlight().climb = 0;
-	PlayerDefense().frontShield = 255;
-	PlayerDefense().aftShield = 255;
-	PlayerDefense().energy = 255;
-	PlayerCaps().altitude = 255;
+	PlayerCaps().altitude = 255;   // display defaults; vitals mirror PlayerStatus
 	PlayerCaps().cabTemp = 30;
 	reset_weapons();
 }
 
 
-/*
- * Check if we are correctly aligned to dock.
- */
-
-// Alignment test against a single object (the station) in camera space. Shared
-// by the legacy index-based path and the replicated render path, which has no
-// global local_objects[] table to index into.
-int is_docking_obj (struct local_object *obj)
+// Ask the server to dock us (rate-limited: the proximity check below runs every
+// frame while near the station). The docked flow starts only when the server's
+// StationResponse{Dock, Ok} arrives - see the handler in main.cpp.
+void request_dock (void)
 {
-	struct vector vec;
-	double fz;
-	double ux;
+	static int cooldown = 0;
 
-	if (auto_pilot)		// Don't want it to kill anyone!
-		return 1;
+	if (docked)
+		return;
 
-	fz = obj->rotmat[2].z;
+	if (cooldown > 0)
+	{
+		cooldown--;
+		return;
+	}
 
-	if (fz > -0.90)
-		return 0;
-
-	vec = unit_vector (&obj->location);
-
-	if (vec.z < 0.927)
-		return 0;
-
-	ux = obj->rotmat[1].x;
-	if (ux < 0)
-		ux = -ux;
-
-	if (ux < 0.84)
-		return 0;
-
-	return 1;
+	cooldown = 30;   // ~1 request per second at display rate while in range
+	Neuron::Net::StationRequest req;
+	req.kind = Neuron::Net::StationRequestKind::Dock;
+	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 }
 
 
-int is_docking (int sn)
-{
-	return is_docking_obj (&local_objects[sn]);
-}
-
-
-/*
- * Game Over...
- */
-
-void do_game_over (void)
-{
-	snd_play_sample (SND_GAMEOVER);
-	game_over = 1;
-}
-
-
+// Display-only altitude readout for the HUD dial, recomputed from the replicated
+// planet's mirrored position (local_objects[0]). Never a consequence: the server
+// owns planet collisions and kills authoritatively (EntityDeath).
 void update_altitude (void)
 {
 	double x,y,z;
 	double dist;
-	
+
 	PlayerCaps().altitude = 255;
 
 	if (witchspace)
 		return;
-	
+
 	x = fabs(local_objects[0].location.x);
 	y = fabs(local_objects[0].location.y);
 	z = fabs(local_objects[0].location.z);
-	
+
 	if ((x > 65535) || (y > 65535) || (z > 65535))
 		return;
 
 	x /= 256;
 	y /= 256;
 	z /= 256;
-	
+
 	dist = (x * x) + (y * y) + (z * z);
 
 	if (dist > 65535)
 		return;
-	
+
 	dist -= 9472;
 	if (dist < 1)
 	{
 		PlayerCaps().altitude = 0;
-		do_game_over ();
 		return;
 	}
 
 	dist = sqrt (dist);
-	if (dist < 1)
-	{
-		PlayerCaps().altitude = 0;
-		do_game_over ();
-		return;
-	}
 
-	PlayerCaps().altitude = dist;	
-}
-
-
-void update_cabin_temp (void)
-{
-	int x,y,z;
-	int dist;
-	
-	PlayerCaps().cabTemp = 30;
-
-	if (witchspace)
-		return;
-	
-	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
-		return;
-	
-	x = abs((int)local_objects[1].location.x);
-	y = abs((int)local_objects[1].location.y);
-	z = abs((int)local_objects[1].location.z);
-	
-	if ((x > 65535) || (y > 65535) || (z > 65535))
-		return;
-
-	x /= 256;
-	y /= 256;
-	z /= 256;
-	
-	dist = ((x * x) + (y * y) + (z * z)) / 256;
-
-	if (dist > 255)
-		return;
-
-  	dist ^=  255;
-
-	PlayerCaps().cabTemp = dist + 30;
-
-	if (PlayerCaps().cabTemp > 255)
-	{
-		PlayerCaps().cabTemp = 255;
-		do_game_over ();
-		return;
-	}
-	
-	if ((PlayerCaps().cabTemp < 224) || (cmdr.fuel_scoop == 0))
-		return;
-
-	cmdr.fuel += PlayerFlight().speed / 2;
-	if (cmdr.fuel > PlayerCaps().maxFuel)
-		cmdr.fuel = PlayerCaps().maxFuel;
-
-	info_message ("Fuel Scoop On");	
-}
-
-
-
-/*
- * Regenerate the shields and the energy banks.
- */
-
-void regenerate_shields (void)
-{
-	if (PlayerDefense().energy > 127)
-	{
-		if (PlayerDefense().frontShield < 255)
-		{
-			PlayerDefense().frontShield++;
-			PlayerDefense().energy--;
-		}
-	
-		if (PlayerDefense().aftShield < 255)
-		{
-			PlayerDefense().aftShield++;
-			PlayerDefense().energy--;
-		}
-	}
-		
-	PlayerDefense().energy++;
-	PlayerDefense().energy += cmdr.energy_unit;
-	if (PlayerDefense().energy > 255)
-		PlayerDefense().energy = 255;
-}
-
-
-void decrease_energy (int amount)
-{
-	PlayerDefense().energy += amount;
-
-	if (PlayerDefense().energy <= 0)
-		do_game_over();
-}
-
-
-/*
- * Deplete the shields.  Drain the energy banks if the shields fail.
- */
-
-void damage_ship (int damage, int front)
-{
-	int shield;
-
-	if (damage <= 0)	/* sanity check */
-		return;
-	
-	shield = front ? PlayerDefense().frontShield : PlayerDefense().aftShield;
-	
-	shield -= damage;
-	if (shield < 0)
-	{
-		decrease_energy (shield);
-		shield = 0;
-	}
-	
-	if (front)
-		PlayerDefense().frontShield = shield;
-	else
-		PlayerDefense().aftShield = shield;
-}
-
-
-
-
-void make_station_appear (void)
-{
-	double px,py,pz;
-	double sx,sy,sz;
-	Vector vec;
-	Matrix rotmat;
-	
-	px = local_objects[0].location.x;
-	py = local_objects[0].location.y;
-	pz = local_objects[0].location.z;
-	
-	vec.x = (rand() & 32767) - 16384;	
-	vec.y = (rand() & 32767) - 16384;	
-	vec.z = rand() & 32767;	
-
-	vec = unit_vector (&vec);
-
-	sx = px - vec.x * 65792;
-	sy = py - vec.y * 65792;
-	sz = pz - vec.z * 65792;
-
-//	set_init_matrix (rotmat);
-	
-	rotmat[0].x = 1.0;
-	rotmat[0].y = 0.0;
-	rotmat[0].z = 0.0;
-
-	rotmat[1].x = vec.x;
-	rotmat[1].y = vec.z;
-	rotmat[1].z = -vec.y;
-	
-	rotmat[2].x = vec.x;
-	rotmat[2].y = vec.y;
-	rotmat[2].z = vec.z;
-
-	tidy_matrix (rotmat);
-	
-	add_new_station (sx, sy, sz, rotmat);
-}
-
-
-
-void check_docking (int i)
-{
-	if (is_docking(i))
-	{
-		snd_play_sample (SND_DOCK);					
-		dock_player();
-		current_screen = SCR_BREAK_PATTERN;
-		return;
-	}
-					
-	if (PlayerFlight().speed >= 5)
-	{
-		do_game_over();
-		return;
-	}
-
-	PlayerFlight().speed = 1;
-	damage_ship (5, local_objects[i].location.z > 0);
-	snd_play_sample (SND_CRASH);
+	PlayerCaps().altitude = (dist < 1) ? 0 : dist;
 }
 
 
@@ -517,132 +379,66 @@ void switch_to_view (struct local_object *flip)
 
 
 /*
- * Update all the local objects and render them.
+ * Animate and draw the local display objects.
+ *
+ * Presentation only: this drives the intro ship parade and the game-over debris
+ * tumble. No AI, no combat, no docking, no scooping - the legacy local
+ * simulation was retired with the single-player fallback; the live game renders
+ * the server's replicated world (render_replicated_objects) instead.
  */
 
 void update_local_objects (void)
 {
 	int i;
 	int type;
-	int bounty;
-	char str[80];
 	struct local_object flip;
-	
-	
+
 	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
 		type = local_objects[i].type;
-		
+
 		if (type != 0)
 		{
 			if (local_objects[i].flags & FLG_REMOVE)
 			{
-				if (type == SHIP_VIPER)
-					cmdr.legal_status |= 64;
-			
-				bounty = ship_list[type]->bounty;
-				
-				if ((bounty != 0) && (!witchspace))
-				{
-					cmdr.credits += bounty;
-					sprintf (str, "%d.%d CR", cmdr.credits / 10, cmdr.credits % 10);
-					info_message (str);
-				}
-				
-				remove_ship (i);
+				remove_ship (i);   // a finished explosion animation
 				continue;
 			}
 
-			if ((detonate_bomb) && ((local_objects[i].flags & FLG_DEAD) == 0) &&
-				(type != SHIP_PLANET) && (type != SHIP_SUN) &&
-				(type != SHIP_CONSTRICTOR) && (type != SHIP_COUGAR) &&
-				(type != SHIP_CORIOLIS) && (type != SHIP_DODEC))
-			{
-				snd_play_sample (SND_EXPLODE);
-				local_objects[i].flags |= FLG_DEAD;		
-			}
-
-			if ((current_screen != SCR_INTRO_ONE) &&
-				(current_screen != SCR_INTRO_TWO) &&
-				(current_screen != SCR_GAME_OVER) &&
-				(current_screen != SCR_ESCAPE_POD))
-			{
-				tactics (i);
-			} 
-		
 			move_local_object (&local_objects[i]);
-
-			flip = local_objects[i];
-			switch_to_view (&flip);
-			
-			if (type == SHIP_PLANET)
-			{
-				if ((ship_count[SHIP_CORIOLIS] == 0) &&
-					(ship_count[SHIP_DODEC] == 0) &&
-					(local_objects[i].distance < 65792)) // was 49152
-				{
-					make_station_appear();
-				}				
-
-				draw_ship (&flip);
-				continue;
-			}
-
-			if (type == SHIP_SUN)
-			{
-				draw_ship (&flip);
-				continue;
-			}
-			
-			
-			if (local_objects[i].distance < 170)
-			{
-				if ((type == SHIP_CORIOLIS) || (type == SHIP_DODEC))
-					check_docking (i);
-				else
-					scoop_item(i);
-				
-				continue;
-			}
 
 			if (local_objects[i].distance > 57344)
 			{
-				remove_ship (i);
+				remove_ship (i);   // drifted out of the display range
 				continue;
 			}
 
+			flip = local_objects[i];
+			switch_to_view (&flip);
+
 			draw_ship (&flip);
 
+			// draw_ship advances the explosion animation on the copy; keep it.
 			local_objects[i].flags = flip.flags;
 			local_objects[i].exp_seed = flip.exp_seed;
 			local_objects[i].exp_delta = flip.exp_delta;
-			
-			local_objects[i].flags &= ~FLG_FIRING;
-			
-			if (local_objects[i].flags & FLG_DEAD)
-				continue;
-
-			check_target (i, &flip);
 		}
 	}
 
 	/* The frame's 3D scene is fully submitted (skybox + dust + the models handed to
 	   Scene3D::SubmitModel above): draw it now, onto the cleared back buffer, under the 2D HUD. */
 	gfx_render_3d_scene();
-
-	detonate_bomb = 0;
 }
 
 
 /*
- * Render the replicated world instead of the locally-simulated one.
+ * Render the replicated world.
  *
- * The thin-client path: the server is authoritative, so rather than moving and
- * fighting local_objects we sample the interpolated snapshots from the
+ * The server is authoritative: we sample the interpolated snapshots from the
  * ReplicationClient, rebase them around the local player (the floating origin)
  * into the legacy render frame, and draw them through the same pipeline. No game
- * logic runs here - the client only displays. Enabled via Open() on the client
- * (see game_main); otherwise update_local_objects() runs as before.
+ * logic runs here - the client only displays. While disconnected the flight
+ * screen shows the connection-lost state instead (see game_render_flight).
  */
 
 // World-unit distance to the closest replicated station this frame (1e18 = none
@@ -791,22 +587,16 @@ void render_replicated_objects (void)
 		// static (non-spinning) station and network lag that is punishing, and a
 		// fresh commander has no docking computer. So we dock forgivingly: fly up
 		// to the station (within ~600 units) with it ahead of you, AT LOW SPEED,
-		// and you dock. The speed gate restores the classic "ease in to dock"
-		// feel - you can't slam into the slot at full throttle. The server still
-		// gates on its own proximity check (DOCK_RANGE), so this only ever
-		// completes when genuinely at a station.
+		// and a dock REQUEST goes to the server. The docked flow starts only when
+		// the server's StationResponse{Dock, Ok} arrives (see main.cpp) - the
+		// client never flips itself docked on a proximity guess.
 		const int dockSpeedLimit = (PlayerCaps().maxSpeed > 0) ? (PlayerCaps().maxSpeed / 4) : 10;
 		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
 			obj.distance < 600 && PlayerFlight().speed <= dockSpeedLimit)
 		{
 			struct vector approach = unit_vector (&obj.location);
-			if (approach.z > 0.5)   // station roughly ahead -> dock
-			{
-				snd_play_sample (SND_DOCK);
-				dock_player ();
-				current_screen = SCR_BREAK_PATTERN;
-				break;
-			}
+			if (approach.z > 0.5)   // station roughly ahead -> ask to dock
+				request_dock ();
 		}
 	}
 
@@ -1252,269 +1042,25 @@ void decrease_flight_climb (void)
 }
 
 
-void start_hyperspace (void)
-{
-	if (hyper_ready)
-		return;
-		
-	hyper_distance = calc_distance_to_planet (docked_planet, hyperspace_planet);
-
-	if ((hyper_distance == 0) || (hyper_distance > cmdr.fuel))
-		return;
-
-	destination_planet = hyperspace_planet;
-	name_planet (hyper_name, destination_planet);
-	capitalise_name (hyper_name);
-	
-	hyper_ready = 1;
-	hyper_countdown = 15;
-	hyper_galactic = 0;
-
-	disengage_auto_pilot();
-}
-
-void start_galactic_hyperspace (void)
-{
-	if (hyper_ready)
-		return;
-
-	if (cmdr.galactic_hyperdrive == 0)
-		return;
-		
-	hyper_ready = 1;
-	hyper_countdown = 2;
-	hyper_galactic = 1;
-	disengage_auto_pilot();
-}
-
-
-
-void display_hyper_status (void)
-{
-	char str[80];
-
-	sprintf (str, "%d", hyper_countdown);	
-
-	if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
-		(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW))
-	{
-		gfx_display_text (5, 5, str);
-		if (hyper_galactic)
-		{
-			gfx_display_centre_text (358, "Galactic Hyperspace", 120, GFX_COL_WHITE);
-		}
-		else
-		{
-			sprintf (str, "Hyperspace - %s", hyper_name);
-			gfx_display_centre_text (358, str, 120, GFX_COL_WHITE);
-		} 	
-	}
-	else
-	{
-		gfx_clear_area (5, 5, 25, 34);
-		gfx_display_text (5, 5, str);
-	}
-}
-
-
-int rotate_byte_left (int x)
-{
-	return ((x << 1) | (x >> 7)) & 255;
-}
-
-void enter_next_galaxy (void)
-{
-	cmdr.galaxy_number++;
-	cmdr.galaxy_number &= 7;
-	
-	cmdr.galaxy.a = rotate_byte_left (cmdr.galaxy.a);
-	cmdr.galaxy.b = rotate_byte_left (cmdr.galaxy.b);
-	cmdr.galaxy.c = rotate_byte_left (cmdr.galaxy.c);
-	cmdr.galaxy.d = rotate_byte_left (cmdr.galaxy.d);
-	cmdr.galaxy.e = rotate_byte_left (cmdr.galaxy.e);
-	cmdr.galaxy.f = rotate_byte_left (cmdr.galaxy.f);
-
-	docked_planet = find_planet (0x60, 0x60);
-	hyperspace_planet = docked_planet;
-}
-
-
-
-
-
-void enter_witchspace (void)
-{
-	int i;
-	int nthg;
-
-	witchspace = 1;
-	docked_planet.b ^= 31;
-	in_battle = 1;  
-
-	PlayerFlight().speed = 12;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
-	create_new_stars();
-	clear_local_objects();
-
-	nthg = (randint() & 3) + 1;
-	
-	for (i = 0; i < nthg; i++)
-		create_thargoid();	
-	
-	current_screen = SCR_BREAK_PATTERN;
-	snd_play_sample (SND_HYPERSPACE);
-}
-
-
-void complete_hyperspace (void)
-{
-	Matrix rotmat;
-	int px,py,pz;
-	
-	hyper_ready = 0;
-	witchspace = 0;
-	
-	if (hyper_galactic)
-	{
-		cmdr.galactic_hyperdrive = 0;
-		enter_next_galaxy();
-		cmdr.legal_status = 0;
-	}
-	else
-	{
-		cmdr.fuel -= hyper_distance;
-		cmdr.legal_status /= 2;
-
-		if ((rand255() > 253) || (PlayerFlight().climb == PlayerCaps().maxClimb))
-		{
-			enter_witchspace();
-			return;
-		}
-
-		docked_planet = destination_planet; 
-	}
-
-	cmdr.market_rnd = rand255();
-	generate_planet_data (&current_planet_data, docked_planet);
-	generate_stock_market ();
-	
-	PlayerFlight().speed = 12;
-	PlayerFlight().roll = 0;
-	PlayerFlight().climb = 0;
-	create_new_stars();
-	clear_local_objects();
-
-	set_init_matrix (rotmat);
-
-	pz = (((docked_planet.b) & 7) + 7) / 2;
-	px = pz / 2;
-	py = px;
-
-	px <<= 16;
-	py <<= 16;
-	pz <<= 16;
-	
-	if ((docked_planet.b & 1) == 0)
-	{
-		px = -px;
-		py = -py;
-	}
-
-	add_new_ship (SHIP_PLANET, px, py, pz, rotmat, 0, 0);
-
-
-	pz = -(((docked_planet.d & 7) | 1) << 16);
-	px = ((docked_planet.f & 3) << 16) | ((docked_planet.f & 3) << 8);
-
-	add_new_ship (SHIP_SUN, px, py, pz, rotmat, 0, 0);
-
-	current_screen = SCR_BREAK_PATTERN;
-	snd_play_sample (SND_HYPERSPACE);
-}
-
-
-void countdown_hyperspace (void)
-{
-	if (hyper_countdown == 0)
-	{
-		complete_hyperspace();
-		return;
-	}
-
-	hyper_countdown--;
-}
-
-
-
 void jump_warp (void)
 {
-	int i;
-	int type;
-	int jump;
-
-	// Thin-client mode (G7): the server owns the mass-lock rules and moves the
-	// ship; ask it to jump and let the new position ride the snapshot stream. The
-	// local star-warp visual still fires below for feedback.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		Neuron::Net::StationRequest req;
-		req.kind = Neuron::Net::StationRequestKind::JumpDrive;
-		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		warp_stars = 1;
-		mcount &= 63;
-		in_battle = 0;
-		return;
-	}
-
-	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
-	{
-		type = local_objects[i].type;
-		
-		if ((type > 0) && (type != SHIP_ASTEROID) && (type != SHIP_CARGO) &&
-			(type != SHIP_ALLOY) && (type != SHIP_ROCK) &&
-			(type != SHIP_BOULDER) && (type != SHIP_ESCAPE_CAPSULE))
-		{
-			info_message ("Mass Locked");
-			return;
-		}
-	}
-
-	if ((local_objects[0].distance < 75001) || (local_objects[1].distance < 75001))
-	{
-		info_message ("Mass Locked");
-		return;
-	}
-
-
-	if (local_objects[0].distance < local_objects[1].distance)
-		jump = local_objects[0].distance - 75000;
-	else
-		jump = local_objects[1].distance - 75000;	
-
-	if (jump > 1024)
-		jump = 1024;
-	
-	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
-	{
-		if (local_objects[i].type != 0)
-			local_objects[i].location.z -= jump;
-	}
-
+	// The server owns the mass-lock rules and moves the ship (G7); ask it to
+	// jump and let the new position ride the snapshot stream. The local
+	// star-warp visual still fires for immediate feedback.
+	Neuron::Net::StationRequest req;
+	req.kind = Neuron::Net::StationRequestKind::JumpDrive;
+	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 	warp_stars = 1;
 	mcount &= 63;
-	in_battle = 0;
 }
 
 
 void launch_player (void)
 {
-	Matrix rotmat;
-
 	docked = 0;
 
-	// Thin-client mode: tell the server we've undocked.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	// Tell the server we've undocked; the launch offset and the world around us
+	// arrive on the snapshot stream.
 	{
 		Neuron::Net::StationRequest req;
 		req.kind = Neuron::Net::StationRequestKind::Undock;
@@ -1524,16 +1070,8 @@ void launch_player (void)
 	PlayerFlight().speed = 12;
 	PlayerFlight().roll = -15;
 	PlayerFlight().climb = 0;
-	cmdr.legal_status |= carrying_contraband();
 	create_new_stars();
 	clear_local_objects();
-	set_init_matrix (rotmat);
-	add_new_ship (SHIP_PLANET, 0, 0, 65536, rotmat, 0, 0);
-
-	rotmat[2].x = -rotmat[2].x;
-	rotmat[2].y = -rotmat[2].y;
-	rotmat[2].z = -rotmat[2].z;
-	add_new_station (0, 0, -256, rotmat);
 
 	current_screen = SCR_BREAK_PATTERN;
 	snd_play_sample (SND_LAUNCH);
@@ -1542,20 +1080,132 @@ void launch_player (void)
 
 
 /*
- * Engage the docking computer.
- * For the moment we just do an instant dock if we are in the safe zone.
+ * Engage the docking computer: request a dock when genuinely within the
+ * server's docking range (the server validates its own DOCK_RANGE and replies;
+ * the docked flow starts on the StationResponse, never locally).
  */
 
 void engage_docking_computer (void)
 {
-	// Only dock when genuinely within the server's docking range (it will reject
-	// and strand us otherwise). 5000 world units matches the server's DOCK_RANGE.
 	if ((ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC]) &&
 		s_nearest_station_dist < 5000.0)
 	{
-		snd_play_sample (SND_DOCK);
-		dock_player();
-		current_screen = SCR_BREAK_PATTERN;
+		request_dock();
 	}
 }
 
+
+
+// ---- Weapon visuals (presentation only; moved from the retired swat.cpp) -----
+
+// Reset the weapon HUD/visual state (docking, respawn). The authoritative laser
+// heat and ECM state are the server's; these are just the local indicators.
+void reset_weapons (void)
+{
+	laser_counter = 0;
+	laser = 0;
+	ecm_active = 0;
+	missile_target = MISSILE_UNARMED;
+}
+
+
+// Trigger the laser-beam visual for this frame's fire intent (the shot itself is
+// resolved by the server from InputCommand.fire; damage and heat come back via
+// PlayerStatus). Honours the server-mirrored trigger lock (laserTemp >= 242) and
+// the legacy pulse pacing so the beam flashes like the original. Returns the
+// number of frames to draw the beam (0 = no laser in this view / too hot).
+int fire_laser (void)
+{
+	if ((laser_counter == 0) && (PlayerDefense().laserHeat < 242))
+	{
+		switch (current_screen)
+		{
+			case SCR_FRONT_VIEW:
+				laser = cmdr.front_laser;
+				break;
+
+			case SCR_REAR_VIEW:
+				laser = cmdr.rear_laser;
+				break;
+
+			case SCR_RIGHT_VIEW:
+				laser = cmdr.right_laser;
+				break;
+
+			case SCR_LEFT_VIEW:
+				laser = cmdr.left_laser;
+				break;
+
+			default:
+				laser = 0;
+		}
+
+		if (laser != 0)
+		{
+			laser_counter = (laser > 127) ? 0 : (laser & 0xFA);
+			laser &= 127;
+
+			snd_play_sample (SND_PULSE);
+
+			// Aim point is the view centre (with a little jitter), so it tracks the
+			// cross-hairs whether the 3D fills the window or the retro play area.
+			const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+			laser_x = (int)(vm.cx) + ((rand() & 3) - 2);
+			laser_y = (int)(vm.cy) + ((rand() & 3) - 2);
+
+			return 2;
+		}
+	}
+
+	return 0;
+}
+
+
+// Advance the beam-visual pacing each frame. (The authoritative laser heat cools
+// server-side and rides PlayerStatus; nothing to simulate here.)
+void cool_laser (void)
+{
+	laser = 0;
+
+	if (laser_counter > 0)
+		laser_counter--;
+
+	if (laser_counter > 0)
+		laser_counter--;
+}
+
+
+// Count the E indicator down after an EcmPulse event lit it.
+void time_ecm (void)
+{
+	if (ecm_active != 0)
+		ecm_active--;
+}
+
+
+void draw_laser_lines (void)
+{
+	// The beams rise from the bottom corners of the live view and converge on the
+	// aim point (laser_x,laser_y). The four x origins keep their fraction of the
+	// width, and the bottom edge follows the view, so they fire correctly whether
+	// the 3D is the retro play area or the full window.
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	const int by = vm.height - 1;
+	const int x1 = (int)(vm.width * (32.0  / 256.0));
+	const int x2 = (int)(vm.width * (48.0  / 256.0));
+	const int x3 = (int)(vm.width * (208.0 / 256.0));
+	const int x4 = (int)(vm.width * (224.0 / 256.0));
+
+	if (wireframe)
+	{
+		gfx_draw_colour_line (x1, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x2, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x3, by, laser_x, laser_y, GFX_COL_WHITE);
+		gfx_draw_colour_line (x4, by, laser_x, laser_y, GFX_COL_WHITE);
+	}
+	else
+	{
+		gfx_draw_triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
+		gfx_draw_triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
+	}
+}

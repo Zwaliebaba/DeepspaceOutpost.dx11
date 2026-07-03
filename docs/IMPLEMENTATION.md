@@ -142,7 +142,30 @@ hygiene parallelizable, #20 gating entity-cap increases).
 
 ---## 3. Track A — Truth & hygiene
 
-### A1 — Purge game rules from the client (extends S4 / #21) — **M**
+### A1 — Purge game rules from the client (extends S4 / #21) — **M** — ✅ **done 2026-07-03**
+
+*As implemented (details in the numbered spec below): `swat.cpp`, `pilot.cpp`
+and `missions.cpp` are deleted along with the whole offline fallback; the
+unguarded connected-mode rules (client-side altitude/cabin-temp deaths,
+`random_encounter`, local shield regen, local equipment/market mutation) are
+gone; a disconnected client shows a CONNECTION LOST screen with automatic
+retry (`ensure_connection`); docking is request-based — the client flips
+docked only on `StationResponse{Dock, Ok}`; the hyperspace key now sends
+`Teleport` from either chart in flight or docked (the legacy local
+countdown/witchspace jump died with the fallback); the witchspace flag and
+the ECM indicator are mirrored from server responses/events. Salvaged as
+presentation into `space.cpp`: the display-object pool (intro parade,
+game-over debris), the laser-beam visual (no heat/energy mutation — the
+server's `laserTemp` gates the trigger), the weapon-HUD state, and a
+display-only altitude dial. Known residues, accepted and documented:
+(a) the energy-bomb flag is still cleared optimistically on use — no wire
+message mirrors equipment consumption yet (PlayerStatus carries no equipment
+bits); a G-track item adds the authoritative equipment mirror;
+(b) `generate_stock_market` remains as the market screen's display baseline
+(the server does not replicate per-station price/stock rows yet — A5's
+successor protocol or F4's market messages close that);
+(c) `GameWindows.cpp`'s now-uncalled `OpenPlanetDataWindow` is left for a
+NeuronClient UI sweep.*
 
 The single most important correction: make the load-bearing rule literally
 true. §13.1-S4 scoped this as deleting shield regen; the audit shows the real

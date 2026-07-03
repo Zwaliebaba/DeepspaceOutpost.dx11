@@ -43,8 +43,6 @@ int finish;
 /* Player ship dynamic state (flight rates, shields, energy, laser heat) now
    lives in ECS components on the player entity - see GameComponents.h and the
    PlayerFlight()/PlayerDefense() accessors (GameUniverse.h). */
-int detonate_bomb;
-int auto_pilot;
 
 
 struct commander saved_cmdr =

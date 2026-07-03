@@ -1169,44 +1169,19 @@ void display_commander_status (void)
 static char *unit_name[] = {"t", "kg", "g"};
 
 
-// Render-free buy: mutates state (or sends a server request in thin-client mode).
-// Returns 1 if an action was taken (so a caller can refresh its display).
+// Render-free buy: trading is server-authoritative. Sends a buy request and
+// lets the StationResponse update credits/cargo - no local mutation.
+// Returns 1 if a request was sent (so a caller can refresh its display).
 int market_buy (int item)
 {
-	struct stock_item *it;
-	int cargo_held;
-
 	if (!docked)
 		return 0;
 
-	// Thin-client mode: trading is server-authoritative. Send a buy request and
-	// let the StationResponse update credits/cargo; skip the local mutation.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		Neuron::Net::StationRequest req;
-		req.kind = Neuron::Net::StationRequestKind::Buy;
-		req.commodity = (uint16_t) item;
-		req.quantity = 1;
-		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return 1;
-	}
-
-	it = &stock_market[item];
-
-	if ((it->current_quantity == 0) ||
-	    (cmdr.credits < it->current_price))
-		return 0;
-
-	cargo_held = total_cargo();
-
-	if ((it->units == TONNES) &&
-		(cargo_held == cmdr.cargo_capacity))
-		return 0;
-
-	cmdr.current_cargo[item]++;
-	it->current_quantity--;
-	cmdr.credits -= it->current_price;
-
+	Neuron::Net::StationRequest req;
+	req.kind = Neuron::Net::StationRequestKind::Buy;
+	req.commodity = (uint16_t) item;
+	req.quantity = 1;
+	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 	return 1;
 }
 
@@ -1214,28 +1189,14 @@ int market_buy (int item)
 // Render-free sell counterpart to market_buy.
 int market_sell (int item)
 {
-	struct stock_item *it;
-
 	if ((!docked) || (cmdr.current_cargo[item] == 0))
 		return 0;
 
-	// Thin-client mode: ask the server to sell; the response updates our state.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
-	{
-		Neuron::Net::StationRequest req;
-		req.kind = Neuron::Net::StationRequestKind::Sell;
-		req.commodity = (uint16_t) item;
-		req.quantity = 1;
-		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return 1;
-	}
-
-	it = &stock_market[item];
-
-	cmdr.current_cargo[item]--;
-	it->current_quantity++;
-	cmdr.credits += it->current_price;
-
+	Neuron::Net::StationRequest req;
+	req.kind = Neuron::Net::StationRequestKind::Sell;
+	req.commodity = (uint16_t) item;
+	req.quantity = 1;
+	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 	return 1;
 }
 
@@ -1636,32 +1597,13 @@ void collapse_equip_list (void)
 }
 
 
-int laser_refund (int laser_type)
-{
-	switch (laser_type)
-	{
-		case PULSE_LASER:
-			return 4000;
-		
-		case BEAM_LASER:
-			return 10000;
-		
-		case MILITARY_LASER:
-			return 60000;
-		
-		case MINING_LASER:
-			return 8000;
-	}
-
-	return 0;
-}
 
 
 // Map a legacy equip-screen item to the server's authoritative equipment catalog.
 // Returns true and fills `_item` for a server-modeled purchase; returns false for
 // items the server does not model (lasers, extra energy unit, docking computer,
-// galactic hyperdrive) - not purchasable in connected play. Fuel is a Refuel
-// request handled by the caller, not an EquipItem.
+// galactic hyperdrive) - those are not purchasable. Fuel is a Refuel request
+// handled by the caller, not an EquipItem.
 static bool server_equip_item (int _type, Neuron::Net::EquipItem& _item)
 {
 	switch (_type)
@@ -1678,9 +1620,9 @@ static bool server_equip_item (int _type, Neuron::Net::EquipItem& _item)
 
 
 // Render-free equip action for a given stock index: expand a laser sub-menu (name
-// beginning '+'), or buy the item. In thin-client mode the purchase is a server
-// request and cmdr state changes only when the StationResponse/PlayerStatus reply
-// arrives; the offline branch mutates cmdr directly. Returns 1 if it acted.
+// beginning '+'), or buy the item. Equipment and fuel are server-authoritative:
+// the purchase is a station request and cmdr state changes only when the
+// StationResponse/PlayerStatus reply arrives. Returns 1 if it acted.
 int equip_do (int index)
 {
 	int i;
@@ -1694,158 +1636,20 @@ int equip_do (int index)
 		return 1;
 	}
 
-	// Thin-client mode: equipment and fuel are server-authoritative. Send the
-	// matching station request and let the StationResponse (+ PlayerStatus) update
-	// credits/fuel/missiles/ownership; never mutate cmdr locally. Items the server
-	// does not model yet are simply not purchasable while connected.
-	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	Neuron::Net::StationRequest req;
+	if (equip_stock[index].type == EQ_FUEL)
 	{
-		Neuron::Net::StationRequest req;
-		if (equip_stock[index].type == EQ_FUEL)
-		{
-			req.kind = Neuron::Net::StationRequestKind::Refuel;
-		}
-		else
-		{
-			Neuron::Net::EquipItem item;
-			if (!server_equip_item(equip_stock[index].type, item))
-				return 0;
-			req.kind = Neuron::Net::StationRequestKind::Equip;
-			req.commodity = (uint16_t) item;
-		}
-		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
-		return 1;
+		req.kind = Neuron::Net::StationRequestKind::Refuel;
 	}
-
-	if (equip_stock[index].canbuy == 0)
-		return 0;
-
-	switch (equip_stock[index].type)
+	else
 	{
-		case EQ_FUEL:
-			cmdr.fuel = PlayerCaps().maxFuel;
-			update_console();
-			break;
-
-		case EQ_MISSILE:
-			cmdr.missiles++;
-			update_console();
-			break;
-		
-		case EQ_CARGO_BAY:
-			cmdr.cargo_capacity = 35;
-			break;
-		
-		case EQ_ECM:
-			cmdr.ecm = 1;
-			break;
-		
-		case EQ_FUEL_SCOOPS:
-			cmdr.fuel_scoop = 1;
-			break;
-		
-		case EQ_ESCAPE_POD:
-			cmdr.escape_pod = 1;
-			break;
-		
-		case EQ_ENERGY_BOMB:
-			cmdr.energy_bomb = 1;
-			break;
-
-		case EQ_ENERGY_UNIT:
-			cmdr.energy_unit = 1;
-			break;
-			
-		case EQ_DOCK_COMP:
-			cmdr.docking_computer = 1;
-			break;
-			
-		case EQ_GAL_DRIVE:
-			cmdr.galactic_hyperdrive = 1;
-			break;
-			
-		case EQ_FRONT_PULSE:
-			cmdr.credits += laser_refund (cmdr.front_laser);
-			cmdr.front_laser = PULSE_LASER;
-			break;
-		
-		case EQ_REAR_PULSE:
-			cmdr.credits += laser_refund (cmdr.rear_laser);
-			cmdr.rear_laser = PULSE_LASER;
-			break;
-
-		case EQ_LEFT_PULSE:
-			cmdr.credits += laser_refund (cmdr.left_laser);
-			cmdr.left_laser = PULSE_LASER;
-			break;
-
-		case EQ_RIGHT_PULSE:
-			cmdr.credits += laser_refund (cmdr.right_laser);
-			cmdr.right_laser = PULSE_LASER;
-			break;
-
-		case EQ_FRONT_BEAM:
-			cmdr.credits += laser_refund (cmdr.front_laser);
-			cmdr.front_laser = BEAM_LASER;
-			break;
-
-		case EQ_REAR_BEAM:
-			cmdr.credits += laser_refund (cmdr.rear_laser);
-			cmdr.rear_laser = BEAM_LASER;
-			break;
-
-		case EQ_LEFT_BEAM:
-			cmdr.credits += laser_refund (cmdr.left_laser);
-			cmdr.left_laser = BEAM_LASER;
-			break;
-
-		case EQ_RIGHT_BEAM:
-			cmdr.credits += laser_refund (cmdr.right_laser);
-			cmdr.right_laser = BEAM_LASER;
-			break;
-
-		case EQ_FRONT_MINING:
-			cmdr.credits += laser_refund (cmdr.front_laser);
-			cmdr.front_laser = MINING_LASER;
-			break;
-
-		case EQ_REAR_MINING:
-			cmdr.credits += laser_refund (cmdr.rear_laser);
-			cmdr.rear_laser = MINING_LASER;
-			break;
-
-		case EQ_LEFT_MINING:
-			cmdr.credits += laser_refund (cmdr.left_laser);
-			cmdr.left_laser = MINING_LASER;
-			break;
-
-		case EQ_RIGHT_MINING:
-			cmdr.credits += laser_refund (cmdr.right_laser);
-			cmdr.right_laser = MINING_LASER;
-			break;
-
-		case EQ_FRONT_MILITARY:
-			cmdr.credits += laser_refund (cmdr.front_laser);
-			cmdr.front_laser = MILITARY_LASER;
-			break;
-
-		case EQ_REAR_MILITARY:
-			cmdr.credits += laser_refund (cmdr.rear_laser);
-			cmdr.rear_laser = MILITARY_LASER;
-			break;
-
-		case EQ_LEFT_MILITARY:
-			cmdr.credits += laser_refund (cmdr.left_laser);
-			cmdr.left_laser = MILITARY_LASER;
-			break;
-
-		case EQ_RIGHT_MILITARY:
-			cmdr.credits += laser_refund (cmdr.right_laser);
-			cmdr.right_laser = MILITARY_LASER;
-			break;
+		Neuron::Net::EquipItem item;
+		if (!server_equip_item(equip_stock[index].type, item))
+			return 0;
+		req.kind = Neuron::Net::StationRequestKind::Equip;
+		req.commodity = (uint16_t) item;
 	}
-
-	cmdr.credits -= equip_stock[index].price;
+	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 	return 1;
 }
 

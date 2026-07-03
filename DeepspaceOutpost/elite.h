@@ -127,9 +127,7 @@ extern int game_over;
 extern int docked;
 extern int finish;
 extern int mcount;
-extern int detonate_bomb;
 extern int witchspace;
-extern int auto_pilot;
 
 
 void restore_saved_commander (void);

@@ -25,9 +25,6 @@ extern struct stock_item stock_market[NO_OF_STOCK_ITEMS];
 
 void generate_stock_market (void);
 void set_stock_quantities(int *quant);
-int carrying_contraband (void);
-int total_cargo (void);
-void scoop_item (int un);
 
 #endif
 
