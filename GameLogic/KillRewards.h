@@ -46,10 +46,14 @@ namespace Neuron::GameLogic
     if (wallet == nullptr || record == nullptr)
       return 0;   // an NPC (or a departed player) earns nothing
 
+    // A kill made in witchspace pays no bounty (legacy rule); the score still
+    // counts. The already-implemented ApplyKill inWitchspace flag finally has its
+    // caller (G7).
     const int bounty = BountyFor(_world, _victim);
-    const KillReward reward = ApplyKill(wallet->credits, record->score, bounty, /*inWitchspace*/ false);
+    const bool inWitchspace = _world.Has<Witchspace>(killer);
+    const KillReward reward = ApplyKill(wallet->credits, record->score, bounty, inWitchspace);
     wallet->credits = reward.credits;
     record->score = reward.score;
-    return bounty;
+    return inWitchspace ? 0 : bounty;
   }
 }

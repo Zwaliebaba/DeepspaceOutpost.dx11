@@ -231,6 +231,9 @@ int main()
   // loot and AI draws can't perturb each other's sequences.
   uint32_t aiRng = 0xA11CEu;
 
+  // And one for hyperspace witchspace rolls / Thargoid scatter (G7).
+  uint32_t hyperRng = 0x5A17Eu;
+
   // Push a player their full per-commodity cargo hold. The aggregate
   // PlayerStatus.cargoUsed can't convey the per-good breakdown the HUD tracks, so a
   // scoop (or a respawn that emptied the hold) resends the whole manifest to just
@@ -465,8 +468,32 @@ int main()
         Msg::ClientHello hello;
         if (Msg::TryDecode(msg, req))
         {
-          const Net::StationResponse resp =
-              GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
+          Net::StationResponse resp;
+          resp.kind = req.kind;
+          if (req.kind == Net::StationRequestKind::Teleport)
+          {
+            // G7: a real fuel-gated hyperspace jump (may misfire into witchspace),
+            // NOT the old docked instant-teleport. Routed through HyperspaceSystem.
+            const GameLogic::HyperspaceOutcome hj = GameLogic::Hyperspace(world, s.entity, req.stationId, hyperRng);
+            resp.status = hj.status;
+            if (const auto* wal = world.TryGet<GameLogic::Wallet>(s.entity)) resp.credits = wal->credits;
+            if (hj.wantedChanged)
+              if (Msg::PlayerInfo pi; sessions.PlayerInfoFor(world, s.entity.index, pi))
+                sessions.Broadcast(pi);
+            if (hj.jumped)
+              printf("[tick %u] player %u hyperspace -> system %u (%s)\n", tick, s.entity.index,
+                     req.stationId, hj.witchspace ? "WITCHSPACE misjump" : "arrived");
+          }
+          else if (req.kind == Net::StationRequestKind::JumpDrive)
+          {
+            // G7: in-system fast jump toward the planet (mass-lock gated).
+            const GameLogic::JumpDriveOutcome jd = GameLogic::InSystemJump(world, s.entity);
+            resp.status = jd.status;
+          }
+          else
+          {
+            resp = GameLogic::ProcessStationRequest(world, s.entity, DOCK_RANGE, req);
+          }
           s.events.Send(resp);   // Gameplay lane
         }
         else if (Msg::TryDecode(msg, hello))
@@ -555,6 +582,7 @@ int main()
       {
         if (const auto* c = world.TryGet<GameLogic::Combatant>(s.entity)) ps.energy = c->energy;
         if (const auto* sh = world.TryGet<GameLogic::Shields>(s.entity)) { ps.frontShield = sh->front; ps.aftShield = sh->aft; }
+        if (const auto* fu = world.TryGet<GameLogic::Fuel>(s.entity)) ps.fuel = fu->tenths;
         if (const auto* wal = world.TryGet<GameLogic::Wallet>(s.entity)) ps.credits = wal->credits;
         if (const auto* eq = world.TryGet<GameLogic::Equipment>(s.entity)) ps.missiles = eq->missiles;
         if (const auto* h = world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);

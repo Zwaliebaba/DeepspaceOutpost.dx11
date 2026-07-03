@@ -1449,7 +1449,21 @@ void jump_warp (void)
 	int i;
 	int type;
 	int jump;
-	
+
+	// Thin-client mode (G7): the server owns the mass-lock rules and moves the
+	// ship; ask it to jump and let the new position ride the snapshot stream. The
+	// local star-warp visual still fires below for feedback.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		req.kind = Neuron::Net::StationRequestKind::JumpDrive;
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+		warp_stars = 1;
+		mcount &= 63;
+		in_battle = 0;
+		return;
+	}
+
 	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
 		type = local_objects[i].type;

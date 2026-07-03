@@ -81,6 +81,12 @@ namespace Neuron::GameLogic
     int level = 0;
   };
 
+  // Marks a player stranded in WITCHSPACE (G7): a hyperspace misjump dumped them
+  // into interstellar deep space to fight off a Thargoid ambush. While present,
+  // kills they make pay NO bounty (legacy: witchspace bounties are withheld -
+  // see KillRewards); a successful onward jump clears it.
+  struct Witchspace {};
+
   // At or above this wanted level a player is a FUGITIVE: stations refuse them
   // docking (StationServices), and they are fair game to attack without penalty.
   // A clean player (level 0) is protected - shooting one is a crime. The 1..threshold-1

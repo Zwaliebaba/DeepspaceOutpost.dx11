@@ -39,6 +39,7 @@ namespace Neuron::GameLogic
     inline constexpr int Shuttle = 9;      // ambient trader hulls (SHIP_SHUTTLE /
     inline constexpr int Transporter = 10; // SHIP_TRANSPORTER, the legacy lane flyers)
     inline constexpr int Viper = 16;
+    inline constexpr int Thargoid = 29;    // witchspace ambusher (SHIP_THARGOID)
   }
 
   // An in-flight homing missile - a real entity that chases its locked target and

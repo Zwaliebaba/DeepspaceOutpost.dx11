@@ -208,6 +208,7 @@ namespace Neuron::GameLogic
       _world.Add<CargoHold>(e, CargoHold{});
       _world.Add<DockState>(e, DockState{});
       _world.Add<Equipment>(e, Equipment{});
+      _world.Add<Fuel>(e, Fuel{});   // full hyperspace tank (G7)
       // Combat/faction state: a player is on the Player team, fires only on
       // command (autoEngage = false), and starts with a clean record.
       _world.Add<PlayerTag>(e, PlayerTag{});

@@ -32,6 +32,7 @@
 #include "StationServices.h"
 #include "KillRewards.h"
 #include "LootSystem.h"
+#include "HyperspaceSystem.h"
 #include "CombatMessages.h"
 
 namespace Neuron::GameLogic

@@ -49,6 +49,22 @@ namespace Neuron::GameLogic
     bool escapePod = false;
   };
 
+  // Hyperspace fuel (G7): legacy 0..70 tenths = 0.0..7.0 light years. Full at
+  // spawn; spent by a jump in proportion to distance (HyperspaceSystem), refilled
+  // at a station (Refuel) or by sun-skimming later. `max` grows with no upgrade
+  // today but is carried so a future long-range drive can raise the ceiling.
+  inline constexpr int MAX_FUEL_TENTHS = 70;
+
+  // Cost to buy one tenth of a light year of fuel (legacy units: tenths of a
+  // credit). A full 7.0 LY tank costs 14.0 Cr.
+  inline constexpr int FUEL_PRICE_PER_TENTH = 2;
+
+  struct Fuel
+  {
+    int tenths = MAX_FUEL_TENTHS;
+    int max = MAX_FUEL_TENTHS;
+  };
+
   // A station's authoritative market, stored on the station entity so every
   // player docked there trades against the same shared stock. `systemId` links
   // it back to its galaxy system.
@@ -245,6 +261,29 @@ namespace Neuron::GameLogic
     r.status = Net::StationStatus::Ok;
     r.credits = _wallet.credits;
     return r;
+  }
+
+  // Buy hyperspace fuel (legacy buy_fuel). Fills the tank as far as the wallet
+  // allows, up to full, and charges for what was actually pumped. Docked-only.
+  // Returns Ok on any purchase (or an already-full tank); NotEnoughCredits only
+  // when the player can't afford even a single tenth of a partial tank.
+  [[nodiscard]] inline Net::StationStatus RefuelPlayer(Wallet& _wallet, Fuel& _fuel, bool _docked)
+  {
+    if (!_docked)
+      return Net::StationStatus::NotDocked;
+
+    const int need = _fuel.max - _fuel.tenths;
+    if (need <= 0)
+      return Net::StationStatus::Ok;   // already full - a no-op, not an error
+
+    const int affordable = _wallet.credits / FUEL_PRICE_PER_TENTH;
+    const int buy = (need < affordable) ? need : affordable;
+    if (buy <= 0)
+      return Net::StationStatus::NotEnoughCredits;
+
+    _wallet.credits -= buy * FUEL_PRICE_PER_TENTH;
+    _fuel.tenths += buy;
+    return Net::StationStatus::Ok;
   }
 
   // Can the player dock? Proximity check to the station (Chebyshev, overflow-safe
@@ -458,6 +497,19 @@ namespace Neuron::GameLogic
         break;
       }
 
+      case Net::StationRequestKind::Refuel:
+      {
+        Fuel* fuel = _world.TryGet<Fuel>(_player);
+        if (fuel == nullptr)
+        {
+          resp.status = Net::StationStatus::BadCommodity;   // not fuel-capable
+          break;
+        }
+        resp.status = RefuelPlayer(*wallet, *fuel, dock->docked);
+        resp.credits = wallet->credits;   // the fuel level itself rides PlayerStatus
+        break;
+      }
+
       case Net::StationRequestKind::Teleport:
       {
         // Jump from this station to the destination system's station (the
@@ -484,6 +536,14 @@ namespace Neuron::GameLogic
         }
         break;
       }
+
+      default:
+        // In-flight travel commands (Teleport as a real fuel-gated jump, and
+        // JumpDrive) are intercepted by the server loop and routed through
+        // HyperspaceSystem before this station-service dispatch, so they never
+        // arrive here. Any other/unknown kind is not a station service.
+        resp.status = Net::StationStatus::BadCommodity;
+        break;
     }
 
     return resp;

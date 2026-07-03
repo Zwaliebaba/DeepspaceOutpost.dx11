@@ -21,6 +21,7 @@ add_executable(GameLogic.Tests
     MissileSystemTests.cpp
     GalaxyGenTests.cpp
     GalaxyTests.cpp
+    HyperspaceSystemTests.cpp
     MotionTests.cpp
     SessionTests.cpp
     SpawnDirectorTests.cpp

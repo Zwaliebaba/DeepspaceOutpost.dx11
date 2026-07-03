@@ -1192,6 +1192,18 @@ static void register_client_event_handlers(void)
   // Commerce: apply the authoritative station result to the local commander.
   g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
   {
+    // A hyperspace jump (G7) arrives in FLIGHT near the destination, or misfires
+    // into a witchspace ambush - either way, leave the station screen for space.
+    // The server owns our new position/fuel (they ride snapshots + PlayerStatus).
+    if (_resp.kind == Net::StationRequestKind::Teleport &&
+        (_resp.status == Net::StationStatus::Arrived || _resp.status == Net::StationStatus::Witchspace))
+    {
+      docked = 0;
+      current_screen = SCR_BREAK_PATTERN;
+      snd_play_sample(SND_HYPERSPACE);
+      return;
+    }
+
     if (_resp.status != Net::StationStatus::Ok)
       return;
     cmdr.credits = _resp.credits;
@@ -1246,6 +1258,7 @@ static void register_client_event_handlers(void)
   g_clientBus.Subscribe<Neuron::Msg::PlayerStatus>([](const Neuron::Msg::PlayerStatus& _ps)
   {
     cmdr.credits = _ps.credits;
+    cmdr.fuel = _ps.fuel;   // hyperspace tank (G7): server-owned, drives the fuel gauge
     PlayerDefense().frontShield = _ps.frontShield;
     PlayerDefense().aftShield = _ps.aftShield;
     PlayerDefense().energy = _ps.energy;
