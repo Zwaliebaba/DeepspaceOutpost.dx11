@@ -68,7 +68,7 @@ endpoint spawns a player entity and provisions a session (see §5.2).
 | `Server/` | The dedicated host: UDP socket loop, fixed tick, session I/O, world bootstrap (home system + procedural galaxy). | GameLogic, NeuronCore |
 | `NeuronClient/` | Client-side engine: DX11 device/render, replication client (socket + interpolation), sound, fonts. | NeuronCore |
 | `DeepspaceOutpost/` | The game client: legacy-derived presentation (cockpit, charts, station screens), input → intent, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
-| `Tests/GameLogic/`, `Tests/NeuronCore/` | GoogleTest suites (headless). | respective libs |
+| `Tests/GameLogic/`, `Tests/NeuronCore/`, `Tests/NeuronClient/`, `Tests/NeuronServer/` | GoogleTest suites (headless). | respective libs |
 | `GameData/Models/` | Ship meshes (JSON), converted from the legacy tables. | — |
 
 Dependency direction is strictly downward: the client never includes
@@ -207,6 +207,11 @@ never on the wire.
 | `0x1000–0x7FFF` | game-specific extensions |
 | `0x8000–0xFFFE` | **LocalOnly / Tooling — never on the wire** |
 
+Grandfathered: `EcmPulse` (`0x0202`) and `EscapePodUsed` (`0x0203`) are
+gameplay events that predate this note and sit in the replication band; their
+ids stay (permanent ABI). Future gameplay/combat/VFX events allocate from the
+game-specific band (`0x1000+`).
+
 ### 4.4 Wire message catalog
 
 #### Session & identity
@@ -274,7 +279,7 @@ yet wired — see §14.)*
 
 #### Input
 
-**`InputCommand`** (alias `Net::ClientInput`) — `0x0100` · Wire · Command ·
+**`InputCommand`** — `0x0100` · Wire · Command ·
 **Unreliable** lane · C→S. The per-frame flight/fire intent. Self-superseding:
 the server keeps the highest `sequence` and drops stale datagrams. A static
 trait forbids queuing it on a reliable lane.
@@ -458,7 +463,9 @@ Every ~33 ms, in this order:
    velocity movers, e.g. drifting canisters).
 7. **Spawning** — `SpawnDirector::Step` (pirates near players, every 600 ticks,
    NPC cap 12) and `StepTraders` (lane traffic, every 900 ticks, cap 2).
-8. **Shield regen** — every 8 ticks, players' shields/energy recharge.
+8. **Shield regen & equipment upkeep** — every 8 ticks, players'
+   shields/energy recharge; every tick, `StepEquipment` cools lasers and
+   recharges ECM (§6.12).
 9. **Combat resolution** — `StepMissiles` (homing + detonation) + `StepCombat`
    (NPC auto-fire) + `StepCollisions` (G6) → all kills published as
    `EntityKilled`; bus dispatched (deaths resolve; double-reports are guarded).
@@ -513,8 +520,8 @@ flies by intent*).
   auto-fights; players (autoEngage=false) fire only on command but may target
   **other players** — that is how PvP exists at all.
 - **Player laser:** on `fire`, `ResolvePlayerFire` picks the nearest enemy
-  within 6000 units inside a cos ≥ 0.9 (~25°) aiming cone; damage derives from
-  laser strength (`LaserDamageTo`).
+  within 6000 units inside a cos ≥ 0.9 (~25°) aiming cone; damage is the
+  ship's laser strength.
 - **NPC lasers:** `StepCombat` — each auto-engaging combatant fires at most
   once per `fireInterval` (10 ticks), damage accumulates and resolves
   simultaneously (fire order can't matter).
@@ -979,8 +986,9 @@ legacy presentation code is touched; freezing is a state, not a plan.
 `EcmPulse` (`0x0202`) and `EscapePodUsed` (`0x0203`) are gameplay events
 sitting in the replication-lifecycle band. Ids are permanent, so: grandfather
 these two with a note in §4.3, and declare that future combat/VFX events
-allocate from the game-specific band (`0x1000+`). Likewise strike the
-`InputCommand` / `Net::ClientInput` alias — one catalog name.
+allocate from the game-specific band (`0x1000+`). *(The
+`InputCommand`/`Net::ClientInput` alias half of this item is done — the alias
+was struck 2026-07-03; `Msg::InputCommand` is the one catalog name.)*
 
 **What is *not* over-engineered — do not "simplify" these.**
 The five-trait message catalog, the three reliable lanes, the sparse-set ECS,

@@ -33,8 +33,8 @@ namespace Neuron::GameLogic
 
   // Credit the killer for downing the victim: add the bounty to their wallet and
   // bump their score (ApplyKill). No-op unless the killer is a player with a
-  // Wallet + PlayerRecord. Returns the bounty paid (0 if the killer earns nothing).
-  // Witchspace bounty-withholding is not modelled yet, so `inWitchspace` is false.
+  // Wallet + PlayerRecord. Returns the bounty paid (0 if the killer earns nothing,
+  // or if the kill was made in witchspace - the bounty is withheld, score still counts).
   inline int CreditKill(ECS::Registry& _world, uint32_t _killerIndex, ECS::EntityId _victim)
   {
     const ECS::EntityId killer = _world.LiveEntity(_killerIndex);

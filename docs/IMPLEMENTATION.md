@@ -208,11 +208,19 @@ dead-reckoning `speed`. This is presentation only; it also produces the
 sampled position at alpha 0.5 is the midpoint; visually smooth motion at
 30 Hz server / 144 Hz client.
 
-### A4 — Delete dead code (per §1.3 table) — **S**
+### A4 — Delete dead code (per §1.3 table) — **S** — ✅ **done 2026-07-03**
 
-Mechanical, one commit per bullet in the §1.3 table so each is separately
-revertible. Update the tests that were the sole callers (delete or repoint
-them as noted).
+Mechanical, per the §1.3 table. As implemented: the docked-Teleport case is
+gone (its tests replaced by one pinning "travel kinds are rejected by the
+station dispatcher"); `ResolveLaserHit`/`LaserHitResult`/`TargetClass`/
+`MILITARY_LASER_STRENGTH` deleted with damage now taken directly from laser
+strength; `BuildWorldSnapshot` moved into `ReplicationTests.cpp`;
+`SystemSeed`/`NextGalaxy`/`RotateByteLeft` deleted; `SnapshotReceiver.h`
+deleted with its transport tests ported to `SnapshotInterpolator`;
+`ClientInput.h` deleted with all call sites renamed to `Msg::InputCommand` /
+`Msg::NO_MISSILE_TARGET`; `alg_main.h`/`menu.h` deleted. (The legacy
+`MILITARY_LASER` in `DeepspaceOutpost/` legacy screens remains — that tier is
+A1's scope.)
 
 ### A5 — Protocol hygiene (#19: S2 + S3 + S7 remnants) — **M**
 
@@ -240,24 +248,27 @@ All three follow the ABI rule: new id, retire the old id in place.
    and `NeuronCore/GalaxyManifest.h` once the client no longer speaks it.
    This is also the prerequisite for fog of war (F2): the server will later
    filter chunk replies by `KnownSystems`.
-3. **S7 — Band note + alias.** Add the §4.3 note grandfathering
-   `EcmPulse`/`EscapePodUsed`; future gameplay events allocate from
-   `0x1000+` (as above). Delete the `Net::ClientInput` alias (§1.3).
+3. **S7 — Band note + alias.** ✅ done 2026-07-03: the §4.3 note
+   grandfathering `EcmPulse`/`EscapePodUsed` is in ARCHITECTURE.md (future
+   gameplay events allocate from `0x1000+`), and the `Net::ClientInput`
+   alias is deleted (with A4).
 
 *Acceptance:* round-trip + golden-layout tests for the four new messages;
 governance tests pass; a legacy `StationRequest{Teleport}` is answered with a
 rejection, not a jump; the client completes its chart using pulled chunks.
 
-### A6 — Determinism & build hygiene — **XS**
+### A6 — Determinism & build hygiene — **XS** — ✅ **done 2026-07-03**
 
-Add `/fp:strict` to `GameLogic`, `Server`, and both their test targets
-(§13.3-E5); rebuild and re-run the golden tests (any drift means a test was
-depending on contraction — fix the test's expectations once, now).
-Add the three missing headers to `NEURONCORE_HEADERS`
-(`GalaxyManifest.h` — until A5 retires it, `Messages/Defs/PlayerSession.h`,
-`Messages/Defs/EquipmentEvents.h`).
+`/fp:strict` is now a PUBLIC compile option on `GameLogic`, so `Server` and
+`GameLogic.Tests` inherit it transitively (§13.3-E5); CI's golden-test run
+validates no expectation depended on contraction. The `NEURONCORE_HEADERS`
+manifest gained the missing `GalaxyManifest.h`,
+`Messages/Defs/PlayerSession.h` and `Messages/Defs/EquipmentEvents.h`, and
+dropped the deleted `ClientInput.h`/`SnapshotReceiver.h`.
 
-### A7 — Documentation truth pass — **XS**
+### A7 — Documentation truth pass — **XS** — ✅ **done 2026-07-03**
+*(as itemized below; the client-ECS §7 note waits on A1's outcome, and the
+§13 status fold-in is this document)*
 
 - ARCHITECTURE.md: add `StepEquipment` to the §5.1 tick list; list all four
   test suites in §2; document the client's ECS-as-HUD-mirror in §7 (or
@@ -269,8 +280,8 @@ Add the three missing headers to `NEURONCORE_HEADERS`
   the trailing XML artifact.
 - `ci.yml`: drop the `MIGRATION_ROADMAP.md` comment and the stale branch
   trigger.
-- `cmo.md`: remove the false "Linux CI" claim; mark the whole doc per the
-  owner's Q3 decision (§12).
+- `cmo.md`: left untouched per the owner's Q3 decision (§12) — the owner
+  covers the DSOM/Models question separately.
 
 ---
 
@@ -686,12 +697,11 @@ Three items are genuinely open and block only their own bullets:
 2. **Q2 — Legacy save files.** `file.cpp` still reads/writes local
    commander saves; B4 makes the server authoritative. Assumed: local saves
    die with B4 (config/keybinds stay local).
-3. **Q3 — `GameData/Models` + `cmo.md` (DSOM).** 67 orphaned model files
-   and an unreferenced format proposal. Options: (a) wire a runtime loader
-   as part of Track H step 1 (mesh table reads JSON instead of compiled
-   tables — enables art iteration without recompiles), or (b) delete the
-   exports and park cmo.md. Track H does not depend on either. Assumed:
-   decide before H; default (a) if art iteration matters.
+3. **Q3 — `GameData/Models` + `cmo.md` (DSOM).** *Decided 2026-07-03:
+   deferred — the owner will handle this separately. Leave `GameData/Models`,
+   `tools/shipdata2obj` and `cmo.md` exactly as they are; no track touches
+   them (the A7 doc pass leaves `cmo.md` alone too). Track H proceeds from
+   the compiled mesh tables.*
 4. **Q4 — x86.** Presets exist, CI never builds them, nothing in the plan
    needs x86. Assumed: drop the presets or add a CI lane; default drop.
 

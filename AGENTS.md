@@ -4,9 +4,9 @@
 
 Deepspace Outpost is a Windows-native C++ game built with CMake and the MSVC toolchain. It
 targets Windows (x64 and x86) and builds with the Ninja generator via CMake presets. The
-renderer is **Direct3D 11** and audio is **XAudio2**. The codebase is mid-restructure toward a
-modular engine split into reusable `Neuron*` static libraries plus the game logic and the
-executables (a Win32 GUI client, a headless bot test client, and a dedicated server). Vector/matrix
+renderer is **Direct3D 11** and audio is **XAudio2**. The codebase is split into reusable
+`Neuron*` static engine libraries plus the game logic and the executables (a Win32 GUI client,
+a dedicated server, and a planned headless bot test client). Vector/matrix
 math is being migrated to **DirectXMath** (SIMD) via `Neuron::Math`.
 
 **Direction:** the project is migrating from the single-player game to an **open-world,
@@ -15,18 +15,18 @@ with an **in-house ECS**, client prediction, and Area-of-Interest replication. T
 consolidated roadmap live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (§12–§14) — read it
 before doing architecture work.
 
-> **Status note.** Today the whole game builds as a single Win32 GUI executable,
-> **DeepspaceOutpost**, with two source tiers: faithfully ported game logic (`*.cpp` in the
-> project root, compiled `/permissive`) and a freshly written platform layer (`platform/*.cpp` —
-> Win32 / Direct3D 11 / XAudio2, compiled `/permissive- /W4`) wired to the game through contract
-> headers (`gfx.h`, `sound.h`, …). The `Neuron*` and `Server` directories are placeholders for the
-> *planned* engine libraries described below and are empty for now. `DemoShaders/` is HLSL ported
-> from the engine's GLSL, kept for **reference only** (not built). Several engineering conventions
-> below (DirectXMath SIMD boundary, `winrt::com_ptr`, native-first) describe the *target* style for
-> new and migrated code; the ported game logic still uses legacy patterns. Match the file you are
-> editing, and move legacy code toward the target style when you touch it.
+> **Status note.** The engine split has landed: `NeuronCore`, `NeuronClient`, `NeuronServer`,
+> `GameLogic`, the `DeepspaceOutpost` client and the dedicated `Server` are all real CMake
+> targets with companion test suites under `Tests/<Library>/`. `BotClient` is the one planned
+> target that does not exist yet (ARCHITECTURE.md §14, item 20). The client still carries two
+> source tiers: legacy-derived presentation (`*.cpp` in `DeepspaceOutpost/`, compiled
+> `/permissive`) and the freshly written engine layers (compiled `/permissive- /W4`). Several
+> engineering conventions below (DirectXMath SIMD boundary, `winrt::com_ptr`, native-first)
+> describe the *target* style for new and migrated code; the legacy presentation code still
+> uses older patterns. Match the file you are editing, and move legacy code toward the target
+> style when you touch it.
 
-**Target project structure (CMake), once the engine split lands:**
+**Project structure (CMake):**
 
 | Project | Type | Role |
 |---|---|---|
@@ -35,7 +35,7 @@ before doing architecture work.
 | **NeuronServer** | Static lib | Server engine: authoritative session management, **AOI/replication**, and **persistence (Microsoft SQL Server)**. Depends on GameLogic, NeuronCore. |
 | **GameLogic** | Static lib | **SERVER-ONLY — the single home of ALL game behavior**: motion/physics integration, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **NeuronCore**. **The client never links it; there is no shared game-logic library.** |
 | **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient. |
-| **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init). |
+| **BotClient** *(planned — not yet created)* | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init). |
 | **Server** | Console executable | Dedicated-server host: main loop, sessions, fixed-tick scheduler. Entry point `main`. Links NeuronServer, GameLogic. |
 
 **Target dependency graph** (each project depends on its parent; arrows omitted for clarity):
@@ -44,7 +44,7 @@ before doing architecture work.
 NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/protocol schemas, ship-data, math, NetLib
 ├─ NeuronClient            D3D11 · audio · input · GUI · client net (interpolation + dead-reckoning, NO game rules)
 │  ├─ DeepspaceOutpost     Win32 client exe (game rendering, UI, input)
-│  └─ BotClient            headless test exe (bots, no render/audio)
+│  └─ BotClient            headless test exe (bots, no render/audio) [planned]
 └─ GameLogic               SERVER-ONLY: ALL game behaviour (motion/physics, AI, economy, combat, missions)
    └─ NeuronServer         sessions · AOI/replication · MS SQL persistence
       └─ Server            dedicated-server host exe
@@ -99,7 +99,7 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **Canonical design document**: architecture, game rules, protocol, locked decisions, architectural review, and consolidated roadmap (read first for architecture work) |
 | [coding-standards.md](.github/coding-standards.md) | Naming, formatting, language conventions, native-first rule |
 | [copilot-instructions.md](.github/copilot-instructions.md) | Code-generation guidance for this repository |
-| [DemoShaders/PORTING.md](DemoShaders/PORTING.md) | GLSL→HLSL porting guide for the reference shaders in `DemoShaders/` (reference only — not built) |
+| [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | Execution companion to ARCHITECTURE.md: audit findings, dead/legacy-code inventory, and the work-item-level implementation plan |
 
 ## Setup Commands
 
@@ -244,5 +244,3 @@ them. The load→compute→store boundary must be explicit.
   (raw pointers, C-style strings, custom containers). Keep those when editing legacy areas;
   use modern C++ for new code.
 - Build after changes to confirm compilation succeeds.
-</content>
-</invoke>

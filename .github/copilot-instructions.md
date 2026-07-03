@@ -12,23 +12,21 @@ When generating code for this repository:
 
 ## Project Snapshot
 
-**Deepspace Outpost** is a Windows-native C++23 game (DirectX 11 / XAudio2). The codebase is
-mid-restructure toward a modular engine: reusable `Neuron*` static libraries plus the game logic
-and two executables.
+**Deepspace Outpost** is a Windows-native C++23 game (DirectX 11 / XAudio2): a modular engine of
+reusable `Neuron*` static libraries plus the server-only game logic and the executables.
 
-> **Current status.** Today the whole game builds as a single Win32 GUI executable,
-> **DeepspaceOutpost**, made of two source tiers: faithfully ported game logic (`*.cpp` in the
-> project root, compiled `/permissive`) and a freshly written platform layer (`platform/*.cpp` —
-> Win32 / Direct3D 11 / XAudio2, compiled `/permissive- /W4`) that talks to the game through
-> contract headers (`gfx.h`, `sound.h`, …). The `Neuron*` and `Server` directories are
-> placeholders for the *planned* engine libraries below and are empty for now. `DemoShaders/`
-> holds HLSL ported from the engine's GLSL and is **reference only** — it is not part of the build.
+> **Current status.** The engine split has landed: `NeuronCore`, `NeuronClient`, `NeuronServer`,
+> `GameLogic`, the **DeepspaceOutpost** Win32 client and the dedicated **Server** all build as
+> real CMake targets with companion GoogleTest suites under `Tests/<Library>/`. The client still
+> carries two source tiers: legacy-derived presentation (`*.cpp` in `DeepspaceOutpost/`,
+> compiled `/permissive`) and the modern engine layers (compiled `/permissive- /W4`).
 
 **Direction:** the project is migrating to an **open-world, server-authoritative MMO** (up to 100
 players, `int64³` world, in-house ECS, client prediction, AOI replication). Read
-[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) (§12–§14) before architecture work.
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) (§12–§14) before architecture work, and
+[`docs/IMPLEMENTATION.md`](../docs/IMPLEMENTATION.md) for the work-item-level plan.
 
-Target structure once the engine split lands:
+Project structure:
 
 - **NeuronCore** (static lib): engine foundation **+ the only client/server shared data** — the
   **in-house ECS** container, component & wire-protocol **schemas** (`Transform`, `Motion`,
@@ -44,8 +42,8 @@ Target structure once the engine split lands:
   physics, AI/tactics, economy, combat resolution, missions, spawning. Headless, no rendering.
   Depends on NeuronCore. **The client never links it; there is no shared game-logic library.**
 - **DeepspaceOutpost** (Win32 GUI executable, `wWinMain`): the game client. Links NeuronClient.
-- **BotClient** (console executable): **headless test client** — bots, no render/audio, for load
-  testing. Links NeuronClient (headless).
+- **BotClient** (console executable, *planned — not yet created*): **headless test client** —
+  bots, no render/audio, for load testing. Links NeuronClient (headless).
 - **Server** (console executable, `main`): dedicated-server host. Links NeuronServer, GameLogic.
 
 The renderer is **Direct3D 11** (not D3D12). Math is migrating from the legacy ported math types to
