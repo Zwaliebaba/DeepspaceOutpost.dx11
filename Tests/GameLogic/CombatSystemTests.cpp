@@ -157,6 +157,37 @@ TEST(CombatSys, AutoFireRespectsCooldown)
   EXPECT_TRUE(world.Get<GameLogic::Combatant>(b).energy == 90);
 }
 
+TEST(CombatSys, FocusFireOverridesTheNearestEnemy)
+{
+  ECS::Registry world;
+  ECS::EntityId attacker = Spawn(world, 0, GameLogic::Team::Pirate, 100, 10, /*range*/ 9000);
+  ECS::EntityId nearPrey = Spawn(world, 1000, GameLogic::Team::Player, 100, 0, 1);
+  ECS::EntityId farPrey = Spawn(world, 5000, GameLogic::Team::Player, 100, 0, 1);
+  world.Get<GameLogic::Combatant>(attacker).focus = farPrey.index;   // target memory
+
+  std::ignore = GameLogic::StepCombat(world);
+
+  // Fire follows the memory, not proximity.
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(farPrey).energy == 90);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(nearPrey).energy == 100);
+}
+
+TEST(CombatSys, PoliceSpareCleanPlayersButShootFugitives)
+{
+  ECS::Registry world;
+  ECS::EntityId cop = Spawn(world, 0, GameLogic::Team::Police, 120, 10);
+  ECS::EntityId player = Spawn(world, 1000, GameLogic::Team::Player, 100, 0, 1);
+  world.Add<GameLogic::PlayerTag>(player, GameLogic::PlayerTag{});
+  world.Add<GameLogic::Wanted>(player, GameLogic::Wanted{ 0 });
+
+  std::ignore = GameLogic::StepCombat(world);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).energy == 100);   // innocent: spared
+
+  world.Get<GameLogic::Wanted>(player).level = 2;
+  std::ignore = GameLogic::StepCombat(world);
+  EXPECT_TRUE(world.Get<GameLogic::Combatant>(player).energy == 90);    // fugitive: engaged
+}
+
 TEST(Fire, HitsTheEnemyAhead)
 {
   ECS::Registry w;

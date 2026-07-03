@@ -27,7 +27,9 @@ namespace Neuron::Net
     Buy = 3,
     Sell = 4,
     Equip = 5,      // buy equipment; the item id travels in StationRequest::commodity
-    Teleport = 6,   // jump to another system; the target system id is StationRequest::stationId
+    Teleport = 6,   // hyperspace jump; the target system id is StationRequest::stationId (G7: fuel-gated)
+    Refuel = 7,     // buy hyperspace fuel to fill the tank (docked)
+    JumpDrive = 8,  // in-system fast-jump toward the planet (in-flight; mass-lock gated)
   };
 
   // Equipment the player can buy at a station (id carried in a request's
@@ -54,6 +56,12 @@ namespace Neuron::Net
     BadCommodity = 6,
     CantDock = 7,
     AlreadyOwned = 8,
+    DockingRefused = 9,    // the station refuses a fugitive (wanted) player
+    NotEnoughFuel = 10,    // the jump costs more fuel than the tank holds (G7)
+    OutOfRange = 11,       // the destination is beyond even a full tank's reach
+    MassLocked = 12,       // an in-system jump is blocked by nearby mass/hostiles
+    Arrived = 13,          // a hyperspace jump landed you in flight (not docked)
+    Witchspace = 14,       // a misjump dumped you into a witchspace ambush
   };
 }
 

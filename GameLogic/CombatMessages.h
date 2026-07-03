@@ -29,8 +29,9 @@
 #include "Messages/MessageBus.h"
 
 #include "SimComponents.h"
-#include "CombatSystem.h"    // Combatant, Team, Wanted, FireOutcome, ResolvePlayerFire
-#include "MissileSystem.h"   // SpawnMissile
+#include "CombatSystem.h"      // Combatant, Team, Wanted, FireOutcome, ResolvePlayerFire
+#include "MissileSystem.h"     // SpawnMissile
+#include "EquipmentSystem.h"   // ActivateEcm, DetonateEnergyBomb, UseEscapePod, SpendLaserShot
 
 namespace Neuron::GameLogic
 {
@@ -41,12 +42,19 @@ namespace Neuron::GameLogic
     inline constexpr uint16_t FireWeapon   = 0x8101;
     inline constexpr uint16_t Crime        = 0x8102;
     inline constexpr uint16_t EntityKilled = 0x8103;
+    inline constexpr uint16_t EcmFired     = 0x8104;
+    inline constexpr uint16_t PodEjected   = 0x8105;
   }
 
+  // What a FireWeapon command activates: the two projectile weapons, plus the
+  // G8 equipment (each a discrete, server-validated activation).
   enum class Weapon : uint8_t
   {
     Laser = 0,
     Missile = 1,
+    Ecm = 2,
+    EnergyBomb = 3,
+    EscapePod = 4,
   };
 
   // A request to fire a weapon. In Phase 1 the server publishes this from a
@@ -104,6 +112,66 @@ namespace Neuron::GameLogic
     auto Fields() const { return std::tie(victim, killer); }
   };
 
+  // A fact: a ship's ECM burst fired (G8). The server broadcasts the wire
+  // EcmPulse cue; the downed missiles arrive as EntityKilled facts alongside.
+  struct EcmFired
+  {
+    static constexpr Msg::MessageId    Id    = static_cast<Msg::MessageId>(CombatMsgId::EcmFired);
+    static constexpr Msg::MessageScope Scope = Msg::MessageScope::LocalOnly;
+    static constexpr Msg::MessageKind  Kind  = Msg::MessageKind::Event;
+    static constexpr Msg::MessageLane  Lane  = Msg::MessageLane::Unreliable;
+    static constexpr Msg::Direction    Dir   = Msg::Direction::None;
+
+    uint32_t ship = 0;
+
+    auto Fields()       { return std::tie(ship); }
+    auto Fields() const { return std::tie(ship); }
+  };
+
+  // A fact: a player abandoned ship in the escape pod (G8) - they are already
+  // respawned docked; the server tells that one session (EscapePodUsed) and
+  // refreshes the roster (the record was cleared).
+  struct PodEjected
+  {
+    static constexpr Msg::MessageId    Id    = static_cast<Msg::MessageId>(CombatMsgId::PodEjected);
+    static constexpr Msg::MessageScope Scope = Msg::MessageScope::LocalOnly;
+    static constexpr Msg::MessageKind  Kind  = Msg::MessageKind::Event;
+    static constexpr Msg::MessageLane  Lane  = Msg::MessageLane::Unreliable;
+    static constexpr Msg::Direction    Dir   = Msg::Direction::None;
+
+    uint32_t ship = 0;
+
+    auto Fields()       { return std::tie(ship); }
+    auto Fields() const { return std::tie(ship); }
+  };
+
+  // Flag a shot/blast against a PROTECTED victim as a crime: the Station, the
+  // Police, a Trader, or a CLEAN player (Elite-style PvP consequence - attacking
+  // an innocent makes you wanted; a player who is already wanted is fair game).
+  // The offender's record advances and the fact is published (a subscriber
+  // dispatches police on the first offence). Shared by the laser/missile path
+  // and the energy bomb.
+  inline void FlagIfCrime(ECS::Registry& _world, Msg::MessageBus& _bus,
+                          ECS::EntityId _offender, ECS::EntityId _victim, int _victimTeam)
+  {
+    bool protectedVictim = (_victimTeam == Team::Station || _victimTeam == Team::Police
+                            || _victimTeam == Team::Trader);   // civilians are protected too
+    if (_victimTeam == Team::Player)
+    {
+      const Wanted* vw = _world.TryGet<Wanted>(_victim);
+      protectedVictim = (vw != nullptr && vw->level == 0);   // only a clean player is protected
+    }
+    if (!protectedVictim)
+      return;
+    bool first = false;
+    if (Wanted* w = _world.TryGet<Wanted>(_offender))
+    {
+      first = (w->level == 0);
+      ++w->level;
+    }
+    _bus.Publish(Crime{ _offender, _victimTeam, first });
+  }
+
   // Resolve a FireWeapon command against the world, publishing the resulting facts
   // (Crime / EntityKilled) onto the bus. PURE w.r.t. external systems - it only
   // reads/writes the world and publishes - so it is unit-tested headlessly; police
@@ -116,42 +184,72 @@ namespace Neuron::GameLogic
     if (!_world.IsValid(_fw.shooter))
       return;
 
-    // Crime + wanted-record bookkeeping shared by laser and missile: firing on the
-    // Station or Police is an offence; the offender's record advances and the fact
-    // is published (a subscriber dispatches police on the first offence).
-    auto flagIfCrime = [&](int _victimTeam)
+    switch (_fw.weapon)
     {
-      if (_victimTeam != Team::Station && _victimTeam != Team::Police)
-        return;
-      bool first = false;
-      if (Wanted* w = _world.TryGet<Wanted>(_fw.shooter))
+      case Weapon::Laser:
       {
-        first = (w->level == 0);
-        ++w->level;
-      }
-      _bus.Publish(Crime{ _fw.shooter, _victimTeam, first });
-    };
-
-    if (_fw.weapon == Weapon::Laser)
-    {
-      const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone);
-      if (!shot.hit)
+        // G8 laser heat: an overheated trigger is locked; a fired shot heats the
+        // laser and sips the energy bank (legacy fire_laser) whether it hits or not.
+        if (!SpendLaserShot(_world, _fw.shooter))
+          return;
+        const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone);
+        if (!shot.hit)
+          return;
+        FlagIfCrime(_world, _bus, _fw.shooter, shot.target, shot.targetTeam);
+        if (shot.destroyed)
+          _bus.Publish(EntityKilled{ shot.target, _fw.shooter.index });
         return;
-      flagIfCrime(shot.targetTeam);
-      if (shot.destroyed)
-        _bus.Publish(EntityKilled{ shot.target, _fw.shooter.index });
-      return;
-    }
+      }
 
-    // Missile: spawn the homing projectile (its detonation kill is resolved later
-    // by StepMissiles). Launching at the Station/Police is a crime at launch, just
-    // as the laser hit is.
-    const ECS::EntityId missile = SpawnMissile(_world, _fw.shooter, _fw.target);
-    if (!_world.IsValid(missile))
-      return;
-    const Missile* mc = _world.TryGet<Missile>(missile);
-    if (mc != nullptr && _world.IsValid(mc->target))
-      if (const Combatant* tc = _world.TryGet<Combatant>(mc->target))
-        flagIfCrime(tc->team);
+      case Weapon::Missile:
+      {
+        // Spawn the homing projectile (its detonation kill is resolved later by
+        // StepMissiles). Launching at the Station/Police is a crime at launch,
+        // just as the laser hit is.
+        const ECS::EntityId missile = SpawnMissile(_world, _fw.shooter, _fw.target);
+        if (!_world.IsValid(missile))
+          return;
+        const Missile* mc = _world.TryGet<Missile>(missile);
+        if (mc != nullptr && _world.IsValid(mc->target))
+          if (const Combatant* tc = _world.TryGet<Combatant>(mc->target))
+            FlagIfCrime(_world, _bus, _fw.shooter, mc->target, tc->team);
+        return;
+      }
+
+      case Weapon::Ecm:
+      {
+        // The burst downs every missile in range; the kills ride the normal
+        // death pipeline (their pops show on every client), the cue rides EcmFired.
+        const EcmOutcome ecm = ActivateEcm(_world, _fw.shooter);
+        if (!ecm.fired)
+          return;
+        _bus.Publish(EcmFired{ _fw.shooter.index });
+        for (const Kill& k : ecm.kills)
+          _bus.Publish(EntityKilled{ k.victim, k.killer });
+        return;
+      }
+
+      case Weapon::EnergyBomb:
+      {
+        // Flag the crimes (police/trader victims) BEFORE publishing the kills,
+        // while the victims still exist to be inspected.
+        const BombOutcome bomb = DetonateEnergyBomb(_world, _fw.shooter);
+        if (!bomb.detonated)
+          return;
+        for (const Kill& k : bomb.kills)
+          if (const Combatant* vc = _world.TryGet<Combatant>(k.victim))
+            FlagIfCrime(_world, _bus, _fw.shooter, k.victim, vc->team);
+        for (const Kill& k : bomb.kills)
+          _bus.Publish(EntityKilled{ k.victim, k.killer });
+        return;
+      }
+
+      case Weapon::EscapePod:
+      {
+        if (UseEscapePod(_world, _fw.shooter))
+          _bus.Publish(PodEjected{ _fw.shooter.index });
+        return;
+      }
+    }
   }
 }

@@ -11,17 +11,17 @@
 
 #include "pch.h"
 
+#include <atomic>
 #include <windows.h>
 #include <mmsystem.h>
 
 #include "platform_win.h"
 #include "Renderer.h"
 #include "audio_win.h"
+#include "sound.h"
 
 #include "ClientEngine.h"
 #include "EventManager.h"
-
-#include "gfx.h"
 
 /* Defined by the game logic (elite.cpp). The platform forces this when the window is
  * closed so the various for(;;) sequence loops unwind cleanly. */
@@ -35,6 +35,7 @@ namespace {
 bool     g_quit          = false;
 Renderer g_renderer;
 bool     g_renderer_ready = false;
+static std::atomic_bool g_forced_shutdown = false;
 
 /* EventManager processor for platform messages the legacy code relies on. Returns -1
  * for messages it doesn't handle so the EventManager chain / DefWindowProc continue. */
@@ -83,9 +84,21 @@ void platform_pump_messages(void)
 	if (g_quit)
 	{
 		/* The original game loop and its nested intro/escape/game-over sequences only
-		 * test the `finish` flag in a few places, so closing the window mid-sequence
-		 * must terminate the process directly. */
+		 * test the `finish` flag in a few places. Release platform and D3D resources before
+		 * the forced process exit so the debug runtimes do not report every live device object. */
 		finish = 1;
+		if (!g_forced_shutdown.exchange(true))
+		{
+			/* Match the normal game_main/WinMain teardown order: stop legacy sound first,
+			 * clear the adopted renderer flag, then release the ClientEngine-owned D3D objects. */
+			snd_sound_shutdown();
+			if (g_renderer_ready)
+			{
+				g_renderer.shutdown();
+				g_renderer_ready = false;
+			}
+			ClientEngine::Shutdown();
+		}
 		ExitProcess(0);
 	}
 }

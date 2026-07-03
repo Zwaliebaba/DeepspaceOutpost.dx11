@@ -92,6 +92,91 @@ TEST(Session, RecentSessionsSurviveReaping)
   EXPECT_TRUE(sessions.Count() == 1);
 }
 
+TEST(Session, NewSessionGetsADefaultNameAndPlayerRecord)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 3000 };
+  ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.0f), 1);
+
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+  EXPECT_FALSE(s.name.empty());                                   // a placeholder was assigned
+  ASSERT_TRUE(world.Has<GameLogic::PlayerRecord>(e));
+  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, s.name);  // mirrored onto the record
+}
+
+TEST(Session, ApplyNameSanitizesAndMirrorsToTheRecord)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 3001 };
+  ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.0f), 1);
+
+  // Control chars are dropped; the printable remainder is kept.
+  EXPECT_TRUE(sessions.ApplyName(world, a, std::string("Ja\x01me\x7Fson")));
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+  EXPECT_EQ(s.name, "Jameson");
+  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Jameson");
+}
+
+TEST(Session, ApplyNameKeepsDefaultForABlankName)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 3002 };
+  sessions.OnInput(world, a, Input(1, 0.0f), 1);
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+  const std::string def = s.name;
+
+  EXPECT_FALSE(sessions.ApplyName(world, a, "\x01\x02   "));   // all control/space -> nothing usable
+  EXPECT_EQ(s.name, def);                                      // default retained
+}
+
+TEST(Session, ApplyNameDeDuplicatesAcrossSessions)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 3003 };
+  const Net::Endpoint b{ 0x7F000001, 3004 };
+  sessions.OnInput(world, a, Input(1, 0.0f), 1);
+  sessions.OnInput(world, b, Input(1, 0.0f), 1);
+
+  EXPECT_TRUE(sessions.ApplyName(world, a, "Raxxla"));
+  EXPECT_TRUE(sessions.ApplyName(world, b, "Raxxla"));   // same name -> disambiguated
+
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).name, "Raxxla");
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(b)).name, "Raxxla-2");
+}
+
+TEST(Session, RosterAndPlayerInfoReflectNameAndWanted)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 3005 };
+  ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.0f), 1);
+  sessions.ApplyName(world, a, "Elite");
+  world.Get<GameLogic::Wanted>(e).level = 4;
+
+  std::vector<Neuron::Msg::PlayerInfo> roster = sessions.Roster(world);
+  ASSERT_EQ(roster.size(), 1u);
+  EXPECT_EQ(roster[0].entityId, e.index);
+  EXPECT_EQ(roster[0].name, "Elite");
+  EXPECT_EQ(roster[0].wantedLevel, 4);
+
+  Neuron::Msg::PlayerInfo one;
+  ASSERT_TRUE(sessions.PlayerInfoFor(world, e.index, one));
+  EXPECT_EQ(one.name, "Elite");
+  EXPECT_EQ(one.wantedLevel, 4);
+
+  Neuron::Msg::PlayerInfo missing;
+  EXPECT_FALSE(sessions.PlayerInfoFor(world, 99999u, missing));   // no such session
+}
+
 TEST(Session, ClientAckClearsTheReliableQueue)
 {
   ECS::Registry world;

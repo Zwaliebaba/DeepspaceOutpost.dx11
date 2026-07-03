@@ -6,16 +6,23 @@
 # game-system headers and the engine headers they build on are reachable.
 
 add_executable(GameLogic.Tests
+    AiSystemTests.cpp
     AreaOfInterestTests.cpp
     CombatSystemTests.cpp
     CombatMessagesTests.cpp
     CombatTests.cpp
+    CollisionSystemTests.cpp
+    KillRewardsTests.cpp
+    LootSystemTests.cpp
+    ShieldsTests.cpp
     EconomyTests.cpp
+    EquipmentSystemTests.cpp
     FlightInputTests.cpp
     FlightTests.cpp
     MissileSystemTests.cpp
     GalaxyGenTests.cpp
     GalaxyTests.cpp
+    HyperspaceSystemTests.cpp
     MotionTests.cpp
     SessionTests.cpp
     SpawnDirectorTests.cpp

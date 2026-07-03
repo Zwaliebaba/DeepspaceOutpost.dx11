@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <vector>
 
 #include "NetLib.h"
@@ -27,6 +28,7 @@
 #include "GalaxyManifest.h"
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
+#include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
 
 namespace Neuron::Client
 {
@@ -58,6 +60,15 @@ namespace Neuron::Client
     {
       if (m_open)
         m_events.Send(_request);   // Gameplay lane
+    }
+
+    // Queue the opening handshake: protocol version + the player's commander name.
+    // Rides the reliable Control lane, so it is redelivered until the server (which
+    // connects the session on first input) acknowledges it. No-op until open.
+    void SendHello(uint32_t _protocolVersion, const std::string& _name)
+    {
+      if (m_open)
+        m_events.Send(Msg::ClientHello{ _protocolVersion, _name });   // Control lane
     }
 
     // Interpolated state of `_id` at `_alpha` in [0,1], or false if unknown.

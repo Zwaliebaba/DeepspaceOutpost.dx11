@@ -194,6 +194,57 @@ TEST(Station, DockAttachesToTheNearestStation)
   EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == nearStn.index);   // the closer one
 }
 
+TEST(Station, StationRefusesToDockAFugitive)
+{
+  ECS::Registry w;
+  SpawnStation(w, /*x*/ 100, 5, 5);
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+  w.Add<GameLogic::Wanted>(p, GameLogic::Wanted{ GameLogic::FUGITIVE_THRESHOLD });   // wanted enough to be turned away
+
+  Net::StationRequest dock;
+  dock.kind = Net::StationRequestKind::Dock;
+  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, dock);
+
+  EXPECT_TRUE(r.status == Net::StationStatus::DockingRefused);
+  EXPECT_FALSE(w.Get<GameLogic::DockState>(p).docked);
+
+  // Once the record cools below the fugitive threshold, the same station lets them in.
+  w.Get<GameLogic::Wanted>(p).level = GameLogic::FUGITIVE_THRESHOLD - 1;
+  Net::StationResponse r2 = GameLogic::ProcessStationRequest(w, p, 5000, dock);
+  EXPECT_TRUE(r2.status == Net::StationStatus::Ok);
+  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).docked);
+}
+
+TEST(Station, RespawnAtNearestStationDocksAndDropsCargo)
+{
+  ECS::Registry w;
+  ECS::EntityId nearStn = SpawnStation(w, /*x*/ 1000, 5, 5);
+  SpawnStation(w, /*x*/ 500000, 5, 5);               // a farther station
+  ECS::EntityId p = SpawnTrader(w, /*x*/ 900, 1000);  // closest to nearStn
+  w.Get<GameLogic::CargoHold>(p).units[0] = 7;
+  w.Get<GameLogic::CargoHold>(p).capacity = 35;       // e.g. large cargo bay
+
+  EXPECT_TRUE(GameLogic::RespawnAtNearestStation(w, p));
+
+  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).docked);
+  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == nearStn.index);
+
+  const auto& pp = w.Get<GameLogic::WorldTransform>(p).position;
+  const auto& sp = w.Get<GameLogic::WorldTransform>(nearStn).position;
+  EXPECT_TRUE(pp.x == sp.x && pp.y == sp.y && pp.z == sp.z);   // relocated onto the station
+
+  EXPECT_TRUE(w.Get<GameLogic::CargoHold>(p).units[0] == 0);   // cargo dropped
+  EXPECT_TRUE(w.Get<GameLogic::CargoHold>(p).capacity == 35);  // hold size kept
+}
+
+TEST(Station, RespawnFailsGracefullyWhenNoStationExists)
+{
+  ECS::Registry w;
+  ECS::EntityId p = SpawnTrader(w, 0, 1000);
+  EXPECT_FALSE(GameLogic::RespawnAtNearestStation(w, p));
+  EXPECT_FALSE(w.Get<GameLogic::DockState>(p).docked);
+}
+
 TEST(Station, ProcessBuyNeedsDockThenSucceeds)
 {
   ECS::Registry w;

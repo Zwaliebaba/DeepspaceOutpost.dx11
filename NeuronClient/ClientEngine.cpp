@@ -15,7 +15,6 @@
 #include "platform_win.h" // platform_pump_messages
 
 #include "gfx.h"    // gfx_set_scene_fullwindow
-#include "gfx2d.h"  // gfx2d_flush
 
 namespace
 {

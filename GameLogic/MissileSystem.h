@@ -16,6 +16,7 @@
 // is their sole integrator.
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "ECS.h"
@@ -23,7 +24,8 @@
 #include "Vector3d.h"
 
 #include "SimComponents.h"
-#include "CombatSystem.h"   // Combatant, Kill, Team
+#include "CombatSystem.h"      // Combatant, Kill, Team, EcmFitted
+#include "StationServices.h"   // Equipment (a player target's ECM fitting)
 
 namespace Neuron::GameLogic
 {
@@ -32,6 +34,11 @@ namespace Neuron::GameLogic
   inline constexpr int MISSILE_HIT_DAMAGE = 250;           // detonation damage (one-shots typical NPCs)
   inline constexpr int64_t MISSILE_DETONATE_RANGE = 400;   // contact radius around the target
   inline constexpr int64_t MISSILE_SPAWN_OFFSET = 250;     // launch this far ahead of the shooter
+
+  // The legacy automatic ECM defence (missile_tactics): each tick a missile is
+  // homing on an ECM-fitted target, a rand255() below this jams it (16/256 =
+  // 6.25% per tick - a homing run rarely survives a fitted target).
+  inline constexpr uint32_t MISSILE_ECM_JAM_CHANCE = 16;
 
   // Launch a homing missile from `_shooter` at the target the player locked (its
   // entity index, as identified from the replicated view; resolved here to a live
@@ -91,7 +98,15 @@ namespace Neuron::GameLogic
   // destroy (exactly like StepCombat): on detonation, both the target (if it died)
   // AND the missile itself, so the missile's explosion shows on the client. A
   // missile that simply times out is destroyed here and vanishes silently.
-  [[nodiscard]] inline std::vector<Kill> StepMissiles(ECS::Registry& _world)
+  //
+  // G8: while homing on an ECM-FITTED target (a player's purchased unit or an
+  // NPC's EcmFitted marker), each tick the missile has the legacy 16/256 chance
+  // of being jammed: it dies as a kill credited to the defender (so its pop shows
+  // on every client) and the defender's index is appended to `_ecmPulses` so the
+  // server can broadcast the classic ECM cue. `_rng` is a caller-owned
+  // deterministic stream.
+  [[nodiscard]] inline std::vector<Kill> StepMissiles(ECS::Registry& _world, uint32_t& _rng,
+                                                      std::vector<uint32_t>& _ecmPulses)
   {
     std::vector<Kill> kills;
 
@@ -101,6 +116,13 @@ namespace Neuron::GameLogic
     {
       missiles.push_back(_id);
     });
+
+    auto targetHasEcm = [&_world](ECS::EntityId _t) -> bool
+    {
+      if (const Equipment* eq = _world.TryGet<Equipment>(_t))
+        return eq->ecm;
+      return _world.Has<EcmFitted>(_t);
+    };
 
     for (const ECS::EntityId mid : missiles)
     {
@@ -119,6 +141,18 @@ namespace Neuron::GameLogic
       // Home toward the target while it is alive.
       if (_world.IsValid(mc->target) && _world.Has<WorldTransform>(mc->target))
       {
+        // The target's automatic ECM defence rolls before the missile closes.
+        if (targetHasEcm(mc->target))
+        {
+          _rng = _rng * 1664525u + 1013904223u;
+          if (((_rng >> 8) & 0xFFu) < MISSILE_ECM_JAM_CHANCE)
+          {
+            kills.push_back(Kill{ mid, mc->target.index });   // jammed: the missile pops
+            _ecmPulses.push_back(mc->target.index);
+            continue;
+          }
+        }
+
         const Math::Vector3i64 tp = _world.Get<WorldTransform>(mc->target).position;
         const double dx = static_cast<double>(tp.x - mt->position.x);
         const double dy = static_cast<double>(tp.y - mt->position.y);
@@ -132,8 +166,9 @@ namespace Neuron::GameLogic
           {
             if (tc->invulnTicks <= 0)   // respect spawn/respawn grace
             {
-              tc->energy -= mc->damage;
-              if (tc->energy <= 0)
+              // A player target absorbs the blast through the shield facing the
+              // incoming missile; an NPC takes it flat on energy.
+              if (ApplyDamage(_world, mc->target, mc->damage, mt->position))
                 kills.push_back(Kill{ mc->target, mc->owner });
             }
           }

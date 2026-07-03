@@ -7,6 +7,7 @@
 
 add_executable(NeuronCore.Tests
     EcsTests.cpp
+    EquipmentEventsTests.cpp
     MathTests.cpp
     SpatialTests.cpp
     ClientInputTests.cpp
@@ -24,6 +25,7 @@ add_executable(NeuronCore.Tests
     CatalogToolsTests.cpp
     PacketInspectTests.cpp
     MessageFuzzTests.cpp
+    PlayerSessionTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)

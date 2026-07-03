@@ -10,6 +10,8 @@ set(NEURONSERVER_SOURCES
 
 set(NEURONSERVER_HEADERS
     NeuronServer.h
+    DatagramPump.h
+    OnChangeCache.h
     pch.h
 )
 

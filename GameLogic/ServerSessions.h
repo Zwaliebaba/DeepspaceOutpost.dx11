@@ -13,6 +13,7 @@
 // headlessly; the server loop wires the socket I/O around it.
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -22,11 +23,13 @@
 #include "ReliableChannel.h"
 #include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
 #include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
-#include "Messages/Defs/CoreEvents.h" // Msg::AssignPlayer
+#include "Messages/Defs/CoreEvents.h"   // Msg::AssignPlayer
+#include "Messages/Defs/PlayerSession.h" // Msg::PlayerInfo
 
 #include "SimComponents.h"
 #include "StationServices.h"
 #include "CombatSystem.h"
+#include "EquipmentSystem.h"   // ShipGear (laser heat + ECM recharge, G8)
 
 namespace Neuron::GameLogic
 {
@@ -36,11 +39,16 @@ namespace Neuron::GameLogic
     return (static_cast<uint64_t>(_ep.address) << 16) | static_cast<uint64_t>(_ep.port);
   }
 
+  // Longest commander name the server stores/replicates (client input is capped and
+  // sanitized to this before de-duplication).
+  inline constexpr std::size_t MAX_NAME_LEN = 20;
+
   struct Session
   {
     Net::Endpoint endpoint;
     ECS::EntityId entity;
     Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
+    std::string name;                  // display name (default assigned; ClientHello overrides)
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
   };
@@ -62,6 +70,11 @@ namespace Neuron::GameLogic
         Session s;
         s.endpoint = _ep;
         s.entity = SpawnPlayer(_world);
+        // A unique placeholder name until (or unless) the client's ClientHello
+        // supplies a real one; also mirrored onto the authoritative PlayerRecord.
+        s.name = "Commander-" + std::to_string(s.entity.index);
+        if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
+          pr->name = s.name;
         s.events.Send(Msg::AssignPlayer{ s.entity.index });   // Control lane
         // The galaxy chart, once on connect, on the Bulk lane so it can't head-of-line
         // -block gameplay/control events.
@@ -123,6 +136,53 @@ namespace Neuron::GameLogic
         entry.second.events.Send(_m);
     }
 
+    // Apply a client's ClientHello name to its session + authoritative PlayerRecord:
+    // sanitize, cap, de-duplicate against the other sessions. Returns true when the
+    // stored name actually changed (so the caller broadcasts an updated PlayerInfo).
+    // A blank/all-control name, or an unknown endpoint, keeps the assigned default.
+    bool ApplyName(ECS::Registry& _world, const Net::Endpoint& _ep, const std::string& _raw)
+    {
+      const uint64_t key = EndpointKey(_ep);
+      auto it = m_sessions.find(key);
+      if (it == m_sessions.end())
+        return false;
+
+      std::string clean = SanitizeName(_raw);
+      if (clean.empty())
+        return false;
+      clean = UniqueName(clean, key);
+      if (clean == it->second.name)
+        return false;
+
+      it->second.name = clean;
+      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(it->second.entity))
+        pr->name = clean;
+      return true;
+    }
+
+    // The full roster (one PlayerInfo per live session) to replay to a joiner and
+    // broadcast on membership changes.
+    [[nodiscard]] std::vector<Msg::PlayerInfo> Roster(ECS::Registry& _world) const
+    {
+      std::vector<Msg::PlayerInfo> out;
+      out.reserve(m_sessions.size());
+      for (const auto& e : m_sessions)
+        if (Msg::PlayerInfo pi; BuildPlayerInfo(_world, e.second, pi))
+          out.push_back(std::move(pi));
+      return out;
+    }
+
+    // Build the current PlayerInfo for the session controlling `_entityIndex` (for a
+    // targeted broadcast after that player's name or wanted level changed). Returns
+    // false if no live session owns that entity.
+    bool PlayerInfoFor(ECS::Registry& _world, uint32_t _entityIndex, Msg::PlayerInfo& _out) const
+    {
+      for (const auto& e : m_sessions)
+        if (e.second.entity.index == _entityIndex)
+          return BuildPlayerInfo(_world, e.second, _out);
+      return false;
+    }
+
     // Set the galaxy manifest sent to every client when it connects (static for
     // the world's lifetime; built once at startup from the generated galaxy).
     void SetManifest(std::vector<Net::GalaxySystemInfo> _manifest) { m_manifest = std::move(_manifest); }
@@ -149,16 +209,72 @@ namespace Neuron::GameLogic
       _world.Add<CargoHold>(e, CargoHold{});
       _world.Add<DockState>(e, DockState{});
       _world.Add<Equipment>(e, Equipment{});
+      _world.Add<Fuel>(e, Fuel{});   // full hyperspace tank (G7)
       // Combat/faction state: a player is on the Player team, fires only on
       // command (autoEngage = false), and starts with a clean record.
       _world.Add<PlayerTag>(e, PlayerTag{});
-      _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ 255, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
+      _world.Add<Combatant>(e, Combatant{ Team::Player, /*energy*/ MAX_ENERGY, /*laser*/ 10, /*range*/ 6000, /*autoEngage*/ false });
       // Spawn protection: brief immunity so connecting into nearby hostiles isn't
       // an instant death.
       _world.Get<Combatant>(e).invulnTicks = RESPAWN_GRACE_TICKS;
+      _world.Add<Shields>(e, Shields{});   // full directional shields (player-only feature)
+      _world.Add<ShipGear>(e, ShipGear{}); // laser temperature + ECM recharge (G8)
       _world.Add<Wanted>(e, Wanted{});
+      _world.Add<PlayerRecord>(e, PlayerRecord{});   // name filled in by the caller
       _world.Add<NetType>(e, NetType{ ShipType::Viper });
       return e;
+    }
+
+    // Fill `_out` with a session's roster entry (entity + name + legal status).
+    // Returns false when the session's entity is no longer valid.
+    [[nodiscard]] static bool BuildPlayerInfo(ECS::Registry& _world, const Session& _s, Msg::PlayerInfo& _out)
+    {
+      if (!_world.IsValid(_s.entity))
+        return false;
+      _out.entityId = _s.entity.index;
+      _out.name = _s.name;
+      const Wanted* w = _world.TryGet<Wanted>(_s.entity);
+      _out.wantedLevel = (w != nullptr) ? w->level : 0;
+      return true;
+    }
+
+    // Keep only printable ASCII, drop control bytes, cap length and trim trailing
+    // spaces - so a hostile or empty name can't inject control chars or run long.
+    [[nodiscard]] static std::string SanitizeName(const std::string& _raw)
+    {
+      std::string out;
+      for (char c : _raw)
+      {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u >= 0x20 && u < 0x7F)
+          out.push_back(c);
+        if (out.size() >= MAX_NAME_LEN)
+          break;
+      }
+      while (!out.empty() && out.back() == ' ')
+        out.pop_back();
+      return out;
+    }
+
+    // Make `_base` unique among the OTHER sessions by appending -2, -3, ... .
+    [[nodiscard]] std::string UniqueName(const std::string& _base, uint64_t _selfKey) const
+    {
+      auto taken = [&](const std::string& _n)
+      {
+        for (const auto& e : m_sessions)
+          if (e.first != _selfKey && e.second.name == _n)
+            return true;
+        return false;
+      };
+      if (!taken(_base))
+        return _base;
+      for (int i = 2; i < 1000; ++i)
+      {
+        std::string cand = _base + "-" + std::to_string(i);
+        if (!taken(cand))
+          return cand;
+      }
+      return _base;   // astronomically unlikely; give up rather than loop forever
     }
 
     std::unordered_map<uint64_t, Session> m_sessions;

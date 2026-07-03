@@ -1,13 +1,22 @@
-# Server - standalone dedicated server executable (placeholder for now).
+# Server - the dedicated server executable.
 #
-# A console application that drives the engine via NeuronServer + NeuronCore.
+# A console application: Main.cpp is process startup + the fixed-tick loop;
+# GameServer sequences the tick phases and the combat subscribers; WorldBuilder
+# bootstraps the authoritative world; ServerConfig.h holds the tuning knobs.
+# Generic engine plumbing (datagram pump, on-change cache) lives in NeuronServer.
 
 set(SERVER_SOURCES
     Main.cpp
+    GameServer.cpp
+    WorldBuilder.cpp
     pch.cpp
 )
 
 set(SERVER_HEADERS
+    GameServer.h
+    WorldBuilder.h
+    ServerConfig.h
+    SnapshotHelpers.h
     pch.h
 )
 

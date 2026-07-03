@@ -26,8 +26,14 @@
 #include "ServerSessions.h"
 #include "CombatSystem.h"
 #include "MissileSystem.h"
+#include "AiSystem.h"
+#include "CollisionSystem.h"
 #include "SpawnDirector.h"
 #include "StationServices.h"
+#include "KillRewards.h"
+#include "LootSystem.h"
+#include "HyperspaceSystem.h"
+#include "EquipmentSystem.h"
 #include "CombatMessages.h"
 
 namespace Neuron::GameLogic

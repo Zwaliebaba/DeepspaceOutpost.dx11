@@ -16,6 +16,7 @@
 
 #include "SimComponents.h"     // WorldTransform
 #include "Economy.h"           // COMMODITY_COUNT, MarketEntry
+#include "CombatSystem.h"      // Wanted, FUGITIVE_THRESHOLD (fugitives are refused docking)
 
 namespace Neuron::GameLogic
 {
@@ -46,6 +47,22 @@ namespace Neuron::GameLogic
     bool fuelScoop = false;
     bool energyBomb = false;
     bool escapePod = false;
+  };
+
+  // Hyperspace fuel (G7): legacy 0..70 tenths = 0.0..7.0 light years. Full at
+  // spawn; spent by a jump in proportion to distance (HyperspaceSystem), refilled
+  // at a station (Refuel) or by sun-skimming later. `max` grows with no upgrade
+  // today but is carried so a future long-range drive can raise the ceiling.
+  inline constexpr int MAX_FUEL_TENTHS = 70;
+
+  // Cost to buy one tenth of a light year of fuel (legacy units: tenths of a
+  // credit). A full 7.0 LY tank costs 14.0 Cr.
+  inline constexpr int FUEL_PRICE_PER_TENTH = 2;
+
+  struct Fuel
+  {
+    int tenths = MAX_FUEL_TENTHS;
+    int max = MAX_FUEL_TENTHS;
   };
 
   // A station's authoritative market, stored on the station entity so every
@@ -246,6 +263,29 @@ namespace Neuron::GameLogic
     return r;
   }
 
+  // Buy hyperspace fuel (legacy buy_fuel). Fills the tank as far as the wallet
+  // allows, up to full, and charges for what was actually pumped. Docked-only.
+  // Returns Ok on any purchase (or an already-full tank); NotEnoughCredits only
+  // when the player can't afford even a single tenth of a partial tank.
+  [[nodiscard]] inline Net::StationStatus RefuelPlayer(Wallet& _wallet, Fuel& _fuel, bool _docked)
+  {
+    if (!_docked)
+      return Net::StationStatus::NotDocked;
+
+    const int need = _fuel.max - _fuel.tenths;
+    if (need <= 0)
+      return Net::StationStatus::Ok;   // already full - a no-op, not an error
+
+    const int affordable = _wallet.credits / FUEL_PRICE_PER_TENTH;
+    const int buy = (need < affordable) ? need : affordable;
+    if (buy <= 0)
+      return Net::StationStatus::NotEnoughCredits;
+
+    _wallet.credits -= buy * FUEL_PRICE_PER_TENTH;
+    _fuel.tenths += buy;
+    return Net::StationStatus::Ok;
+  }
+
   // Can the player dock? Proximity check to the station (Chebyshev, overflow-safe
   // on absolute coordinates).
   [[nodiscard]] inline bool CanDock(const Math::Vector3i64& _player, const Math::Vector3i64& _station, int64_t _range)
@@ -309,6 +349,37 @@ namespace Neuron::GameLogic
   // a fresh launch never instantly re-docks.
   constexpr int64_t LAUNCH_OFFSET = 2000;
 
+  // Respawn a dead player DOCKED at the nearest station anywhere in the world
+  // (G3 death rule): relocate them onto the station, mark them docked, and empty
+  // their hold. The cargo is lost for now - it will scatter as scoopable canisters
+  // once loot entities exist (G4). Returns false (leaving the player in place) only
+  // if the player lacks a transform/dock or no station exists.
+  inline bool RespawnAtNearestStation(ECS::Registry& _world, ECS::EntityId _player)
+  {
+    WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+    DockState* dock = _world.TryGet<DockState>(_player);
+    if (pt == nullptr || dock == nullptr)
+      return false;
+
+    // Unbounded nearest: a range wider than the galaxy so the Chebyshev gate never
+    // culls, giving the globally nearest station.
+    const ECS::EntityId station = NearestStation(_world, pt->position, INT64_MAX / 4);
+    const WorldTransform* st = (station.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(station) : nullptr;
+    if (st == nullptr)
+      return false;
+
+    pt->position = st->position;
+    dock->docked = true;
+    dock->stationId = station.index;
+
+    // Drop cargo: empty the hold but keep its capacity (the large bay survives death).
+    if (CargoHold* hold = _world.TryGet<CargoHold>(_player))
+      for (int& units : hold->units)
+        units = 0;
+
+    return true;
+  }
+
   // Apply a station request to `_player`'s authoritative components and the market
   // of the station they are docked at, returning the response to send back. Dock
   // attaches to the nearest in-range station; trades hit THAT station's market.
@@ -336,6 +407,14 @@ namespace Neuron::GameLogic
     {
       case Net::StationRequestKind::Dock:
       {
+        // Fugitives are turned away: cool your wanted level down (it decays over
+        // time, and dies with you) before a station will let you dock again.
+        const Wanted* wnt = _world.TryGet<Wanted>(_player);
+        if (wnt != nullptr && wnt->level >= FUGITIVE_THRESHOLD)
+        {
+          resp.status = Net::StationStatus::DockingRefused;
+          break;
+        }
         const WorldTransform* t = _world.TryGet<WorldTransform>(_player);
         const ECS::EntityId station = (t != nullptr)
           ? NearestStation(_world, t->position, _dockRange) : ECS::EntityId{};
@@ -418,6 +497,19 @@ namespace Neuron::GameLogic
         break;
       }
 
+      case Net::StationRequestKind::Refuel:
+      {
+        Fuel* fuel = _world.TryGet<Fuel>(_player);
+        if (fuel == nullptr)
+        {
+          resp.status = Net::StationStatus::BadCommodity;   // not fuel-capable
+          break;
+        }
+        resp.status = RefuelPlayer(*wallet, *fuel, dock->docked);
+        resp.credits = wallet->credits;   // the fuel level itself rides PlayerStatus
+        break;
+      }
+
       case Net::StationRequestKind::Teleport:
       {
         // Jump from this station to the destination system's station (the
@@ -444,6 +536,14 @@ namespace Neuron::GameLogic
         }
         break;
       }
+
+      default:
+        // In-flight travel commands (Teleport as a real fuel-gated jump, and
+        // JumpDrive) are intercepted by the server loop and routed through
+        // HyperspaceSystem before this station-service dispatch, so they never
+        // arrive here. Any other/unknown kind is not a station service.
+        resp.status = Net::StationStatus::BadCommodity;
+        break;
     }
 
     return resp;

@@ -44,8 +44,14 @@ namespace Neuron::Msg
     bool     fireMissile = false;// launch a missile this frame
     uint32_t missileTarget = NO_MISSILE_TARGET;   // entity index the missile is locked to
 
-    auto Fields()       { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget); }
-    auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget); }
+    // Equipment activation intents (G8) - server-validated against ownership,
+    // energy, cooldown and dock state; appended after the legacy layout.
+    bool ecm = false;            // fire the ECM burst this frame
+    bool energyBomb = false;     // detonate the energy bomb this frame
+    bool escapePod = false;      // eject in the escape pod this frame
+
+    auto Fields()       { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod); }
+    auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod); }
   };
 }
 

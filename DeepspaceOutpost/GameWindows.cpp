@@ -128,7 +128,7 @@ namespace
         int y = 30;
 
         auto addCycle = [&](const std::string& label, int* value, std::vector<std::string> options) {
-          auto* button = new CycleButton(label, value, std::move(options));
+          auto* button = NEW CycleButton(label, value, std::move(options));
           button->SetProperties(label, x, y, w, btnH, label);
           button->Refresh();
           RegisterButton(button);
@@ -145,13 +145,13 @@ namespace
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});
 
         y += 4;
-        auto* save = new SaveSettingsButton();
+        auto* save = NEW SaveSettingsButton();
         save->SetProperties("Save", x, y, w, btnH, "Save Settings");
         RegisterButton(save);
         m_buttonOrder.push_back(save);
         y += rowH;
 
-        auto* close = new CloseButton();
+        auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("Close", x, y, w, btnH, "Close");
         RegisterButton(close);
@@ -180,17 +180,17 @@ namespace
         GuiWindow::Create();
         m_buttonOrder.clear();
 
-        auto* label = new LabelButton();
+        auto* label = NEW LabelButton();
         label->SetProperties("QuitPrompt", 10, 30, 220, 15, "Quit game?");
         RegisterButton(label);
 
-        auto* yes = new GameExitButton();
+        auto* yes = NEW GameExitButton();
         yes->m_centered = true;
         yes->SetProperties("Yes", 10, 60, 105, 18, "Yes");
         RegisterButton(yes);
         m_buttonOrder.push_back(yes);
 
-        auto* no = new CloseButton();
+        auto* no = NEW CloseButton();
         no->m_centered = true;
         no->SetProperties("No", 125, 60, 105, 18, "No");
         RegisterButton(no);
@@ -209,7 +209,7 @@ namespace
     if (Canvas::EclGetWindow(_name))
       Canvas::EclBringWindowToFront(_name);
     else
-      Canvas::EclRegisterWindow(new T());
+      Canvas::EclRegisterWindow(NEW T());
   }
 
   class OpenSettingsButton : public GuiButton
@@ -246,21 +246,21 @@ namespace
         const int w = static_cast<int>(m_w) - 20;
         int y = 30;
 
-        auto* settings = new OpenSettingsButton();
+        auto* settings = NEW OpenSettingsButton();
         settings->m_centered = true;
         settings->SetProperties("GameSettings", x, y, w, 18, "Game Settings");
         RegisterButton(settings);
         m_buttonOrder.push_back(settings);
         y += 26;
 
-        auto* quit = new OpenQuitButton();
+        auto* quit = NEW OpenQuitButton();
         quit->m_centered = true;
         quit->SetProperties("Quit", x, y, w, 18, "Quit");
         RegisterButton(quit);
         m_buttonOrder.push_back(quit);
         y += 26;
 
-        auto* close = new CloseButton();
+        auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("Close", x, y, w, 18, "Close");
         RegisterButton(close);
@@ -325,7 +325,7 @@ namespace
 
         char hdr[128];
         snprintf(hdr, sizeof(hdr), "%-15s %-2s %7s %6s %6s", "PRODUCT", "U", "PRICE", "SALE", "HOLD");
-        auto* header = new LabelButton();
+        auto* header = NEW LabelButton();
         header->SetProperties("MktHeader", infoX, 28, infoW, 14, hdr);
         RegisterButton(header);
 
@@ -333,17 +333,17 @@ namespace
         int y = 44;
         for (int i = 0; i < count; ++i)
         {
-          auto* info = new LabelButton();
+          auto* info = NEW LabelButton();
           info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, 14, "");
           RegisterButton(info);
           m_rows.push_back(info);
 
-          auto* buy = new TradeButton(i, true);
+          auto* buy = NEW TradeButton(i, true);
           buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, 14, "Buy");
           RegisterButton(buy);
           m_buttonOrder.push_back(buy);
 
-          auto* sell = new TradeButton(i, false);
+          auto* sell = NEW TradeButton(i, false);
           sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, 14, "Sell");
           RegisterButton(sell);
           m_buttonOrder.push_back(sell);
@@ -352,11 +352,11 @@ namespace
         }
 
         y += 6;
-        m_cash = new LabelButton();
+        m_cash = NEW LabelButton();
         m_cash->SetProperties("MktCash", infoX, y, infoW, 14, "");
         RegisterButton(m_cash);
 
-        auto* close = new CloseButton();
+        auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("Close", buyX, y, actW + 6 + actW, 16, "Close");
         RegisterButton(close);
@@ -435,7 +435,7 @@ namespace
         int y = 28;
         for (int i = 0; i < n; ++i)
         {
-          auto* label = new LabelButton();
+          auto* label = NEW LabelButton();
           label->SetProperties("Info" + std::to_string(i), x, y, w, 14, "");
           RegisterButton(label);
           m_labels.push_back(label);
@@ -443,7 +443,7 @@ namespace
         }
 
         y += 6;
-        auto* close = new CloseButton();
+        auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("Close", x, y, w, 16, "Close");
         RegisterButton(close);
@@ -549,7 +549,7 @@ namespace
           const int idx = equip_visible_index(i);
           m_shownIndices.push_back(idx);
 
-          auto* row = new EquipButton(idx);
+          auto* row = NEW EquipButton(idx);
           row->SetProperties("Eq" + std::to_string(idx), x, y, w, 14, "");
           RegisterButton(row);
           m_rows.push_back(row);
@@ -558,11 +558,11 @@ namespace
         }
 
         y += 6;
-        m_cash = new LabelButton();
+        m_cash = NEW LabelButton();
         m_cash->SetProperties("Cash", x, y, w, 14, "");
         RegisterButton(m_cash);
 
-        auto* close = new CloseButton();
+        auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("CloseBtn", x, y + 18, w, 16, "Close");
         RegisterButton(close);
@@ -609,36 +609,36 @@ namespace
 
 void RegisterGameWindows()
 {
-  GuiOverlay::SetOptionsWindowFactory([]() -> GuiWindow* { return new OptionsMenuWindow(); });
+  GuiOverlay::SetOptionsWindowFactory([]() -> GuiWindow* { return NEW OptionsMenuWindow(); });
 }
 
 void OpenMarketWindow()
 {
-  GuiOverlay::ShowWindow(std::string_view("Market"), []() -> GuiWindow* { return new MarketWindow(); });
+  GuiOverlay::ShowWindow(std::string_view("Market"), []() -> GuiWindow* { return NEW MarketWindow(); });
 }
 
 void OpenCommanderWindow()
 {
   GuiOverlay::ShowWindow(std::string_view("Commander"), []() -> GuiWindow* {
-    return new InfoWindow("Commander", "Commander", cmdr_status_title, cmdr_status_line_count, cmdr_status_line, 380, 420);
+    return NEW InfoWindow("Commander", "Commander", cmdr_status_title, cmdr_status_line_count, cmdr_status_line, 380, 420);
   });
 }
 
 void OpenInventoryWindow()
 {
   GuiOverlay::ShowWindow(std::string_view("Inventory"), []() -> GuiWindow* {
-    return new InfoWindow("Inventory", "Inventory", nullptr, inventory_line_count, inventory_line, 360, 380);
+    return NEW InfoWindow("Inventory", "Inventory", nullptr, inventory_line_count, inventory_line, 360, 380);
   });
 }
 
 void OpenPlanetDataWindow()
 {
   GuiOverlay::ShowWindow(std::string_view("PlanetData"), []() -> GuiWindow* {
-    return new InfoWindow("PlanetData", "Planet Data", planet_data_title, planet_data_line_count, planet_data_line, 440, 440);
+    return NEW InfoWindow("PlanetData", "Planet Data", planet_data_title, planet_data_line_count, planet_data_line, 440, 440);
   });
 }
 
 void OpenEquipWindow()
 {
-  GuiOverlay::ShowWindow(std::string_view("Equip"), []() -> GuiWindow* { return new EquipWindow(); });
+  GuiOverlay::ShowWindow(std::string_view("Equip"), []() -> GuiWindow* { return NEW EquipWindow(); });
 }

@@ -32,11 +32,24 @@
 #include "Camera.h"
 #include "ReplicationClient.h"
 #include "Messages/MessageBus.h"
+#include "Messages/Framing.h"            // Neuron::Msg::PROTOCOL_VERSION (handshake)
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
+#include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
+
+#include <string>
+#include <unordered_map>
+
+// The client's in-process event bus. Inbound reliable facts (decoded from the
+// server) are published here and independent subscribers (commerce, audio/VFX,
+// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
+// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
+// Defined up here with the includes: the input key handlers publish onto it well
+// before the subscriber-registration block further down.
+static Neuron::Msg::MessageBus g_clientBus;
 
 int draw_lasers;
 int mcount;
@@ -881,8 +894,10 @@ void handle_flight_keys(void)
 
   if (kbd_ecm_pressed)
   {
+    // Thin client: the server owns the burst (validation, energy, cooldown, the
+    // downed missiles); the EcmPulse event coming back plays the classic buzz.
     if (!docked && cmdr.ecm)
-      activate_ecm(1);
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
   }
 
   if (kbd_find_pressed)
@@ -958,17 +973,22 @@ void handle_flight_keys(void)
 
   if (kbd_energy_bomb_pressed)
   {
+    // Thin client: the server validates ownership and applies the blast; clear
+    // the local mirror optimistically (it is one-shot either way).
     if ((!docked) && (cmdr.energy_bomb))
     {
-      detonate_bomb = 1;
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
       cmdr.energy_bomb = 0;
     }
   }
 
   if (kbd_escape_pressed)
   {
+    // Thin client: the server consumes the pod, clears the record, refuels and
+    // respawns us docked; the EscapePodUsed event coming back flips the client
+    // into the docked flow (replacing the legacy local escape sequence).
     if ((!docked) && (cmdr.escape_pod) && (!witchspace))
-      run_escape_sequence();
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
   }
 }
 
@@ -1086,20 +1106,22 @@ static void start_new_game(void)
   enter_intro1();
 }
 
-// After the game-over animation. In thin-client mode the server has already respawned us
-// in place (it keeps no permadeath yet), so clear the death and drop straight back into
-// flight - the replicated snapshots drive the view again. The degraded single-player
-// fallback has no server to respawn us, so it starts a fresh game (intro).
+// After the game-over animation. In thin-client mode the server has respawned us
+// DOCKED at the nearest station (the G3 death rule, minus cargo), so enter the
+// station menus rather than resuming flight - mirroring enter_flight. dock_player()
+// re-confirms the dock with the server and resets our ship state; the replicated
+// snapshots (now at the station) drive the view when we launch. The degraded
+// single-player fallback has no server to respawn us, so it starts a fresh game.
 static void respawn_after_death(void)
 {
   if (Client::ReplicationClientInstance().IsOpen())
   {
     game_over = 0;
-    docked = 0;
-    PlayerFlight().speed = 0;
-    PlayerFlight().roll = 0;
-    PlayerFlight().climb = 0;
-    current_screen = SCR_FRONT_VIEW;
+    // The server dropped our cargo on death; clear the local display to match (the
+    // authoritative hold is already empty server-side).
+    memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
+    dock_player();
+    display_commander_status();
     s_state = GameState::Flight;
   }
   else
@@ -1152,18 +1174,26 @@ void info_message(const char* message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
-// The client's in-process event bus. Inbound reliable facts (decoded from the
-// server) are published here and independent subscribers (commerce, audio/VFX,
-// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
-// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
-static Neuron::Msg::MessageBus g_clientBus;
-
 // This frame's discrete combat input, accumulated from ActionTriggered messages and
 // consumed by send_player_input. Continuous flight (roll/pitch/throttle) is NOT here -
 // it stays the legacy rate-based PlayerFlight state, normalized to axes at send time.
 static bool     s_frameFire = false;
 static bool     s_frameMissile = false;
 static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
+static bool     s_frameEcm = false;
+static bool     s_frameEnergyBomb = false;
+static bool     s_frameEscapePod = false;
+
+// The other players in view, keyed by entity id: their commander name + legal
+// status, as replicated by PlayerInfo. Used to label ships and (later) chat; an
+// entry is dropped when its ship despawns/dies. This is presentation-only mirror
+// state - the server stays authoritative.
+struct PlayerRosterEntry
+{
+  std::string name;
+  int wanted = 0;
+};
+static std::unordered_map<uint32_t, PlayerRosterEntry> g_playerRoster;
 
 static void register_client_event_handlers(void)
 {
@@ -1175,6 +1205,18 @@ static void register_client_event_handlers(void)
   // Commerce: apply the authoritative station result to the local commander.
   g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
   {
+    // A hyperspace jump (G7) arrives in FLIGHT near the destination, or misfires
+    // into a witchspace ambush - either way, leave the station screen for space.
+    // The server owns our new position/fuel (they ride snapshots + PlayerStatus).
+    if (_resp.kind == Net::StationRequestKind::Teleport &&
+        (_resp.status == Net::StationStatus::Arrived || _resp.status == Net::StationStatus::Witchspace))
+    {
+      docked = 0;
+      current_screen = SCR_BREAK_PATTERN;
+      snd_play_sample(SND_HYPERSPACE);
+      return;
+    }
+
     if (_resp.status != Net::StationStatus::Ok)
       return;
     cmdr.credits = _resp.credits;
@@ -1198,6 +1240,12 @@ static void register_client_event_handlers(void)
     }
     if (_death.victim == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
+    g_playerRoster.erase(_death.victim);
+    // Capture the dying ship's last position/type BEFORE forgetting it, so we can
+    // play a debris burst where it died (the server just vanishes the entity).
+    Net::EntitySnapshot vs;
+    if (rc.Sample(_death.victim, 1.0, vs))
+      spawn_replicated_explosion(vs);
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
   });
@@ -1207,7 +1255,71 @@ static void register_client_event_handlers(void)
   {
     if (_ds.entityId == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
+    g_playerRoster.erase(_ds.entityId);
     Client::ReplicationClientInstance().Forget(_ds.entityId);
+  });
+
+  // Roster: another player's name/legal status. Mirror it for ship labels + chat.
+  g_clientBus.Subscribe<Neuron::Msg::PlayerInfo>([](const Neuron::Msg::PlayerInfo& _pi)
+  {
+    g_playerRoster[_pi.entityId] = PlayerRosterEntry{ _pi.name, _pi.wantedLevel };
+  });
+
+  // Status: our own authoritative vitals for the HUD. The server owns shields and
+  // energy, so mirror them into the legacy defense state the cockpit HUD draws
+  // (fuel/score wiring lands with G7/later).
+  g_clientBus.Subscribe<Neuron::Msg::PlayerStatus>([](const Neuron::Msg::PlayerStatus& _ps)
+  {
+    cmdr.credits = _ps.credits;
+    cmdr.fuel = _ps.fuel;   // hyperspace tank (G7): server-owned, drives the fuel gauge
+    PlayerDefense().frontShield = _ps.frontShield;
+    PlayerDefense().aftShield = _ps.aftShield;
+    PlayerDefense().energy = _ps.energy;
+    PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
+  });
+
+  // ECM burst (G8): someone's unit fired - play the classic buzz. The downed
+  // missiles arrive as EntityDeath events (explosions) alongside.
+  g_clientBus.Subscribe<Neuron::Msg::EcmPulse>([](const Neuron::Msg::EcmPulse&)
+  {
+    snd_play_sample(SND_ECM);
+  });
+
+  // Escape pod (G8): our pod fired - the ship is gone and the server has us
+  // docked at the nearest station with an empty hold and a clean record (the
+  // CargoManifest/PlayerStatus refreshes ride alongside). Flip into the docked
+  // flow, legacy abandon_ship style.
+  g_clientBus.Subscribe<Neuron::Msg::EscapePodUsed>([](const Neuron::Msg::EscapePodUsed& _e)
+  {
+    if (_e.entityId != Client::ReplicationClientInstance().LocalPlayer())
+      return;
+    cmdr.escape_pod = 0;
+    memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
+    snd_play_sample(SND_DOCK);
+    dock_player();
+    current_screen = SCR_BREAK_PATTERN;
+  });
+
+  // Cargo manifest: the authoritative per-commodity hold, resent after a scoop or a
+  // respawn emptied it. Mirror it into the commander and, if the hold actually grew
+  // (a scoop, not a respawn), play a pickup cue - the legacy client had no netcode,
+  // so the server is the source of truth for what we're carrying.
+  g_clientBus.Subscribe<Neuron::Msg::CargoManifest>([](const Neuron::Msg::CargoManifest& _cm)
+  {
+    int before = 0;
+    for (int i = 0; i < NO_OF_STOCK_ITEMS; ++i)
+      before += cmdr.current_cargo[i];
+
+    int after = 0;
+    const int n = static_cast<int>(_cm.units.size());
+    for (int i = 0; i < NO_OF_STOCK_ITEMS; ++i)
+    {
+      cmdr.current_cargo[i] = (i < n) ? _cm.units[i] : 0;
+      after += cmdr.current_cargo[i];
+    }
+
+    if (after > before)
+      snd_play_sample(SND_BEEP);   // scooped something
   });
 
   // Input command-builder: a discrete combat action sets this frame's intent, which
@@ -1222,6 +1334,15 @@ static void register_client_event_handlers(void)
       case Neuron::Msg::InputAction::LaunchMissile:
         s_frameMissile = true;
         s_frameMissileTarget = _a.param;
+        break;
+      case Neuron::Msg::InputAction::Ecm:
+        s_frameEcm = true;
+        break;
+      case Neuron::Msg::InputAction::EnergyBomb:
+        s_frameEnergyBomb = true;
+        break;
+      case Neuron::Msg::InputAction::EscapePod:
+        s_frameEscapePod = true;
         break;
     }
   });
@@ -1240,6 +1361,11 @@ static void process_server_events(void)
     Net::StationResponse resp;
     Neuron::Msg::EntityDeath death;
     Neuron::Msg::EntityDespawn despawn;
+    Neuron::Msg::PlayerInfo info;
+    Neuron::Msg::PlayerStatus status;
+    Neuron::Msg::CargoManifest cargo;
+    Neuron::Msg::EcmPulse ecm;
+    Neuron::Msg::EscapePodUsed pod;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
@@ -1247,6 +1373,16 @@ static void process_server_events(void)
       g_clientBus.Publish(death);
     else if (Neuron::Msg::TryDecode(msg, despawn))
       g_clientBus.Publish(despawn);
+    else if (Neuron::Msg::TryDecode(msg, info))
+      g_clientBus.Publish(info);
+    else if (Neuron::Msg::TryDecode(msg, status))
+      g_clientBus.Publish(status);
+    else if (Neuron::Msg::TryDecode(msg, cargo))
+      g_clientBus.Publish(cargo);
+    else if (Neuron::Msg::TryDecode(msg, ecm))
+      g_clientBus.Publish(ecm);
+    else if (Neuron::Msg::TryDecode(msg, pod))
+      g_clientBus.Publish(pod);
   }
   g_clientBus.Dispatch();
 }
@@ -1290,6 +1426,9 @@ static void send_player_input(void)
   s_frameFire = false;
   s_frameMissile = false;
   s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  s_frameEcm = false;
+  s_frameEnergyBomb = false;
+  s_frameEscapePod = false;
   if (kbd_fire_pressed)
     g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
   if (s_fire_missile_intent)
@@ -1302,6 +1441,9 @@ static void send_player_input(void)
   in.fire = s_frameFire;
   in.fireMissile = s_frameMissile;
   in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
+  in.ecm = s_frameEcm;
+  in.energyBomb = s_frameEnergyBomb;
+  in.escapePod = s_frameEscapePod;
 
   Client::ReplicationClientInstance().SendInput(in);
 }
@@ -1450,7 +1592,10 @@ static void game_render_flight(void)
     if (mcount < 0)
       mcount = 255;
 
-    if ((mcount & 7) == 0)
+    // The server regenerates and replicates shields/energy in thin-client mode
+    // (see the PlayerStatus handler); only the degraded single-player fallback
+    // regenerates locally.
+    if ((mcount & 7) == 0 && !Client::ReplicationClientInstance().IsOpen())
       regenerate_shields();
 
     if ((mcount & 31) == 10)
@@ -1591,6 +1736,10 @@ int game_main(void)
     rc.Open(bindPort);
     rc.SetServerEndpoint(Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
                                            static_cast<uint8_t>(e), 40000));
+    // Send the opening handshake with the player's commander name. It rides the
+    // reliable Control lane, so it is redelivered until the server (which connects
+    // the session on first input) accepts it; a blank name keeps the server default.
+    rc.SendHello(Neuron::Msg::PROTOCOL_VERSION, cmdr.name);
     // LocalPlayer is set by the server's AssignPlayer handshake; default 0.
   }
 
