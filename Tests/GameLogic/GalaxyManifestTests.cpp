@@ -1,11 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <string>
 #include <vector>
 
-#include "GalaxyManifest.h"
-#include "ReliableChannel.h"
+#include "Messages/Defs/GalaxyChunks.h"
+#include "Messages/MessageEndpoint.h"
+#include "Messages/Reliable.h"
 #include "GalaxyGen.h"
+#include "ServerSessions.h"
 
 using namespace Neuron;
 
@@ -27,103 +30,139 @@ namespace
   }
 }
 
-TEST(Manifest, ChunkRoundTrips)
+// --- Wire entry <-> manifest struct ------------------------------------------
+
+TEST(Manifest, WireEntryConversionRoundTrips)
 {
-  std::vector<Net::GalaxySystemInfo> in;
-  in.push_back(MakeSys(0, 10, -20, 30, "LAVE"));
-  in.push_back(MakeSys(7, 9'000'000'000LL, -1, 5, "DISO"));
+  const Net::GalaxySystemInfo in = MakeSys(7, 100, -200, 300, "Tibedied");
 
-  std::vector<uint8_t> bytes = Net::EncodeManifestChunk(99, 4, in.data(), static_cast<uint16_t>(in.size()));
+  const Msg::GalaxySystemEntry e = Msg::ToWireEntry(in);
+  EXPECT_TRUE(e.name == "Tibedied");
 
-  Net::ReliableMessage m;
-  m.type = Msg::Raw(Net::GALAXY_MANIFEST_ID);
-  m.payload = bytes;
-
-  uint32_t total = 0, base = 0;
-  std::vector<Net::GalaxySystemInfo> out;
-  EXPECT_TRUE(Net::DecodeManifestChunk(m, total, base, out));
-  EXPECT_TRUE(total == 99);
-  EXPECT_TRUE(base == 4);
-  EXPECT_TRUE(out.size() == 2);
-
-  EXPECT_TRUE(out[0].id == 0);
-  EXPECT_TRUE((out[0].x == 10 && out[0].y == -20 && out[0].z == 30));
-  EXPECT_TRUE(std::strcmp(out[0].name, "LAVE") == 0);
-  EXPECT_TRUE(out[0].government == 3);
-  EXPECT_TRUE(out[0].economy == 5);
-  EXPECT_TRUE(out[0].techLevel == 9);
-  EXPECT_TRUE(out[0].population == 42);
-  EXPECT_TRUE(out[0].productivity == 1234);
-
-  EXPECT_TRUE(out[1].id == 7);
-  EXPECT_TRUE(out[1].x == 9'000'000'000LL);   // a value well beyond 32 bits survives
-  EXPECT_TRUE(std::strcmp(out[1].name, "DISO") == 0);
+  const Net::GalaxySystemInfo out = Msg::FromWireEntry(e);
+  EXPECT_EQ(out.id, in.id);
+  EXPECT_EQ(out.x, in.x);
+  EXPECT_EQ(out.y, in.y);
+  EXPECT_EQ(out.z, in.z);
+  EXPECT_TRUE(std::strcmp(out.name, in.name) == 0);
+  EXPECT_EQ(out.government, in.government);
+  EXPECT_EQ(out.economy, in.economy);
+  EXPECT_EQ(out.techLevel, in.techLevel);
+  EXPECT_EQ(out.population, in.population);
+  EXPECT_EQ(out.productivity, in.productivity);
 }
 
-TEST(Manifest, WrongTypeRejected)
+TEST(Manifest, OverlongWireNameIsTruncatedSafely)
 {
-  Net::ReliableMessage m;
-  m.type = 0xABCD;   // any non-GalaxyManifest type tag
-  uint32_t total = 0, base = 0;
-  std::vector<Net::GalaxySystemInfo> out;
-  EXPECT_TRUE(!Net::DecodeManifestChunk(m, total, base, out));
+  Msg::GalaxySystemEntry e;
+  e.name = "AVeryLongSystemNameIndeed";   // longer than GALAXY_NAME_MAX
+
+  const Net::GalaxySystemInfo out = Msg::FromWireEntry(e);
+  EXPECT_EQ(std::strlen(out.name), Net::GALAXY_NAME_MAX - 1);   // clamped + terminated
 }
 
-TEST(Manifest, ChunkFitsTheSafeUdpPayload)
+// --- GalaxyChunk through the generic codec ------------------------------------
+
+TEST(Manifest, ChunkRoundTripsThroughTheCodec)
 {
-  EXPECT_TRUE(Net::MANIFEST_SYSTEMS_PER_CHUNK >= 1);
-  const std::size_t maxPacket =
-      Net::MANIFEST_CHUNK_HEADER + Net::MANIFEST_SYSTEMS_PER_CHUNK * Net::MANIFEST_ENTRY_SIZE;
-  EXPECT_TRUE(maxPacket <= Net::SAFE_UDP_PAYLOAD);
+  Msg::GalaxyChunk in;
+  in.total = 99;
+  in.baseIndex = 4;
+  for (uint32_t i = 0; i < 3; ++i)
+    in.systems.push_back(Msg::ToWireEntry(MakeSys(4 + i, i * 10, -static_cast<int64_t>(i), i * 2, "Lave")));
+
+  const std::vector<uint8_t> bytes = Msg::Encode(in);
+
+  Msg::GalaxyChunk out;
+  EXPECT_TRUE(Msg::Decode(bytes, out));
+  EXPECT_EQ(out.total, 99u);
+  EXPECT_EQ(out.baseIndex, 4u);
+  ASSERT_EQ(out.systems.size(), 3u);
+  EXPECT_EQ(out.systems[2].id, 6u);
+  EXPECT_TRUE(out.systems[2].name == "Lave");
 }
 
-TEST(Manifest, StreamsThroughReliableChannelInOrder)
+TEST(Manifest, AFullChunkFitsTheSafeUdpPayload)
 {
-  // Build a manifest larger than one chunk so the chunking path is exercised.
-  std::vector<Net::GalaxySystemInfo> systems;
-  const uint32_t count = static_cast<uint32_t>(Net::MANIFEST_SYSTEMS_PER_CHUNK * 2 + 3);
-  for (uint32_t i = 0; i < count; ++i)
-    systems.push_back(MakeSys(i, static_cast<int64_t>(i) * 100, 0, 0, "SYS"));
+  Msg::GalaxyChunk chunk;
+  chunk.total = 256;
+  chunk.baseIndex = 0;
+  for (uint16_t i = 0; i < Msg::GALAXY_CHUNK_MAX_SYSTEMS; ++i)
+    chunk.systems.push_back(Msg::ToWireEntry(MakeSys(i, 1'000'000, -2'000'000, 3'000'000, "Zaonceatxe")));
 
-  Net::ReliableChannel server;
-  Net::ReliableChannel client;
-  Net::SendManifest(server, systems);
+  // Leave generous room for the reliable framing around the payload.
+  EXPECT_LT(Msg::Encode(chunk).size(), static_cast<std::size_t>(Net::SAFE_UDP_PAYLOAD - 64));
+}
 
-  // Pump packets server->client until everything is acked (bounded loop).
+// --- The pull protocol through ServerSessions ---------------------------------
+
+TEST(Manifest, ChunkRequestIsAnsweredInOrderWithTotal)
+{
+  // A session with a 40-system manifest; the "client" end of its lanes.
+  GameLogic::Session session;
+  GameLogic::ServerSessions sessions;
+  std::vector<Net::GalaxySystemInfo> manifest;
+  for (uint32_t i = 0; i < 40; ++i)
+    manifest.push_back(MakeSys(i, i * 1000, 0, 0, "Sys"));
+  sessions.SetManifest(manifest);
+
+  // Ask for the first 64 (more than exist): everything comes back, in order,
+  // split into <=16-entry chunks, each carrying the total.
+  sessions.SendGalaxyChunks(session, /*base*/ 0, /*count*/ 64);
+
+  Msg::MessageEndpoint client;
+  for (const std::vector<uint8_t>& dg : session.events.WriteDatagrams())
+    client.OnDatagram(dg.data(), dg.size());
+
   std::vector<Net::GalaxySystemInfo> received;
-  for (int round = 0; round < 50 && server.PendingOutgoing() > 0; ++round)
+  Net::ReliableMessage m;
+  while (client.Receive(m))
   {
-    std::vector<uint8_t> pkt = server.WritePacket();
-    client.ReadPacket(pkt.data(), pkt.size());
-
-    Net::ReliableMessage m;
-    while (client.Receive(m))
-    {
-      uint32_t total = 0, base = 0;
-      EXPECT_TRUE(Net::DecodeManifestChunk(m, total, base, received));
-      EXPECT_TRUE(total == count);
-    }
-    std::vector<uint8_t> ack = client.WritePacket();
-    server.ReadPacket(ack.data(), ack.size());
+    Msg::GalaxyChunk chunk;
+    ASSERT_TRUE(Msg::TryDecode(m, chunk));
+    EXPECT_EQ(chunk.total, 40u);
+    EXPECT_EQ(chunk.baseIndex, received.size());
+    EXPECT_LE(chunk.systems.size(), static_cast<std::size_t>(Msg::GALAXY_CHUNK_MAX_SYSTEMS));
+    for (const Msg::GalaxySystemEntry& e : chunk.systems)
+      received.push_back(Msg::FromWireEntry(e));
   }
 
-  EXPECT_TRUE(received.size() == count);
-  for (uint32_t i = 0; i < count; ++i)
-  {
-    EXPECT_TRUE(received[i].id == i);
-    EXPECT_TRUE(received[i].x == static_cast<int64_t>(i) * 100);
-  }
+  ASSERT_EQ(received.size(), 40u);
+  for (uint32_t i = 0; i < 40; ++i)
+    EXPECT_EQ(received[i].id, i);
 }
+
+TEST(Manifest, OutOfRangeRequestStillTeachesTheTotal)
+{
+  GameLogic::Session session;
+  GameLogic::ServerSessions sessions;
+  sessions.SetManifest({ MakeSys(0, 0, 0, 0, "Only") });
+
+  sessions.SendGalaxyChunks(session, /*base*/ 5, /*count*/ 16);
+
+  Msg::MessageEndpoint client;
+  for (const std::vector<uint8_t>& dg : session.events.WriteDatagrams())
+    client.OnDatagram(dg.data(), dg.size());
+
+  Net::ReliableMessage m;
+  ASSERT_TRUE(client.Receive(m));
+  Msg::GalaxyChunk chunk;
+  ASSERT_TRUE(Msg::TryDecode(m, chunk));
+  EXPECT_EQ(chunk.total, 1u);           // the client learns the size...
+  EXPECT_TRUE(chunk.systems.empty());   // ...but gets no out-of-range entries
+}
+
+// --- Built from the generated galaxy ------------------------------------------
 
 TEST(Manifest, BuiltFromGeneratedGalaxy)
 {
   GameLogic::GalaxyConfig cfg;
-  cfg.planetCount = 8;
+  cfg.planetCount = 16;   // small but representative
   const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(cfg);
   const std::vector<Net::GalaxySystemInfo> manifest = GameLogic::BuildManifest(systems);
 
   EXPECT_TRUE(manifest.size() == systems.size());
-  for (std::size_t i = 0; i < systems.size(); ++i)
+  for (std::size_t i = 0; i < manifest.size(); ++i)
   {
     EXPECT_TRUE(manifest[i].id == systems[i].id);
     EXPECT_TRUE(manifest[i].x == systems[i].planetPos.x);
@@ -131,7 +170,6 @@ TEST(Manifest, BuiltFromGeneratedGalaxy)
     EXPECT_TRUE(manifest[i].z == systems[i].planetPos.z);
     EXPECT_TRUE(manifest[i].economy == static_cast<uint8_t>(systems[i].planet.economy));
     EXPECT_TRUE(manifest[i].techLevel == static_cast<uint8_t>(systems[i].planet.techLevel));
-    // Names are short (<= the wire limit), so they carry across intact.
     EXPECT_TRUE(systems[i].name == std::string(manifest[i].name));
   }
 }

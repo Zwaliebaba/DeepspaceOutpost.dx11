@@ -23,6 +23,7 @@
 #include "NetLib.h"
 #include "Messages/MessageBus.h"
 #include "Messages/Defs/PlayerSession.h"
+#include "Messages/Defs/Travel.h"         // TravelRequest / TravelResponse
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 
@@ -67,6 +68,7 @@ namespace DSOServer
     void OnCrime(const Neuron::GameLogic::Crime& _c);
     void OnEntityKilled(const Neuron::GameLogic::EntityKilled& _k);
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
+    void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
     void SendCargoTo(uint32_t _entityIndex);
     void BroadcastPlayerInfo(uint32_t _entityIndex);
 

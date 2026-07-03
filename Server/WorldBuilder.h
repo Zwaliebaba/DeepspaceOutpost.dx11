@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "ECS.h"
-#include "GalaxyManifest.h"
+#include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo
 
 namespace DSOServer
 {

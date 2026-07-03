@@ -24,8 +24,8 @@
 // than stranding everyone at spawn.
 //
 // Pure apart from the world it mutates and the caller-owned RNG; unit-tested
-// headlessly. The server loop routes the Teleport / JumpDrive station requests
-// through here.
+// headlessly. The server loop routes TravelRequest (hyperspace /
+// in-system jump) through here; travel no longer rides the station protocol.
 
 #include <cmath>
 #include <cstdint>
@@ -39,7 +39,7 @@
 #include "CombatSystem.h"      // Team, Combatant, Wanted, Witchspace, Bounty, PIRATE_BOUNTY
 #include "StationServices.h"   // Fuel, DockState, NearestStation, FindStationBySystem, LAUNCH_OFFSET
 #include "AiSystem.h"          // AiPilot, NpcFlightCaps, NPC_MAX_TURN_RATE, Detail::AiRand255
-#include "StationProtocol.h"   // Net::StationStatus
+#include "Messages/Defs/Travel.h"   // Msg::TravelStatus (the travel wire outcomes)
 
 namespace Neuron::GameLogic
 {
@@ -108,7 +108,7 @@ namespace Neuron::GameLogic
 
   struct HyperspaceOutcome
   {
-    Net::StationStatus status = Net::StationStatus::CantDock;
+    Msg::TravelStatus status = Msg::TravelStatus::Rejected;
     bool jumped = false;       // did the ship move + spend fuel?
     bool witchspace = false;   // did it misfire into a witchspace ambush?
     bool wantedChanged = false;// did the jump cool the wanted record (needs a roster refresh)?
@@ -118,7 +118,7 @@ namespace Neuron::GameLogic
   // deducts fuel by distance, cools the wanted record, and either arrives near the
   // destination (in flight) or misfires into a witchspace Thargoid ambush. The RNG
   // is caller-owned (deterministic). Returns what happened for the caller to turn
-  // into a StationResponse and any broadcasts.
+  // into a TravelResponse and any broadcasts.
   inline HyperspaceOutcome Hyperspace(ECS::Registry& _world, ECS::EntityId _player,
                                       uint32_t _destSystemId, uint32_t& _rng)
   {
@@ -135,19 +135,19 @@ namespace Neuron::GameLogic
       ? _world.TryGet<WorldTransform>(destStation) : nullptr;
     if (dt == nullptr)
     {
-      out.status = Net::StationStatus::CantDock;   // unknown destination system
+      out.status = Msg::TravelStatus::UnknownSystem;
       return out;
     }
 
     const int cost = JumpCostTenths(pt->position, dt->position);
     if (cost > fuel->max)
     {
-      out.status = Net::StationStatus::OutOfRange;   // beyond even a full tank
+      out.status = Msg::TravelStatus::OutOfRange;   // beyond even a full tank
       return out;
     }
     if (cost > fuel->tenths)
     {
-      out.status = Net::StationStatus::NotEnoughFuel;
+      out.status = Msg::TravelStatus::NotEnoughFuel;
       return out;
     }
 
@@ -170,7 +170,7 @@ namespace Neuron::GameLogic
         _world.Add<Witchspace>(_player, Witchspace{});
       const int nthg = 1 + static_cast<int>(Detail::AiRand255(_rng) & 3u);   // legacy (rand & 3) + 1
       SpawnThargoids(_world, pt->position, nthg, _rng);
-      out.status = Net::StationStatus::Witchspace;
+      out.status = Msg::TravelStatus::Witchspace;
       out.witchspace = true;
       return out;
     }
@@ -180,13 +180,13 @@ namespace Neuron::GameLogic
     if (_world.Has<Witchspace>(_player))
       _world.Remove<Witchspace>(_player);
     pt->position = dt->position + Math::Vector3i64{ 0, 0, LAUNCH_OFFSET };
-    out.status = Net::StationStatus::Arrived;
+    out.status = Msg::TravelStatus::Arrived;
     return out;
   }
 
   struct JumpDriveOutcome
   {
-    Net::StationStatus status = Net::StationStatus::MassLocked;
+    Msg::TravelStatus status = Msg::TravelStatus::MassLocked;
     bool jumped = false;
   };
 
@@ -241,12 +241,12 @@ namespace Neuron::GameLogic
 
     if (locked)
     {
-      out.status = Net::StationStatus::MassLocked;
+      out.status = Msg::TravelStatus::MassLocked;
       return out;
     }
     if (!foundPlanet)
     {
-      out.status = Net::StationStatus::CantDock;   // nowhere to jump toward
+      out.status = Msg::TravelStatus::Rejected;   // nowhere to jump toward
       return out;
     }
 
@@ -261,7 +261,7 @@ namespace Neuron::GameLogic
       hop = reachable;
     if (hop <= 0)
     {
-      out.status = Net::StationStatus::MassLocked;   // already on top of the planet
+      out.status = Msg::TravelStatus::MassLocked;   // already on top of the planet
       return out;
     }
 
@@ -271,7 +271,7 @@ namespace Neuron::GameLogic
       static_cast<int64_t>(dy * s),
       static_cast<int64_t>(dz * s),
     };
-    out.status = Net::StationStatus::Ok;
+    out.status = Msg::TravelStatus::Jumped;
     out.jumped = true;
     return out;
   }

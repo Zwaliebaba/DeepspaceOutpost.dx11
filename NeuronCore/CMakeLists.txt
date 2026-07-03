@@ -29,7 +29,6 @@ set(NEURONCORE_HEADERS
     SnapshotInterpolator.h
     ReliableChannel.h
     StationProtocol.h
-    GalaxyManifest.h
     NetLib.h
     Debug.h
     FileSys.h
@@ -56,6 +55,8 @@ set(NEURONCORE_HEADERS
     Messages/Defs/InputActions.h
     Messages/Defs/PlayerSession.h
     Messages/Defs/EquipmentEvents.h
+    Messages/Defs/Travel.h
+    Messages/Defs/GalaxyChunks.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

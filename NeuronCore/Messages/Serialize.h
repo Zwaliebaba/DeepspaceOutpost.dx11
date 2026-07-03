@@ -14,8 +14,10 @@
 //
 // Supported leaf field types: uint8/16/32/64, int32/64, float, double, bool, any
 // enum (serialised as its underlying type), std::string (UTF-8, length-capped),
-// NetEntityId, std::optional<T>, and std::vector<T> (count-capped). Add a leaf
-// pair to extend; a field of an unsupported type is a compile error.
+// NetEntityId, std::optional<T>, std::vector<T> (count-capped), and any Record -
+// a plain struct that self-describes via Fields() but carries no id/traits of its
+// own (it only ever travels inside a message, e.g. a galaxy-chunk entry). Add a
+// leaf pair to extend; a field of an unsupported type is a compile error.
 
 #include <cstdint>
 #include <algorithm>
@@ -106,6 +108,20 @@ namespace Neuron::Msg
       WriteField(_w, _v[i]);
   }
 
+  // A record: a struct that self-describes via Fields() like a message but has no
+  // id or traits - it never travels alone, only as a field (or vector element) of
+  // a real catalog message. Whole messages are deliberately NOT records (no
+  // nesting of one wire message inside another).
+  template <typename T>
+  concept Record = requires (T& _t, const T& _ct) { _t.Fields(); _ct.Fields(); } &&
+                   !requires { T::Id; };
+
+  template <Record R>
+  void WriteField(DataWriter& _w, const R& _r)
+  {
+    std::apply([&](const auto&... _fs) { (WriteField(_w, _fs), ...); }, _r.Fields());
+  }
+
   // --- Leaf readers (return false on truncation or a cap violation) ----------
 
   [[nodiscard]] inline bool ReadField(DataReader& _r, uint8_t& _v)  { _v = _r.ReadU8();  return _r.Ok(); }
@@ -191,6 +207,14 @@ namespace Neuron::Msg
       _v.push_back(std::move(e));
     }
     return true;
+  }
+
+  template <Record R>
+  [[nodiscard]] bool ReadField(DataReader& _r, R& _out)
+  {
+    bool ok = true;
+    std::apply([&](auto&... _fs) { ((ok = ok && ReadField(_r, _fs)), ...); }, _out.Fields());
+    return ok;
   }
 
   // --- Whole-message encode / decode ----------------------------------------

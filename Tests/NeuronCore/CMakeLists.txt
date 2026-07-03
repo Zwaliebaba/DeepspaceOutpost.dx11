@@ -26,6 +26,7 @@ add_executable(NeuronCore.Tests
     PacketInspectTests.cpp
     MessageFuzzTests.cpp
     PlayerSessionTests.cpp
+    TravelProtocolTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)

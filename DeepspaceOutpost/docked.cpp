@@ -19,6 +19,7 @@
 #include "space.h"
 #include "sound.h"
 #include "ReplicationClient.h"
+#include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 
 
 
@@ -782,10 +783,10 @@ void teleport_to_cursor (void)
 	if (sel < 0)
 		return;
 
-	Neuron::Net::StationRequest req;
-	req.kind = Neuron::Net::StationRequestKind::Teleport;
-	req.stationId = rc.Galaxy()[sel].id;   // server resolves the destination station
-	rc.SendStationRequest (req);
+	Neuron::Msg::TravelRequest req;
+	req.kind = Neuron::Msg::TravelKind::Hyperspace;
+	req.systemId = rc.Galaxy()[sel].id;   // server resolves the destination station
+	rc.Send (req);
 
 	snd_play_sample (SND_HYPERSPACE);
 	current_screen = SCR_BREAK_PATTERN;

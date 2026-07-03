@@ -12,6 +12,7 @@
 // so connection handling, input application and reaping are all unit-tested
 // headlessly; the server loop wires the socket I/O around it.
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -21,7 +22,7 @@
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
 #include "Messages/Defs/InputCommand.h"
 #include "ReliableChannel.h"
-#include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
+#include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo / GalaxyChunk pull protocol
 #include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
 #include "Messages/Defs/CoreEvents.h"   // Msg::AssignPlayer
 #include "Messages/Defs/PlayerSession.h" // Msg::PlayerInfo
@@ -76,9 +77,9 @@ namespace Neuron::GameLogic
         if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
           pr->name = s.name;
         s.events.Send(Msg::AssignPlayer{ s.entity.index });   // Control lane
-        // The galaxy chart, once on connect, on the Bulk lane so it can't head-of-line
-        // -block gameplay/control events.
-        Net::SendManifest(s.events.Channel(Msg::MessageLane::Bulk), m_manifest);
+        // The galaxy chart is PULLED by the client in bounded ranges
+        // (GalaxyChunkRequest -> SendGalaxyChunks), not pushed on connect - that
+        // bounds the connect burst and readies fog-of-war filtering.
         it = m_sessions.emplace(key, std::move(s)).first;
       }
 
@@ -183,9 +184,45 @@ namespace Neuron::GameLogic
       return false;
     }
 
-    // Set the galaxy manifest sent to every client when it connects (static for
-    // the world's lifetime; built once at startup from the generated galaxy).
+    // Set the galaxy manifest clients pull from (static for the world's
+    // lifetime; built once at startup from the generated galaxy).
     void SetManifest(std::vector<Net::GalaxySystemInfo> _manifest) { m_manifest = std::move(_manifest); }
+
+    // Answer a client's GalaxyChunkRequest: send the requested range as one or
+    // more GalaxyChunk messages on the Bulk lane, each at most
+    // GALAXY_CHUNK_MAX_SYSTEMS entries so it fits a safe datagram. The request
+    // count is clamped (GALAXY_CHUNK_MAX_REQUEST) so a hostile request can't
+    // provoke an unbounded burst; an out-of-range baseIndex is answered with an
+    // empty chunk still carrying `total`, so the client always learns the size.
+    void SendGalaxyChunks(Session& _s, uint32_t _baseIndex, uint16_t _count)
+    {
+      const uint32_t total = static_cast<uint32_t>(m_manifest.size());
+
+      if (_baseIndex >= total)
+      {
+        Msg::GalaxyChunk empty;
+        empty.total = total;
+        empty.baseIndex = _baseIndex;
+        _s.events.Send(empty);   // Bulk lane
+        return;
+      }
+
+      const uint16_t wanted = _count == 0 ? Msg::GALAXY_CHUNK_MAX_REQUEST
+                                          : std::min(_count, Msg::GALAXY_CHUNK_MAX_REQUEST);
+      const uint32_t end = std::min<uint32_t>(_baseIndex + wanted, total);
+
+      for (uint32_t base = _baseIndex; base < end; base += Msg::GALAXY_CHUNK_MAX_SYSTEMS)
+      {
+        Msg::GalaxyChunk chunk;
+        chunk.total = total;
+        chunk.baseIndex = base;
+        const uint32_t n = std::min<uint32_t>(Msg::GALAXY_CHUNK_MAX_SYSTEMS, end - base);
+        chunk.systems.reserve(n);
+        for (uint32_t i = 0; i < n; ++i)
+          chunk.systems.push_back(Msg::ToWireEntry(m_manifest[base + i]));
+        _s.events.Send(chunk);   // Bulk lane
+      }
+    }
 
     [[nodiscard]] std::unordered_map<uint64_t, Session>& All() { return m_sessions; }
     [[nodiscard]] std::size_t Count() const { return m_sessions.size(); }

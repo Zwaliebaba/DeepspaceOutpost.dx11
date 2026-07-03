@@ -7,9 +7,8 @@
 // the whole wire ABI (schema export, catalog diff, the standalone packet decoder)
 // without depending on the game executable.
 //
-// GalaxyManifest is intentionally absent from the generic registry: a manifest
-// chunk is fixed-layout, hand-encoded display data carrying the reserved id
-// Net::GALAXY_MANIFEST_ID (see GalaxyManifest.h), not a generic-codec message.
+// Retired ids stay reserved forever (permanent ABI): 0x0210 was the hand-encoded
+// galaxy-manifest chunk, replaced by the catalog-codec GalaxyChunk (0x1003).
 
 #include "Messages/Registry.h"
 
@@ -18,4 +17,6 @@
 #include "Messages/Defs/InputActions.h"
 #include "Messages/Defs/PlayerSession.h"   // ClientHello / PlayerInfo / PlayerStatus
 #include "Messages/Defs/EquipmentEvents.h"  // EcmPulse / EscapePodUsed
+#include "Messages/Defs/Travel.h"           // TravelRequest / TravelResponse
+#include "Messages/Defs/GalaxyChunks.h"     // GalaxyChunkRequest / GalaxyChunk
 #include "StationProtocol.h"   // StationRequest / StationResponse (REGISTER_MESSAGE'd)

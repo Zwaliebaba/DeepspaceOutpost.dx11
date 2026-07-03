@@ -35,6 +35,7 @@
 #include "stars.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
+#include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
 
 
@@ -1046,10 +1047,11 @@ void jump_warp (void)
 {
 	// The server owns the mass-lock rules and moves the ship (G7); ask it to
 	// jump and let the new position ride the snapshot stream. The local
-	// star-warp visual still fires for immediate feedback.
-	Neuron::Net::StationRequest req;
-	req.kind = Neuron::Net::StationRequestKind::JumpDrive;
-	Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
+	// star-warp visual still fires for immediate feedback; a MassLocked
+	// TravelResponse shows the classic message (see main.cpp).
+	Neuron::Msg::TravelRequest req;
+	req.kind = Neuron::Msg::TravelKind::InSystemJump;
+	Neuron::Client::ReplicationClientInstance().Send(req);
 	warp_stars = 1;
 	mcount &= 63;
 }

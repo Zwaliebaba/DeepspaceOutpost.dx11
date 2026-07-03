@@ -25,7 +25,7 @@
 #include "ReliableChannel.h"
 #include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
-#include "GalaxyManifest.h"
+#include "Messages/Defs/GalaxyChunks.h"    // Net::GalaxySystemInfo / the chunk pull protocol
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
@@ -53,14 +53,19 @@ namespace Neuron::Client
     // known and the socket is open).
     void SendInput(const Msg::InputCommand& _input);
 
+    // Queue any reliable catalog message to the server on its declared lane
+    // (station requests, travel requests, ...). No-op until the client is open.
+    template <Msg::Message M>
+    void Send(const M& _m)
+    {
+      if (m_open)
+        m_events.Send(_m);
+    }
+
     // Queue a reliable station request (dock/undock/buy/sell) to the server. The
     // authoritative StationResponse arrives later via PollEvent(). No-op until
     // the client is open.
-    void SendStationRequest(const Net::StationRequest& _request)
-    {
-      if (m_open)
-        m_events.Send(_request);   // Gameplay lane
-    }
+    void SendStationRequest(const Net::StationRequest& _request) { Send(_request); }
 
     // Queue the opening handshake: protocol version + the player's commander name.
     // Rides the reliable Control lane, so it is redelivered until the server (which
@@ -103,10 +108,16 @@ namespace Neuron::Client
     // consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
 
-    // The galaxy's system list, as delivered by the server's manifest (empty until
-    // it arrives). The galactic chart renders and teleports from this.
+    // The galaxy's system list, pulled from the server in bounded chunk ranges
+    // (empty until the first chunk arrives, growing until complete). The
+    // galactic chart renders and teleports from this - progressively, so a
+    // partially-pulled chart already works.
     [[nodiscard]] const std::vector<Net::GalaxySystemInfo>& Galaxy() const { return m_galaxy; }
     [[nodiscard]] bool HasGalaxy() const { return !m_galaxy.empty(); }
+    [[nodiscard]] bool GalaxyComplete() const
+    {
+      return m_galaxyKnownTotal && m_galaxy.size() >= m_galaxyTotal;
+    }
 
     // The entity id the local player controls - its replicated position is the
     // floating origin and it is not drawn. Learned primarily from the snapshot
@@ -124,7 +135,10 @@ namespace Neuron::Client
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
-    std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart manifest (filled on connect)
+    std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
+    uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk
+    bool m_galaxyKnownTotal = false;
+    uint32_t m_galaxyRequestedUpTo = 0;            // exclusive end of the last chunk request
     Net::Endpoint m_server;
     uint32_t m_localPlayer = 0xFFFFFFFFu;   // sentinel until assigned (never entity 0)
     bool m_haveServer = false;

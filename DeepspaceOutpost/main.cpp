@@ -33,6 +33,7 @@
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
+#include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
@@ -998,23 +999,34 @@ static void register_client_event_handlers(void)
     return;
   registered = true;
 
-  // Commerce: apply the authoritative station result to the local commander.
-  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  // Travel: the authoritative outcome of a hyperspace / in-system jump request.
+  // Position and fuel changes ride the snapshot stream and PlayerStatus; this
+  // drives the screen flow and the classic messages.
+  g_clientBus.Subscribe<Neuron::Msg::TravelResponse>([](const Neuron::Msg::TravelResponse& _t)
   {
     // A hyperspace jump (G7) arrives in FLIGHT near the destination, or misfires
     // into a witchspace ambush - either way, leave the station screen for space.
-    // The server owns our new position/fuel (they ride snapshots + PlayerStatus);
-    // the witchspace flag is mirrored for the HUD/UX guards (compass, market key).
-    if (_resp.kind == Net::StationRequestKind::Teleport &&
-        (_resp.status == Net::StationStatus::Arrived || _resp.status == Net::StationStatus::Witchspace))
+    // The witchspace flag is mirrored for the HUD/UX guards (compass, market key).
+    if (_t.kind == Neuron::Msg::TravelKind::Hyperspace &&
+        (_t.status == Neuron::Msg::TravelStatus::Arrived || _t.status == Neuron::Msg::TravelStatus::Witchspace))
     {
-      witchspace = (_resp.status == Net::StationStatus::Witchspace) ? 1 : 0;
+      witchspace = (_t.status == Neuron::Msg::TravelStatus::Witchspace) ? 1 : 0;
       docked = 0;
       current_screen = SCR_BREAK_PATTERN;
       snd_play_sample(SND_HYPERSPACE);
       return;
     }
 
+    if (_t.status == Neuron::Msg::TravelStatus::MassLocked)
+      info_message("Mass Locked");
+    else if (_t.status == Neuron::Msg::TravelStatus::NotEnoughFuel ||
+             _t.status == Neuron::Msg::TravelStatus::OutOfRange)
+      info_message("Out Of Fuel Range");
+  });
+
+  // Commerce: apply the authoritative station result to the local commander.
+  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  {
     if (_resp.status != Net::StationStatus::Ok)
       return;
 
@@ -1204,6 +1216,7 @@ static void process_server_events(void)
   while (rc.PollEvent(msg))
   {
     Net::StationResponse resp;
+    Neuron::Msg::TravelResponse travel;
     Neuron::Msg::EntityDeath death;
     Neuron::Msg::EntityDespawn despawn;
     Neuron::Msg::PlayerInfo info;
@@ -1214,6 +1227,8 @@ static void process_server_events(void)
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
+    else if (Neuron::Msg::TryDecode(msg, travel))
+      g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))
       g_clientBus.Publish(death);
     else if (Neuron::Msg::TryDecode(msg, despawn))

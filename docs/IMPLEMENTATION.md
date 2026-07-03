@@ -261,40 +261,43 @@ deleted with its transport tests ported to `SnapshotInterpolator`;
 `MILITARY_LASER` in `DeepspaceOutpost/` legacy screens remains — that tier is
 A1's scope.)
 
-### A5 — Protocol hygiene (#19: S2 + S3 + S7 remnants) — **M**
+### A5 — Protocol hygiene (#19: S2 + S3 + S7 remnants) — **M** — ✅ **done 2026-07-03**
 
-All three follow the ABI rule: new id, retire the old id in place.
+All three followed the ABI rule: new id, retire the old id in place.
 
-1. **S3 — Travel split.** New catalog messages in the game-specific band:
-   `TravelRequest` (`0x1000`, Wire/Command/Gameplay/C→S:
-   `kind u8 {Hyperspace=1, InSystemJump=2}`, `systemId u32`) and
-   `TravelResponse` (`0x1001`, Wire/Event/Gameplay/S→C:
-   `kind u8`, `status u8 {Ok, NotEnoughFuel, OutOfRange, UnknownSystem,
-   MassLocked, Arrived, Witchspace}`). Client chart/jump keys send these;
-   `GameServer::HandleStationRequest` loses its Teleport/JumpDrive
-   interception; `StationRequestKind::Teleport/JumpDrive` and the travel
-   values of `StationStatus` are marked retired (kept in the enum,
-   rejected if received). §4.4/§11 tables updated.
-2. **S2 — Manifest re-cut, request-driven.** New catalog messages:
-   `GalaxyChunkRequest` (`0x1002`, Wire/Command/Bulk/C→S:
-   `baseIndex u32`, `count u16`) and `GalaxyChunk` (`0x1003`,
-   Wire/Event/Bulk/S→C: `total u32`, `baseIndex u32`,
-   `systems vector<SystemEntry>` where `SystemEntry.Fields()` carries
-   id/x/y/z/name-string/government/economy/techLevel/population/
-   productivity through the generic codec). Client pulls chunks after the
-   handshake instead of receiving a connect-time fire-hose; server clamps
-   `count` so replies fit `SAFE_UDP_PAYLOAD`. Retire hand-coded `0x0210`
-   and `NeuronCore/GalaxyManifest.h` once the client no longer speaks it.
-   This is also the prerequisite for fog of war (F2): the server will later
-   filter chunk replies by `KnownSystems`.
-3. **S7 — Band note + alias.** ✅ done 2026-07-03: the §4.3 note
-   grandfathering `EcmPulse`/`EscapePodUsed` is in ARCHITECTURE.md (future
-   gameplay events allocate from `0x1000+`), and the `Net::ClientInput`
-   alias is deleted (with A4).
+1. **S3 — Travel split.** ✅ `TravelRequest` (`0x1000`) / `TravelResponse`
+   (`0x1001`) in `Messages/Defs/Travel.h` carry travel
+   (`TravelKind{Hyperspace, InSystemJump}`, `TravelStatus{Arrived,
+   Witchspace, Jumped, NotEnoughFuel, OutOfRange, UnknownSystem, MassLocked,
+   Rejected}`). `HyperspaceSystem` outcomes now speak `TravelStatus`;
+   `GameServer` routes `TravelRequest` to a dedicated handler and
+   `HandleStationRequest` is docking + commerce only (the retired
+   Teleport/JumpDrive kinds fall through to the dispatcher's rejection,
+   pinned by the A4 test). The client chart/jump keys send `TravelRequest`;
+   a `TravelResponse` subscriber drives the screen flow — and restores the
+   classic "Mass Locked" message the thin client had lost.
+2. **S2 — Manifest re-cut, request-driven.** ✅ `GalaxyChunkRequest`
+   (`0x1002`) / `GalaxyChunk` (`0x1003`) in `Messages/Defs/GalaxyChunks.h`
+   through the generic codec — which gained **nested Record support**
+   (a `Fields()` struct with no id, usable in vectors; unit-tested) for the
+   per-system entries. The client pulls ranges of ≤64 (server also clamps),
+   ≤16 entries per message so each fits `SAFE_UDP_PAYLOAD`; an out-of-range
+   request returns an empty chunk carrying `total`; the chart renders
+   progressively and keeps pulling until complete. The hand-coded `0x0210`
+   and `NeuronCore/GalaxyManifest.h` are retired (id reserved);
+   `Net::GalaxySystemInfo` moved to the new header; the now-purposeless
+   `MessageEndpoint::Channel()` accessor was removed. Fog of war (F2) later
+   filters the chunk replies by `KnownSystems`.
+3. **S7 — Band note + alias.** ✅ done earlier (with A4): the §4.3
+   grandfathering note is in ARCHITECTURE.md and the `Net::ClientInput`
+   alias is deleted.
 
-*Acceptance:* round-trip + golden-layout tests for the four new messages;
-governance tests pass; a legacy `StationRequest{Teleport}` is answered with a
-rejection, not a jump; the client completes its chart using pulled chunks.
+*Acceptance (implemented):* round-trip + golden-layout tests for all four new
+messages plus nested-record and truncation-safety tests
+(`TravelProtocolTests.cpp`); the pull protocol is exercised end-to-end through
+`ServerSessions`/`MessageEndpoint` (`GalaxyManifestTests.cpp`); governance
+tests cover the new ids; the A4 station test pins that travel kinds are
+rejected by the station dispatcher.
 
 ### A6 — Determinism & build hygiene — **XS** — ✅ **done 2026-07-03**
 

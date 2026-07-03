@@ -357,30 +357,55 @@ and you are already respawned docked. The client flips to the docked flow.
 | `cargo` | u16 | resulting held quantity of `commodity` |
 
 `StationRequestKind`: `Dock=1`, `Undock=2`, `Buy=3`, `Sell=4`, `Equip=5`,
-`Teleport=6` (fuel-gated hyperspace jump), `Refuel=7`, `JumpDrive=8`
-(in-system fast jump). Teleport and JumpDrive are intercepted by the server
-loop and routed through `HyperspaceSystem` (§6.8); the rest hit
-`ProcessStationRequest`.
+`Refuel=7`. All hit `ProcessStationRequest`. *(`Teleport=6` and `JumpDrive=8`
+are **retired** — travel moved to `TravelRequest`; the values stay reserved and
+a request carrying them is rejected.)*
 
 `StationStatus`: `Ok=0`, `NotDocked=1`, `NoStock=2`, `NotEnoughCredits=3`,
 `HoldFull=4`, `NoCargo=5`, `BadCommodity=6`, `CantDock=7`, `AlreadyOwned=8`,
-`DockingRefused=9` (fugitive turned away), `NotEnoughFuel=10`, `OutOfRange=11`,
-`MassLocked=12`, `Arrived=13` (jump landed you in flight), `Witchspace=14`
-(misjump — ambush).
+`DockingRefused=9` (fugitive turned away). *(Values `10–14` are **retired** —
+the travel outcomes moved to `TravelStatus`; never reuse them.)*
 
 `EquipItem`: `Missile=1` (30.0 Cr, max 4), `LargeCargoBay=2` (400 Cr, +15 t),
 `Ecm=3` (600 Cr), `FuelScoop=4` (525 Cr), `EnergyBomb=5` (900 Cr),
 `EscapePod=6` (1000 Cr). *(Ownership is authoritative; ECM/bomb/pod behaviour
 lands in G8.)*
 
+#### Travel
+
+**`TravelRequest`** — `0x1000` · Wire · Command · Gameplay · C→S. Take me
+somewhere; the server validates fuel/range/mass-lock through
+`HyperspaceSystem` (§6.8).
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | u8 enum | `Hyperspace=1`, `InSystemJump=2` |
+| `systemId` | u32 | destination system (Hyperspace; ignored by InSystemJump) |
+
+**`TravelResponse`** — `0x1001` · Wire · Event · Gameplay · S→C. The outcome;
+position/fuel changes ride the snapshot stream and `PlayerStatus`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | u8 enum | echoes the request kind |
+| `status` | u8 enum | `Arrived=0`, `Witchspace=1`, `Jumped=2`, `NotEnoughFuel=3`, `OutOfRange=4`, `UnknownSystem=5`, `MassLocked=6`, `Rejected=7` |
+
 #### Bulk
 
-**Galaxy manifest chunk** — id `0x0210`, Bulk lane, S→C, sent once on connect.
-Hand-encoded (fixed layout with a fixed-size name array, not the generic
-codec): `total u32 | baseIndex u32 | count u16` then `count ×` entries of
-`id u32 | x,y,z i64 | name char[12] (NUL-padded) | government u8 | economy u8 |
-techLevel u8 | population u16 | productivity u16` (47 bytes each). The client
-sizes its chart table from `total` and fills chunks as they arrive.
+**`GalaxyChunkRequest`** — `0x1002` · Wire · Command · Bulk · C→S. The client
+**pulls** the galaxy chart in bounded ranges (`baseIndex u32`, `count u16`,
+server-clamped to 64) instead of receiving a connect-time fire-hose — the
+prerequisite for fog of war (§13.2.3-5).
+
+**`GalaxyChunk`** — `0x1003` · Wire · Event · Bulk · S→C. One slice:
+`total u32 | baseIndex u32 | systems vector<entry>` through the generic codec
+(entries are nested records: `id u32 | x,y,z i64 | name string | government u8
+| economy u8 | techLevel u8 | population u16 | productivity u16`), at most 16
+entries per message so each fits a safe datagram. An out-of-range request is
+answered with an empty chunk still carrying `total`. The client requests the
+next range as each completes, until it holds all `total` systems; the chart
+renders progressively meanwhile. *(Replaces the retired hand-encoded `0x0210`
+manifest — one serialization path.)*
 
 #### Snapshot stream (not a catalog message)
 
@@ -420,9 +445,11 @@ The server's own combat pipeline is decoupled through an in-process
 ### 4.6 Canonical sequences
 
 **Connect:** client sends `InputCommand` → server spawns the player entity,
-replies `AssignPlayer` (Control) + galaxy manifest (Bulk) → client sends
-`ClientHello{version, name}` → server sanitizes/dedupes, broadcasts the full
-`PlayerInfo` roster → snapshots + `PlayerStatus`/`CargoManifest` begin flowing.
+replies `AssignPlayer` (Control) → client sends `ClientHello{version, name}` →
+server sanitizes/dedupes, broadcasts the full `PlayerInfo` roster → snapshots +
+`PlayerStatus`/`CargoManifest` begin flowing. In parallel the client **pulls**
+the galaxy chart in bounded ranges (`GalaxyChunkRequest` → `GalaxyChunk`,
+Bulk) until it holds all systems.
 
 **Fire → kill → respawn:** `InputCommand.fire` → server publishes `FireWeapon`
 → `ResolveFireWeapon` applies damage, may publish `Crime` (wanted +1, police
@@ -434,9 +461,9 @@ session `EntityDeath`, restores hull/shields, clears wanted, sweeps every NPC
 refreshed `PlayerInfo`, resends `CargoManifest` (now empty). NPC victims are
 destroyed and broadcast to everyone.
 
-**Hyperspace:** chart crosshair → `StationRequest{Teleport, stationId=systemId}`
-→ server runs `Hyperspace()` → `StationResponse{status = Arrived | Witchspace |
-NotEnoughFuel | OutOfRange | CantDock}` (+ a `PlayerInfo` broadcast if the
+**Hyperspace:** chart crosshair → `TravelRequest{Hyperspace, systemId}` →
+server runs `Hyperspace()` → `TravelResponse{status = Arrived | Witchspace |
+NotEnoughFuel | OutOfRange | UnknownSystem}` (+ a `PlayerInfo` broadcast if the
 wanted level cooled) → the new position rides the next snapshot; fuel rides
 `PlayerStatus`.
 
@@ -749,17 +776,21 @@ The client is deliberately dumb. It keeps:
   (`SnapshotInterpolator` + dead-reckoning on `speed`).
 - **HUD mirrors:** shields/energy/fuel/credits/missiles/cargo/wanted/score from
   `PlayerStatus` + `CargoManifest`; the roster (`PlayerInfo`) for ship labels;
-  the market/chart from `StationResponse`/manifest. Local shield regen runs
-  **only** when disconnected (single-player fallback path).
+  the market/chart from `StationResponse`/the pulled galaxy chunks. There is
+  **no offline simulation**: a disconnected client shows a connection-lost
+  screen and retries (the single-player fallback was deleted — S4 extended).
 - **Input:** raw keys → `ActionTriggered` (LocalOnly bus) → command builder →
   one `InputCommand` per frame. Station screens send `StationRequest`s.
-  The hyperspace key on a chart sends `Teleport`; the jump key sends
-  `JumpDrive`; the server answers both.
+  The hyperspace key on a chart sends `TravelRequest{Hyperspace}` (docked or
+  in flight); the jump key sends `TravelRequest{InSystemJump}`; the server
+  answers both with a `TravelResponse`. In-flight docking is request-based:
+  the proximity check and the docking computer only *send* a Dock request,
+  and the docked flow starts on `StationResponse{Dock, Ok}`.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
 
-A `StationResponse{Teleport, Arrived|Witchspace}` flips the client from the
+A `TravelResponse{Hyperspace, Arrived|Witchspace}` flips the client from the
 station screen into flight; position updates always come from snapshots.
 
 ---
@@ -851,13 +882,17 @@ station screen into flight; position updates always come from snapshots.
 | `0x0201` | EntityDeath | Wire | Gameplay | S→C |
 | `0x0202` | EcmPulse | Wire | Gameplay | S→C |
 | `0x0203` | EscapePodUsed | Wire | Gameplay | S→C (owner) |
-| `0x0210` | GalaxyManifest chunk (hand-encoded) | Wire | Bulk | S→C |
+| `0x0210` | *retired* (was the hand-encoded GalaxyManifest chunk → `GalaxyChunk 0x1003`) | — | — | — |
 | `0x0300` | Chat *(UI pending)* | Wire | Gameplay | Both |
 | `0x0301` | PlayerInfo | Wire | Gameplay | S→C |
 | `0x0302` | PlayerStatus | Wire | Gameplay | S→C (owner) |
 | `0x0303` | CargoManifest | Wire | Gameplay | S→C (owner) |
 | `0x0400` | StationRequest | Wire | Gameplay | C→S |
 | `0x0401` | StationResponse | Wire | Gameplay | S→C |
+| `0x1000` | TravelRequest | Wire | Gameplay | C→S |
+| `0x1001` | TravelResponse | Wire | Gameplay | S→C |
+| `0x1002` | GalaxyChunkRequest | Wire | Bulk | C→S |
+| `0x1003` | GalaxyChunk | Wire | Bulk | S→C |
 | `0x8101` | FireWeapon | LocalOnly (server) | — | — |
 | `0x8102` | Crime | LocalOnly (server) | — | — |
 | `0x8103` | EntityKilled | LocalOnly (server) | — | — |
@@ -943,30 +978,24 @@ lane; *that* spawns the session. Deletes the `Commander-<n>` placeholder path
 and gives session-security work (§13.2.2) a single choke point.
 
 **S2 — One serialization path: fold the galaxy manifest into the catalog codec.**
-`0x0210` is the only wire message outside the generic `Fields()` codec — a
-hand-rolled fixed layout with a NUL-padded `char[12]` name. A second codec is
-a second thing to fuzz, golden-test, and explain. Re-cut it as a
-catalog-encoded `GalaxyManifestChunk` (new id), keep the Bulk-lane chunking,
-retire `0x0210`. Design the successor as **request-driven** (`baseIndex/count`
-pulls) rather than a connect-time fire-hose — that both bounds the connect
-burst and is the prerequisite for fog-of-war (§13.2.3).
+✅ *Done 2026-07-03:* the hand-encoded `0x0210` chunk is retired; the client
+pulls the chart with `GalaxyChunkRequest`/`GalaxyChunk` (`0x1002`/`0x1003`,
+§4.4) through the generic codec, request-driven (`baseIndex/count`) rather
+than a connect-time fire-hose — bounding the connect burst and readying
+fog-of-war (§13.2.3).
 
 **S3 — Split travel out of the station protocol.**
-`Teleport` and `JumpDrive` ride `StationRequest` but are intercepted before
-`ProcessStationRequest` and routed to `HyperspaceSystem` — the message name
-lies about its handler, `stationId` means *system id* for one kind only, and
-`StationStatus` mixes commerce outcomes (`NoStock`, `HoldFull`) with travel
-outcomes (`Arrived`, `Witchspace`, `MassLocked`). Introduce
-`TravelRequest{kind, systemId}` / `TravelResponse{status}` and let the station
-protocol shrink back to docking + commerce. The code already separates them;
-the wire should match.
+✅ *Done 2026-07-03:* `TravelRequest{kind, systemId}` / `TravelResponse{status}`
+(`0x1000`/`0x1001`, §4.4) carry travel; the station protocol is docking +
+commerce again. `StationRequestKind::Teleport/JumpDrive` and the travel
+`StationStatus` values are retired in place (reserved, rejected if received).
 
 **S4 — Delete the client's single-player shield-regen fallback.**
-§7 admits local shield regen runs "only when disconnected". Single-player is
-retired; this is the one game rule still living in the client, in direct
-tension with the document's load-bearing rule. A disconnected client shows a
-connection-lost state, not simulated vitals. Cheap, and it makes the central
-claim literally true.
+✅ *Done 2026-07-03, extended:* the whole single-player fallback engine was
+deleted (not just shield regen — local combat/AI/spawning, local travel, the
+client-side altitude/cabin-temp deaths, local market/equipment mutation). A
+disconnected client shows a connection-lost state and retries. The central
+claim is literally true; see docs/IMPLEMENTATION.md A1 for the residue notes.
 
 **S5 — Replace `Sleep(33)` with an accumulator-based fixed timestep.**
 `Sleep` guarantees *at least* the delay; tick duration drifts under load, so
@@ -1274,9 +1303,9 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 16 | Drifting markets + traders-as-supply + hauler routing | §13.2.3-3/4 | Feature | L | exploit, emergence |
 | 17 | `FactionId` + standings | §13.2.3-7 | Feature | M | diplomacy, mass PvP |
 | 18 | Kill-VFX broadcast; missile-lock validation; chat + abuse controls | §13.2.2 | Feature | S–M | MMO polish |
-| 19 | Travel protocol split; codec unification; band notes; math-stack retirement | S2, S3, S6, S7 | Simplify | S | protocol hygiene |
+| 19 | Travel protocol split; codec unification; band notes ✅ (done 2026-07-03); math-stack retirement rides item 13 | S2, S3, S6, S7 | Simplify | S | protocol hygiene |
 | 20 | BotClient harness → 100-player load test | §12 | Test | M | validates 6–10 |
-| 21 | Delete client shield-regen fallback | S4 | Simplify | XS | dogma integrity |
+| 21 | Delete client shield-regen fallback ✅ (done 2026-07-03, extended to the whole offline engine) | S4 | Simplify | XS | dogma integrity |
 
 Sequencing spine: **1 → 2/3/4 → 5 → 6/7/8 → 9/10/11 → 12+**, with 13 (render)
 and 19/21 (hygiene) parallelizable at any point, and 20 gating any entity-cap

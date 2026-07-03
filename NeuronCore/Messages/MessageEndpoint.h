@@ -47,8 +47,6 @@ namespace Neuron::Msg
   class MessageEndpoint
   {
   public:
-    [[nodiscard]] Net::ReliableChannel& Channel(MessageLane _lane) { return m_lanes[LaneIndex(_lane)]; }
-
     // Queue a catalog message on the channel for its lane; returns the assigned seq.
     template <Message M>
     uint32_t Send(const M& _m)
@@ -57,8 +55,8 @@ namespace Neuron::Msg
       return m_lanes[LaneIndex(M::Lane)].Send(Raw(M::Id), Encode(_m));
     }
 
-    // Queue a pre-encoded payload on an explicit lane (for hand-encoded messages such
-    // as the chunked galaxy manifest, which isn't routed through the generic codec).
+    // Queue a pre-encoded payload on an explicit lane (transport-level escape hatch;
+    // exercised by the lane tests - every production message is a catalog message).
     uint32_t SendRaw(MessageLane _lane, uint16_t _type, const std::vector<uint8_t>& _payload)
     {
       return m_lanes[LaneIndex(_lane)].Send(_type, _payload);

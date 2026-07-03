@@ -4,10 +4,10 @@
 
 #include <chrono>
 
-#include "GalaxyManifest.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"
 #include "Messages/Defs/CoreEvents.h"
+#include "Messages/Defs/GalaxyChunks.h"
 
 namespace Neuron::Client
 {
@@ -104,21 +104,47 @@ namespace Neuron::Client
       m_lastInterpTick = latest;
     }
 
-    // Drain reliable events: AssignPlayer is the handshake and GalaxyManifest is
+    // Drain reliable events: AssignPlayer is the handshake and GalaxyChunk is
     // the chart data (both consumed here); the rest are queued for the application
     // via PollEvent().
     Net::ReliableMessage msg;
     while (m_events.Receive(msg))
     {
       Msg::AssignPlayer assign;
-      uint32_t total = 0;
-      uint32_t base = 0;
+      Msg::GalaxyChunk chunk;
       if (Msg::TryDecode(msg, assign))
+      {
         m_localPlayer = assign.entityId;
-      else if (Net::DecodeManifestChunk(msg, total, base, m_galaxy))
-        m_galaxy.reserve(total);   // chunks arrive in order; just accumulate
+      }
+      else if (Msg::TryDecode(msg, chunk))
+      {
+        // Chunks arrive in request order on the ordered Bulk lane, so they
+        // append contiguously; the first one sizes the table.
+        m_galaxyTotal = chunk.total;
+        m_galaxyKnownTotal = true;
+        m_galaxy.reserve(chunk.total);
+        if (chunk.baseIndex == m_galaxy.size())
+          for (const Msg::GalaxySystemEntry& e : chunk.systems)
+            m_galaxy.push_back(Msg::FromWireEntry(e));
+      }
       else
+      {
         m_appEvents.push_back(std::move(msg));
+      }
+    }
+
+    // Pull the galaxy chart in bounded ranges: ask for the next range once the
+    // previous request has fully arrived, until the whole table is here. The
+    // request rides the reliable Bulk lane, so it is redelivered until answered
+    // (the server ignores unknown endpoints until the session exists; the
+    // channel's resend covers that window).
+    if (!GalaxyComplete() && m_galaxy.size() >= m_galaxyRequestedUpTo)
+    {
+      Msg::GalaxyChunkRequest req;
+      req.baseIndex = static_cast<uint32_t>(m_galaxy.size());
+      req.count = Msg::GALAXY_CHUNK_MAX_REQUEST;
+      m_events.Send(req);
+      m_galaxyRequestedUpTo = req.baseIndex + req.count;
     }
 
     // Send our cumulative acks back so the server stops resending delivered events

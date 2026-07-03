@@ -156,10 +156,21 @@ namespace DSOServer
       while (s.events.Receive(msg))
       {
         Net::StationRequest req;
+        Msg::TravelRequest travel;
+        Msg::GalaxyChunkRequest chunkReq;
         Msg::ClientHello hello;
         if (Msg::TryDecode(msg, req))
         {
           HandleStationRequest(s, req);
+        }
+        else if (Msg::TryDecode(msg, travel))
+        {
+          HandleTravelRequest(s, travel);
+        }
+        else if (Msg::TryDecode(msg, chunkReq))
+        {
+          // The client pulls the galaxy chart in bounded ranges (Bulk lane).
+          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);
         }
         else if (Msg::TryDecode(msg, hello))
         {
@@ -174,33 +185,36 @@ namespace DSOServer
 
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)
   {
-    Net::StationResponse resp;
+    // Docking + commerce only. The retired travel kinds (Teleport/JumpDrive)
+    // fall through to the station dispatcher, which rejects them - travel rides
+    // TravelRequest (HandleTravelRequest) since the protocol split.
+    const Net::StationResponse resp =
+        GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
+    _session.events.Send(resp);   // Gameplay lane
+  }
+
+  void GameServer::HandleTravelRequest(GameLogic::Session& _session, const Msg::TravelRequest& _req)
+  {
+    Msg::TravelResponse resp;
     resp.kind = _req.kind;
 
-    if (_req.kind == Net::StationRequestKind::Teleport)
+    if (_req.kind == Msg::TravelKind::Hyperspace)
     {
-      // G7: a real fuel-gated hyperspace jump (may misfire into witchspace),
-      // NOT the old docked instant-teleport. Routed through HyperspaceSystem.
+      // G7: a fuel-gated hyperspace jump (may misfire into witchspace).
       const GameLogic::HyperspaceOutcome hj =
-          GameLogic::Hyperspace(m_world, _session.entity, _req.stationId, m_hyperRng);
+          GameLogic::Hyperspace(m_world, _session.entity, _req.systemId, m_hyperRng);
       resp.status = hj.status;
-      if (const auto* wal = m_world.TryGet<GameLogic::Wallet>(_session.entity))
-        resp.credits = wal->credits;
       if (hj.wantedChanged)
         BroadcastPlayerInfo(_session.entity.index);
       if (hj.jumped)
         printf("[tick %u] player %u hyperspace -> system %u (%s)\n", m_tick, _session.entity.index,
-               _req.stationId, hj.witchspace ? "WITCHSPACE misjump" : "arrived");
+               _req.systemId, hj.witchspace ? "WITCHSPACE misjump" : "arrived");
     }
-    else if (_req.kind == Net::StationRequestKind::JumpDrive)
+    else if (_req.kind == Msg::TravelKind::InSystemJump)
     {
       // G7: in-system fast jump toward the planet (mass-lock gated).
       const GameLogic::JumpDriveOutcome jd = GameLogic::InSystemJump(m_world, _session.entity);
       resp.status = jd.status;
-    }
-    else
-    {
-      resp = GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
     }
 
     _session.events.Send(resp);   // Gameplay lane
