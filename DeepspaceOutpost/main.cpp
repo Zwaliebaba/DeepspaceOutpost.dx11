@@ -43,6 +43,14 @@
 #include <string>
 #include <unordered_map>
 
+// The client's in-process event bus. Inbound reliable facts (decoded from the
+// server) are published here and independent subscribers (commerce, audio/VFX,
+// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
+// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
+// Defined up here with the includes: the input key handlers publish onto it well
+// before the subscriber-registration block further down.
+static Neuron::Msg::MessageBus g_clientBus;
+
 int draw_lasers;
 int mcount;
 int message_count;
@@ -1166,12 +1174,6 @@ void info_message(const char* message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
-// The client's in-process event bus. Inbound reliable facts (decoded from the
-// server) are published here and independent subscribers (commerce, audio/VFX,
-// view) react - mirroring the server's Msg::MessageBus. New presentation reactions
-// (camera shake, kill feed, ...) just Subscribe<> instead of editing one switch.
-static Neuron::Msg::MessageBus g_clientBus;
-
 // This frame's discrete combat input, accumulated from ActionTriggered messages and
 // consumed by send_player_input. Continuous flight (roll/pitch/throttle) is NOT here -
 // it stays the legacy rate-based PlayerFlight state, normalized to axes at send time.
