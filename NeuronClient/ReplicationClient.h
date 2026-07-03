@@ -82,6 +82,12 @@ namespace Neuron::Client
       return m_interp.SampleAll(_alpha);
     }
 
+    // The interpolation alpha to sample at THIS frame: renders ~one snapshot
+    // interval in the past and tweens prev->curr, from the measured snapshot
+    // arrival cadence (presentation only; see Net::InterpolationAlpha). Returns
+    // 1.0 (show latest) until two snapshots have been timed.
+    [[nodiscard]] double InterpolationAlpha() const;
+
     void EvictStale(uint32_t _maxAge) { m_interp.EvictStale(_maxAge); }
 
     // Drop one entity now (on an authoritative despawn/death), so a destroyed
@@ -123,6 +129,11 @@ namespace Neuron::Client
     uint32_t m_localPlayer = 0xFFFFFFFFu;   // sentinel until assigned (never entity 0)
     bool m_haveServer = false;
     bool m_open = false;
+
+    // Snapshot arrival timing for render interpolation (presentation only).
+    double m_currArrivalMs = 0.0;        // wall-clock when the latest tick first appeared
+    double m_interpIntervalMs = 33.0;    // measured gap between the last two snapshots (~1 tick seed)
+    uint32_t m_lastInterpTick = 0;       // latest tick we have timestamped
   };
 
   // Process-wide replication client (mirrors GameUniverse()'s temporary global).

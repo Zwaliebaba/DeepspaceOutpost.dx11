@@ -2,6 +2,8 @@
 
 #include "ReplicationClient.h"
 
+#include <chrono>
+
 #include "GalaxyManifest.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"
@@ -17,6 +19,14 @@ namespace Neuron::Client
 
     // Cap datagrams processed per Pump() so a flood can never stall the frame.
     constexpr int kMaxDrainPerPump = 256;
+
+    // Monotonic wall clock in milliseconds (presentation timing only - this is the
+    // client render path, not the deterministic simulation).
+    [[nodiscard]] double NowMs()
+    {
+      using namespace std::chrono;
+      return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+    }
   }
 
   bool ReplicationClient::Open(uint16_t _port)
@@ -76,6 +86,24 @@ namespace Neuron::Client
       }
     }
 
+    // Presentation timing: when a newer snapshot tick first appears, stamp its
+    // arrival and measure the interval since the previous stamp. The render then
+    // samples one interval in the past (InterpolationAlpha) so motion tweens
+    // smoothly between snapshots instead of snapping to the latest tick.
+    const uint32_t latest = m_interp.LatestTick();
+    if (latest != m_lastInterpTick)
+    {
+      const double now = NowMs();
+      if (m_currArrivalMs > 0.0)
+      {
+        const double dt = now - m_currArrivalMs;
+        if (dt > 1.0 && dt < 1000.0)   // ignore duplicate stamps and long stalls
+          m_interpIntervalMs = dt;
+      }
+      m_currArrivalMs = now;
+      m_lastInterpTick = latest;
+    }
+
     // Drain reliable events: AssignPlayer is the handshake and GalaxyManifest is
     // the chart data (both consumed here); the rest are queued for the application
     // via PollEvent().
@@ -113,6 +141,11 @@ namespace Neuron::Client
     Msg::PacketWriter writer(Msg::MessageLane::Unreliable);
     writer.Add(_input);
     m_socket.SendTo(m_server, writer.Bytes().data(), writer.Size());
+  }
+
+  double ReplicationClient::InterpolationAlpha() const
+  {
+    return Net::InterpolationAlpha(NowMs(), m_currArrivalMs, m_interpIntervalMs);
   }
 
   bool ReplicationClient::PollEvent(Net::ReliableMessage& _out)

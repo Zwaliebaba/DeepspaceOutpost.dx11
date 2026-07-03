@@ -182,31 +182,47 @@ disconnected client shows the connection-lost state. All remaining
 `DeepspaceOutpost` code is input capture, request sending, replicated-state
 rendering, HUD, audio, and screens.
 
-### A2 — Wire Equip and Refuel through the server (closes D1/D2) — **S**
+### A2 — Wire Equip and Refuel through the server (closes D1/D2) — **S** — ✅ **done 2026-07-03**
 
-Rewrite `equip_do` (`docked.cpp:1663-1806`) to send
-`StationRequest{Equip, commodity=EquipItem}` and apply results only from
-`StationResponse` + `PlayerStatus` (credits/missiles) — delete every local
-`cmdr.<equipment> = 1` and credit deduction. Add a refuel action to the
-equip screen sending `StationRequest{Refuel}`. Server paths already exist
-and are tested; this is client-only.
+As implemented, in thin-client mode `equip_do` (`docked.cpp`) sends a
+station request instead of mutating `cmdr`: Fuel → `StationRequest{Refuel}`;
+the six server-modeled items (Missile/LargeCargoBay/Ecm/FuelScoop/
+EnergyBomb/EscapePod) → `StationRequest{Equip, commodity=EquipItem}` via a
+new `server_equip_item` mapping helper. Items the server does not model
+(lasers, extra energy unit, docking computer, galactic hyperdrive) are not
+purchasable while connected (they belong to the retired single-player tier;
+the offline branch still handles them until A1 removes it). Ownership is
+applied only from the reply: the `StationResponse` handler (`main.cpp`) now
+mirrors an `Equip` Ok result to the matching `cmdr` flag/capacity, and
+**the cargo-slot write is guarded to Buy/Sell** (an Equip response reuses
+`commodity` for the EquipItem id 1–6, which previously would have clobbered
+a cargo hold of the same index — a latent bug this fixes). `PlayerStatus`
+now also mirrors `missiles` (server-owned rack count).
 
-*Acceptance:* equipment ownership and fuel change only after a
-`StationResponse{Ok}` round-trip; a rejected purchase (`NotEnoughCredits`,
-`AlreadyOwned`) changes nothing locally.
+*Acceptance:* equipment ownership, fuel and missiles change only after a
+`StationResponse{Ok}` / `PlayerStatus` round-trip; a rejected purchase
+changes nothing locally. (Client-side visual behaviour is not covered by
+the headless suites — validated by the CI build + manual thin-client run.)
 
-### A3 — Real snapshot interpolation (closes D3) — **S**
+### A3 — Real snapshot interpolation (closes D3) — **S** — ✅ **done 2026-07-03**
 
-Replace the hardcoded `1.0` alphas (`space.cpp:695,817`) with a
-render-time-based alpha: track arrival times of the last two snapshot ticks
-in `ReplicationClient`, render at `now − interpolationDelay` (start with one
-snapshot interval ≈ 33 ms), clamp extrapolation via the existing
-dead-reckoning `speed`. This is presentation only; it also produces the
-`interpDelay` input that Track E1's lag compensation needs on the server.
+As implemented: `ReplicationClient::Pump` timestamps each snapshot tick as it
+first appears and measures the interval between the last two; a new pure,
+unit-tested `Net::InterpolationAlpha(now, arrival, interval)` (in
+`SnapshotInterpolator.h`) turns that into a render alpha that walks 0→1 over
+one interval, so the client renders ~one snapshot interval in the past and
+tweens prev→curr (the interpolator already blended given an alpha — the
+client just always passed 1.0). `render_replicated_objects` samples both the
+entities and the floating-origin local player at that single per-frame alpha,
+keeping the frame coherent. Targeting/logic queries that legitimately want
+the freshest tick (`find_lock_target`, `chart_current_system`, the
+death-VFX position capture) stay at 1.0. The measured interval is the
+`interpDelay` input Track E1's lag compensation will need server-side.
 
-*Acceptance:* NeuronClient test: two synthetic snapshots at ticks N/N+1 →
-sampled position at alpha 0.5 is the midpoint; visually smooth motion at
-30 Hz server / 144 Hz client.
+*Acceptance:* NeuronCore test asserts alpha walks 0 → 0.5 → 1 across one
+interval and clamps outside it (`InterpolationTests.cpp`); the existing
+prev→curr position-lerp tests already cover the blend. Smooth motion at
+display rate is validated by the CI build + manual run.
 
 ### A4 — Delete dead code (per §1.3 table) — **S** — ✅ **done 2026-07-03**
 

@@ -690,9 +690,12 @@ void render_replicated_objects (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 
-	// Sample at alpha 1.0 (the latest tick) for now; a render-time-based alpha for
-	// smoother interpolation is a later refinement.
-	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(1.0);
+	// Interpolate at a render-time alpha: sample ~one snapshot interval in the past
+	// and tween prev->curr, so replicated motion is smooth at display rate instead
+	// of snapping to the latest tick. The same alpha rebases the floating origin
+	// (the local player) below, keeping every entity's frame coherent.
+	const double alpha = rc.InterpolationAlpha();
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(alpha);
 	std::vector<Neuron::Client::RenderRecord> records =
 		Neuron::Client::BuildRenderRecords(ents, rc.LocalPlayer());
 
@@ -814,7 +817,7 @@ void render_replicated_objects (void)
 	if (!s_explosions.empty())
 	{
 		Neuron::Net::EntitySnapshot meSnap;
-		if (rc.Sample (rc.LocalPlayer(), 1.0, meSnap))
+		if (rc.Sample (rc.LocalPlayer(), alpha, meSnap))
 		{
 			std::vector<Neuron::Net::EntitySnapshot> es;
 			es.reserve (s_explosions.size() + 1);
