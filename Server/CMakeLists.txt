@@ -25,6 +25,9 @@ add_executable(Server ${SERVER_SOURCES} ${SERVER_HEADERS})
 target_compile_features(Server PRIVATE cxx_std_23)
 
 if(MSVC)
+    # /fp:strict rides in transitively from GameLogic (PUBLIC) so the server's
+    # own TUs, which inline the header-only simulation, match its floating-point
+    # contract exactly.
     target_compile_options(Server PRIVATE /W4)
 endif()
 
