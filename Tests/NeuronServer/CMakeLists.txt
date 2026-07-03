@@ -7,6 +7,8 @@
 
 add_executable(NeuronServer.Tests
     SmokeTests.cpp
+    DatagramPumpTests.cpp
+    OnChangeCacheTests.cpp
 )
 
 target_compile_features(NeuronServer.Tests PRIVATE cxx_std_23)

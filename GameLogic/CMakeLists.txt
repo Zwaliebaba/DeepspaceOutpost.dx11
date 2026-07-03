@@ -26,6 +26,11 @@ set(GAMELOGIC_HEADERS
     ServerSessions.h
     CombatSystem.h
     MissileSystem.h
+    AiSystem.h
+    CollisionSystem.h
+    HyperspaceSystem.h
+    KillRewards.h
+    LootSystem.h
     SpawnDirector.h
     StationServices.h
     CombatMessages.h
