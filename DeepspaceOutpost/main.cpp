@@ -35,6 +35,7 @@
 #include "Messages/Framing.h"            // Neuron::Msg::PROTOCOL_VERSION (handshake)
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
+#include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
@@ -885,8 +886,10 @@ void handle_flight_keys(void)
 
   if (kbd_ecm_pressed)
   {
+    // Thin client: the server owns the burst (validation, energy, cooldown, the
+    // downed missiles); the EcmPulse event coming back plays the classic buzz.
     if (!docked && cmdr.ecm)
-      activate_ecm(1);
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
   }
 
   if (kbd_find_pressed)
@@ -962,17 +965,22 @@ void handle_flight_keys(void)
 
   if (kbd_energy_bomb_pressed)
   {
+    // Thin client: the server validates ownership and applies the blast; clear
+    // the local mirror optimistically (it is one-shot either way).
     if ((!docked) && (cmdr.energy_bomb))
     {
-      detonate_bomb = 1;
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
       cmdr.energy_bomb = 0;
     }
   }
 
   if (kbd_escape_pressed)
   {
+    // Thin client: the server consumes the pod, clears the record, refuels and
+    // respawns us docked; the EscapePodUsed event coming back flips the client
+    // into the docked flow (replacing the legacy local escape sequence).
     if ((!docked) && (cmdr.escape_pod) && (!witchspace))
-      run_escape_sequence();
+      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
   }
 }
 
@@ -1170,6 +1178,9 @@ static Neuron::Msg::MessageBus g_clientBus;
 static bool     s_frameFire = false;
 static bool     s_frameMissile = false;
 static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
+static bool     s_frameEcm = false;
+static bool     s_frameEnergyBomb = false;
+static bool     s_frameEscapePod = false;
 
 // The other players in view, keyed by entity id: their commander name + legal
 // status, as replicated by PlayerInfo. Used to label ships and (later) chat; an
@@ -1262,6 +1273,29 @@ static void register_client_event_handlers(void)
     PlayerDefense().frontShield = _ps.frontShield;
     PlayerDefense().aftShield = _ps.aftShield;
     PlayerDefense().energy = _ps.energy;
+    PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
+  });
+
+  // ECM burst (G8): someone's unit fired - play the classic buzz. The downed
+  // missiles arrive as EntityDeath events (explosions) alongside.
+  g_clientBus.Subscribe<Neuron::Msg::EcmPulse>([](const Neuron::Msg::EcmPulse&)
+  {
+    snd_play_sample(SND_ECM);
+  });
+
+  // Escape pod (G8): our pod fired - the ship is gone and the server has us
+  // docked at the nearest station with an empty hold and a clean record (the
+  // CargoManifest/PlayerStatus refreshes ride alongside). Flip into the docked
+  // flow, legacy abandon_ship style.
+  g_clientBus.Subscribe<Neuron::Msg::EscapePodUsed>([](const Neuron::Msg::EscapePodUsed& _e)
+  {
+    if (_e.entityId != Client::ReplicationClientInstance().LocalPlayer())
+      return;
+    cmdr.escape_pod = 0;
+    memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
+    snd_play_sample(SND_DOCK);
+    dock_player();
+    current_screen = SCR_BREAK_PATTERN;
   });
 
   // Cargo manifest: the authoritative per-commodity hold, resent after a scoop or a
@@ -1299,6 +1333,15 @@ static void register_client_event_handlers(void)
         s_frameMissile = true;
         s_frameMissileTarget = _a.param;
         break;
+      case Neuron::Msg::InputAction::Ecm:
+        s_frameEcm = true;
+        break;
+      case Neuron::Msg::InputAction::EnergyBomb:
+        s_frameEnergyBomb = true;
+        break;
+      case Neuron::Msg::InputAction::EscapePod:
+        s_frameEscapePod = true;
+        break;
     }
   });
 }
@@ -1319,6 +1362,8 @@ static void process_server_events(void)
     Neuron::Msg::PlayerInfo info;
     Neuron::Msg::PlayerStatus status;
     Neuron::Msg::CargoManifest cargo;
+    Neuron::Msg::EcmPulse ecm;
+    Neuron::Msg::EscapePodUsed pod;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
@@ -1332,6 +1377,10 @@ static void process_server_events(void)
       g_clientBus.Publish(status);
     else if (Neuron::Msg::TryDecode(msg, cargo))
       g_clientBus.Publish(cargo);
+    else if (Neuron::Msg::TryDecode(msg, ecm))
+      g_clientBus.Publish(ecm);
+    else if (Neuron::Msg::TryDecode(msg, pod))
+      g_clientBus.Publish(pod);
   }
   g_clientBus.Dispatch();
 }
@@ -1375,6 +1424,9 @@ static void send_player_input(void)
   s_frameFire = false;
   s_frameMissile = false;
   s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  s_frameEcm = false;
+  s_frameEnergyBomb = false;
+  s_frameEscapePod = false;
   if (kbd_fire_pressed)
     g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
   if (s_fire_missile_intent)
@@ -1387,6 +1439,9 @@ static void send_player_input(void)
   in.fire = s_frameFire;
   in.fireMissile = s_frameMissile;
   in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
+  in.ecm = s_frameEcm;
+  in.energyBomb = s_frameEnergyBomb;
+  in.escapePod = s_frameEscapePod;
 
   Client::ReplicationClientInstance().SendInput(in);
 }

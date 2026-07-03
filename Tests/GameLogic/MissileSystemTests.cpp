@@ -3,6 +3,19 @@
 
 #include "GameLogic.h"
 
+// G8 gave StepMissiles a deterministic RNG stream and an out-list of auto-ECM
+// pulses; these tests exercise the pre-ECM behaviour (no fitted targets), so a
+// thin adapter keeps the call sites readable.
+namespace
+{
+  std::vector<Neuron::GameLogic::Kill> StepMissilesPlain(Neuron::ECS::Registry& _w)
+  {
+    uint32_t rng = 1u;
+    std::vector<uint32_t> pulses;
+    return Neuron::GameLogic::StepMissiles(_w, rng, pulses);
+  }
+}
+
 using namespace Neuron;
 
 namespace
@@ -54,7 +67,7 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
   const int64_t zStart = w.Get<GameLogic::WorldTransform>(missile).position.z;
 
   // One tick: the missile has flown forward but not yet reached the target.
-  std::ignore = GameLogic::StepMissiles(w);
+  std::ignore = StepMissilesPlain(w);
   EXPECT_TRUE(w.Get<GameLogic::WorldTransform>(missile).position.z > zStart);
   EXPECT_TRUE(w.IsValid(missile));
 
@@ -63,7 +76,7 @@ TEST(MissileSys, HomesOverSeveralTicksAndDestroysTheTarget)
   // loop) destroys the victims, which we mimic here.
   bool killedPirate = false, killedMissile = false;
   for (int i = 0; i < GameLogic::MISSILE_LIFE && !killedPirate; ++i)
-    for (const GameLogic::Kill& k : GameLogic::StepMissiles(w))
+    for (const GameLogic::Kill& k : StepMissilesPlain(w))
     {
       if (k.victim == pirate)  { killedPirate = true; EXPECT_TRUE(k.killer == shooter.index); }
       if (k.victim == missile) { killedMissile = true; }
@@ -87,7 +100,7 @@ TEST(MissileSys, DumbFiresAndSelfDestructsWithNoTarget)
 
   // It flies straight and self-destructs once its life runs out.
   for (int i = 0; i < GameLogic::MISSILE_LIFE; ++i)
-      std::ignore = GameLogic::StepMissiles(w);
+      std::ignore = StepMissilesPlain(w);
   EXPECT_TRUE(!w.IsValid(missile));
 }
 
@@ -104,7 +117,7 @@ TEST(MissileSys, DetonatesOnTheStationWithoutDestroyingIt)
   // but the missile reports its own explosion; mimic the server destroying it.
   bool stationKilled = false, missileExploded = false;
   for (int i = 0; i < GameLogic::MISSILE_LIFE && w.IsValid(missile); ++i)
-    for (const GameLogic::Kill& k : GameLogic::StepMissiles(w))
+    for (const GameLogic::Kill& k : StepMissilesPlain(w))
     {
       if (k.victim == station) stationKilled = true;
       if (k.victim == missile) missileExploded = true;

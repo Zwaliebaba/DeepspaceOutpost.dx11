@@ -29,6 +29,7 @@
 #include "SimComponents.h"
 #include "StationServices.h"
 #include "CombatSystem.h"
+#include "EquipmentSystem.h"   // ShipGear (laser heat + ECM recharge, G8)
 
 namespace Neuron::GameLogic
 {
@@ -217,6 +218,7 @@ namespace Neuron::GameLogic
       // an instant death.
       _world.Get<Combatant>(e).invulnTicks = RESPAWN_GRACE_TICKS;
       _world.Add<Shields>(e, Shields{});   // full directional shields (player-only feature)
+      _world.Add<ShipGear>(e, ShipGear{}); // laser temperature + ECM recharge (G8)
       _world.Add<Wanted>(e, Wanted{});
       _world.Add<PlayerRecord>(e, PlayerRecord{});   // name filled in by the caller
       _world.Add<NetType>(e, NetType{ ShipType::Viper });

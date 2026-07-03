@@ -91,6 +91,10 @@ namespace Neuron::GameLogic
       _world.Add<FlightCaps>(e, NpcFlightCaps());
       _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 64 + static_cast<int>(NextRand() % 64u),
                                       /*missiles*/ 2, /*maxEnergy*/ 80 });
+      // G8: about half the pirates ship an ECM (the legacy hunters were a mixed
+      // bag) - a player missile has to get lucky against the fitted ones.
+      if ((NextRand() & 1u) != 0)
+        _world.Add<EcmFitted>(e, EcmFitted{});
       return e;
     }
 
@@ -113,10 +117,12 @@ namespace Neuron::GameLogic
         // police is a crime, not a payday.
         _world.Add<NetType>(e, NetType{ ShipType::Viper });
         // G5: police fly by intent too - legacy station-Viper bravery (113), one
-        // missile in the rack.
+        // missile in the rack. G8: station Vipers always ship an ECM (legacy
+        // launch_enemy FLG_HAS_ECM).
         _world.Add<FlightIntent>(e, FlightIntent{});
         _world.Add<FlightCaps>(e, NpcFlightCaps());
         _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 113, /*missiles*/ 1, /*maxEnergy*/ 120 });
+        _world.Add<EcmFitted>(e, EcmFitted{});
         spawned.push_back(e);
       }
       return spawned;
@@ -137,6 +143,9 @@ namespace Neuron::GameLogic
       _world.Add<AiPilot>(e, AiPilot{ /*bravery*/ 0, /*missiles*/ 0, /*maxEnergy*/ 60 });
       _world.Add<TradeLane>(e, TradeLane{ _to });
       _world.Add<NetType>(e, NetType{ _hull });
+      // G8: civilian lane flyers ship an ECM (legacy launch_shuttle FLG_HAS_ECM) -
+      // pirating a trader takes lasers, not a fire-and-forget missile.
+      _world.Add<EcmFitted>(e, EcmFitted{});
       return e;
     }
 

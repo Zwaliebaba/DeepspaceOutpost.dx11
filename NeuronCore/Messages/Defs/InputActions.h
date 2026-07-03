@@ -26,6 +26,9 @@ namespace Neuron::Msg
   {
     Fire = 0,           // fire the front laser this frame (held)
     LaunchMissile = 1,  // launch a missile at `param` (the locked target index)
+    Ecm = 2,            // fire the ECM burst (G8)
+    EnergyBomb = 3,     // detonate the energy bomb (G8)
+    EscapePod = 4,      // eject in the escape pod (G8)
   };
 
   struct ActionTriggered

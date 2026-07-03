@@ -12,6 +12,7 @@
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/CoreEvents.h"
+#include "Messages/Defs/EquipmentEvents.h"
 
 #include "ServerConfig.h"
 #include "SnapshotHelpers.h"
@@ -114,12 +115,21 @@ namespace DSOServer
 
       const ECS::EntityId player = m_sessions.OnInput(m_world, _from, in, m_tick);
 
-      // Player weapon intent becomes a FireWeapon command on the bus; the combat
-      // subscriber resolves it to facts after the receive loop.
-      if (in.fire && m_world.IsValid(player))
-        m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
-      if (in.fireMissile && m_world.IsValid(player))
-        m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
+      // Player weapon/equipment intent becomes FireWeapon commands on the bus;
+      // the combat subscriber resolves them to facts after the receive loop.
+      if (m_world.IsValid(player))
+      {
+        if (in.fire)
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
+        if (in.fireMissile)
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
+        if (in.ecm)
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Net::NO_MISSILE_TARGET });
+        if (in.energyBomb)
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Net::NO_MISSILE_TARGET });
+        if (in.escapePod)
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Net::NO_MISSILE_TARGET });
+      }
     }
   }
 
@@ -214,6 +224,9 @@ namespace DSOServer
     // hit this tick lands on the freshly-regenerated shield).
     if (m_tick % Cfg::SHIELD_REGEN_INTERVAL == 0)
       GameLogic::StepShieldRegen(m_world);
+
+    // G8: lasers cool and ECM units recharge, one step per tick.
+    GameLogic::StepEquipment(m_world);
   }
 
   void GameServer::ResolveKills()
@@ -224,7 +237,12 @@ namespace DSOServer
     // death and destroys the wreck (whose removal also rides the despawn diff).
     // A victim reported by two systems in one tick is fine - the death handler
     // skips already-resolved entities.
-    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world);
+    // G8: a missile homing on an ECM-fitted target can be jammed mid-flight;
+    // every jam is broadcast as the classic ECM cue.
+    std::vector<uint32_t> ecmPulses;
+    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses);
+    for (uint32_t defender : ecmPulses)
+      m_sessions.Broadcast(Msg::EcmPulse{ defender });
     for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world))
       kills.push_back(k);
     for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world))
@@ -295,6 +313,7 @@ namespace DSOServer
         if (const auto* h = m_world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
         if (const auto* pr = m_world.TryGet<GameLogic::PlayerRecord>(s.entity)) ps.score = pr->score;
+        if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
       }
       if (m_lastStatus.Changed(key, ps))
         s.events.Send(ps);
@@ -321,6 +340,26 @@ namespace DSOServer
 
     m_bus.Subscribe<GameLogic::Crime>([this](const GameLogic::Crime& _c) { OnCrime(_c); });
     m_bus.Subscribe<GameLogic::EntityKilled>([this](const GameLogic::EntityKilled& _k) { OnEntityKilled(_k); });
+
+    // G8 equipment facts -> wire cues. An ECM burst is a public event (everyone
+    // hears the classic buzz); a pod ejection is the owner's business - it also
+    // cleared their record and emptied their hold, so refresh both mirrors.
+    m_bus.Subscribe<GameLogic::EcmFired>([this](const GameLogic::EcmFired& _e)
+    {
+      m_sessions.Broadcast(Msg::EcmPulse{ _e.ship });
+    });
+    m_bus.Subscribe<GameLogic::PodEjected>([this](const GameLogic::PodEjected& _p)
+    {
+      for (auto& entry : m_sessions.All())
+        if (entry.second.entity.index == _p.ship)
+        {
+          entry.second.events.Send(Msg::EscapePodUsed{ _p.ship });
+          break;
+        }
+      BroadcastPlayerInfo(_p.ship);   // the record was cleared
+      SendCargoTo(_p.ship);           // the hold went down with the ship
+      printf("[tick %u] player %u ejected (escape pod) -> docked\n", m_tick, _p.ship);
+    });
   }
 
   void GameServer::OnCrime(const GameLogic::Crime& _c)

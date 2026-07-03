@@ -29,6 +29,7 @@ set(GAMELOGIC_HEADERS
     AiSystem.h
     CollisionSystem.h
     HyperspaceSystem.h
+    EquipmentSystem.h
     KillRewards.h
     LootSystem.h
     SpawnDirector.h

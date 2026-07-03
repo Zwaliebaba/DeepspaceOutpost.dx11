@@ -83,8 +83,9 @@ namespace Neuron::Msg
     int32_t cargoUsed = 0;
     int32_t wantedLevel = 0;
     int32_t score = 0;
-    auto Fields()       { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score); }
-    auto Fields() const { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score); }
+    int32_t laserTemp = 0;   // laser temperature (G8): overheat blocks firing
+    auto Fields()       { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score, laserTemp); }
+    auto Fields() const { return std::tie(energy, frontShield, aftShield, fuel, credits, missiles, cargoUsed, wantedLevel, score, laserTemp); }
   };
 
   // server -> client (owning session only): the local player's full per-commodity

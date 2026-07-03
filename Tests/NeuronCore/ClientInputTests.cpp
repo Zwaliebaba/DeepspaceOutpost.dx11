@@ -24,6 +24,9 @@ TEST(Input, RoundTripsOverUnreliableLane)
   in.fire = true;
   in.fireMissile = true;
   in.missileTarget = 4242;
+  in.ecm = true;
+  in.energyBomb = false;
+  in.escapePod = true;
 
   // The input rides the unified 'NMSG' unreliable lane as one record.
   Msg::PacketWriter pw(Msg::MessageLane::Unreliable);
@@ -45,11 +48,15 @@ TEST(Input, RoundTripsOverUnreliableLane)
   EXPECT_TRUE(out.fire == true);
   EXPECT_TRUE(out.fireMissile == true);
   EXPECT_TRUE(out.missileTarget == 4242u);
+  EXPECT_TRUE(out.ecm == true);
+  EXPECT_TRUE(out.energyBomb == false);
+  EXPECT_TRUE(out.escapePod == true);
 }
 
-// Byte-parity: the InputCommand payload must be byte-identical to the legacy
-// 'NCMD' field layout (sequence u32, three f32, two u8, target u32 - all LE), so
-// folding onto the new framing did not change the wire format of the fields.
+// Byte-parity: the InputCommand payload is the legacy 'NCMD' field layout
+// (sequence u32, three f32, two u8, target u32 - all LE) with the G8 equipment
+// bits (three u8) APPENDED - the legacy prefix is unchanged, so folding onto
+// the new framing and the G8 extension never rewrote the original fields.
 TEST(Input, PayloadMatchesLegacyByteLayout)
 {
   Net::ClientInput in;
@@ -60,6 +67,9 @@ TEST(Input, PayloadMatchesLegacyByteLayout)
   in.fire = true;
   in.fireMissile = true;
   in.missileTarget = 4242;
+  in.ecm = true;
+  in.energyBomb = false;
+  in.escapePod = true;
 
   const std::vector<uint8_t> payload = Msg::Encode(in);
 
@@ -71,6 +81,9 @@ TEST(Input, PayloadMatchesLegacyByteLayout)
   golden.WriteU8(1);
   golden.WriteU8(1);
   golden.WriteU32(4242);
+  golden.WriteU8(1);   // ecm        (G8, appended)
+  golden.WriteU8(0);   // energyBomb (G8, appended)
+  golden.WriteU8(1);   // escapePod  (G8, appended)
   EXPECT_EQ(payload, golden.Bytes());
 }
 

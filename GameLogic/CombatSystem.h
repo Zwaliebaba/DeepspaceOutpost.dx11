@@ -87,6 +87,11 @@ namespace Neuron::GameLogic
   // see KillRewards); a successful onward jump clears it.
   struct Witchspace {};
 
+  // Marks an NPC hull fitted with an ECM (G8, the legacy FLG_HAS_ECM): a homing
+  // missile has a per-tick chance of being jammed by it (StepMissiles). Players
+  // carry theirs on Equipment.ecm instead.
+  struct EcmFitted {};
+
   // At or above this wanted level a player is a FUGITIVE: stations refuse them
   // docking (StationServices), and they are fair game to attack without penalty.
   // A clean player (level 0) is protected - shooting one is a crime. The 1..threshold-1

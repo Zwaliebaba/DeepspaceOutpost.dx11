@@ -1,6 +1,6 @@
 # DeepspaceOutpost — Architecture & Game Design
 
-**Status:** as-built (Phase G complete through G7), 2026-07-03.
+**Status:** as-built (Phase G complete: G0-G8; chat deferred), 2026-07-03.
 This is the **canonical design document** for the game: the client/server
 architecture, the authoritative simulation, the complete game rules, and the
 network protocol with every message type. Companion documents:
@@ -37,7 +37,7 @@ Concretely:
   the client does not link. The client keeps only presentation: rendering,
   interpolation, HUD, audio, input capture.
 - Every gameplay rule is unit-tested headlessly (no DX11, no sockets, no
-  wall-clock) — 205 GameLogic tests + the NeuronCore protocol suites at the
+  wall-clock) — 218 GameLogic tests + the NeuronCore/NeuronServer suites at the
   time of writing, CI-built on Windows/MSVC (x64 debug + release).
 
 ### Topology
@@ -254,6 +254,7 @@ server caches the last sent copy per session).
 | `cargoUsed` | i32 | hold tonnage used |
 | `wantedLevel` | i32 | own legal status |
 | `score` | i32 | kill count |
+| `laserTemp` | i32 | laser temperature (G8); >= 242 locks the trigger |
 
 **`CargoManifest`** — `0x0303` · Wire · Event · Gameplay · S→C (owner only).
 The full per-commodity hold, resent whenever it changes outside a trade (a
@@ -288,6 +289,9 @@ trait forbids queuing it on a reliable lane.
 | `fire` | bool | fire the front laser this frame |
 | `fireMissile` | bool | launch a missile this frame |
 | `missileTarget` | u32 | locked target index, or `0xFFFFFFFF` (none) |
+| `ecm` | bool | fire the ECM burst (G8) |
+| `energyBomb` | bool | detonate the energy bomb (G8) |
+| `escapePod` | bool | eject in the escape pod (G8) |
 
 #### Lifecycle
 
@@ -310,6 +314,22 @@ see it flicker out.)
 |---|---|---|
 | `victim` | u32 | destroyed entity |
 | `killer` | u32 | credited entity index |
+
+**`EcmPulse`** — `0x0202` · Wire · Event · Gameplay · S→C (broadcast). A ship's
+ECM burst fired — a player's activation or an NPC's automatic defence. Plays the
+classic buzz; the downed missiles arrive as `EntityDeath` events alongside.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source` | u32 | the ship whose ECM fired |
+
+**`EscapePodUsed`** — `0x0203` · Wire · Event · Gameplay · S→C (owner only).
+Your pod ejected: the ship is lost (cargo gone, record cleared, tank refilled)
+and you are already respawned docked. The client flips to the docked flow.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `entityId` | u32 | the ejecting ship (your own) |
 
 #### Station & economy
 
@@ -389,6 +409,8 @@ The server's own combat pipeline is decoupled through an in-process
 | `FireWeapon{shooter, weapon, target}` | `0x8101` | a fire request (synthesized from `InputCommand`); resolved against the world |
 | `Crime{offender, victimTeam, firstOffence}` | `0x8102` | a protected victim was fired on; police dispatch on first offence |
 | `EntityKilled{victim, killer}` | `0x8103` | something died; ONE subscriber decides what a death does |
+| `EcmFired{ship}` | `0x8104` | an ECM burst fired (G8) → the server broadcasts `EcmPulse` |
+| `PodEjected{ship}` | `0x8105` | a pod ejected (G8) → owner notify + roster/cargo refresh |
 | `ActionTriggered{action, param}` | `0x8200` | **client**-local: raw input → command-builder bridge |
 
 ### 4.6 Canonical sequences
@@ -688,6 +710,28 @@ killer's wallet and bumps `PlayerRecord.score` — only a player killer with a
 wallet earns; missiles' own detonations credit their owner; witchspace
 withholds the money but not the score.
 
+### 6.12 Equipment (G8)
+
+The purchased items work, all server-validated (`EquipmentSystem`):
+
+- **ECM** (activation, 32 energy, 32-tick recharge): downs EVERY in-flight
+  missile within 12 000 units — anyone's, including your own (the legacy burst
+  was indiscriminate). NPCs get the legacy *automatic* defence instead: each
+  tick a missile homes on an ECM-fitted target it has a 16/256 chance of being
+  jammed. Fittings: police and traders always (`EcmFitted`), pirates ~50 %,
+  Thargoids never; players buy theirs.
+- **Energy bomb** (one shot, consumed, in flight only): kills every NPC hull
+  and missile within 16 384 units. Stations are immune (the legacy
+  Coriolis/Dodec exemption) and so are players — no area one-shots on people.
+  Each police/trader victim is a separate crime.
+- **Escape pod** (consumed, in flight, never in witchspace): the legacy
+  `abandon_ship` — cargo lost with the hull (nothing spilled), record CLEARED,
+  tank refilled, hull/shields restored with respawn grace, and you wake docked
+  at the nearest station. An expensive, legitimate get-out-of-trouble card.
+- **Laser temperature** (players only): +8 per trigger pull and −1 energy; at
+  242+ the trigger locks until it cools (−1/tick). Sustained fire locks after
+  31 pulls (~1 s at 30 Hz), forcing the legacy fire discipline.
+
 ---
 
 ## 7. Client presentation layer
@@ -778,6 +822,10 @@ station screen into flight; position updates always come from snapshots.
 | Pirate spawn cadence / NPC cap | 600 ticks / 12 | Server/Main, SpawnDirector.h |
 | Trader cadence / cap / dock range | 900 ticks / 2 / 1500 | SpawnDirector.h, AiSystem.h |
 | Fuel max / price / units-per-tenth-LY | 70 / 2 / 500 000 | StationServices.h, HyperspaceSystem.h |
+| ECM cost / recharge / range | 32 energy / 32 ticks / 12 000 | EquipmentSystem.h |
+| Missile auto-jam chance | 16/256 per tick | MissileSystem.h |
+| Energy bomb radius | 16 384 | EquipmentSystem.h |
+| Laser heat per shot / lock / cool | +8 / 242 / −1 per tick | EquipmentSystem.h |
 | Witchspace odds / displacement | >253 of 256 (~0.8 %) / 20M | HyperspaceSystem.h |
 | Mass-lock / in-system hop | 75 000 / ≤200 000 | HyperspaceSystem.h |
 | Galaxy systems / extent / station orbit | 256 / ±100M / 8000 | GalaxyGen.h |
@@ -795,6 +843,8 @@ station screen into flight; position updates always come from snapshots.
 | `0x0100` | InputCommand | Wire | Unreliable | C→S |
 | `0x0200` | EntityDespawn | Wire | Gameplay | S→C |
 | `0x0201` | EntityDeath | Wire | Gameplay | S→C |
+| `0x0202` | EcmPulse | Wire | Gameplay | S→C |
+| `0x0203` | EscapePodUsed | Wire | Gameplay | S→C (owner) |
 | `0x0210` | GalaxyManifest chunk (hand-encoded) | Wire | Bulk | S→C |
 | `0x0300` | Chat *(UI pending)* | Wire | Gameplay | Both |
 | `0x0301` | PlayerInfo | Wire | Gameplay | S→C |
@@ -805,6 +855,8 @@ station screen into flight; position updates always come from snapshots.
 | `0x8101` | FireWeapon | LocalOnly (server) | — | — |
 | `0x8102` | Crime | LocalOnly (server) | — | — |
 | `0x8103` | EntityKilled | LocalOnly (server) | — | — |
+| `0x8104` | EcmFired | LocalOnly (server) | — | — |
+| `0x8105` | PodEjected | LocalOnly (server) | — | — |
 | `0x8200` | ActionTriggered | LocalOnly (client) | — | — |
 
 Plus the two non-catalog streams: `'NSNP'` snapshots (§4.4) and the raw
@@ -817,12 +869,6 @@ Plus the two non-catalog streams: `'NSNP'` snapshots (§4.4) and the raw
 In rough priority order — details in
 [`MIGRATION_ROADMAP.md`](MIGRATION_ROADMAP.md) and [`gameplay.md`](gameplay.md):
 
-- **G8 — equipment behaviours:** ECM (destroys in-flight missiles in range;
-  new input bit + an `EcmPulse` event for the classic sound/flash), energy
-  bomb (one-shot area kill), escape pod (ship lost, respawn docked, credits
-  kept), laser temperature (overheat blocks fire). NPC ECM chance hooks into
-  the existing panic-missile path. The purchased flags already exist
-  server-side; G8 makes them *do* something.
 - **Suns & cabin heat:** add sun entities to worldgen, port
   `update_cabin_temp` (heat ramp → death) and sun-skimming fuel scooping —
   deferred from G6/G7 so suns, heat and the fuel payoff land together.

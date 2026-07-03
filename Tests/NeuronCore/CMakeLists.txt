@@ -7,6 +7,7 @@
 
 add_executable(NeuronCore.Tests
     EcsTests.cpp
+    EquipmentEventsTests.cpp
     MathTests.cpp
     SpatialTests.cpp
     ClientInputTests.cpp

@@ -48,6 +48,7 @@ TEST(PlayerSession, PlayerStatusRoundTripsAllFields)
   in.cargoUsed = 15;
   in.wantedLevel = 8;
   in.score = 512;
+  in.laserTemp = 90;
 
   PlayerStatus out;
   ASSERT_TRUE(Decode(Encode(in), out));
