@@ -11,9 +11,9 @@ math is being migrated to **DirectXMath** (SIMD) via `Neuron::Math`.
 
 **Direction:** the project is migrating from the single-player game to an **open-world,
 server-authoritative MMO** (first milestone: up to 100 players) on an `int64³` coordinate field,
-with an **in-house ECS**, client prediction, and Area-of-Interest replication. The detailed phased
-plan lives in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md) — read it before doing
-architecture work.
+with an **in-house ECS**, client prediction, and Area-of-Interest replication. The locked decisions, phased history, and
+consolidated roadmap live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (§12–§14) — read it
+before doing architecture work.
 
 > **Status note.** Today the whole game builds as a single Win32 GUI executable,
 > **DeepspaceOutpost**, with two source tiers: faithfully ported game logic (`*.cpp` in the
@@ -56,7 +56,7 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
 > dead-reckoned authoritative snapshots. Client and server share only **data** (the ECS/protocol
 > schemas in `NeuronCore`), never behavior. This is a deliberate change from the older
 > client-linked-`GameLogic` design. Today the game still builds as the single-player client (see
-> the status note above); the phased path is in [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+> the status note above); the roadmap is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §14.
 
 ## Key Architecture Decisions
 
@@ -69,7 +69,7 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
   *data* (the in-house **ECS** container + component/protocol schemas in `NeuronCore`). The
   de-globalized `Universe` *is* the ECS world, simulated by the server. Transport is **raw-winsock
   UDP** + a custom reliability layer; the wire format is a **hand-rolled binary** protocol
-  (`DataReader`/`DataWriter`). See [`docs/MIGRATION_ROADMAP.md`](docs/MIGRATION_ROADMAP.md).
+  (`DataReader`/`DataWriter`). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - **Built for a 4X / RTS drift**: the game logic will move over time from single-ship space-flight
   toward a **4X / RTS** style (many units per player, empire/economy/territory, less twitch). The
   architecture generalizes three single-player assumptions up front so that pivot is an extension,
@@ -96,7 +96,7 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
 
 | Document | Purpose |
 |---|---|
-| [docs/MIGRATION_ROADMAP.md](docs/MIGRATION_ROADMAP.md) | **Phased plan** to migrate the single-player client to the server-authoritative MMO (read first for architecture work) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **Canonical design document**: architecture, game rules, protocol, locked decisions, architectural review, and consolidated roadmap (read first for architecture work) |
 | [coding-standards.md](.github/coding-standards.md) | Naming, formatting, language conventions, native-first rule |
 | [copilot-instructions.md](.github/copilot-instructions.md) | Code-generation guidance for this repository |
 | [DemoShaders/PORTING.md](DemoShaders/PORTING.md) | GLSL→HLSL porting guide for the reference shaders in `DemoShaders/` (reference only — not built) |

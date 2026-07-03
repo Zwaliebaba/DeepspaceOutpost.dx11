@@ -26,7 +26,7 @@ and two executables.
 
 **Direction:** the project is migrating to an **open-world, server-authoritative MMO** (up to 100
 players, `int64³` world, in-house ECS, client prediction, AOI replication). Read
-[`docs/MIGRATION_ROADMAP.md`](../docs/MIGRATION_ROADMAP.md) before architecture work.
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) (§12–§14) before architecture work.
 
 Target structure once the engine split lands:
 
@@ -69,7 +69,7 @@ Before generating code, scan the codebase to identify:
 Prioritize the following files (if they exist):
 
 - **AGENTS.md** (repo root): Project structure, dependency graph, and conventions — read first.
-- **docs/MIGRATION_ROADMAP.md**: Phased plan for the server-authoritative MMO migration.
+- **docs/ARCHITECTURE.md**: Canonical design doc — architecture, protocol, locked decisions, review, roadmap.
 - **.github/coding-standards.md**: Code style, formatting standards, and the native-first rule.
 
 If a `.github/copilot/` directory is added later (architecture.md, tech-stack.md, etc.),
