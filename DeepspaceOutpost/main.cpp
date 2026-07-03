@@ -1220,7 +1220,29 @@ static void register_client_event_handlers(void)
     if (_resp.status != Net::StationStatus::Ok)
       return;
     cmdr.credits = _resp.credits;
-    if (_resp.commodity < NO_OF_STOCK_ITEMS)
+
+    // An equipment purchase confirmed: mirror the granted item's ownership (the
+    // server owns the fact; we only reflect its echoed result). Missiles and fuel
+    // ride PlayerStatus, so nothing to do for those here.
+    if (_resp.kind == Net::StationRequestKind::Equip)
+    {
+      switch (static_cast<Net::EquipItem>(_resp.commodity))
+      {
+        case Net::EquipItem::LargeCargoBay: cmdr.cargo_capacity = 35; break;
+        case Net::EquipItem::Ecm:           cmdr.ecm = 1;             break;
+        case Net::EquipItem::FuelScoop:     cmdr.fuel_scoop = 1;      break;
+        case Net::EquipItem::EnergyBomb:    cmdr.energy_bomb = 1;     break;
+        case Net::EquipItem::EscapePod:     cmdr.escape_pod = 1;      break;
+        case Net::EquipItem::Missile:       break;   // count rides PlayerStatus
+      }
+      return;
+    }
+
+    // Buy/Sell echo the affected commodity's resulting hold quantity. (Guard the
+    // kind: an Equip response reuses `commodity` for the EquipItem id, which would
+    // otherwise clobber a cargo slot of the same index.)
+    if ((_resp.kind == Net::StationRequestKind::Buy || _resp.kind == Net::StationRequestKind::Sell) &&
+        _resp.commodity < NO_OF_STOCK_ITEMS)
       cmdr.current_cargo[_resp.commodity] = _resp.cargo;
   });
 
@@ -1272,6 +1294,7 @@ static void register_client_event_handlers(void)
   {
     cmdr.credits = _ps.credits;
     cmdr.fuel = _ps.fuel;   // hyperspace tank (G7): server-owned, drives the fuel gauge
+    cmdr.missiles = _ps.missiles;   // rack count: server-owned (buy/launch/respawn)
     PlayerDefense().frontShield = _ps.frontShield;
     PlayerDefense().aftShield = _ps.aftShield;
     PlayerDefense().energy = _ps.energy;

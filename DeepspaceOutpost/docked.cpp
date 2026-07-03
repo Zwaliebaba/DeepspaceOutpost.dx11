@@ -1657,9 +1657,30 @@ int laser_refund (int laser_type)
 }
 
 
+// Map a legacy equip-screen item to the server's authoritative equipment catalog.
+// Returns true and fills `_item` for a server-modeled purchase; returns false for
+// items the server does not model (lasers, extra energy unit, docking computer,
+// galactic hyperdrive) - not purchasable in connected play. Fuel is a Refuel
+// request handled by the caller, not an EquipItem.
+static bool server_equip_item (int _type, Neuron::Net::EquipItem& _item)
+{
+	switch (_type)
+	{
+		case EQ_MISSILE:      _item = Neuron::Net::EquipItem::Missile;       return true;
+		case EQ_CARGO_BAY:    _item = Neuron::Net::EquipItem::LargeCargoBay; return true;
+		case EQ_ECM:          _item = Neuron::Net::EquipItem::Ecm;           return true;
+		case EQ_FUEL_SCOOPS:  _item = Neuron::Net::EquipItem::FuelScoop;     return true;
+		case EQ_ENERGY_BOMB:  _item = Neuron::Net::EquipItem::EnergyBomb;    return true;
+		case EQ_ESCAPE_POD:   _item = Neuron::Net::EquipItem::EscapePod;     return true;
+		default:              return false;
+	}
+}
+
+
 // Render-free equip action for a given stock index: expand a laser sub-menu (name
-// beginning '+'), or buy the item if affordable. Mutates show flags / cmdr state but
-// does not draw. Returns 1 if it changed anything.
+// beginning '+'), or buy the item. In thin-client mode the purchase is a server
+// request and cmdr state changes only when the StationResponse/PlayerStatus reply
+// arrives; the offline branch mutates cmdr directly. Returns 1 if it acted.
 int equip_do (int index)
 {
 	int i;
@@ -1670,6 +1691,29 @@ int equip_do (int index)
 		equip_stock[index].show = 0;
 		for (i = 1; i <= 5; i++)
 			equip_stock[index + i].show = 1;
+		return 1;
+	}
+
+	// Thin-client mode: equipment and fuel are server-authoritative. Send the
+	// matching station request and let the StationResponse (+ PlayerStatus) update
+	// credits/fuel/missiles/ownership; never mutate cmdr locally. Items the server
+	// does not model yet are simply not purchasable while connected.
+	if (Neuron::Client::ReplicationClientInstance().IsOpen())
+	{
+		Neuron::Net::StationRequest req;
+		if (equip_stock[index].type == EQ_FUEL)
+		{
+			req.kind = Neuron::Net::StationRequestKind::Refuel;
+		}
+		else
+		{
+			Neuron::Net::EquipItem item;
+			if (!server_equip_item(equip_stock[index].type, item))
+				return 0;
+			req.kind = Neuron::Net::StationRequestKind::Equip;
+			req.commodity = (uint16_t) item;
+		}
+		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 		return 1;
 	}
 
