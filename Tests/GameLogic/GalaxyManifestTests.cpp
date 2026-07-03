@@ -4,11 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "Messages/Defs/GalaxyChunks.h"
+#include "GameLogic.h"   // umbrella: ServerSessions, GalaxyGen, the message defs
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Reliable.h"
-#include "GalaxyGen.h"
-#include "ServerSessions.h"
 
 using namespace Neuron;
 
@@ -107,24 +105,32 @@ TEST(Manifest, ChunkRequestIsAnsweredInOrderWithTotal)
   sessions.SetManifest(manifest);
 
   // Ask for the first 64 (more than exist): everything comes back, in order,
-  // split into <=16-entry chunks, each carrying the total.
+  // split into <=16-entry chunks, each carrying the total. The manifest spans
+  // several datagrams, so pump reliably (data one way, acks back) until the
+  // send window has drained the whole thing - one WriteDatagrams() emits only
+  // one datagram per lane.
   sessions.SendGalaxyChunks(session, /*base*/ 0, /*count*/ 64);
 
   Msg::MessageEndpoint client;
-  for (const std::vector<uint8_t>& dg : session.events.WriteDatagrams())
-    client.OnDatagram(dg.data(), dg.size());
-
   std::vector<Net::GalaxySystemInfo> received;
-  Net::ReliableMessage m;
-  while (client.Receive(m))
+  for (int round = 0; round < 50 && received.size() < 40; ++round)
   {
-    Msg::GalaxyChunk chunk;
-    ASSERT_TRUE(Msg::TryDecode(m, chunk));
-    EXPECT_EQ(chunk.total, 40u);
-    EXPECT_EQ(chunk.baseIndex, received.size());
-    EXPECT_LE(chunk.systems.size(), static_cast<std::size_t>(Msg::GALAXY_CHUNK_MAX_SYSTEMS));
-    for (const Msg::GalaxySystemEntry& e : chunk.systems)
-      received.push_back(Msg::FromWireEntry(e));
+    for (const std::vector<uint8_t>& dg : session.events.WriteDatagrams())
+      client.OnDatagram(dg.data(), dg.size());
+    for (const std::vector<uint8_t>& ack : client.WriteDatagrams())
+      session.events.OnDatagram(ack.data(), ack.size());
+
+    Net::ReliableMessage m;
+    while (client.Receive(m))
+    {
+      Msg::GalaxyChunk chunk;
+      ASSERT_TRUE(Msg::TryDecode(m, chunk));
+      EXPECT_EQ(chunk.total, 40u);
+      EXPECT_EQ(chunk.baseIndex, received.size());   // reliable, in order
+      EXPECT_LE(chunk.systems.size(), static_cast<std::size_t>(Msg::GALAXY_CHUNK_MAX_SYSTEMS));
+      for (const Msg::GalaxySystemEntry& e : chunk.systems)
+        received.push_back(Msg::FromWireEntry(e));
+    }
   }
 
   ASSERT_EQ(received.size(), 40u);

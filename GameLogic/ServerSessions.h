@@ -28,6 +28,7 @@
 #include "Messages/Defs/PlayerSession.h" // Msg::PlayerInfo
 
 #include "SimComponents.h"
+#include "FlightInput.h"       // FlightIntent / FlightCaps (applied in OnInput/SpawnPlayer)
 #include "StationServices.h"
 #include "CombatSystem.h"
 #include "EquipmentSystem.h"   // ShipGear (laser heat + ECM recharge, G8)
