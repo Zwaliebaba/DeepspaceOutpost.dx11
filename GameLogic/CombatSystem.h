@@ -4,8 +4,8 @@
 //
 // Promotes the ported, unit-tested Combat.h primitives from "library functions"
 // to a live authoritative system over the int64 world. Each tick every Combatant
-// fires on the nearest ENEMY (different team) within range, damage resolves
-// simultaneously through LaserDamageTo(), and anything driven to zero energy dies.
+// fires on the nearest ENEMY (different team) within range for its laser
+// strength, damage resolves simultaneously, and anything driven to zero energy dies.
 // StepCombat() returns the kills (victim + killer) so the server can broadcast
 // reliable death events and despawn the wreck - the system itself stays pure (it
 // only mutates energy), so it is unit-tested headlessly.
@@ -322,7 +322,7 @@ namespace Neuron::GameLogic
 
       if (best != nullptr)
       {
-        damage[best->id.index] += LaserDamageTo(TargetClass::Normal, a.c->laserStrength);
+        damage[best->id.index] += a.c->laserStrength;
         attacker[best->id.index] = a.id.index;
         attackerPos[best->id.index] = a.pos;
         a.c->fireTimer = a.c->fireInterval;   // begin the cooldown after firing
@@ -432,7 +432,7 @@ namespace Neuron::GameLogic
     if (tc->invulnTicks > 0)
       return out;   // target is in spawn/respawn grace - the shot passes through
 
-    const int dmg = LaserDamageTo(TargetClass::Normal, sc->laserStrength);
+    const int dmg = sc->laserStrength;
     const bool destroyed = ApplyDamage(_world, best, dmg, origin);   // origin = shooter position
 
     out.hit = true;

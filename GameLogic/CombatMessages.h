@@ -14,7 +14,7 @@
 // half): EntityKilled drives the server's death handling, which broadcasts the
 // catalog wire EntityDeath (Messages/Defs/CoreEvents.h) to clients. FireWeapon is
 // the command the client will eventually send; in Phase 1 the server synthesises it
-// from ClientInput so the same resolution path serves both today and tomorrow.
+// from InputCommand so the same resolution path serves both today and tomorrow.
 //
 // Header-only and server-only (GameLogic): it builds on the header-only Msg
 // mechanism in NeuronCore and the existing combat systems; the client links none
@@ -58,7 +58,7 @@ namespace Neuron::GameLogic
   };
 
   // A request to fire a weapon. In Phase 1 the server publishes this from a
-  // client's ClientInput; later it becomes the wire command the client sends.
+  // client's InputCommand; later it becomes the wire command the client sends.
   struct FireWeapon
   {
     static constexpr Msg::MessageId    Id    = static_cast<Msg::MessageId>(CombatMsgId::FireWeapon);

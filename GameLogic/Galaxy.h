@@ -20,8 +20,9 @@
 
 namespace Neuron::GameLogic
 {
-  // The 6-byte (48-bit) system seed. Twisting it (Waggle) walks the 256 systems
-  // of a galaxy; rotating it (NextGalaxy) jumps to the next of the 8 galaxies.
+  // The 6-byte (48-bit) system seed. Twisting it (Waggle) walks the systems of
+  // a galaxy. (The legacy 8-galaxy rotation was dropped: the procedural galaxy
+  // derives per-system seeds via SplitMix64 in GalaxyGen.h instead.)
   struct GalaxySeed
   {
     uint8_t a = 0;
@@ -80,26 +81,6 @@ namespace Neuron::GameLogic
 
     _seed.e = static_cast<uint8_t>(x);
     _seed.f = static_cast<uint8_t>(y);
-  }
-
-  // Rotate a byte left by one bit (legacy rotate_byte_left).
-  [[nodiscard]] inline uint8_t RotateByteLeft(uint8_t _x)
-  {
-    return static_cast<uint8_t>(((_x << 1) | (_x >> 7)) & 0xFF);
-  }
-
-  // Jump from one galaxy's seed to the next (legacy enter_next_galaxy). There are
-  // 8 galaxies; applying this 8 times returns to the start.
-  [[nodiscard]] inline GalaxySeed NextGalaxy(GalaxySeed _seed)
-  {
-    return GalaxySeed{
-      RotateByteLeft(_seed.a),
-      RotateByteLeft(_seed.b),
-      RotateByteLeft(_seed.c),
-      RotateByteLeft(_seed.d),
-      RotateByteLeft(_seed.e),
-      RotateByteLeft(_seed.f),
-    };
   }
 
   // Derive a system's economy/government/tech/etc. from its seed. Pure port of
@@ -162,19 +143,5 @@ namespace Neuron::GameLogic
     }
 
     return name;
-  }
-
-  // Return the seed of system `_index` (0..255) within a galaxy: the galaxy seed
-  // twisted four times per system (legacy systems are spaced 4 waggles apart).
-  [[nodiscard]] inline GalaxySeed SystemSeed(GalaxySeed _galaxy, int _index)
-  {
-    for (int i = 0; i < _index; ++i)
-    {
-      Waggle(_galaxy);
-      Waggle(_galaxy);
-      Waggle(_galaxy);
-      Waggle(_galaxy);
-    }
-    return _galaxy;
   }
 }

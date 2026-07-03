@@ -23,7 +23,7 @@
 #include "NetLib.h"
 #include "SnapshotInterpolator.h"
 #include "ReliableChannel.h"
-#include "ClientInput.h"
+#include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
 #include "GalaxyManifest.h"
 #include "Messages/Reliable.h"
@@ -51,7 +51,7 @@ namespace Neuron::Client
 
     // Send the player's intent to the server (no-op until the server endpoint is
     // known and the socket is open).
-    void SendInput(const Net::ClientInput& _input);
+    void SendInput(const Msg::InputCommand& _input);
 
     // Queue a reliable station request (dock/undock/buy/sell) to the server. The
     // authoritative StationResponse arrives later via PollEvent(). No-op until

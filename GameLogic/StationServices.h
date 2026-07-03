@@ -510,35 +510,8 @@ namespace Neuron::GameLogic
         break;
       }
 
-      case Net::StationRequestKind::Teleport:
-      {
-        // Jump from this station to the destination system's station (the
-        // "teleport building" - only available while docked). Arrive docked at
-        // the destination.
-        if (!dock->docked)
-        {
-          resp.status = Net::StationStatus::NotDocked;
-          break;
-        }
-        const ECS::EntityId dest = FindStationBySystem(_world, static_cast<int>(_req.stationId));
-        WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
-        WorldTransform* dt = (dest.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(dest) : nullptr;
-        if (pt != nullptr && dt != nullptr)
-        {
-          pt->position = dt->position;
-          dock->docked = true;
-          dock->stationId = dest.index;
-          resp.status = Net::StationStatus::Ok;
-        }
-        else
-        {
-          resp.status = Net::StationStatus::CantDock;   // unknown destination
-        }
-        break;
-      }
-
       default:
-        // In-flight travel commands (Teleport as a real fuel-gated jump, and
+        // Travel commands (Teleport - the fuel-gated hyperspace jump - and
         // JumpDrive) are intercepted by the server loop and routed through
         // HyperspaceSystem before this station-service dispatch, so they never
         // arrive here. Any other/unknown kind is not a station service.

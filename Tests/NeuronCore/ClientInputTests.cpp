@@ -4,7 +4,7 @@
 
 #include "DataWriter.h"
 #include "DataReader.h"
-#include "ClientInput.h"            // Net::ClientInput == Msg::InputCommand
+#include "Messages/Defs/InputCommand.h"
 #include "ReliableChannel.h"
 #include "Messages/Serialize.h"
 #include "Messages/Framing.h"
@@ -16,7 +16,7 @@ using namespace Neuron;
 
 TEST(Input, RoundTripsOverUnreliableLane)
 {
-  Net::ClientInput in;
+  Msg::InputCommand in;
   in.sequence = 7;
   in.rollAxis = -1.0f;
   in.pitchAxis = 0.5f;
@@ -37,9 +37,9 @@ TEST(Input, RoundTripsOverUnreliableLane)
   ASSERT_TRUE(Msg::ReadPacket(pw.Bytes().data(), pw.Bytes().size(), hdr, recs));
   EXPECT_TRUE(hdr.lane == Msg::MessageLane::Unreliable);
   ASSERT_EQ(recs.size(), 1u);
-  EXPECT_TRUE(recs[0].id == Net::ClientInput::Id);
+  EXPECT_TRUE(recs[0].id == Msg::InputCommand::Id);
 
-  Net::ClientInput out;
+  Msg::InputCommand out;
   ASSERT_TRUE(Msg::DecodeRecord(recs[0], out));
   EXPECT_TRUE(out.sequence == 7);
   EXPECT_TRUE(out.rollAxis == -1.0f);
@@ -59,7 +59,7 @@ TEST(Input, RoundTripsOverUnreliableLane)
 // the new framing and the G8 extension never rewrote the original fields.
 TEST(Input, PayloadMatchesLegacyByteLayout)
 {
-  Net::ClientInput in;
+  Msg::InputCommand in;
   in.sequence = 7;
   in.rollAxis = -1.0f;
   in.pitchAxis = 0.5f;
@@ -97,7 +97,7 @@ TEST(Input, ForeignMagicRejected)
 
 TEST(Input, InputCommandIsRegisteredInTheGlobalCatalog)
 {
-  const Msg::MessageInfo* info = Msg::GlobalRegistry().Find(Net::ClientInput::Id);
+  const Msg::MessageInfo* info = Msg::GlobalRegistry().Find(Msg::InputCommand::Id);
   ASSERT_NE(info, nullptr);
   EXPECT_TRUE(info->scope == Msg::MessageScope::Wire);
   EXPECT_TRUE(info->dir == Msg::Direction::ClientToServer);

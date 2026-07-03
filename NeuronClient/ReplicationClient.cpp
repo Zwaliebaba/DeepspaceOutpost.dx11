@@ -103,7 +103,7 @@ namespace Neuron::Client
     }
   }
 
-  void ReplicationClient::SendInput(const Net::ClientInput& _input)
+  void ReplicationClient::SendInput(const Msg::InputCommand& _input)
   {
     if (!m_open || !m_haveServer)
       return;

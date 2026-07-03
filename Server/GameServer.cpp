@@ -6,7 +6,7 @@
 #include <ranges>
 
 #include "SnapshotPacketizer.h"
-#include "ClientInput.h"
+#include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"
@@ -106,10 +106,10 @@ namespace DSOServer
       // if it decodes (direction is guaranteed by the message type: InputCommand
       // is ClientToServer). Malformed/unknown records are dropped;
       // stale/duplicate inputs are rejected by OnInput's sequence.
-      static_assert(Net::ClientInput::Dir == Msg::Direction::ClientToServer);
-      if (rec.id != Net::ClientInput::Id)
+      static_assert(Msg::InputCommand::Dir == Msg::Direction::ClientToServer);
+      if (rec.id != Msg::InputCommand::Id)
         continue;
-      Net::ClientInput in;
+      Msg::InputCommand in;
       if (!Msg::DecodeRecord(rec, in))
         continue;
 
@@ -120,15 +120,15 @@ namespace DSOServer
       if (m_world.IsValid(player))
       {
         if (in.fire)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
         if (in.fireMissile)
           m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
         if (in.ecm)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Msg::NO_MISSILE_TARGET });
         if (in.energyBomb)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET });
         if (in.escapePod)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Msg::NO_MISSILE_TARGET });
       }
     }
   }

@@ -26,11 +26,10 @@ set(NEURONCORE_HEADERS
     DataReader.h
     Replication.h
     SnapshotPacketizer.h
-    SnapshotReceiver.h
     SnapshotInterpolator.h
     ReliableChannel.h
-    ClientInput.h
     StationProtocol.h
+    GalaxyManifest.h
     NetLib.h
     Debug.h
     FileSys.h
@@ -55,6 +54,8 @@ set(NEURONCORE_HEADERS
     Messages/Defs/InputCommand.h
     Messages/Defs/CoreEvents.h
     Messages/Defs/InputActions.h
+    Messages/Defs/PlayerSession.h
+    Messages/Defs/EquipmentEvents.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

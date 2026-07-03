@@ -18,7 +18,7 @@ namespace Neuron::GameLogic
   // Fill one entity's snapshot from its authoritative components. Orientation and
   // speed come from the Flight component when present; otherwise the entity is
   // reported at rest with the default facing (e.g. static props / simple movers).
-  // Shared by the full-world builder and the per-viewer area-of-interest builder.
+  // Consumed by the per-viewer area-of-interest builder (AreaOfInterest.h).
   [[nodiscard]] inline Net::EntitySnapshot MakeEntitySnapshot(ECS::Registry& _world, ECS::EntityId _id, const WorldTransform& _t)
   {
     Net::EntitySnapshot e;
@@ -42,19 +42,5 @@ namespace Neuron::GameLogic
       e.type = static_cast<int16_t>(nt->type);
 
     return e;
-  }
-
-  // Build a snapshot of every entity that has a WorldTransform.
-  [[nodiscard]] inline Net::WorldSnapshot BuildWorldSnapshot(ECS::Registry& _world, uint32_t _tick)
-  {
-    Net::WorldSnapshot snap;
-    snap.tick = _tick;
-
-    _world.Each<WorldTransform>([&_world, &snap](ECS::EntityId _id, WorldTransform& _t)
-    {
-      snap.entities.push_back(MakeEntitySnapshot(_world, _id, _t));
-    });
-
-    return snap;
   }
 }

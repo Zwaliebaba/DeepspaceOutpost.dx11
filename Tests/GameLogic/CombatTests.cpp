@@ -42,30 +42,6 @@ TEST(Combat, NonPositiveDamageIsNoOp)
   EXPECT_TRUE(!r.destroyed);
 }
 
-TEST(Combat, StationIsImmuneToLaser)
-{
-  EXPECT_TRUE(LaserDamageTo(TargetClass::Station, 100) == 0);
-  LaserHitResult r = ResolveLaserHit(50, TargetClass::Station, 100);
-  EXPECT_TRUE(r.targetEnergy == 50);
-  EXPECT_TRUE(!r.destroyed);
-}
-
-TEST(Combat, ArmouredTakesOnlyMilitaryLaserAtQuarter)
-{
-  // Pulse laser (strength 15) does nothing to an armoured target.
-  EXPECT_TRUE(LaserDamageTo(TargetClass::Armoured, 15) == 0);
-  // Military laser (strength 23) does 23/4 = 5.
-  EXPECT_TRUE(LaserDamageTo(TargetClass::Armoured, MILITARY_LASER_STRENGTH) == 5);
-}
-
-TEST(Combat, NormalTargetTakesFullStrengthAndDies)
-{
-  EXPECT_TRUE(LaserDamageTo(TargetClass::Normal, 23) == 23);
-  LaserHitResult r = ResolveLaserHit(20, TargetClass::Normal, 23);
-  EXPECT_TRUE(r.targetEnergy == -3);
-  EXPECT_TRUE(r.destroyed);
-}
-
 TEST(Combat, BountyPaidOutsideWitchspaceScoreAlwaysBumps)
 {
   KillReward paid = ApplyKill(/*credits*/ 1000, /*score*/ 4, /*bounty*/ 50, /*witch*/ false);

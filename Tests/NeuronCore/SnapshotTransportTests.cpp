@@ -4,7 +4,7 @@
 
 #include "Replication.h"
 #include "SnapshotPacketizer.h"
-#include "SnapshotReceiver.h"
+#include "SnapshotInterpolator.h"
 
 using namespace Neuron;
 
@@ -27,6 +27,12 @@ namespace
       s.entities.push_back(e);
     }
     return s;
+  }
+
+  // Freshest known state of `_id` (alpha 1.0 = the current snapshot).
+  bool Latest(const Net::SnapshotInterpolator& _rx, uint32_t _id, Net::EntitySnapshot& _out)
+  {
+    return _rx.Sample(_id, 1.0, _out);
   }
 }
 
@@ -65,7 +71,7 @@ TEST(Transport, DatagramsStayWithinMtuAndHoldWholeEntities)
 TEST(Transport, ReceiverReassemblesAllEntities)
 {
   Net::WorldSnapshot snap = MakeSnapshot(9, 50);
-  Net::SnapshotReceiver rx;
+  Net::SnapshotInterpolator rx;
   for (const std::vector<uint8_t>& p : Net::PacketizeSnapshot(snap, 1200))
     EXPECT_TRUE(rx.Apply(p.data(), p.size()));
 
@@ -73,16 +79,16 @@ TEST(Transport, ReceiverReassemblesAllEntities)
   EXPECT_TRUE(rx.LatestTick() == 9);
   for (int i = 0; i < 50; ++i)
   {
-    const Net::EntitySnapshot* e = rx.Get(static_cast<uint32_t>(i));
-    EXPECT_TRUE(e != nullptr);
-    EXPECT_TRUE(e->x == i * 10);
-    EXPECT_TRUE(e->speed == static_cast<float>(i));
+    Net::EntitySnapshot e;
+    EXPECT_TRUE(Latest(rx, static_cast<uint32_t>(i), e));
+    EXPECT_TRUE(e.x == i * 10);
+    EXPECT_TRUE(e.speed == static_cast<float>(i));
   }
 }
 
 TEST(Transport, StaleTickIsDroppedFreshTickWins)
 {
-  Net::SnapshotReceiver rx;
+  Net::SnapshotInterpolator rx;
 
   auto applyOne = [&](uint32_t tick, uint32_t id, int64_t x)
   {
@@ -97,19 +103,26 @@ TEST(Transport, StaleTickIsDroppedFreshTickWins)
     return rx.Apply(w.Data(), w.Size());
   };
 
+  Net::EntitySnapshot e;
+
   EXPECT_TRUE(applyOne(5, 1, 100));
-  EXPECT_TRUE(rx.Get(1)->x == 100);
-  EXPECT_TRUE(rx.TickOf(1) == 5);
+  EXPECT_TRUE(Latest(rx, 1, e));
+  EXPECT_TRUE(e.x == 100);
+  EXPECT_TRUE(rx.LatestTick() == 5);
 
   // A late datagram from an OLDER tick must not overwrite the fresher value.
   EXPECT_TRUE(applyOne(3, 1, 999));
-  EXPECT_TRUE(rx.Get(1)->x == 100);
-  EXPECT_TRUE(rx.TickOf(1) == 5);
+  EXPECT_TRUE(Latest(rx, 1, e));
+  EXPECT_TRUE(e.x == 100);
+  EXPECT_TRUE(rx.LatestTick() == 5);
 
-  // A newer tick wins.
+  // A newer tick wins - and the displaced value becomes the tween source.
   EXPECT_TRUE(applyOne(7, 1, 200));
-  EXPECT_TRUE(rx.Get(1)->x == 200);
-  EXPECT_TRUE(rx.TickOf(1) == 7);
+  EXPECT_TRUE(Latest(rx, 1, e));
+  EXPECT_TRUE(e.x == 200);
+  EXPECT_TRUE(rx.Sample(1, 0.0, e));
+  EXPECT_TRUE(e.x == 100);
+  EXPECT_TRUE(rx.LatestTick() == 7);
 }
 
 TEST(Transport, OutOfOrderDatagramsOfSameTickAllApply)
@@ -117,18 +130,19 @@ TEST(Transport, OutOfOrderDatagramsOfSameTickAllApply)
   std::vector<std::vector<uint8_t>> packets = Net::PacketizeSnapshot(MakeSnapshot(4, 50), 1200);
 
   // Deliver them back-to-front: same tick, so every entity still lands.
-  Net::SnapshotReceiver rx;
+  Net::SnapshotInterpolator rx;
   for (auto it = packets.rbegin(); it != packets.rend(); ++it)
     EXPECT_TRUE(rx.Apply(it->data(), it->size()));
 
   EXPECT_TRUE(rx.Count() == 50);
-  EXPECT_TRUE(rx.Get(49) != nullptr);
-  EXPECT_TRUE(rx.Get(0) != nullptr);
+  Net::EntitySnapshot e;
+  EXPECT_TRUE(Latest(rx, 49, e));
+  EXPECT_TRUE(Latest(rx, 0, e));
 }
 
 TEST(Transport, StaleEntitiesAreEvicted)
 {
-  Net::SnapshotReceiver rx;
+  Net::SnapshotInterpolator rx;
 
   auto applyOne = [&](uint32_t tick, uint32_t id)
   {
@@ -148,8 +162,9 @@ TEST(Transport, StaleEntitiesAreEvicted)
 
   rx.EvictStale(/*maxAge*/ 5);   // 10 - 1 = 9 > 5 -> entity 1 forgotten
   EXPECT_TRUE(rx.Count() == 1);
-  EXPECT_TRUE(rx.Get(1) == nullptr);
-  EXPECT_TRUE(rx.Get(2) != nullptr);
+  Net::EntitySnapshot e;
+  EXPECT_TRUE(!rx.Sample(1, 1.0, e));
+  EXPECT_TRUE(rx.Sample(2, 1.0, e));
 }
 
 TEST(Transport, EmptySnapshotStillSendsTickKeepAlive)
@@ -157,7 +172,7 @@ TEST(Transport, EmptySnapshotStillSendsTickKeepAlive)
   std::vector<std::vector<uint8_t>> packets = Net::PacketizeSnapshot(MakeSnapshot(77, 0), 1200);
   EXPECT_TRUE(packets.size() == 1);
 
-  Net::SnapshotReceiver rx;
+  Net::SnapshotInterpolator rx;
   EXPECT_TRUE(rx.Apply(packets[0].data(), packets[0].size()));
   EXPECT_TRUE(rx.Count() == 0);
   EXPECT_TRUE(rx.LatestTick() == 77);

@@ -19,7 +19,7 @@
 
 #include "ECS.h"
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
-#include "ClientInput.h"
+#include "Messages/Defs/InputCommand.h"
 #include "ReliableChannel.h"
 #include "GalaxyManifest.h"    // Net::GalaxySystemInfo / SendManifest
 #include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
@@ -61,7 +61,7 @@ namespace Neuron::GameLogic
     // reliable channel. The latest intent is applied to the entity. Returns the
     // session's entity.
     ECS::EntityId OnInput(ECS::Registry& _world, const Net::Endpoint& _ep,
-                          const Net::ClientInput& _in, uint32_t _tick)
+                          const Msg::InputCommand& _in, uint32_t _tick)
     {
       const uint64_t key = EndpointKey(_ep);
       auto it = m_sessions.find(key);

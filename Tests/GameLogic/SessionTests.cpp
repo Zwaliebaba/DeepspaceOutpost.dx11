@@ -10,9 +10,9 @@ using namespace Neuron;
 
 namespace
 {
-  Net::ClientInput Input(uint32_t _seq, float _throttle)
+  Msg::InputCommand Input(uint32_t _seq, float _throttle)
   {
-    Net::ClientInput in;
+    Msg::InputCommand in;
     in.sequence = _seq;
     in.throttle = _throttle;
     return in;

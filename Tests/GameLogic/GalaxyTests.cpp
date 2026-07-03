@@ -41,36 +41,3 @@ TEST(Galaxy, WaggleIsDeterministic)
   EXPECT_TRUE(a == b);
 }
 
-TEST(Galaxy, SystemSeedSpacesByFourWaggles)
-{
-  // SystemSeed(.,1) must equal four manual twists of the galaxy seed.
-  GalaxySeed manual = BASE_GALAXY_SEED;
-  Waggle(manual);
-  Waggle(manual);
-  Waggle(manual);
-  Waggle(manual);
-  EXPECT_TRUE(SystemSeed(BASE_GALAXY_SEED, 1) == manual);
-  EXPECT_TRUE(SystemSeed(BASE_GALAXY_SEED, 0) == BASE_GALAXY_SEED);
-}
-
-TEST(Galaxy, NextGalaxyRotatesEachByte)
-{
-  // rotate_byte_left on each byte of {0x4a,0x5a,0x48,0x02,0x53,0xb7}.
-  GalaxySeed g2 = NextGalaxy(BASE_GALAXY_SEED);
-  EXPECT_TRUE(g2.a == 0x94);
-  EXPECT_TRUE(g2.b == 0xb4);
-  EXPECT_TRUE(g2.c == 0x90);
-  EXPECT_TRUE(g2.d == 0x04);
-  EXPECT_TRUE(g2.e == 0xa6);
-  EXPECT_TRUE(g2.f == 0x6f);
-}
-
-TEST(Galaxy, EightGalaxiesWrapAround)
-{
-  // Eight single-bit rotations of a byte return it unchanged, so cycling all
-  // eight galaxies returns to the starting seed (legacy galaxy_number & 7).
-  GalaxySeed g = BASE_GALAXY_SEED;
-  for (int i = 0; i < 8; ++i)
-    g = NextGalaxy(g);
-  EXPECT_TRUE(g == BASE_GALAXY_SEED);
-}

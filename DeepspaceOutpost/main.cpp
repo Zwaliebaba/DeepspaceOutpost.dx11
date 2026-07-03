@@ -1407,7 +1407,7 @@ static void send_player_input(void)
   const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
   const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
 
-  Net::ClientInput in;
+  Msg::InputCommand in;
   in.sequence = ++seq;
   // The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
   // whose handedness is the transpose of the world basis the server rotates and
@@ -1425,7 +1425,7 @@ static void send_player_input(void)
   register_client_event_handlers();
   s_frameFire = false;
   s_frameMissile = false;
-  s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  s_frameMissileTarget = Msg::NO_MISSILE_TARGET;
   s_frameEcm = false;
   s_frameEnergyBomb = false;
   s_frameEscapePod = false;
@@ -1440,7 +1440,7 @@ static void send_player_input(void)
 
   in.fire = s_frameFire;
   in.fireMissile = s_frameMissile;
-  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
+  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Msg::NO_MISSILE_TARGET;
   in.ecm = s_frameEcm;
   in.energyBomb = s_frameEnergyBomb;
   in.escapePod = s_frameEscapePod;

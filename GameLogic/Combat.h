@@ -57,51 +57,6 @@ namespace Neuron::GameLogic
     return result;
   }
 
-  // --- Laser fire striking a target -----------------------------------------
-
-  // How a target absorbs laser fire (legacy check_target special cases).
-  enum class TargetClass
-  {
-    Normal,      // ordinary ship/asteroid: takes full laser strength
-    Station,     // Coriolis/Dodec station: immune to laser fire
-    Armoured,    // Constrictor/Cougar: only the military laser bites, at 1/4
-  };
-
-  // The legacy `laser` value (a ship's laser strength) for the military laser:
-  // MILITARY_LASER (0x97) masked to its 7-bit strength.
-  inline constexpr int MILITARY_LASER_STRENGTH = 0x97 & 127;   // = 23
-
-  // Laser damage actually dealt to a target of the given class (legacy
-  // check_target). `_laserStrength` is the firing laser's 7-bit strength.
-  [[nodiscard]] inline int LaserDamageTo(TargetClass _target, int _laserStrength)
-  {
-    switch (_target)
-    {
-      case TargetClass::Station:
-        return 0;
-      case TargetClass::Armoured:
-        return (_laserStrength == MILITARY_LASER_STRENGTH) ? _laserStrength / 4 : 0;
-      case TargetClass::Normal:
-      default:
-        return _laserStrength;
-    }
-  }
-
-  // Resolve a laser hit on a target with `_targetEnergy` hull/energy. Returns the
-  // target's remaining energy and whether it was destroyed (energy <= 0, the
-  // legacy explode_object trigger).
-  struct LaserHitResult
-  {
-    int targetEnergy = 0;
-    bool destroyed = false;
-  };
-
-  [[nodiscard]] inline LaserHitResult ResolveLaserHit(int _targetEnergy, TargetClass _target, int _laserStrength)
-  {
-    int energy = _targetEnergy - LaserDamageTo(_target, _laserStrength);
-    return LaserHitResult{ energy, energy <= 0 };
-  }
-
   // --- Kill reward ----------------------------------------------------------
 
   // Award for destroying a ship (legacy bounty payout + score bump on the kill).
