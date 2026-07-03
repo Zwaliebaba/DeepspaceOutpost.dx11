@@ -1,17 +1,16 @@
 # DeepspaceOutpost — Architecture & Game Design
 
-**Status:** as-built (Phase G complete: G0-G8; chat deferred), 2026-07-03.
-This is the **canonical design document** for the game: the client/server
-architecture, the authoritative simulation, the complete game rules, and the
-network protocol with every message type. Companion documents:
+**Status:** as-built (Phase G complete: G0-G8; chat deferred) + architectural
+review, 2026-07-03. This is the **single canonical design document** for the
+game: the client/server architecture, the authoritative simulation, the
+complete game rules, the network protocol with every message type, the locked
+design decisions (§12), the standing **architectural review** (§13), and the
+consolidated roadmap (§14).
 
-- [`MIGRATION_ROADMAP.md`](MIGRATION_ROADMAP.md) — the phased migration history
-  and per-phase status (how we got here).
-- [`gameplay.md`](gameplay.md) — the Phase G (multiplayer gameplay) work-package
-  plan this implementation followed.
-
-A short [Future outlook](#12-future-outlook) at the end covers designed-but-unbuilt
-work; everything else in this document describes code that exists and is tested.
+The former companion documents (`MIGRATION_ROADMAP.md`, `gameplay.md`,
+`ARCHITECTURE_REVIEW.md`) have been folded into §12–§14 and retired to prevent
+duplication. Sections 1–11 describe code that exists and is tested; §13–§14
+are critique and forward plan.
 
 ---
 
@@ -37,8 +36,8 @@ Concretely:
   the client does not link. The client keeps only presentation: rendering,
   interpolation, HUD, audio, input capture.
 - Every gameplay rule is unit-tested headlessly (no DX11, no sockets, no
-  wall-clock) — 218 GameLogic tests + the NeuronCore/NeuronServer suites at the
-  time of writing, CI-built on Windows/MSVC (x64 debug + release).
+  wall-clock) — 200+ GameLogic tests (see CI for the live count) + the
+  NeuronCore/NeuronServer suites, CI-built on Windows/MSVC (x64 debug + release).
 
 ### Topology
 
@@ -266,7 +265,7 @@ breakdown.
 | `units` | vector\<i32\> | held units per commodity, index 0..16 |
 
 **`Chat`** — `0x0300` · Wire · Event · Gameplay · Both. *(Registered; UI not
-yet wired — see Future outlook.)*
+yet wired — see §14.)*
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -686,7 +685,7 @@ Exempt: docked ships (inside the station, not in space), spawn/respawn grace
 (undock, police, traders: 2000) are born clear of every contact range, and
 trader lanes end at a **gate** 6000 above the planet, outside the kill zone.
 Sun proximity / cabin heat is deferred with the fuel-scoop payoff to G8+ (no
-sun entities exist yet — see Future outlook).
+sun entities exist yet — see §14).
 
 ### 6.10 World generation
 
@@ -761,7 +760,7 @@ station screen into flight; position updates always come from snapshots.
 ## 8. Determinism & testing
 
 - **Everything gameplay is headless-testable**: no sockets, no GPU, no clock,
-  no global RNG. 205 GameLogic tests + NeuronCore protocol suites run in CI
+  no global RNG. 200+ GameLogic tests + NeuronCore protocol suites run in CI
   (Windows, MSVC, x64 debug + release) and locally.
 - **Parity tests** pin the wire ABI: golden byte layouts for the folded legacy
   codecs, round-trips for every catalog message, and registry governance
@@ -864,23 +863,413 @@ Plus the two non-catalog streams: `'NSNP'` snapshots (§4.4) and the raw
 
 ---
 
-## 12. Future outlook (designed, not built)
+## 12. Locked design decisions & trajectory
 
-In rough priority order — details in
-[`MIGRATION_ROADMAP.md`](MIGRATION_ROADMAP.md) and [`gameplay.md`](gameplay.md):
+Preserved from the retired migration roadmap (its §0 and §2.4) — these are
+**owner-locked** and every recommendation in §13 honors them.
 
-- **Suns & cabin heat:** add sun entities to worldgen, port
-  `update_cabin_temp` (heat ramp → death) and sun-skimming fuel scooping —
-  deferred from G6/G7 so suns, heat and the fuel payoff land together.
-- **Chat (dropped from Phase G scope for now):** the `Chat` message exists;
-  needs client UI + server relay/sanitization.
-- **Phase F — persistence (SQL Server):** the top structural gap — today a
-  server restart wipes commanders (names, credits, cargo, equipment, score,
-  wanted). Session-scoped by explicit decision until F lands.
-- **Replication depth (Phase D/E leftovers):** delta compression,
-  quantization, a strategic AOI tier, client-side prediction for the local
-  ship (the starfield currently drifts against the replicated world).
-- **Scale hardening (Phase H):** the BotClient load harness and profiling
-  toward the 100-concurrent-player milestone; O(n²) pair loops in combat/
-  collisions will need the spatial grid once fleets grow.
-- **Operations (Phase I):** structured logging, metrics, admin tooling.
+| Topic | Decision |
+|---|---|
+| Platform | Windows client **and** Windows server (MSVC, DX11) |
+| Authority | Server-authoritative; clients send intent, render replicated state |
+| Trajectory | Gameplay evolves from space-flight toward a **4X / RTS-style MMO** (many units per player, empire/economy/territory, less twitch) — as an *extension*, never a rewrite |
+| World | One **seamless** absolute `int64³` space, no visible segments; an invisible cell partition underneath for interest management and future multi-process sharding |
+| Identity | **Account → Empire/Faction → owns N entities.** A player is *not* bound to one avatar; camera & interest are view-driven |
+| Input | Command/intent protocol (validated orders with costs/preconditions) — today flight axes, tomorrow unit orders; the anti-cheat boundary |
+| Streaming | Multi-resolution AOI: a high-detail **tactical** tier + a low-detail **strategic** tier (territory/fleet summaries) |
+| Transport | Raw winsock UDP + the custom reliability layer; hand-rolled binary hot path |
+| Persistence | Microsoft SQL Server; async batched writes off the sim thread; the world simulates while players are offline; **never** per-tick positions to SQL |
+| Entity model | In-house sparse-set ECS in NeuronCore; indexed spatially **and** relationally (owner/faction/group/tag) |
+| Sim cadence | **Decoupled clocks**: sim tick, command intake, and replication are separate rates; tactical replicates faster than strategic |
+| Logic boundary | `GameLogic` is server-only; the client shares **data schemas only**, never behavior |
+| Scale model | **Replication, not lockstep** — determinism kept for replays/tests; 100-player scale via interest-managed state replication |
+| Test harness | Headless `BotClient` over the real net stack for the 100-player load milestone |
+| Aesthetic | The faithful **low-poly wireframe / retro-vector** look is the art direction, not a placeholder — rendering work amplifies it, never replaces it |
+
+Phase status at retirement of the roadmap: 0/A/C ✅ · B/D/E/G 🟡 (BotClient,
+strategic tier, delta/quantization, prediction, chat outstanding) · F/H/I 🔴.
+Missions are deferred until after F. The **persistence-readiness rule** from
+the Phase G plan is promoted to a standing invariant here: *every
+durable-in-spirit piece of state lives in a plain serializable component*
+(`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `PlayerRecord`, `Equipment`, …) so
+Phase F serializes components without refactoring gameplay.
+
+---
+
+## 13. Architectural review — 4X Space MMO readiness
+
+**Reviewed 2026-07-03** against the locked trajectory in §12: a
+server-authoritative, retro-future **tactical-digital 4X space MMO** — low-poly
+wireframe presentation over a large-scale emergent simulation. Verdict in one
+paragraph:
+
+> The bones are unusually good. The single load-bearing rule (server
+> simulates, client renders, only schemas are shared) is actually enforced —
+> intent clamping, compile-time message traits, bounded decoding, seeded
+> deterministic RNG, headless tests. The weaknesses are at the edges: a
+> handful of protocol conveniences that accumulated special cases (§13.1); MMO
+> and 4X table-stakes that are acknowledged but unbuilt — persistence,
+> session security, the strategic tier, and above all the **identity layer**,
+> where the as-built protocol has quietly re-concretized the single-avatar
+> assumption §12 explicitly forbids (§13.2); and hot paths that are
+> fine at 12 NPCs but shaped wrong for fleets — O(n²) pair sweeps, per-tick
+> allocation churn, an unquantized 58-byte snapshot (§13.3). Nothing below
+> changes the concept, the lore, or the wireframe direction; everything
+> builds on the existing seams.
+
+### 13.1 Concept integrity & simplification
+
+Ordered by value ÷ effort. Message ids are permanent ABI (§4.3), so protocol
+simplifications mean *introducing a successor id and retiring the old one*,
+never mutating in place.
+
+**S1 — Invert the handshake: `ClientHello` becomes the front door.**
+Today any first `InputCommand` datagram from an unknown endpoint spawns an
+entity, provisions a session, and streams the multi-kilobyte manifest (§4.6) —
+*before* the server has seen a protocol version. That is (a) a version check
+performed after the entity exists, (b) a textbook amplification/DoS primitive
+(one spoofed ~40-byte datagram triggers kilobytes of Bulk traffic to an
+arbitrary address), and (c) permanent state-machine complexity — the session
+must tolerate hello-before-or-after-input forever. Simplify: ignore unknown
+endpoints until a valid, version-checked `ClientHello` arrives on the Control
+lane; *that* spawns the session. Deletes the `Commander-<n>` placeholder path
+and gives session-security work (§13.2.2) a single choke point.
+
+**S2 — One serialization path: fold the galaxy manifest into the catalog codec.**
+`0x0210` is the only wire message outside the generic `Fields()` codec — a
+hand-rolled fixed layout with a NUL-padded `char[12]` name. A second codec is
+a second thing to fuzz, golden-test, and explain. Re-cut it as a
+catalog-encoded `GalaxyManifestChunk` (new id), keep the Bulk-lane chunking,
+retire `0x0210`. Design the successor as **request-driven** (`baseIndex/count`
+pulls) rather than a connect-time fire-hose — that both bounds the connect
+burst and is the prerequisite for fog-of-war (§13.2.3).
+
+**S3 — Split travel out of the station protocol.**
+`Teleport` and `JumpDrive` ride `StationRequest` but are intercepted before
+`ProcessStationRequest` and routed to `HyperspaceSystem` — the message name
+lies about its handler, `stationId` means *system id* for one kind only, and
+`StationStatus` mixes commerce outcomes (`NoStock`, `HoldFull`) with travel
+outcomes (`Arrived`, `Witchspace`, `MassLocked`). Introduce
+`TravelRequest{kind, systemId}` / `TravelResponse{status}` and let the station
+protocol shrink back to docking + commerce. The code already separates them;
+the wire should match.
+
+**S4 — Delete the client's single-player shield-regen fallback.**
+§7 admits local shield regen runs "only when disconnected". Single-player is
+retired; this is the one game rule still living in the client, in direct
+tension with the document's load-bearing rule. A disconnected client shows a
+connection-lost state, not simulated vitals. Cheap, and it makes the central
+claim literally true.
+
+**S5 — Replace `Sleep(33)` with an accumulator-based fixed timestep.**
+`Sleep` guarantees *at least* the delay; tick duration drifts under load, so
+every "600 ticks ≈ 20 s" rule silently stretches. Because all rates are
+already tick-denominated (good), the fix is confined to the host loop: run N
+catch-up ticks when behind, sleep the remainder when ahead. Also yields the
+tick-overrun metric Phase H needs, for free.
+
+**S6 — Two math stacks, not three.**
+The document sanctions DirectXMath for presentation and
+`Vector3i64`/`Vector3d` for simulation — correct. The frozen
+`LegacyVector*`/`Matrix33` wrappers are a third stack that every new
+contributor must learn to *not* use. Schedule their retirement file-by-file as
+legacy presentation code is touched; freezing is a state, not a plan.
+
+**S7 — Id-band hygiene before the bands ossify.**
+`EcmPulse` (`0x0202`) and `EscapePodUsed` (`0x0203`) are gameplay events
+sitting in the replication-lifecycle band. Ids are permanent, so: grandfather
+these two with a note in §4.3, and declare that future combat/VFX events
+allocate from the game-specific band (`0x1000+`). Likewise strike the
+`InputCommand` / `Net::ClientInput` alias — one catalog name.
+
+**What is *not* over-engineered — do not "simplify" these.**
+The five-trait message catalog, the three reliable lanes, the sparse-set ECS,
+the separate seeded LCG streams, Chebyshev gating on `int64` coordinates, and
+intent-based flight for players *and* NPCs are all proportionate mechanism:
+each buys a compile-time guarantee, a head-of-line-blocking fix, or the
+determinism the test strategy depends on. The snapshot stream staying outside
+the catalog codec is also correct — it is a packed hot path with its own
+packetizer, and forcing it through `Fields()` would cost real bytes and CPU
+for uniformity's sake.
+
+### 13.2 Missing features & functional gaps
+
+#### 13.2.1 Wireframe tactical rendering & spatial partitioning
+
+The wireframe aesthetic is not just art direction — it is a **performance
+budget**. A hull is tens of line segments, not tens of thousands of shaded
+triangles; a thousand-ship battle is only a few hundred thousand lines. The
+current renderer does not cash that cheque:
+
+- **Batched, instanced vector rendering.** The legacy path draws each object
+  immediately, mesh by mesh. Replace with: one persistent line-list vertex
+  buffer per hull type (`NetType` → mesh is already 1:1), one per-frame
+  instance buffer (world transform ± palette tint per replicated entity), one
+  `DrawIndexedInstanced` per hull type. Draw calls become O(hull types), not
+  O(entities) — the single change that makes fleet-scale battles renderable.
+- **Aesthetic as post-process, not per-object cost.** The retro-vector look
+  (line glow/bloom, additive trails, depth-faded tactical grid) belongs in a
+  small post chain: render lines to an emissive target, blur, composite.
+  Expand raw lines to anti-aliased screen-space quads in the vertex shader
+  (4 vertices per segment via `SV_VertexID`, no geometry shader) so line
+  weight is a style parameter, not a raster accident.
+- **Client-side spatial partitioning + iconic LOD.** `Spatial::Grid` lives in
+  NeuronCore but the client uses no partition: no frustum/range culling, and
+  every AOI entity renders as its full mesh at any distance. Add a
+  grid-backed cull, and beyond a range threshold draw the *glyph*, not the
+  mesh — a 2–6 line vector icon per hull class. Iconic LOD **is** the
+  tactical-digital look (distant contacts as symbology) and simultaneously
+  the LOD strategy; it also becomes the render path for the strategic tier
+  below. No smooth-LOD/mesh-decimation machinery is needed or wanted for
+  low-poly wireframe.
+- **Snapshot-type indirection.** `NetType` values are raw legacy `SHIP_*`
+  ints shared by sim and render. Before hull variety grows (§13.2.3 drones,
+  outposts), route them through a client-side table (`NetType` → mesh, glyph,
+  palette row) so adding a hull is data, not a switch statement.
+
+#### 13.2.2 4X MMO scalability — state, ticking, concurrency, persistence
+
+In dependency order; the first three block everything else being "real".
+
+- **Persistence (Phase F) — the top structural gap.** A restart wipes every
+  commander. §12's invariant keeps the write path cheap: serialize
+  components, async batched writes off the sim thread, load-on-connect.
+  Design the schema for the 4X drift now: accounts, **empires**, owned
+  entities, inventory, *and world state* — the moment markets drift
+  (§13.2.3) they stop being pure seed functions and need rows; add a command
+  log table for audit/replay while the table count is still small.
+- **Session security: the UDP endpoint must stop being the identity.**
+  Sessions are keyed `addr<<16 | port` (§5.2): spoofable (anyone who can
+  guess an endpoint can sell your cargo) and fragile (NAT rebind = new
+  player). Fix rides S1: `ClientHello` returns a random 64-bit session
+  token; every subsequent datagram carries it after the lane byte;
+  mismatches drop. Add per-endpoint rate limiting at the same choke point.
+  Accounts arrive with F; the token is a weekend and closes the worst hole.
+- **Reconnect & resume.** 300-tick reaping plus endpoint identity means a
+  Wi-Fi blip is character death. With the token, resume is nearly free: a
+  hello carrying a known token re-binds the session to the new endpoint;
+  add a 30–60 s grace window before the reap is final. Highest
+  perceived-quality-per-line item in this review.
+- **Time synchronization, then lag compensation.** Snapshots carry a `tick`
+  but no shared-clock contract: interpolation delay is a guess and there is
+  no RTT estimate to compensate against. Add a Control-lane ping/offset
+  pair; then give `ResolvePlayerFire` a short transform ring buffer (~15
+  frames) and test the aim cone against the world at `now − RTT −
+  interpDelay`. Dogfighting at 100+ ms RTT currently punishes exactly the
+  players an MMO must keep. Determinism is unaffected (derived state).
+- **Replication depth (Phase D debt): quantization, delta, budgets.** The
+  58-byte `EntitySnapshot` re-sends full `int64` positions and two full
+  float basis vectors every tick to every viewer. Bandwidth — not CPU — is
+  the 4X scaling wall (units ≫ players). See §13.3-E4 for the concrete
+  re-cut; the *architectural* requirements are: per-session delta against a
+  last-acked baseline, per-lane byte budgets, and a documented snapshot send
+  rate (today implicitly "every tick", which is the knob this work turns).
+- **The strategic tier — the second AOI resolution §12 promises.** There is
+  exactly one interest radius. A commander with holdings in three systems is
+  blind to all of them; widening the tactical AOI is the wrong (bandwidth-
+  catastrophic) answer. Add a low-rate (0.5–1 Hz), reliable-lane summary
+  stream keyed by system id — aggregate counts, ownership, alerts ("your
+  station in Lave is under attack") — filtered by known systems (§13.2.3),
+  rendered by the chart screen and the iconic-LOD path (§13.2.1). This also
+  realizes the decoupled-clocks decision: tactical at tick rate, strategic
+  at its own cadence.
+- **Ticking & concurrency shape.** One thread runs everything (§5.1). That
+  is *correct today* — do not parallelize ahead of profiling — but the 4X
+  entity counts will outgrow it, so keep the phases parallelizable:
+  AI-think is read-world/write-own-intent (data-parallel by construction),
+  snapshot building is per-session independent, collision broadphase
+  partitions by cell. Parallelize *by phase with deterministic partitioning
+  and ordered merge*, never by handing entities to free-running threads —
+  that would forfeit the golden-run determinism the test strategy is built
+  on. The invisible cell partition is also the future shard boundary; the
+  discipline that keeps sharding cheap later is keeping systems cell-local
+  now (no system should casually scan the whole world when the grid can
+  answer).
+- **MMO table stakes with existing seams:** broadcast a cosmetic
+  `ExplosionAt{pos}` on player kills (today the killer sees their victim
+  silently vanish — wrong trade for PvP); validate `missileTarget`
+  server-side with the same range+cone gate the laser has; finish chat with
+  relay-side rate limits and a client mute list designed in from day one.
+
+#### 13.2.3 Emergent systems & algorithmic automation
+
+The Darwinia comparison is architecturally load-bearing in one specific way:
+**indirect control** — the commander issues orders; units pilot themselves.
+This engine is unusually pre-adapted because *NPCs already fly by writing
+`FlightIntent` through the same pipeline as players* (§6.1). Every feature
+below exploits that seam; none touches the lore or the flight feel.
+
+1. **The identity layer (player ≠ avatar) — do this first.** §12 locks
+   "Account → Empire → owns N entities", yet the as-built protocol
+   re-concretized the single avatar: `AssignPlayer{entityId}` is singular,
+   `PlayerRecord` lives *on the hull*, sessions map 1:1 to a ship. Introduce
+   `PlayerId` (session owns it; name/score/wallet key off it),
+   `Owner{playerId}` as a component with a **relational index** ("all my
+   units" as a cheap query, per §12), and grow `AssignPlayer` into
+   `AssignControl{playerId, primaryEntityId}` (new id per ABI rules).
+   Short-term behavior identical; every month of delay makes this retrofit
+   more expensive. It unblocks every item below.
+2. **Ordered units — the Darwinia move.** A player-owned escort/drone is an
+   NPC hull with `Owner{you}` whose `AiSystem` target/waypoint comes from a
+   validated `UnitOrder{unitId, order: Escort|Attack|Patrol|Dock|Route,
+   target}` message (`0x1000+` band) instead of the spawn director. The AI,
+   flight model, combat, and replication all already exist — indirect
+   control is literally the current architecture with a different order
+   source. Vertical slice: one buyable escort fighter.
+3. **Automated resource routing.** The trader autopilot (station ↔ gate
+   lanes, dock-despawn) is already a working logistics primitive. Owned
+   haulers reuse it with a `Route{stationIds[]}` order. Above that, a
+   per-empire **flow pass** at strategic cadence (once per few seconds, not
+   per tick): diff supply/demand across the player's known/owned stations
+   per commodity, emit hauler orders greedily. Player sets policy; ships
+   route themselves — 4X logistics without a new simulation layer.
+4. **A living economy instead of a seeded one.** Keep `GenerateMarket` as
+   the *baseline*; make stock/prices state that drifts back toward it, with
+   player and NPC trade pushing against it. Then make the ambient traders
+   *be* the supply chain: a docking trader delivers goods (stock up, price
+   down). Piracy now causes scarcity, trade routes decay as they are
+   exploited, and blockades become emergent gameplay — the mechanism (lane
+   traffic) already exists; only the dock side-effect is missing. Later:
+   per-economy production/consumption, giving owned stations something to
+   tax and haulers something to haul. Requires F.
+5. **Fog of war over the galaxy.** All 256 systems ship to every client at
+   connect, so "explore" is a chart screen. Per-player
+   `KnownSystems{bitset}` (persistence-ready component); known by visiting,
+   buying charts at high-tech stations (an economy sink), or scout units
+   (item 2). The manifest becomes incremental (S2's re-cut), and the
+   strategic tier filters by it. AOI already hides *entities*; this extends
+   the same idea to *map knowledge*.
+6. **Ownership & territory.** Stations gain `Owner`; claiming is a validated
+   station transaction (charter purchase / deployed beacon), conferring
+   small concrete privileges first (fee share, docking lists). A deployable
+   outpost kit is cargo with tonnage semantics, deployed via a command
+   message, spawning a structure entity — replicated, persisted, rendered by
+   the existing paths (one new `NetType`). Territory then *emerges* as
+   influence radii around owned structures; no map-painting system.
+7. **Factions — outgrow the five-value team enum.** Keep `Team` for NPC
+   *archetype* rules (police discipline, pirate preferences); add a
+   server-issued `FactionId` + small standings table for *allegiance*.
+   "Protected victim" (§6.3) generalizes to "clean player not at war with
+   you"; declared wars suspend wanted consequences between belligerents —
+   consensual mass PvP without touching the police system for everyone else.
+
+Deliberately **not** recommended: planetary landings, crafting trees,
+player-built capitals, sharded mega-galaxy, voice. None is required by the 4X
+loop, and each strains the thin-client / 1200-byte / 30 Hz envelope that keeps
+this codebase testable and honest.
+
+### 13.3 Engineering & performance recommendations
+
+**E1 — Wire `Spatial::Grid` into every pairwise loop *before* entity counts
+grow.** Confirmed in code: `CollisionSystem.h` gathers all combatants then
+runs an `i < j` pair sweep; combat target scans, scooping, ECM radius,
+energy-bomb radius, and AOI population are the same shape. Only
+`AreaOfInterest` uses the grid today. With caps of 12 NPCs this is invisible;
+with §13.2.3's drone fleets every one of these goes quadratic *simultaneously*.
+Broadphase: cell size ≥ the largest interaction range (1000 for station
+scrape; 16 384 interactions like ECM/bomb query multiple cells), then exact
+Chebyshev inside candidate cells. Convert and golden-test one system at a
+time now, not under Phase H load-test fire.
+
+**E2 — Kill per-tick allocation churn.** Systems rebuild scratch
+`std::vector`s every tick (the collision gather is one of several). Introduce
+a per-tick **frame arena** (bump allocator reset each tick) or persistent
+per-system scratch buffers with `clear()`-not-free semantics. Same treatment
+for snapshot build and message encode buffers — the reliable channels' resend
+queues should recycle, not reallocate. This is the difference between a flat
+33 ms budget and GC-like latency spikes at fleet scale.
+
+**E3 — ECS: right storage, keep the discipline, add the relational index.**
+Sparse-set with swap-and-pop dense arrays (verified in `ECS.h`) is the correct
+choice at this scale — do *not* migrate to archetypes; the churn isn't worth
+it for ~dozens of component types. Do: (a) keep honoring "rarer pool first"
+in `Each<A,B>`; (b) implement `Owner`/`FactionId` lookups as maintained
+secondary indexes (hash multimap updated on add/remove), never as component
+scans — §12 demands "all my units" be O(mine); (c) when snapshot building
+shows up in profiles, split the hot replicated fields (position, basis,
+speed, type) into a dedicated pool iterated linearly, so the packetizer
+streams from dense memory instead of probing four pools per entity.
+
+**E4 — Re-cut the snapshot for bandwidth (the real scaling wall).** 58
+bytes/entity, unquantized, full-resend, per-viewer. Target ~20 bytes before
+delta: header carries a reference cell per packet; positions become 3×i32
+cell-relative offsets (12 B, exact — no float loss); orientation becomes a
+smallest-three quantized quaternion or oct-encoded nose + roll byte (4–5 B,
+replacing 24 B of redundant orthonormal basis — derive the frame client-side);
+speed as u16 fixed-point. Then per-session **delta compression** against the
+last-acked baseline with a periodic keyframe (the ack plumbing already exists
+in the reliable layer; snapshots stay unreliable with baseline acks
+piggybacked). Quantization must round on the *server* so all clients see
+identical values — never quantize client-side.
+
+**E5 — SIMD, but determinism first.** The sim's cross-run determinism is a
+hard asset (golden tests, future replays). Rules: pin `/fp:strict` on
+`GameLogic` and the server; no `-ffast-math`-style contraction; SIMD via
+*explicit* intrinsics with fixed evaluation order, never autovectorization of
+order-sensitive reductions. Profitable, safe targets: (a) broadphase
+Chebyshev rejection — 4-wide `int64` compares (AVX2) over SoA position
+arrays; (b) `StepFlight` basis rotation over batched SoA doubles (2-wide SSE2
+/ 4-wide AVX) since every ship runs the same integrator; (c) snapshot
+quantization/packing. AI think-rate staggering (`(index ^ tick) & 7`) already
+amortizes the branchy code — leave it scalar.
+
+**E6 — GPU offload belongs on the client only.** The server must stay
+headless-deterministic — no GPU compute in `GameLogic`, ever. Client-side,
+the wireframe aesthetic maps perfectly onto cheap GPU work: vertex-shader
+line expansion + emissive post chain (§13.2.1), explosion debris as a GPU
+particle burst seeded by `EntityDeath` (the legacy `exp_seed` look, computed
+in a compute or vertex shader instead of CPU), starfield in a shader.
+None of this touches simulation truth.
+
+**E7 — Threading: single-threaded until measured, then phase-parallel.**
+Sequence: S5's accumulator first (so overruns are *visible*), then the E1
+grid (so the work is smaller), then profile with the BotClient harness. When
+the tick budget actually breaks, parallelize the embarrassingly-parallel
+phases behind a small job system — AI think, broadphase per cell, snapshot
+build per session — with deterministic partitioning and a single ordered
+merge point per phase. Never free-thread entity mutation. DB I/O (Phase F)
+is async/batched off-thread from day one per §12.
+
+**E8 — Instrument before Phase H, not during.** Minimum counters, cheap
+enough to always-on: tick duration histogram + overrun count (from S5),
+bytes/session/s per lane, entities per AOI snapshot, broadphase candidate-pair
+counts (validates E1), reliable-lane resend rates, and per-phase tick-time
+breakdown. These numbers are what Phase H *tunes*; without them the
+100-player milestone is guesswork.
+
+---
+
+## 14. Consolidated roadmap
+
+Replaces the retired roadmap's phase list and the prior review's matrix.
+Deferred-but-designed gameplay (suns & cabin heat with sun-skimming fuel
+scooping; missions after persistence; chat UI) remains in scope as noted in
+§6/§13. Effort: S ≤ a day-ish, M = days, L = week(s).
+
+| # | Item | Ref | Type | Effort | Unblocks |
+|---|---|---|---|---|---|
+| 1 | Persistence (SQL Server) + world-state rows + command log | §13.2.2 | Infra | L | everything durable |
+| 2 | `ClientHello`-first handshake | S1 | Simplify | S | 3, 4 |
+| 3 | Session token; endpoint ≠ identity; rate limits | §13.2.2 | Infra | S | 4, security |
+| 4 | Reconnect grace + resume | §13.2.2 | Infra | S | player retention |
+| 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
+| 6 | Spatial grid into combat/collision/scoop/ECM loops | E1 | Perf | M | fleet scale |
+| 7 | Frame arena / scratch-buffer reuse | E2 | Perf | S | flat tick budget |
+| 8 | Accumulator fixed timestep + tick metrics | S5, E8 | Simplify | S | honest profiling |
+| 9 | Time sync (ping/offset) → lag-compensated fire | §13.2.2 | Infra | M | PvP fairness |
+| 10 | Snapshot quantization + delta + budgets | E4 | Perf | M–L | bandwidth wall |
+| 11 | Strategic AOI summary tier | §13.2.2 | Feature | M | empire visibility |
+| 12 | First ordered unit (`UnitOrder` escort) | §13.2.3-2 | Feature | M | the Darwinia loop |
+| 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |
+| 14 | Fog of war (`KnownSystems`) + incremental manifest | §13.2.3-5, S2 | Feature | M | explore |
+| 15 | Ownership + claimable/deployable outposts | §13.2.3-6 | Feature | L | expand |
+| 16 | Drifting markets + traders-as-supply + hauler routing | §13.2.3-3/4 | Feature | L | exploit, emergence |
+| 17 | `FactionId` + standings | §13.2.3-7 | Feature | M | diplomacy, mass PvP |
+| 18 | Kill-VFX broadcast; missile-lock validation; chat + abuse controls | §13.2.2 | Feature | S–M | MMO polish |
+| 19 | Travel protocol split; codec unification; band notes; math-stack retirement | S2, S3, S6, S7 | Simplify | S | protocol hygiene |
+| 20 | BotClient harness → 100-player load test | §12 | Test | M | validates 6–10 |
+| 21 | Delete client shield-regen fallback | S4 | Simplify | XS | dogma integrity |
+
+Sequencing spine: **1 → 2/3/4 → 5 → 6/7/8 → 9/10/11 → 12+**, with 13 (render)
+and 19/21 (hygiene) parallelizable at any point, and 20 gating any entity-cap
+increase.
