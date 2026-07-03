@@ -47,8 +47,9 @@ namespace Neuron::Net
 
 namespace Neuron::Msg
 {
-  // The wire form of one system: a Record (Fields() but no id/traits of its own -
-  // it only ever travels inside a GalaxyChunk). The name is a codec-native string.
+  // The wire form of one system: a NestedRecord (Fields() but no id/traits of its
+  // own - it only ever travels inside a GalaxyChunk). The name is a codec-native
+  // string.
   struct GalaxySystemEntry
   {
     uint32_t id = 0;
