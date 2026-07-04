@@ -50,8 +50,15 @@ namespace Neuron::Msg
     bool energyBomb = false;     // detonate the energy bomb this frame
     bool escapePod = false;      // eject in the escape pod this frame
 
-    auto Fields()       { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod); }
-    auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod); }
+    // Snapshot-stream acknowledgement (E2b): the latest snapshot tick the client
+    // holds as a complete baseline. Piggybacked on the input stream (the highest-
+    // frequency client->server traffic) so the server can delta the next snapshot
+    // against a baseline the client provably has. 0 = nothing acked yet. Appended
+    // after the G8 fields (the legacy prefix stays byte-identical).
+    uint32_t ackSnapshotTick = 0;
+
+    auto Fields()       { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod, ackSnapshotTick); }
+    auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod, ackSnapshotTick); }
   };
 }
 

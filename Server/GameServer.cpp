@@ -576,7 +576,10 @@ namespace DSOServer
         snap.refX = viewerPos.x;
         snap.refY = viewerPos.y;
         snap.refZ = viewerPos.z;
-        for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+        // Delta-encode against the baseline the client last acknowledged (E2b): a
+        // small delta most ticks, a full keyframe periodically or when no baseline
+        // is held. Falls back to a full for a crowded (multi-datagram) AOI.
+        for (const std::vector<uint8_t>& datagram : s.snapshotEncoder.Encode(snap, s.ackedSnapshotTick))
         {
           m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
           m_bytesThisTick += datagram.size();   // D3 metrics

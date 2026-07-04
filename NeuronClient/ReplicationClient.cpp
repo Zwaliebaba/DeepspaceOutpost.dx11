@@ -88,8 +88,16 @@ namespace Neuron::Client
       switch (Net::PeekMagic(buffer, size))
       {
         case Net::SNAPSHOT_MAGIC:
-          m_interp.Apply(buffer, size);        // unreliable bulk state
+        {
+          // The snapshot stream is now full-or-delta (E2b): the decoder reconstructs
+          // the whole tick (applying a delta against its acked baseline) and tracks
+          // the latest baseline to acknowledge; feed the reconstruction to the
+          // interpolator exactly as a full snapshot used to be applied.
+          Net::WorldSnapshot recon;
+          if (m_stream.Decode(buffer, size, recon))
+            m_interp.Ingest(recon);
           break;
+        }
         case Msg::RELIABLE_MAGIC:
           m_events.OnDatagram(buffer, size);   // reliable lanes (Control/Gameplay/Bulk)
           break;
@@ -218,8 +226,13 @@ namespace Neuron::Client
     // record (replacing the old bespoke 'NCMD' packet), stamped with our session
     // token (B2) so the server accepts it as ours. Before HelloAck the token is 0
     // and input is ignored server-side anyway (we aren't connected yet).
+    //
+    // Piggyback the snapshot-stream ack (E2b): the latest baseline tick we hold, so
+    // the server deltas its next snapshot against a snapshot we provably have.
+    Msg::InputCommand input = _input;
+    input.ackSnapshotTick = m_stream.AckTick();
     Msg::PacketWriter writer(Msg::MessageLane::Unreliable, m_sessionToken);
-    writer.Add(_input);
+    writer.Add(input);
     m_socket.SendTo(m_server, writer.Bytes().data(), writer.Size());
   }
 

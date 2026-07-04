@@ -70,6 +70,7 @@ TEST(Input, PayloadMatchesLegacyByteLayout)
   in.ecm = true;
   in.energyBomb = false;
   in.escapePod = true;
+  in.ackSnapshotTick = 0xABCD;
 
   const std::vector<uint8_t> payload = Msg::Encode(in);
 
@@ -81,9 +82,10 @@ TEST(Input, PayloadMatchesLegacyByteLayout)
   golden.WriteU8(1);
   golden.WriteU8(1);
   golden.WriteU32(4242);
-  golden.WriteU8(1);   // ecm        (G8, appended)
-  golden.WriteU8(0);   // energyBomb (G8, appended)
-  golden.WriteU8(1);   // escapePod  (G8, appended)
+  golden.WriteU8(1);        // ecm        (G8, appended)
+  golden.WriteU8(0);        // energyBomb (G8, appended)
+  golden.WriteU8(1);        // escapePod  (G8, appended)
+  golden.WriteU32(0xABCD);  // ackSnapshotTick (E2b, appended)
   EXPECT_EQ(payload, golden.Bytes());
 }
 

@@ -22,6 +22,7 @@
 
 #include "NetLib.h"
 #include "SnapshotInterpolator.h"
+#include "SnapshotStream.h"                // Net::SnapshotStreamDecoder (delta stream, E2b)
 #include "ReliableChannel.h"
 #include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
@@ -160,6 +161,7 @@ namespace Neuron::Client
   private:
     Net::UdpSocket m_socket;
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
+    Net::SnapshotStreamDecoder m_stream;           // E2b: full+delta snapshot decode/baseline
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (handshake/chunks filtered out)
     uint64_t m_sessionToken = 0;                   // from HelloAck; stamped on every outbound datagram (B2)

@@ -485,8 +485,22 @@ landmarks (planet + station) out to 2 000 000 units so celestial bodies never
 pop out mid-approach. Packetized to whole entities ≤ 1200 bytes (the reference
 origin is repeated in each split datagram so each decodes independently). Later
 snapshots supersede earlier ones; loss is never repaired, only outrun.
-**Still pending (E2b/E2c):** per-session delta vs a last-acked baseline with
-keyframes, and per-lane byte budgets with distance-sorted drop.
+
+**Delta stream (E2b).** Rather than re-sending every visible entity each tick,
+the server sends a small **delta** against the snapshot the client last
+**acknowledged** — only changed entities (new/moved) and removed ids — plus an
+occasional full **keyframe** (forced ~1 s, or when no acked baseline is held, or
+for a crowded multi-datagram AOI). A delta shares the `'NSNP'` magic with a
+distinct version byte (3) and names its `baselineTick`; a full carries a
+`complete` flag so the client only treats a whole-tick snapshot as a baseline.
+The client **acks** the latest baseline tick by piggybacking it on
+`InputCommand` (`ackSnapshotTick`). Both sides keep a bounded ring of recent
+snapshots, so a lost delta self-heals (the server keeps deltaing against the
+still-acked older baseline) and reordering is safe (a delta resolves its baseline
+by tick). Change detection compares **absolute** positions (stable under the
+moving reference origin) at their **quantized** resolution. Codecs:
+`SnapshotDelta.h` (diff/apply) and `SnapshotStream.h` (encoder/decoder).
+**Still pending (E2c):** per-lane byte budgets with distance-sorted drop.
 
 ### 4.5 Server-internal messages (never on the wire)
 

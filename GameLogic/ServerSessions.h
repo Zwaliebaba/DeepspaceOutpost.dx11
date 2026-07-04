@@ -47,6 +47,7 @@
 #include "Messages/Framing.h"        // Msg::PROTOCOL_VERSION (the hello version check)
 #include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo / GalaxyChunk pull protocol
 #include "Messages/MessageEndpoint.h" // Msg::MessageEndpoint (Control/Gameplay/Bulk lanes)
+#include "SnapshotStream.h"           // Net::SnapshotStreamEncoder (per-session delta stream, E2b)
 #include "Messages/Defs/CoreEvents.h"   // lifecycle events (kept for consumers' transitive use)
 #include "Messages/Defs/PlayerSession.h" // Msg::ClientHello / HelloAck / HelloReject / PlayerInfo
 
@@ -106,6 +107,8 @@ namespace Neuron::GameLogic
     uint32_t inputWindowTick = 0;      // D4: tick the input-cadence window opened
     uint16_t inputsThisWindow = 0;     // D4: inputs applied this tick (capped)
     bool loading = false;              // B4: version-checked, awaiting a persistence load before spawn
+    uint32_t ackedSnapshotTick = 0;    // E2b: latest snapshot tick this client holds as a baseline
+    Net::SnapshotStreamEncoder snapshotEncoder;   // E2b: per-session delta/keyframe snapshot stream
 
     // A session is LIVE once its ClientHello spawned an entity; before that it is
     // a pending shell that exists only to receive that reliable hello.
@@ -160,6 +163,7 @@ namespace Neuron::GameLogic
       if (_in.sequence > session->lastInputSeq)
       {
         session->lastInputSeq = _in.sequence;
+        session->ackedSnapshotTick = _in.ackSnapshotTick;   // E2b: freshest input carries the freshest ack
         FlightIntent& fi = _world.Get<FlightIntent>(session->entity);
         fi.rollAxis = _in.rollAxis;
         fi.pitchAxis = _in.pitchAxis;

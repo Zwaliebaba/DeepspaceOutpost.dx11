@@ -1023,10 +1023,36 @@ removed-id list; `PeekSnapshotVersion` lets a receiver route full vs delta.
 `SnapshotDeltaTests.cpp` covers empty/new/changed/removed diffs, sub-quantum
 suppression, diff→apply reconstruction, the **stationary-entity-survives-a-moving-
 reference** case, full and delta wire round-trips (incl. a 9e11 reference), and
-version peeking. **Still pending: E2b-2** (wire it into the server/client -
-per-session baselines, sequence/ack plumbing on the reliable lane, keyframe
-cadence, MTU fallback) **and E2c** (per-lane byte budgets with distance-sorted
-drop).
+version peeking.
+
+*As built — E2b-2 (server/client wiring), 2026-07-04:* the delta stream is live.
+`Replication.h`'s `WorldSnapshot` gains a 1-byte `complete` flag (header now 41);
+`PacketizeSnapshot` clears it on every part of a multi-datagram snapshot, so a
+delta is only ever based on a snapshot the receiver holds in FULL.
+`NeuronCore/SnapshotStream.h` pairs a `SnapshotStreamEncoder` (server) and
+`SnapshotStreamDecoder` (client), each holding a bounded ring of recent snapshots:
+the encoder deltas the current tick against the tick the client last ACKED (looked
+up in its ring) and sends a single-datagram delta when it fits, else a full - also
+forced on a ~1 s keyframe cadence; the decoder reconstructs each tick (applying a
+delta against the baseline tick it names, found in its own ring) and tracks the
+latest complete baseline to acknowledge. **Ack channel:** piggybacked on
+`InputCommand` (a new appended `ackSnapshotTick` u32 - the highest-frequency
+client→server traffic, and unreliable like the snapshots it acks, which suits a
+lost ack better than the reliable lane the original note suggested); the client
+stamps it in `SendInput`, the server reads it in `OnInput` (freshest input carries
+the freshest ack). Each `Session` owns its encoder; `GameServer::PublishState`
+sends `s.snapshotEncoder.Encode(snap, s.ackedSnapshotTick)`; `ReplicationClient`
+routes every `'NSNP'` datagram through `m_stream.Decode` → `interpolator.Ingest`.
+Loss self-heals (the server keeps deltaing against the still-acked older baseline;
+a keyframe bounds the worst case); reordering is safe (deltas resolve their
+baseline by tick). `SnapshotStreamTests.cpp` verifies keyframe-then-deltas
+reconstruction, dropped-delta self-heal, the keyframe cadence, no-baseline drop,
+and that a multi-datagram full is rendered but not acked. **Scope note:** delta
+fires when the current tick's changes fit one datagram (the common case, incl. the
+12-NPC acceptance target); a persistently *crowded* AOI (multi-datagram fulls)
+never forms a single-datagram baseline and stays on full snapshots - fragment
+reassembly for delta at extreme fleet density is a further step. **Still pending:
+E2c** (per-lane byte budgets with distance-sorted drop).
 
 ### E3 — Strategic AOI tier (#11) — **M**
 
