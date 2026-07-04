@@ -181,6 +181,7 @@ namespace DSOServer
              static_cast<unsigned long long>(s.overruns), s.entities, s.sessions,
              static_cast<unsigned long long>(s.avgCandidatePairs),
              static_cast<unsigned long long>(s.bytesPerSecond));
+      fflush(stdout);   // the D5 harness parses this line from a redirected pipe
       m_metrics.Reset();
       m_metricsWindowStartMs = nowMs;
     }

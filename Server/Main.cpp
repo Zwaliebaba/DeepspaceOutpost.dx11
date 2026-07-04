@@ -15,17 +15,27 @@
 using namespace winrt;
 using namespace Neuron;
 
-int main()
+int main(int argc, char** argv)
 {
+  // Optional argv[1] overrides the UDP port (the D5 BotClient smoke runs the
+  // server on a side port so it can never collide with a real instance).
+  uint16_t port = DSOServer::Cfg::SERVER_PORT;
+  if (argc > 1)
+  {
+    const int p = atoi(argv[1]);
+    if (p > 0 && p <= 65535)
+      port = static_cast<uint16_t>(p);
+  }
+
   printf("Starting DSOServer (GameLogic v%u) on UDP %u...\n",
-         GameLogic::Version(), static_cast<unsigned>(DSOServer::Cfg::SERVER_PORT));
+         GameLogic::Version(), static_cast<unsigned>(port));
   CoreEngine::Startup();
 
   Net::NetStartup();
   Net::UdpSocket socket;
-  if (!socket.Open(DSOServer::Cfg::SERVER_PORT))
+  if (!socket.Open(port))
   {
-    printf("Failed to bind UDP %u\n", static_cast<unsigned>(DSOServer::Cfg::SERVER_PORT));
+    printf("Failed to bind UDP %u\n", static_cast<unsigned>(port));
     return 1;
   }
 

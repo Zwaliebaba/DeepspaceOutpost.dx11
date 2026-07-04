@@ -1388,7 +1388,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 17 | `FactionId` + standings | §13.2.3-7 | Feature | M | diplomacy, mass PvP |
 | 18 | Kill-VFX broadcast; missile-lock validation; chat + abuse controls | §13.2.2 | Feature | S–M | MMO polish |
 | 19 | Travel protocol split; codec unification; band notes ✅ (done 2026-07-03); math-stack retirement rides item 13 | S2, S3, S6, S7 | Simplify | S | protocol hygiene |
-| 20 | BotClient harness → 100-player load test | §12 | Test | M | validates 6–10 |
+| 20 | BotClient harness → 100-player load test ✅ (harness + CI smoke done 2026-07-04; the 100-bot soak is a manual run of the same binary) | §12 | Test | M | validates 6–10 |
 | 21 | Delete client shield-regen fallback ✅ (done 2026-07-03, extended to the whole offline engine) | S4 | Simplify | XS | dogma integrity |
 
 Sequencing spine: **1 → 2/3/4 → 5 → 6/7/8 → 9/10/11 → 12+**, with 13 (render)

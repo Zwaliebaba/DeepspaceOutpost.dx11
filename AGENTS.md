@@ -16,9 +16,9 @@ consolidated roadmap live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (§1
 before doing architecture work.
 
 > **Status note.** The engine split has landed: `NeuronCore`, `NeuronClient`, `NeuronServer`,
-> `GameLogic`, the `DeepspaceOutpost` client and the dedicated `Server` are all real CMake
-> targets with companion test suites under `Tests/<Library>/`. `BotClient` is the one planned
-> target that does not exist yet (ARCHITECTURE.md §14, item 20). The client still carries two
+> `GameLogic`, the `DeepspaceOutpost` client, the dedicated `Server` and the headless
+> `BotClient` load harness (ARCHITECTURE.md §14, item 20) are all real CMake targets, the
+> libraries with companion test suites under `Tests/<Library>/`. The client still carries two
 > source tiers: legacy-derived presentation (`*.cpp` in `DeepspaceOutpost/`, compiled
 > `/permissive`) and the freshly written engine layers (compiled `/permissive- /W4`). Several
 > engineering conventions below (DirectXMath SIMD boundary, `winrt::com_ptr`, native-first)
@@ -35,7 +35,7 @@ before doing architecture work.
 | **NeuronServer** | Static lib | Server engine: authoritative session management, **AOI/replication**, and **persistence (Microsoft SQL Server)**. Depends on GameLogic, NeuronCore. |
 | **GameLogic** | Static lib | **SERVER-ONLY — the single home of ALL game behavior**: motion/physics integration, AI/tactics, economy/market, combat resolution, missions, spawning/encounters. Headless, no rendering. Depends on **NeuronCore**. **The client never links it; there is no shared game-logic library.** |
 | **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient. |
-| **BotClient** *(planned — not yet created)* | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Links NeuronClient (headless, no graphics init). |
+| **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Its `--smoke` mode (spawn the Server + 8 bots on loopback) runs as the `BotClient.Smoke` CTest test in CI. Links NeuronClient (headless, no graphics init). |
 | **Server** | Console executable | Dedicated-server host: main loop, sessions, fixed-tick scheduler. Entry point `main`. Links NeuronServer, GameLogic. |
 
 **Target dependency graph** (each project depends on its parent; arrows omitted for clarity):
@@ -44,7 +44,7 @@ before doing architecture work.
 NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/protocol schemas, ship-data, math, NetLib
 ├─ NeuronClient            D3D11 · audio · input · GUI · client net (interpolation + dead-reckoning, NO game rules)
 │  ├─ DeepspaceOutpost     Win32 client exe (game rendering, UI, input)
-│  └─ BotClient            headless test exe (bots, no render/audio) [planned]
+│  └─ BotClient            headless test exe (bots, no render/audio; CI smoke lane)
 └─ GameLogic               SERVER-ONLY: ALL game behaviour (motion/physics, AI, economy, combat, missions)
    └─ NeuronServer         sessions · AOI/replication · MS SQL persistence
       └─ Server            dedicated-server host exe

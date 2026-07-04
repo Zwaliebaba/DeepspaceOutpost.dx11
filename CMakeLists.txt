@@ -74,6 +74,10 @@ add_subdirectory ("GameLogic")
 add_subdirectory ("DeepspaceOutpost")
 add_subdirectory ("Server")
 
+# Headless load/soak harness (D5): drives N scripted client sessions over the
+# real UDP stack; its --smoke mode (server + 8 bots on loopback) is a CTest test.
+add_subdirectory ("BotClient")
+
 # Per-library GoogleTest projects (run by CTest in CI). Migrated from the former
 # hand-rolled Tests/ executable; see Tests/ for the per-module breakdown. Guarded
 # by BUILD_TESTING so a tests-off configure skips them (and the GoogleTest fetch).

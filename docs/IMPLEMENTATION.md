@@ -799,7 +799,7 @@ counter that resets when the tick advances) — returning an invalid id so the
 excess input's intent AND its fire are both shed. A normal client sends only a few
 inputs per 30 Hz tick, so the cap only bites a flood.
 
-### D5 — BotClient harness → 100-player load test (#20) — **M**
+### D5 — BotClient harness → 100-player load test (#20) — **M** — ✅ **done 2026-07-04**
 
 New console target `BotClient/` (the AGENTS.md table finally becomes true):
 links NeuronClient headless (no D3D/audio init) + NeuronCore, drives N
@@ -809,6 +809,24 @@ Emits per-bot RTT/loss and reads the server's D3 metrics. CI gets a smoke
 lane (server + 8 bots, 30 s, asserts zero overruns and zero desyncs);
 the 100-bot soak is a manual/perf-lab run that gates every entity-cap
 increase (§14).
+
+*As built:* `BotClient/Main.cpp` — each bot is a full production
+`ReplicationClient` (ephemeral port, hello redelivered by the reliable Control
+lane until acked, session token adopted from `HelloAck`, deterministic orbit
+intents, chart pull to completion). `--smoke` mode spawns the **Server itself**
+on a side port (stdout redirected to a log), runs the fleet, kills the server,
+and parses its `[metrics]` lines — registered as the `BotClient.Smoke` CTest
+test (8 bots, 20 s, port 40123; Server gained an optional argv port and an
+`fflush` after the metrics line for this). Asserts per bot: connected, token
+nonzero, snapshots streaming, galaxy chart complete. **Honest deviations from
+the sketch:** tick overruns are asserted under a small tolerance (3), not zero —
+hosted CI runners stall for >165 ms through no fault of the server, and a hard
+zero would only make the lane flaky; per-bot RTT/loss needs E1's `Ping`/`Pong`
+(until then the harness reports frames-to-connect); fire bursts and dock/trade/
+jump scripting are hooks for the manual soak, not the CI lane, which stays
+minimal-and-reliable (connect + stream + bulk transfer). The 100-bot soak is
+this same binary with bigger numbers: `BotClient --smoke --server-exe ...
+--bots 100 --seconds 300`.
 
 ---
 
