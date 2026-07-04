@@ -1071,7 +1071,7 @@ quantization+delta for ordinary AOIs, with the budget bounding the overloaded
 tail. The 100-bot bandwidth soak (D5) is a manual before/after run of the same
 binary.
 
-### E3 — Strategic AOI tier (#11) — **M**
+### E3 — Strategic AOI tier (#11) — **M** — ✅ **done 2026-07-04**
 
 New reliable Gameplay-lane message `StrategicSummary` (`0x1004`, S→C):
 `systemId u32`, `friendlyCount u16`, `hostileCount u16`, `alert u8`
@@ -1080,6 +1080,25 @@ player has presence or (post-F3) property. Server aggregates per system
 from the ownership index (C) at strategic cadence — this realizes §12's
 decoupled clocks. Client renders it on the chart screen; the iconic-LOD
 glyphs (H) reuse the same data shape.
+
+*As built, 2026-07-04:* `Msg::StrategicSummary` (`0x1004`, reliable Gameplay
+lane) + `Msg::StrategicAlert{None,UnderAttack,Lost}`. `GameLogic/StrategicView.h`
+holds the pure aggregator `SummarizeStrategic(world, center, radius)` — it sweeps
+combatants within `STRATEGIC_RADIUS` (8e6, ~a system's span) of a center and
+tallies the player faction (friendly) vs pirates (hostile); police/traders/
+stations are neutral; counts saturate at u16. At the strategic cadence
+(`STRATEGIC_INTERVAL = 30` ticks, ~1 Hz) `GameServer::PublishStrategicFor` finds
+each viewer's current system (the nearest `ServerStation`, by Chebyshev distance
+so huge absolute coords never square-overflow), summarizes around that station,
+and queues a `StrategicSummary` on the session's reliable lane (`alert =
+UnderAttack` when hostiles are present; `Lost` is reserved for F3 station loss).
+`ReplicationClient` consumes them into a `systemId → StrategicSummary` map exposed
+as `Strategic()` for the chart. **Scope note:** v1 summarizes the player's current
+system only (one owned ship pre-F); multi-system presence via the ownership index
+(owned units/stations elsewhere) lands with F1/F3, and the chart-screen glyph
+render is a client-UI follow-up on this now-flowing data. `StrategicTests.cpp`
+covers the friendly/hostile tally, the radius cutoff, neutral-team exclusion, and
+the message round-trip. **Track E is complete (E1–E3).**
 
 ---
 

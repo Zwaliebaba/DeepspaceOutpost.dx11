@@ -608,6 +608,12 @@ namespace DSOServer
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
         if (m_lastStatus.Changed(key, ps))
           s.events.Send(ps);
+
+        // Strategic tier (E3): a slow per-system rollup for the chart, queued on the
+        // reliable Gameplay lane at the strategic cadence and flushed with the events
+        // below - decoupled from the tactical snapshot clock (§12).
+        if (m_tick % Cfg::STRATEGIC_INTERVAL == 0)
+          PublishStrategicFor(s);
       }
 
       for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
@@ -620,6 +626,45 @@ namespace DSOServer
     // Drop cached status for endpoints that are no longer sessions (reaped
     // clients), so the change-cache can't grow without bound over a long uptime.
     m_lastStatus.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
+  }
+
+  void GameServer::PublishStrategicFor(GameLogic::Session& _s)
+  {
+    // The viewer's current system = the station nearest their ship (works docked or
+    // in flight); its position anchors the per-system rollup. Chebyshev distance
+    // avoids squaring huge absolute coordinates.
+    const Math::Vector3i64 pos = m_world.Get<GameLogic::WorldTransform>(_s.entity).position;
+    int systemId = -1;
+    Math::Vector3i64 center = pos;
+    int64_t best = -1;
+    m_world.Each<GameLogic::ServerStation, GameLogic::WorldTransform>(
+        [&](ECS::EntityId, GameLogic::ServerStation& _st, GameLogic::WorldTransform& _t)
+    {
+      const int64_t dx = _t.position.x - pos.x;
+      const int64_t dy = _t.position.y - pos.y;
+      const int64_t dz = _t.position.z - pos.z;
+      const int64_t ax = dx < 0 ? -dx : dx;
+      const int64_t ay = dy < 0 ? -dy : dy;
+      const int64_t az = dz < 0 ? -dz : dz;
+      int64_t cheb = ax;
+      if (ay > cheb) cheb = ay;
+      if (az > cheb) cheb = az;
+      if (best < 0 || cheb < best)
+      {
+        best = cheb;
+        systemId = _st.systemId;
+        center = _t.position;
+      }
+    });
+
+    const GameLogic::StrategicCounts counts = GameLogic::SummarizeStrategic(m_world, center);
+    Msg::StrategicSummary summary;
+    summary.systemId = static_cast<uint32_t>(systemId);
+    summary.friendlyCount = counts.friendly;
+    summary.hostileCount = counts.hostile;
+    summary.alert = static_cast<uint8_t>(counts.hostile > 0 ? Msg::StrategicAlert::UnderAttack
+                                                            : Msg::StrategicAlert::None);
+    _s.events.Send(summary);   // reliable Gameplay lane
   }
 
   // --- combat subscribers ---------------------------------------------------------

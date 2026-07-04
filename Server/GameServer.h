@@ -28,6 +28,7 @@
 #include "Messages/Defs/PlayerSession.h"
 #include "Messages/Defs/Travel.h"         // TravelRequest / TravelResponse
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
+#include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
@@ -93,6 +94,7 @@ namespace DSOServer
     void DecayWantedRecords();
     void ReapAndDespawn();
     void PublishState();
+    void PublishStrategicFor(Neuron::GameLogic::Session& _s);   // E3: per-system rollup to one viewer
     void SavePlayers();           // B4: cadence snapshot of live players (on change)
 
     // --- handlers & helpers ---

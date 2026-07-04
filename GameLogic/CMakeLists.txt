@@ -39,6 +39,7 @@ set(GAMELOGIC_HEADERS
     StationServices.h
     CombatMessages.h
     PlayerPersistence.h
+    StrategicView.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

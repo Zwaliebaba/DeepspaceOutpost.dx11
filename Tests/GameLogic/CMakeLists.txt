@@ -32,6 +32,7 @@ add_executable(GameLogic.Tests
     StationServicesTests.cpp
     ReplicationTests.cpp
     GalaxyManifestTests.cpp
+    StrategicTests.cpp
 )
 
 target_compile_features(GameLogic.Tests PRIVATE cxx_std_23)

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NetLib.h"
@@ -31,6 +32,7 @@
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
 #include "Messages/Defs/TimeSync.h"        // Msg::Ping / Pong (E1 time sync)
+#include "Messages/Defs/Strategic.h"       // Msg::StrategicSummary (E3 strategic tier)
 #include "LatencyEstimate.h"               // Net::LatencyEstimate (smoothed RTT)
 
 namespace Neuron::Client
@@ -128,6 +130,12 @@ namespace Neuron::Client
     [[nodiscard]] double SmoothedRttMs() const { return m_latency.rttMs; }
     [[nodiscard]] bool HasLatency() const { return m_latency.valid; }
 
+    // The latest strategic per-system rollup (E3), keyed by systemId - the friendly/
+    // hostile counts and alert the chart draws for systems the player has presence
+    // in. Consumed internally from the reliable stream; empty until the first
+    // arrives.
+    [[nodiscard]] const std::unordered_map<uint32_t, Msg::StrategicSummary>& Strategic() const { return m_strategic; }
+
     // The server tick reported by the most recent Pong (0 until one arrives). A
     // coarse clock reference for presentation; the authoritative tick still rides
     // every snapshot header.
@@ -170,6 +178,7 @@ namespace Neuron::Client
     Net::LatencyEstimate m_latency;                // E1: smoothed RTT from Ping/Pong
     double m_lastPingMs = 0.0;                      // wall-clock of our last sent Ping (send cadence)
     uint32_t m_lastServerTick = 0;                 // server tick from the most recent Pong
+    std::unordered_map<uint32_t, Msg::StrategicSummary> m_strategic;   // E3: latest per-system rollups
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
     uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk
     bool m_galaxyKnownTotal = false;

@@ -1018,6 +1018,7 @@ station screen into flight; position updates always come from snapshots.
 | `0x1001` | TravelResponse | Wire | Gameplay | S→C |
 | `0x1002` | GalaxyChunkRequest | Wire | Bulk | C→S |
 | `0x1003` | GalaxyChunk | Wire | Bulk | S→C |
+| `0x1004` | StrategicSummary | Wire | Gameplay | S→C |
 | `0x8101` | FireWeapon | LocalOnly (server) | — | — |
 | `0x8102` | Crime | LocalOnly (server) | — | — |
 | `0x8103` | EntityKilled | LocalOnly (server) | — | — |
@@ -1440,7 +1441,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |
 | 9 | Time sync (ping/offset) → lag-compensated fire ✅ (done 2026-07-04; laser rewound, missile/travel cone-rewind deferred; client-reported RTT clamped to a 15-tick window) | §13.2.2 | Infra | M | PvP fairness |
 | 10 | Snapshot quantization + delta + budgets ✅ (done 2026-07-04: v2 format 58→32 B/entity with an int64 reference origin so the world stays unbounded; per-session delta vs an acked baseline + keyframes; distance-sorted send budget. Fleet-density delta-fragment reassembly is a noted follow-up) | E4 | Perf | M–L | bandwidth wall |
-| 11 | Strategic AOI summary tier | §13.2.2 | Feature | M | empire visibility |
+| 11 | Strategic AOI summary tier ✅ (done 2026-07-04: `StrategicSummary 0x1004` + per-system aggregation at ~1 Hz; v1 covers the player's current system, multi-system presence rides F1/F3, chart glyph render is a client-UI follow-up) | §13.2.2 | Feature | M | empire visibility |
 | 12 | First ordered unit (`UnitOrder` escort) | §13.2.3-2 | Feature | M | the Darwinia loop |
 | 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |
 | 14 | Fog of war (`KnownSystems`) + incremental manifest | §13.2.3-5, S2 | Feature | M | explore |

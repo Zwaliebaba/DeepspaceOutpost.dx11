@@ -38,6 +38,7 @@
 #include "HyperspaceSystem.h"
 #include "EquipmentSystem.h"
 #include "CombatMessages.h"
+#include "StrategicView.h"   // E3: per-system strategic rollup (SummarizeStrategic)
 
 namespace Neuron::GameLogic
 {

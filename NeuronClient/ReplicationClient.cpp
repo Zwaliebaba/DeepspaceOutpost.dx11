@@ -134,6 +134,7 @@ namespace Neuron::Client
       Msg::HelloReject reject;
       Msg::GalaxyChunk chunk;
       Msg::Pong pong;
+      Msg::StrategicSummary strat;
       if (Msg::TryDecode(msg, pong))
       {
         // Time sync (E1): close the round trip we opened with the matching Ping.
@@ -173,6 +174,11 @@ namespace Neuron::Client
         if (chunk.baseIndex == m_galaxy.size())
           for (const Msg::GalaxySystemEntry& e : chunk.systems)
             m_galaxy.push_back(Msg::FromWireEntry(e));
+      }
+      else if (Msg::TryDecode(msg, strat))
+      {
+        // The strategic tier (E3): keep the latest rollup per system for the chart.
+        m_strategic[strat.systemId] = strat;
       }
       else
       {

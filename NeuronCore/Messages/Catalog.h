@@ -20,4 +20,5 @@
 #include "Messages/Defs/Travel.h"           // TravelRequest / TravelResponse
 #include "Messages/Defs/GalaxyChunks.h"     // GalaxyChunkRequest / GalaxyChunk
 #include "Messages/Defs/TimeSync.h"         // Ping / Pong (E1 time sync)
+#include "Messages/Defs/Strategic.h"        // StrategicSummary (E3 strategic tier)
 #include "StationProtocol.h"   // StationRequest / StationResponse (REGISTER_MESSAGE'd)
