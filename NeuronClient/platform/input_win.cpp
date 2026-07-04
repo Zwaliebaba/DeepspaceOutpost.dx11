@@ -39,6 +39,9 @@ int  g_mouseY = 0;
 bool g_lmb = false;
 bool g_rmb = false;
 
+/* Accumulated wheel notches since last consumed (camera dolly/zoom). */
+float g_wheelSteps = 0.0f;
+
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
 int  g_q[QN];
@@ -86,11 +89,17 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		case WM_LBUTTONDOWN:
 			g_lmb = true;  SetCapture(hwnd); return 0;
 		case WM_LBUTTONUP:
-			g_lmb = false; ReleaseCapture();  return 0;
+			g_lmb = false; if (!g_rmb) ReleaseCapture(); return 0;
+		/* RMB captures too: it is the camera look-drag, and the drag must keep
+		 * feeding deltas when the pointer leaves the client area. */
 		case WM_RBUTTONDOWN:
-			g_rmb = true;  return 0;
+			g_rmb = true;  SetCapture(hwnd); return 0;
 		case WM_RBUTTONUP:
-			g_rmb = false; return 0;
+			g_rmb = false; if (!g_lmb) ReleaseCapture(); return 0;
+
+		case WM_MOUSEWHEEL:
+			g_wheelSteps += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
+			return 0;
 
 		// Minimal touch: map the primary pointer to the mouse (no multi-touch yet).
 		case WM_POINTERDOWN:
@@ -159,6 +168,13 @@ void input_mouse_state(int& x, int& y, bool& lmb, bool& rmb)
 	y = g_mouseY;
 	lmb = g_lmb;
 	rmb = g_rmb;
+}
+
+float input_take_mouse_wheel(void)
+{
+	const float steps = g_wheelSteps;
+	g_wheelSteps = 0.0f;
+	return steps;
 }
 
 /* ---- keyboard.h contract ---- */

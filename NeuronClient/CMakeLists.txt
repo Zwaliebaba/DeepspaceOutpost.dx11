@@ -15,7 +15,9 @@ set(NEURONCLIENT_SOURCES
     # Engine front door: window + native D3D11 device + GameMain dispatch.
     ClientEngine.cpp
 
-    # Generic client engine (portable C++; no Win32/D3D).
+    # Generic client engine (portable C++; no Win32/D3D beyond DirectXMath).
+    Camera.cpp
+    CameraController.cpp
     ReplicationClient.cpp
     Strings.cpp
     vector.cpp
@@ -70,10 +72,9 @@ set(NEURONCLIENT_HEADERS
 
     # Generic engine headers.
     Strings.h
-    ViewMetrics.h
-    SceneProjection.h
+    Camera.h
+    CameraController.h
     Mesh.h
-    CameraFollow.h
     ReplicatedScene.h
     ModelDraw.h
     ReplicationClient.h

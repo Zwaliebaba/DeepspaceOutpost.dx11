@@ -87,16 +87,15 @@ void reset_weapons (void);
 int fire_laser (void);          // beam visual trigger (server resolves the shot)
 void cool_laser (void);         // beam-visual pacing
 void time_ecm (void);           // E indicator countdown
-void draw_laser_lines (void);
+
+/* Frames left on the local hull's beam visual (armed by fire_laser, counted down
+ * in main.cpp); while > 0 the own ship's render record carries FLG_FIRING and
+ * draw_ship_laser draws the bolt from its muzzle. */
+extern int draw_lasers;
 
 void update_console (void);
 
 void update_altitude (void);    // display-only HUD dial (never a consequence)
-
-void increase_flight_roll (void);
-void decrease_flight_roll (void);
-void increase_flight_climb (void);
-void decrease_flight_climb (void);
 
 /* Sync local state to a server-confirmed docked state (respawn/pod/startup). */
 void dock_player (void);

@@ -1,18 +1,16 @@
 # NeuronClient.Tests - GoogleTest project for client-side presentation code.
 #
-# Camera-follow, the replicated-scene applier and the projection optics now live
-# in the NeuronClient library and are reached through its public include dirs
-# (via the link below). The DeepspaceOutpost source dir is still on the include
-# path for the headers that remain game-specific (the client Universe view), and
-# GameLogic for shared component schemas. NeuronClient propagates NeuronCore's
-# includes.
+# The free Camera (view/projection), the replicated-scene applier and the mesh
+# builder live in the NeuronClient library and are reached through its public
+# include dirs (via the link below). The DeepspaceOutpost source dir is still on
+# the include path for the headers that remain game-specific (the client
+# Universe view), and GameLogic for shared component schemas. NeuronClient
+# propagates NeuronCore's includes.
 
 add_executable(NeuronClient.Tests
-    CameraFollowTests.cpp
+    CameraTests.cpp
     UniverseTests.cpp
     ReplicatedSceneTests.cpp
-    ViewMetricsTests.cpp
-    SceneProjectionTests.cpp
     MeshTests.cpp
 )
 

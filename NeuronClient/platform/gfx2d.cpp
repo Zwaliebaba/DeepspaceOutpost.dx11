@@ -27,7 +27,7 @@
 #include "Canvas.h" // Canvas::Start/End - the shared 2D-pass bracket (Phase 2)
 
 #include "gfx.h"
-#include "ViewMetrics.h"
+#include "Camera.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -81,13 +81,16 @@ D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::
 bool                     g_xor_mode = false;
 
 /* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
- * is set for the frame and g_view carries the aspect-aware optics; the HUD is
- * floated by adding (g_origin_x,g_origin_y) to every emitted coordinate and to
- * the clip rect. In retro mode all three are inert (origin 0, legacy optics). */
+ * is set for the frame and (g_scene_w, g_scene_h) is the live client size; the
+ * HUD is floated by adding (g_origin_x,g_origin_y) to every emitted coordinate
+ * and to the clip rect. In retro mode all three are inert (origin 0, 512x384
+ * scene canvas). The projection itself lives on the main Camera - see
+ * gfx_set_scene_fullwindow. */
 int                        g_origin_x  = 0;
 int                        g_origin_y  = 0;
 bool                       g_scene_full = false;
-Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
+int                        g_scene_w = 512;
+int                        g_scene_h = 384;
 
 /* The virtual coordinate space the 2D batch is authored in: the retro 512x514 canvas,
  * or the live client area when the in-flight 3D fills the window. (Formerly the size of
@@ -395,27 +398,38 @@ void xor_mode(int on) { g_xor_mode = (on != 0); }
 /* ---- full-window scene / floating HUD ---- */
 
 // Select the canvas/projection mode for the frame about to be drawn: full-window
-// (the in-flight 3D fills the client area, aspect-aware optics) or retro (the
-// letterboxed 512x514 canvas for menus/charts/station). Recomputes the optics
-// from the live client size each call, so it is safe to call every frame.
+// (the in-flight 3D fills the client area) or retro (the letterboxed 512x514
+// canvas for menus/charts/station). Re-issues the main Camera's projection for
+// the live viewport each call - the legacy vertical field of view at the current
+// aspect ratio - so it is safe to call every frame.
 void gfx_set_scene_fullwindow(int on)
 {
 	Renderer* r = platform_renderer();
 	if (on && r)
 	{
 		g_scene_full = true;
-		g_view = Neuron::Client::MakeViewMetrics(r->clientWidth(), r->clientHeight());
+		g_scene_w = r->clientWidth();
+		g_scene_h = r->clientHeight();
 	}
 	else
 	{
 		g_scene_full = false;
-		g_view = Neuron::Client::MakeViewMetrics(512, 384);   // legacy play-area optics
+		g_scene_w = 512;   // legacy play-area optics
+		g_scene_h = 384;
 	}
+
+	const float aspect = (g_scene_h > 0) ? static_cast<float>(g_scene_w) / static_cast<float>(g_scene_h) : 4.0f / 3.0f;
+	Neuron::Client::MainCamera().SetProjParams(Neuron::Client::kLegacySceneFovY, aspect,
+											   Neuron::Client::kSceneNearZ, Neuron::Client::kSceneFarZ);
 }
 
-// The aspect-aware optics for the current frame (used by the software projection
-// in threed.cpp / stars.cpp).
-const Neuron::Client::ViewMetrics& gfx_view_metrics(void) { return g_view; }
+// The scene canvas size for the current frame, in logical pixels (the space the
+// CPU-projected HUD bits in threed.cpp / space.cpp / stars.cpp draw in).
+void gfx_scene_size(int* w, int* h)
+{
+	if (w) *w = g_scene_w;
+	if (h) *h = g_scene_h;
+}
 
 // Offset every subsequent emitted coordinate (and clip rect) by (x,y). Used to
 // float the HUD; pass (0,0) to draw in the canvas's own space again.
@@ -600,7 +614,7 @@ void gfx_render_3d_scene(void)
 
 	const CanvasPlacement cp = canvasPlacement();
 	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
-											g_view, cp.dstX, cp.dstY,
+											Neuron::Client::MainCamera(), cp.dstX, cp.dstY,
 											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
 }
 

@@ -12,23 +12,24 @@
 
 #include "Mesh.h"
 #include "ModelDraw.h"        // Neuron::Render::ModelDraw
-#include "SceneProjection.h"  // Neuron::Client::Matrix4 / ViewMetrics
+#include "Camera.h"           // Neuron::Client::Camera - the view + projection source
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the
 // CPU-projected flight scene. Where the legacy path projected each ship's vertices on
 // the CPU and depth-sorted flat 2D polygons (painter's algorithm), Scene3D uploads each
-// ship type's geometry once into an immutable vertex/index buffer and draws it with a
-// real perspective matrix + hardware depth buffer.
+// ship type's geometry once into an immutable vertex/index buffer and draws it with the
+// Camera's view + projection matrices and the hardware depth buffer.
 //
 // Sibling to Render2D (same all-static lifetime, same GraphicsCore device + back buffer
 // and the depth buffer alongside it), but a genuinely separate pipeline: a 3-component
 // position + normal vertex, a perspective/model constant buffer, and depth-test +
 // (currently) cull-off state - none of which fit Render2D's strict-2D contract.
 //
-// The scene is fed through the render seam: the sim records ModelDraw commands (camera-
-// space transform, no D3D), and the client replays them here (see gfx2d's scene marker).
-// Mesh geometry is provided by the game layer through a callback (it owns the ship
-// tables), so this renderer carries no game-specific data.
+// The scene is fed through the render seam: the game submits ModelDraw commands in the
+// WORLD frame (floating-origin-relative position + world basis, no D3D); RenderModels
+// composes model * View() * Projection() per draw. Mesh geometry is provided by the
+// game layer through a callback (it owns the ship tables), so this renderer carries no
+// game-specific data.
 
 namespace Neuron::Graphics
 {
@@ -56,19 +57,20 @@ namespace Neuron::Graphics
       struct DustVertex { float x, y, bright; };
       static void SetDust(const DustVertex* _pts, int _count);
 
-      // Submit one camera-space model (ship / planet / sun) for this frame's scene pass. The
+      // Submit one WORLD-frame model (ship / planet / sun) for this frame's scene pass. The
       // game's draw pass calls this directly - the successor to routing ModelDraws through the
       // RenderQueue -> GfxRenderSink -> gfx2d round-trip. Accumulated into s_models, consumed
       // and cleared by RenderModels (mirrors how SetDust feeds the dust pass).
       static void SubmitModel(const Neuron::Render::ModelDraw& _model);
 
       // Render this frame's submitted models (SubmitModel) to _rtv with depth-testing against
-      // _dsv. The projection comes from _view (the live flight optics); the scene is placed in
-      // the letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect the
-      // 2D batch uses, so 3D and HUD align. Clears DEPTH only (the colour target already holds
-      // the 2D background) and clears s_models. A no-op if the device/resources are unavailable.
+      // _dsv. The view + projection come from _camera (Camera::View() / Projection()); the
+      // scene is placed in the letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target
+      // pixels - the same rect the 2D batch uses, so 3D and HUD align. Clears DEPTH only (the
+      // colour target already holds the 2D background) and clears s_models. A no-op if the
+      // device/resources are unavailable.
       static void RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
-                               const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH);
+                               Neuron::Client::Camera& _camera, int _vpX, int _vpY, int _vpW, int _vpH);
 
     private:
       struct GpuMesh
@@ -83,10 +85,11 @@ namespace Neuron::Graphics
       // return a mesh with indexCount == 0 (cached "no geometry") - callers skip those.
       static const GpuMesh* MeshForType(int _type);
 
-      // Render one camera-space planet/sun billboard (a depth-tested quad) for a
-      // SHIP_PLANET / SHIP_SUN model. Shares the depth/cull/blend state with the ship
-      // pass; uses the billboard shader + a per-billboard params buffer.
-      static void renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj);
+      // Render one sun billboard (a depth-tested camera-facing quad) for a SHIP_SUN
+      // model. The world-frame centre is view-transformed here; the quad itself is
+      // built in camera space and drawn with the projection alone. Shares the
+      // depth/cull/blend state with the ship pass.
+      static void renderBillboard(const Neuron::Render::ModelDraw& _model);
 
       // Draw this frame's dust quads (SetDust) as the background, behind the depth-tested ships.
       static void renderDust();
@@ -120,8 +123,10 @@ namespace Neuron::Graphics
       // This frame's submitted models (SubmitModel), consumed + cleared by RenderModels.
       inline static std::vector<Neuron::Render::ModelDraw> s_models;
 
-      // Viewport optics for the in-progress RenderModels pass (billboard sizing).
-      inline static Neuron::Client::ViewMetrics s_view;
+      // The in-progress pass's view / projection (from the Camera), stored unloaded so the
+      // statics need no SIMD alignment. Row-vector DirectXMath convention (p' = p * M).
+      inline static DirectX::XMFLOAT4X4 s_viewMat;
+      inline static DirectX::XMFLOAT4X4 s_projMat;
 
       inline static std::unordered_map<int, GpuMesh> s_meshes;
       inline static MeshProvider s_provider;

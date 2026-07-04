@@ -893,53 +893,66 @@ The client is deliberately dumb. It keeps:
 
 - **Rendering:** DX11, low-poly meshes, camera-relative floating origin.
   Replicated entities are drawn from interpolated snapshots
-  (`SnapshotInterpolator` + dead-reckoning on `speed`). Ships render through a
-  single **solid** GPU mesh path (`draw_solid_ship` → `Scene3D::SubmitModel`);
-  the legacy CPU line-drawing `draw_wireframe_ship` and its `wireframe`
-  Solid/Wireframe toggle were **removed** (2026-07-04) — they were an unused
-  settings switch, not the retro-vector *art direction*, which is realized by
-  the low-poly meshes and lands as batched instanced rendering in Track H
-  (§13.2.1). The planet is one lit green 3D sphere; the multi-style planet
-  renderer (`planet_render_style`: Wireframe/Green/SNES/Fractal) went with it
-  (the client only ever shipped the classic green). Both settings dropped out
-  of the options window (and, when it still existed, the local `newkind.cfg`).
-- **A single fixed forward view.** The cockpit renders one view: straight
-  ahead along the ship's nose. The legacy rear/left/right cockpit views were
-  removed (2026-07-04) — F2/F3 no longer switch views (F4 keeps only its
-  docked Equip-window role), the per-view starfields, star flipping and camera
-  axis-flips are gone, and the ship has a single
-  (front) laser mount, so the equip list's per-mount laser sub-menus collapsed
-  to one row per laser type. The camera (`Camera.cpp`) always looks along the
-  nose; the only view freedom left is the F12 cockpit ↔ chase eye offset. The
-  intro and game-over scenes render through the same forward view. The
-  client's screen state (`current_screen`) still distinguishes the
-  non-cockpit screens (charts, commander status, planet data, intro,
-  game-over, break pattern), but its only flight view is `SCR_FRONT_VIEW`.
-  (Server rules are untouched: shields still resolve front/aft by attack
-  direction — that never depended on the client's view.)
+  (`SnapshotInterpolator` + dead-reckoning on `speed`) as WORLD-frame records
+  (`ReplicatedScene`), rebased about the camera's floating origin; `Scene3D`
+  composes each model with the Camera's `View()` and `Projection()` matrices
+  (DirectXMath, left-handed) and the hardware z-buffer resolves visibility.
+  Ships render through a single **solid** GPU mesh path (`draw_solid_ship` →
+  `Scene3D::SubmitModel`); the planet is one lit green 3D sphere; the sun a
+  billboard. The retro-vector art direction is realized by the low-poly
+  meshes and lands as batched instanced rendering in Track H (§13.2.1).
+- **The free camera (2026-07-04): the camera is decoupled from the ship.**
+  The cockpit view is gone — the player flies the CAMERA, and the active ship
+  renders on screen like any other entity. `NeuronClient/Camera` is the one
+  view/projection source (eye/lookAt/up → `View()`; the legacy ~41.1° vertical
+  field of view at the live aspect → `Projection()`), with two
+  `CameraController`s toggled on F12: the default **first-person** free camera
+  (hold RMB to mouse-look; arrow keys move, PgUp/PgDn vertical, Shift boosts,
+  wheel dollies) and an **orbit** camera that rotates around the selected
+  object (the missile-lock target from T, else the own ship; drag rotates,
+  wheel changes distance). The game-side `CameraRig` gathers input, anchors
+  the camera behind the ship on spawn and re-anchors after teleports
+  (hyperspace/respawn), and publishes the int64 **floating origin** (the eye)
+  the frame is rebased around — float precision never degrades far from the
+  world origin (§3.2). The remaining CPU-projected effects (explosion debris,
+  firing beams, the lock reticle, the dust) derive their pixel math from the
+  SAME projection matrix, so there is one optics path. This replaced the
+  legacy `ViewMetrics`/`SceneProjection` focal-pixel pair and the ship-fused
+  `CameraFollow`/`Camera.cpp` seam. (Server rules are untouched: shields
+  still resolve front/aft by attack direction on the hull.)
 - **HUD mirrors:** shields/energy/fuel/credits/missiles/cargo/wanted/score from
   `PlayerStatus` + `CargoManifest`; the roster (`PlayerInfo`) for ship labels;
-  the market/chart from `StationResponse`/the pulled galaxy chunks. There is
-  **no offline simulation**: a disconnected client shows a connection-lost
-  screen and retries (the single-player fallback was deleted — S4 extended).
-- **Input:** raw keys → `ActionTriggered` (LocalOnly bus) → command builder →
-  one `InputCommand` per frame. Station screens send `StationRequest`s.
-  The hyperspace key on a chart sends `TravelRequest{Hyperspace}` (docked or
-  in flight); the jump key sends `TravelRequest{InSystemJump}`; the server
-  answers both with a `TravelResponse`. In-flight docking is request-based:
-  the proximity check and the docking computer only *send* a Dock request,
-  and the docked flow starts on `StationResponse{Dock, Ok}`.
+  the market/chart from `StationResponse`/the pulled galaxy chunks. The
+  scanner/compass mirror is **camera-relative** now (what's around the view);
+  the docking-proximity gate stays **ship-relative** (it is about the hull).
+  There is **no offline simulation**: a disconnected client shows a
+  connection-lost screen and retries (the single-player fallback was deleted —
+  S4 extended).
+- **Input — camera-only control (piloting retired):** the player no longer
+  flies the hull. The per-frame `InputCommand` cadence continues (the delta
+  stream's ack rides it) with **zero flight axes** — the ship launches at rest
+  and idles; the server remains the sole mover. The combat and travel keys
+  stay: fire/missiles/ECM/bomb/pod flow as `ActionTriggered` (LocalOnly bus) →
+  command builder → `InputCommand`; station screens send `StationRequest`s;
+  the hyperspace key on a chart sends `TravelRequest{Hyperspace}`; the jump
+  key sends `TravelRequest{InSystemJump}`. The arrow keys steer the chart
+  crosshair on the chart screens and the camera in flight (the rig gates on
+  the flight view, so the uses never overlap). In-flight docking is
+  request-based and ship-relative: near the station, station off the hull's
+  nose, at rest → a Dock request; the docked flow starts on
+  `StationResponse{Dock, Ok}`.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
 - **Scene background: the streaming "dust" starfield.** The flight scene pass
   (`Scene3D`) draws the projected star quads (`SetDust`, fed from `stars.cpp`)
   as the depth-disabled background behind the ships — the classic Elite
-  streaming-speed cue. The earlier cube-map **skybox** (which loaded
-  `Textures/Skybox.dds` and rotated it with the ship) was **removed**
-  (2026-07-04) along with its shaders, the `SetSkyboxOrientation`/`s_skybox`
-  plumbing, and the per-frame orientation math in `stars.cpp`; the dust is what
-  fills empty space now, so it is drawn unconditionally.
+  streaming-speed cue, now driven by the CAMERA's motion (the rig feeds forward
+  speed along the look plus the frame's look deltas as pan via
+  `set_starfield_motion`; it used to stream with the ship's speed/roll/climb).
+  The earlier cube-map **skybox** (which loaded `Textures/Skybox.dds` and
+  rotated it with the ship) was **removed** (2026-07-04) along with its
+  shaders; the dust is what fills empty space, drawn unconditionally.
 - **No local config files.** The MMO client keeps no on-disk settings: the
   legacy `file.cpp`/`file.h` config subsystem (the `newkind.cfg` settings file
   and the `newscan.cfg` scanner/compass layout) was removed (2026-07-04). The

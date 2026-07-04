@@ -1,8 +1,6 @@
 #ifndef GFX_H
 #define GFX_H
 
-#include "ViewMetrics.h"
-
 #ifdef RES_512_512
 
 #define GFX_SCALE		(2)
@@ -153,14 +151,17 @@ void xor_mode (int on);
  * Full-window 3D scene + floating HUD (client modernization).
  *
  * gfx_set_scene_fullwindow() picks, per frame, whether the in-flight 3D fills
- * the whole window (aspect-aware optics) or the legacy letterboxed 512x514
- * canvas is used (menus/charts/station). gfx_view_metrics() returns the optics
- * the software projection should use. gfx_set_scene_clip() sets the play-area
- * clip for the current mode. gfx_hud_anchor()/gfx_set_draw_origin() float the
- * legacy HUD layout to the bottom-centre of the window when full-window.
+ * the whole window or the legacy letterboxed 512x514 canvas is used
+ * (menus/charts/station), and sets the main Camera's projection for that
+ * viewport (the legacy vertical field of view at the live aspect ratio).
+ * gfx_scene_size() returns the scene canvas size in (logical) pixels - the
+ * space the CPU-projected HUD bits draw in. gfx_set_scene_clip() sets the
+ * play-area clip for the current mode. gfx_hud_anchor()/gfx_set_draw_origin()
+ * float the legacy HUD layout to the bottom-centre of the window when
+ * full-window.
  */
 void gfx_set_scene_fullwindow (int on);
-const Neuron::Client::ViewMetrics& gfx_view_metrics (void);
+void gfx_scene_size (int *w, int *h);
 void gfx_set_draw_origin (int x, int y);
 void gfx_hud_anchor (int *ox, int *oy);
 void gfx_set_scene_clip (void);
