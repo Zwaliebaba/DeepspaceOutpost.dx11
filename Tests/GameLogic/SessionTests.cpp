@@ -5,6 +5,7 @@
 #include "GameLogic.h"
 #include "ReliableChannel.h"
 #include "Messages/MessageEndpoint.h"
+#include "Messages/Reliable.h"        // Msg::TryDecode (reconnect test decodes a ClientHello)
 
 using namespace Neuron;
 

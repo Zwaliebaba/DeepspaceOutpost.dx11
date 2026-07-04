@@ -256,7 +256,7 @@ TEST(Persistence, CommandLogReplayReproducesWalletOutcomes)
     std::vector<Persist::CommandLogEntry> log;
     for (const Net::StationRequest& r : requests)
     {
-      GameLogic::ProcessStationRequest(world, player, /*dockRange*/ 5000, r);
+      (void)GameLogic::ProcessStationRequest(world, player, /*dockRange*/ 5000, r);
       Persist::CommandLogEntry e;
       e.messageId = static_cast<int32_t>(Msg::Raw(Net::StationRequest::Id));
       e.payload = Msg::Encode(r);
@@ -277,7 +277,7 @@ TEST(Persistence, CommandLogReplayReproducesWalletOutcomes)
       ASSERT_EQ(e.messageId, static_cast<int32_t>(Msg::Raw(Net::StationRequest::Id)));
       Net::StationRequest r;
       ASSERT_TRUE(Msg::Decode(e.payload, r));
-      GameLogic::ProcessStationRequest(world, player, 5000, r);
+      (void)GameLogic::ProcessStationRequest(world, player, 5000, r);
     }
     creditsB = world.Get<GameLogic::Wallet>(player).credits;
   }
