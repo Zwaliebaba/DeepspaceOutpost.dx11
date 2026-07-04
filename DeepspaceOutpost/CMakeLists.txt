@@ -19,7 +19,6 @@ set(GAME_SOURCES
     planet.cpp
     trade.cpp
     intro.cpp
-    file.cpp
     random.cpp
 )
 

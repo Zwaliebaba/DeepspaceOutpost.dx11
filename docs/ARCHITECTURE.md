@@ -902,7 +902,7 @@ The client is deliberately dumb. It keeps:
   (§13.2.1). The planet is one lit green 3D sphere; the multi-style planet
   renderer (`planet_render_style`: Wireframe/Green/SNES/Fractal) went with it
   (the client only ever shipped the classic green). Both settings dropped out
-  of the options window and the local `newkind.cfg`.
+  of the options window (and, when it still existed, the local `newkind.cfg`).
 - **A single fixed forward view.** The cockpit renders one view: straight
   ahead along the ship's nose. The legacy rear/left/right cockpit views were
   removed (2026-07-04) — F2/F3 no longer switch views (F4 keeps only its
@@ -932,6 +932,14 @@ The client is deliberately dumb. It keeps:
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
+- **No local config files.** The MMO client keeps no on-disk settings: the
+  legacy `file.cpp`/`file.h` config subsystem (the `newkind.cfg` settings file
+  and the `newscan.cfg` scanner/compass layout) was removed (2026-07-04). The
+  values it loaded are now baked in — the scanner/compass HUD positions and the
+  frame-speed default live in `elite.cpp`, and the scanner bitmap falls back to
+  `scanner.bmp`. The in-session options window still toggles its settings for
+  the running session; nothing persists them (the "Save Settings" row is gone).
+  Durable player state is the server's job (persistence, §13.2.2).
 
 A `TravelResponse{Hyperspace, Arrived|Witchspace}` flips the client from the
 station screen into flight; position updates always come from snapshots.

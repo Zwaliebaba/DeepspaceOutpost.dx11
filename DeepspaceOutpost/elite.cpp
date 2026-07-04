@@ -26,11 +26,15 @@ int speed_cap = 75;
 int instant_dock = 0;
 
 
+/* HUD layout, formerly loaded from GameData/newscan.cfg. The MMO client has no
+   local config files, so these are baked in (the scanner/compass Y values fold
+   in the legacy +385 canvas offset the loader used to add). scanner_filename is
+   left empty: gfx2d falls back to "scanner.bmp", the value the cfg carried. */
 char scanner_filename[256];
-int scanner_cx;
-int scanner_cy;
-int compass_centre_x;
-int compass_centre_y;
+int scanner_cx = 253;
+int scanner_cy = 448;          /* 63 + 385 */
+int compass_centre_x = 382;
+int compass_centre_y = 407;    /* 22 + 385 */
 
 int scene_shading = 0;   /* 0 = flat (faithful), 1 = lit (opt-in directional shading) */
 

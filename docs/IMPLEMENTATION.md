@@ -98,6 +98,7 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H) |
 | `DeepspaceOutpost/SceneMeshes.cpp`, `threed.cpp` + the `planet_render_style` global (`elite.*`, options window, `newkind.cfg`) and `ModelDraw::style`/`colour2` | Multi-style planet renderer (Wireframe/Green/SNES/Fractal) | Only the classic green ever shipped; `ModelDraw::style`/`colour2` had no reader | ✅ **Removed 2026-07-04** (planet is one lit green sphere) |
 | `DeepspaceOutpost/config.h`, `alg_data.h` | whole headers | `alg_data.h` = retired Allegro datafile indexes (unused); `config.h` = the `GFX_ALLEGRO` (dead) + `RES_800_600` macros, the latter still selecting `gfx.h`'s `GFX_SCALE=2` block | ✅ **Removed 2026-07-04** (`RES_800_600` moved to a DeepspaceOutpost target compile definition; every `#include` deleted) |
+| `DeepspaceOutpost/file.cpp`, `file.h` + `GameData/newkind.cfg`, `newscan.cfg` | the local config subsystem (`read/write_config_file`, `read_scanner_config_file`, `get_filename`) | The MMO client keeps no on-disk settings; `write_config_file`/`get_filename` callers were the Save-Settings row and the dead `set_commander_name` | ✅ **Removed 2026-07-04** — the load-bearing values it read (scanner/compass HUD positions, frame-speed default) are baked into `elite.cpp`; the startup `read_config_file()` and the Save-Settings row are gone |
 
 Not dead, do not remove: `Messages/Catalog.h`, `CatalogTools.h`,
 `PacketInspect.h` (test/tooling infrastructure the governance and fuzz suites
@@ -113,7 +114,7 @@ They fall into three classes with different fates:
 | Class | Files (roles) | Fate |
 |---|---|---|
 | **Legacy game rules — remove** (Track A1) | `swat.cpp` (local AI/combat/spawn engine), local-sim parts of `space.cpp` (`update_local_objects`, local hyperspace/witchspace, `regenerate_shields`, altitude/cabin-temp kill rules), local escape pod in `main.cpp`, `missions.cpp` (single-player mission scripts; server has no mission system), local market/jump fallbacks in `trade.cpp`/`docked.cpp`, `pilot.cpp` local autopilot | Delete with the offline fallback; replace disconnected play with a connection-lost screen. Mission *content* may be mined later when #F-era missions land server-side |
-| **Legacy presentation — keep, modernize incrementally** | `threed.cpp` (draw primitives), `stars.cpp`, `intro.cpp`, `shipdata.cpp`/`shipface.cpp` (mesh tables), `planet.cpp` (chart name/description text), station screens in `docked.cpp`, HUD in `space.cpp`, `file.cpp` (config), `random.cpp` (client VFX rng) | Stays; absorbed gradually by Track H (instanced renderer) and S6 (math-stack retirement) |
+| **Legacy presentation — keep, modernize incrementally** | `threed.cpp` (draw primitives), `stars.cpp`, `intro.cpp`, `shipdata.cpp`/`shipface.cpp` (mesh tables), `planet.cpp` (chart name/description text), station screens in `docked.cpp`, HUD in `space.cpp`, `random.cpp` (client VFX rng) | Stays; absorbed gradually by Track H (instanced renderer) and S6 (math-stack retirement). (`file.cpp` config subsystem removed 2026-07-04 — the MMO client keeps no local config files) |
 | **Legacy math stack — retire file-by-file** (S6) | `NeuronClient/vector.h/.cpp` (`Vector`, `Matrix[3]`) used by 13+ files **including the live thin-client render path** (`ReplicatedScene.h`, `SceneProjection.h`, `Scene3D.cpp`) | Convert the live render path to DirectXMath first (it is touched by Track H anyway); legacy screens convert as they are edited; delete `vector.h/.cpp` last |
 
 Also legacy: the `OpenglDirectx` GL-over-D3D layer in `NeuronClient`
@@ -1208,7 +1209,8 @@ session to AOI-plus-roster recipients, with server-side rate limit
 (N lines / 10 s, drop + warn) and length re-validation. Client: a chat line
 input (GameWindows overlay), a scrollback of the last ~8 lines over the
 HUD, and a client-side **mute list** (by `PlayerId` — designed in from day
-one per §13.2.2, persisted in the local config file).
+one per §13.2.2, persisted server-side with the player record; the client
+keeps no local config file).
 
 ### G4 — Suns & cabin heat (§14 preamble; deferred G8+ payoff) — **M**
 
@@ -1290,9 +1292,11 @@ Three items are genuinely open and block only their own bullets:
    extended to the whole fallback). If any offline/practice mode is ever
    wanted, the correct shape is a *locally hosted server process*, never
    client-side rules. Assumed: delete.
-2. **Q2 — Legacy save files.** `file.cpp` still reads/writes local
-   commander saves; B4 makes the server authoritative. Assumed: local saves
-   die with B4 (config/keybinds stay local).
+2. **Q2 — Legacy save/config files.** *Decided 2026-07-04: removed.* The
+   `file.cpp` config subsystem (`newkind.cfg` settings + `newscan.cfg` HUD
+   layout) is gone — the MMO client keeps no local files; durable player
+   state is the server's (B4). The values it loaded (scanner/compass HUD
+   positions, frame-speed default) are baked into `elite.cpp`.
 3. **Q3 — `GameData/Models` + `cmo.md` (DSOM).** *Decided 2026-07-03:
    deferred — the owner will handle this separately. Leave `GameData/Models`,
    `tools/shipdata2obj` and `cmo.md` exactly as they are; no track touches

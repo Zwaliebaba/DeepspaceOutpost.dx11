@@ -23,7 +23,6 @@
 #include "sound.h"
 #include "random.h"
 #include "stars.h"
-#include "file.h"
 #include "keyboard.h"
 #include "Camera.h"
 #include "ReplicationClient.h"
@@ -721,25 +720,6 @@ void handle_flight_keys(void)
     if ((!docked) && (cmdr.escape_pod) && (!witchspace))
       g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
   }
-}
-
-void set_commander_name(char* path)
-{
-  char *fname, *cname;
-  int i;
-
-  fname = get_filename(path);
-  cname = cmdr.name;
-
-  for (i = 0; i < 31; i++)
-  {
-    if (!isalnum(*fname))
-      break;
-
-    *cname++ = toupper(*fname++);
-  }
-
-  *cname = '\0';
 }
 
 // ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
@@ -1502,8 +1482,6 @@ void game_render_scene(void)
 
 int game_main(void)
 {
-  read_config_file();
-
   if (gfx_graphics_startup() == 1)
     return 1;
 
