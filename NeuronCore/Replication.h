@@ -55,8 +55,8 @@ namespace Neuron::Net
   // Exact serialized sizes, so a packetizer can split a snapshot into datagrams
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.
-  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + (8 * 3) + 2;
-      // magic(4)+version(2)+tick(4)+viewerId(4)+refOrigin i64x3(24)+count(2) = 40 (E2)
+  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + (8 * 3) + 1 + 2;
+      // magic(4)+version(2)+tick(4)+viewerId(4)+refOrigin i64x3(24)+complete(1)+count(2) = 41 (E2)
   inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (4 * 3) + (2 * 6) + 2 + 2;
       // id(4) + i32 pos OFFSET(12) + i16 nose/roof(12) + u16 speed(2) + i16 type(2) = 32 (E2)
 
@@ -105,6 +105,12 @@ namespace Neuron::Net
     int64_t refX = 0;
     int64_t refY = 0;
     int64_t refZ = 0;
+
+    // True when this datagram carries the WHOLE tick's snapshot (delta baseline
+    // eligible). The packetizer clears it on every part of a multi-datagram
+    // snapshot, so the delta stream (E2b) only ever bases a delta on a snapshot the
+    // receiver provably holds in full.
+    bool complete = true;
 
     std::vector<EntitySnapshot> entities;
   };
@@ -171,6 +177,7 @@ namespace Neuron::Net
     _w.WriteI64(_snap.refX);   // reference origin: positions below are int32 offsets from it
     _w.WriteI64(_snap.refY);
     _w.WriteI64(_snap.refZ);
+    _w.WriteU8(_snap.complete ? 1u : 0u);   // whole-tick? (delta-baseline eligible)
     _w.WriteU16(static_cast<uint16_t>(_snap.entities.size()));
 
     for (const EntitySnapshot& e : _snap.entities)
@@ -191,6 +198,7 @@ namespace Neuron::Net
     _out.refX = _r.ReadI64();
     _out.refY = _r.ReadI64();
     _out.refZ = _r.ReadI64();
+    _out.complete = (_r.ReadU8() != 0);
     const uint16_t count = _r.ReadU16();
 
     _out.entities.clear();

@@ -47,6 +47,10 @@ namespace Neuron::Net
   {
     std::vector<std::vector<uint8_t>> datagrams;
     const std::size_t perDatagram = EntitiesPerDatagram(_maxPayload);
+    // A snapshot that fits in one datagram is a COMPLETE baseline; a split one is
+    // not (each part carries only a subset), so the delta stream never bases a delta
+    // on a snapshot the receiver holds only in part.
+    const bool single = _snap.entities.size() <= perDatagram;
 
     if (_snap.entities.empty())
     {
@@ -55,6 +59,7 @@ namespace Neuron::Net
       keepAlive.refX = _snap.refX;   // carry the reference origin (E2) even on a keep-alive
       keepAlive.refY = _snap.refY;
       keepAlive.refZ = _snap.refZ;
+      keepAlive.complete = true;     // an empty tick is trivially whole
       DataWriter w;
       WriteSnapshot(w, keepAlive);
       datagrams.push_back(w.Bytes());
@@ -70,6 +75,7 @@ namespace Neuron::Net
       part.refX = _snap.refX;   // every datagram repeats the reference so each decodes independently
       part.refY = _snap.refY;
       part.refZ = _snap.refZ;
+      part.complete = single;   // only a one-datagram snapshot is a complete baseline
       part.entities.assign(_snap.entities.begin() + static_cast<std::ptrdiff_t>(i),
                            _snap.entities.begin() + static_cast<std::ptrdiff_t>(end));
 

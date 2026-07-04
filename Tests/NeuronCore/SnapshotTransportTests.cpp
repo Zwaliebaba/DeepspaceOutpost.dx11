@@ -38,7 +38,7 @@ namespace
 
 TEST(Transport, EntitiesPerDatagramFitsTheMtu)
 {
-  // (1200 - 40 header) / 32 per-entity = 36 whole entities (E2 compact format).
+  // (1200 - 41 header) / 32 per-entity = 36 whole entities (E2 compact format).
   EXPECT_TRUE(Net::EntitiesPerDatagram(1200) == 36);
   // Never returns zero, even for a payload smaller than one entity/header.
   EXPECT_TRUE(Net::EntitiesPerDatagram(10) == 1);
