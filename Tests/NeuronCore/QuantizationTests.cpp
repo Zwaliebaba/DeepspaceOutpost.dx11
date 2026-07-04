@@ -139,24 +139,28 @@ TEST(SnapshotV2, ARotatedBasisRoundTripsWithinTheQuantizationGrid)
   Net::WorldSnapshot in;
   Net::EntitySnapshot e;
   e.id = 1;
-  // A normalized off-axis nose + an orthogonal roof.
-  const float inv = 1.0f / std::sqrt(3.0f);
-  e.noseX = inv; e.noseY = inv; e.noseZ = inv;
-  e.roofX = -inv; e.roofY = 2.0f * inv; e.roofZ = -inv;   // (roof . nose == 0)
+  // A UNIT off-axis nose + a UNIT roof orthogonal to it (both must be genuine unit
+  // vectors - every component stays inside [-1,1], the quantizer's domain).
+  //   nose = (1,1,1)/sqrt(3);  roof = (-1,2,-1)/sqrt(6)  (roof . nose == 0, |roof| == 1)
+  const float n = 1.0f / std::sqrt(3.0f);   // ~0.57735
+  const float r = 1.0f / std::sqrt(6.0f);   // ~0.40825
+  e.noseX = n; e.noseY = n; e.noseZ = n;
+  e.roofX = -r; e.roofY = 2.0f * r; e.roofZ = -r;
   e.speed = 7.4f;
   in.entities.push_back(e);
 
   Net::DataWriter w;
   Net::WriteSnapshot(w, in);
-  Net::DataReader r(w.Bytes().data(), w.Size());
+  Net::DataReader rd(w.Bytes().data(), w.Size());
   Net::WorldSnapshot out;
-  ASSERT_TRUE(Net::ReadSnapshot(r, out));
+  ASSERT_TRUE(Net::ReadSnapshot(rd, out));
 
   const Net::EntitySnapshot& d = out.entities[0];
-  EXPECT_LT(std::fabs(d.noseX - inv), 3.1e-5f);
-  EXPECT_LT(std::fabs(d.noseY - inv), 3.1e-5f);
-  EXPECT_LT(std::fabs(d.noseZ - inv), 3.1e-5f);
-  EXPECT_LT(std::fabs(d.roofY - 2.0f * inv), 3.1e-5f);
+  EXPECT_LT(std::fabs(d.noseX - n), 3.1e-5f);
+  EXPECT_LT(std::fabs(d.noseY - n), 3.1e-5f);
+  EXPECT_LT(std::fabs(d.noseZ - n), 3.1e-5f);
+  EXPECT_LT(std::fabs(d.roofX - (-r)), 3.1e-5f);
+  EXPECT_LT(std::fabs(d.roofY - 2.0f * r), 3.1e-5f);   // ~0.8165, comfortably in [-1,1]
   EXPECT_LT(std::fabs(d.speed - 7.4f), 1.0f / Net::SPEED_QUANT_SCALE);
 }
 
