@@ -20,6 +20,7 @@
 #include "SnapshotHelpers.h"
 #include "WorldBuilder.h"
 #include "SecureRandom.h"   // OS CSPRNG for session tokens (B2)
+#include "OdbcStore.h"      // SQL-Server backend (B4.3), compiled only under DSO_ENABLE_ODBC
 
 using namespace Neuron;
 
@@ -79,9 +80,23 @@ namespace DSOServer
     if (db == nullptr || db[0] == '\0')
       return nullptr;   // persistence disabled: the server behaves exactly as before
 
-    // B4.2 wires the flow against the in-memory store (durable only within a run);
-    // B4.3 branches on the DSO_DB connection string to the SQL-Server OdbcStore.
-    auto store = std::make_unique<Neuron::Persist::InMemoryStore>();
+    std::unique_ptr<Neuron::Persist::IPersistenceStore> store;
+#ifdef DSO_ENABLE_ODBC
+    // Production: connect to SQL Server. A connect failure disables persistence
+    // ENTIRELY (no store, no deferred load) rather than falling back to a volatile
+    // store - a transient DB outage must never spawn a commander fresh and then
+    // alias their real saved rows over the top.
+    store = MakeOdbcStore(db);
+    if (!store)
+    {
+      std::fprintf(stderr, "[persist] ODBC connect failed for DSO_DB; running WITHOUT persistence\n");
+      return nullptr;
+    }
+#else
+    // Built without the ODBC backend: an in-memory store proves the wiring (durable
+    // only within a run). This is the dev/CI path when DSO_DB is set.
+    store = std::make_unique<Neuron::Persist::InMemoryStore>();
+#endif
     return std::make_unique<Neuron::Persist::PersistenceService>(std::move(store), /*startThread*/ true);
   }
 

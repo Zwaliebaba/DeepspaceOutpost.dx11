@@ -1141,13 +1141,19 @@ current renderer does not cash that cheque:
 
 In dependency order; the first three block everything else being "real".
 
-- **Persistence (Phase F) — the top structural gap.** A restart wipes every
-  commander. §12's invariant keeps the write path cheap: serialize
-  components, async batched writes off the sim thread, load-on-connect.
-  Design the schema for the 4X drift now: accounts, **empires**, owned
-  entities, inventory, *and world state* — the moment markets drift
-  (§13.2.3) they stop being pure seed functions and need rows; add a command
-  log table for audit/replay while the table count is still small.
+- **Persistence (Phase F) — the top structural gap.** ✅ *Done 2026-07-04 (B4):*
+  the persistence service (NeuronServer) runs a single writer thread off the sim
+  thread — the sim only ever copies structs onto coalesced queues (one snapshot per
+  player, latest wins) and drains completed loads; it never touches the store or
+  blocks on the DB. `IPersistenceStore` swaps an `InMemoryStore` (tests/CI) for the
+  raw-ODBC `OdbcStore` (SQL Server, behind the `DSO_ENABLE_ODBC` soak flag).
+  Load-on-hello DEFERS the spawn until the commander's durable state loads, so a
+  returning commander is never spawned-fresh (which a save would alias). Cadence
+  saves (150 ticks, change-gated) + a shutdown flush persist wallet/cargo/fuel/
+  standing/equipment and the wake-docked system. The schema (`NeuronServer/
+  schema.sql`) carries accounts, **empires**, players, cargo, markets, world-meta,
+  and an append-only command log; `empires` exists from day one so Track C is an
+  additive migration. `DSO_DB` unset ⇒ the whole feature is off (unchanged server).
 - **Session security: the UDP endpoint must stop being the identity.**
   ✅ *Done 2026-07-04 (B2):* `HelloAck` hands the client a CSPRNG 64-bit token;
   every subsequent `'NMSG'`/`'NRLB'` datagram carries it after the lane byte, and
@@ -1363,7 +1369,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 
 | # | Item | Ref | Type | Effort | Unblocks |
 |---|---|---|---|---|---|
-| 1 | Persistence (SQL Server) + world-state rows + command log | §13.2.2 | Infra | L | everything durable |
+| 1 | Persistence (SQL Server) + world-state rows + command log ✅ (done 2026-07-04) | §13.2.2 | Infra | L | everything durable |
 | 2 | `ClientHello`-first handshake ✅ (done 2026-07-03) | S1 | Simplify | S | 3, 4 |
 | 3 | Session token; endpoint ≠ identity; rate limits ✅ (done 2026-07-04) | §13.2.2 | Infra | S | 4, security |
 | 4 | Reconnect grace + resume ✅ (done 2026-07-04) | §13.2.2 | Infra | S | player retention |

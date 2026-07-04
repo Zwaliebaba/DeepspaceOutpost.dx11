@@ -429,7 +429,7 @@ note: reliable-lane sequence continuity assumes the client keeps its transport
 across the blip — true of the current client; a full channel-reset resume is
 deferred.)
 
-### B4 — Persistence on SQL Server (#1) — **L** — 📐 **design complete 2026-07-03; implementation pending**
+### B4 — Persistence on SQL Server (#1) — **L** — ✅ **done 2026-07-04** (OdbcStore soak-validated, not CI)
 
 The top structural gap. This section is the full design (the pre-code pass);
 honors §12: async batched writes off the sim thread, never per-tick
@@ -611,9 +611,17 @@ validated by a manual soak on Windows (documented in the PR), not by CI.
    Loading sessions get the B3 grace window. `DSO_DB` unset ⇒ `m_persist` null ⇒
    zero behavior change (the CI path); set ⇒ in-memory store for now (B4.3 swaps in
    ODBC). ServerSessions loading primitives are unit-tested.
-3. `OdbcStore` + `schema.sql` + manual Windows soak.
-4. Command log + the replay-smoke test (station requests replayed from the
-   log against a fresh world reproduce identical wallet outcomes).
+3. ✅ **done 2026-07-04** — `OdbcStore` + `schema.sql` + manual Windows soak.
+   *As built:* `Server/OdbcStore.cpp` implements `IPersistenceStore` over raw ODBC
+   (MERGE upserts for accounts/empires/players, cargo row replacement, joined load,
+   command-log inserts, market MERGE, meta), auto-linking `odbc32` via a `#pragma`.
+   It is compiled ONLY under the CMake option `DSO_ENABLE_ODBC` (OFF by default), so
+   CI needs no driver/database and the file is an empty TU there; the factory then
+   uses the in-memory store when `DSO_DB` is set. With the option ON the factory
+   connects via `DSO_DB`, and a connect failure disables persistence entirely rather
+   than aliasing saves over a fresh spawn. Runtime correctness is soak-validated.
+4. ✅ **done 2026-07-04** — Command log + the replay-smoke test (station requests
+   replayed from the log against a fresh world reproduce identical wallet outcomes).
 
 *Acceptance:* stop/restart the server → commanders keep credits, cargo,
 fuel, equipment, wanted, score, and wake docked at their last station; a DB
@@ -958,8 +966,8 @@ Three items are genuinely open and block only their own bullets:
 
 1. **M1 "Honest client"** — A1–A7 complete. The load-bearing rule is
    literally true; protocol hygiene done; docs match code.
-2. **M2 "Durable world"** — B1–B4. Secure sessions, reconnect, SQL
-   persistence. Restart-safe commanders.
+2. **M2 "Durable world"** ✅ — B1–B4 complete. Secure token sessions, reconnect
+   grace + resume, SQL persistence (ODBC soak-validated). Restart-safe commanders.
 3. **M3 "Empire-ready core"** — C + D1–D5. Identity layer, grid, arena,
    accumulator, metrics, BotClient smoke in CI.
 4. **M4 "Fair & scalable netcode"** — E1–E3 (validated by the 100-bot
