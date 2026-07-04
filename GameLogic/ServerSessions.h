@@ -71,6 +71,12 @@ namespace Neuron::GameLogic
   inline constexpr uint16_t RATE_MAX_UNAUTH   = 120;   // token-less datagrams / window / endpoint
   inline constexpr uint32_t RATE_MUTE_TICKS   = 300;   // ~10 s mute once the cap is exceeded
 
+  // D4: how many authenticated InputCommands one session may have applied per
+  // server tick. Input is latest-wins (extra inputs are superseded anyway), so this
+  // just bounds the CPU a flooding client can cost us; a normal client at a high
+  // frame rate sends only a few inputs per 30 Hz tick, well under the cap.
+  inline constexpr uint16_t MAX_INPUTS_PER_TICK = 8;
+
   struct Session
   {
     Net::Endpoint endpoint;            // current return address (B2: updated on a tokened rebind)
@@ -80,6 +86,8 @@ namespace Neuron::GameLogic
     uint64_t token = 0;                // session token (B2 identity); 0 while a pending shell
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
+    uint32_t inputWindowTick = 0;      // D4: tick the input-cadence window opened
+    uint16_t inputsThisWindow = 0;     // D4: inputs applied this tick (capped)
     bool loading = false;              // B4: version-checked, awaiting a persistence load before spawn
 
     // A session is LIVE once its ClientHello spawned an entity; before that it is
@@ -119,6 +127,18 @@ namespace Neuron::GameLogic
       Session* session = Authenticate(_ep, _token, _tick);
       if (session == nullptr || !_world.IsValid(session->entity))
         return ECS::EntityId{};   // unauthenticated / unknown token / not yet live
+
+      // D4 cadence cap: drop inputs beyond the per-tick budget (a new tick resets
+      // it). Latest-wins means the survivors already carry the freshest intent, so
+      // this only sheds a flood's CPU, never a normal client's inputs.
+      if (_tick != session->inputWindowTick)
+      {
+        session->inputWindowTick = _tick;
+        session->inputsThisWindow = 0;
+      }
+      if (session->inputsThisWindow >= MAX_INPUTS_PER_TICK)
+        return ECS::EntityId{};   // capped: drop this input (and its fire) entirely
+      ++session->inputsThisWindow;
 
       if (_in.sequence > session->lastInputSeq)
       {

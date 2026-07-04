@@ -117,6 +117,29 @@ TEST(Session, InputAppliesOnlyWithTheRightToken)
   EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);   // unchanged
 }
 
+TEST(Session, InputCadenceCapDropsAFloodWithinATick)
+{
+  // D4: a session may apply only MAX_INPUTS_PER_TICK inputs per tick; the rest are
+  // dropped (returns invalid), and the budget resets on the next tick.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 8001 };
+  ECS::EntityId e = Connect(world, sessions, a);
+  const uint64_t token = TokenOf(sessions, a);
+
+  for (uint16_t i = 0; i < GameLogic::MAX_INPUTS_PER_TICK; ++i)
+    EXPECT_TRUE(sessions.OnInput(world, a, token, Input(i + 1u, 0.0f), /*tick*/ 5) == e);
+
+  // One past the cap, same tick: dropped even though it is authenticated.
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(100, 1.0f), /*tick*/ 5)));
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0f);   // the dropped intent never applied
+
+  // The next tick reopens the budget.
+  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(101, 0.5f), /*tick*/ 6) == e);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
+}
+
 TEST(Session, DistinctEndpointsGetDistinctEntities)
 {
   ECS::Registry world;

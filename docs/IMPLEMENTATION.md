@@ -699,11 +699,17 @@ snapshot, broadphase candidate-pair counts (validates D1), reliable resend
 rates, per-phase tick-time breakdown. Expose as a periodic console line +
 a queryable struct (the BotClient harness reads it).
 
-### D4 — Rate/cadence guards — **XS**
+### D4 — Rate/cadence guards — **XS** — ✅ **done 2026-07-04**
 
 With B2's rate limiting in place, add the §9 "future" input-cadence sanity:
 per-session `InputCommand` acceptance cap per tick window (latest-wins
 already bounds damage; this bounds the CPU).
+
+*As built:* `ServerSessions::OnInput` drops any authenticated input beyond
+`MAX_INPUTS_PER_TICK` (8) applied by one session in a server tick (a per-session
+counter that resets when the tick advances) — returning an invalid id so the
+excess input's intent AND its fire are both shed. A normal client sends only a few
+inputs per 30 Hz tick, so the cap only bites a flood.
 
 ### D5 — BotClient harness → 100-player load test (#20) — **M**
 
