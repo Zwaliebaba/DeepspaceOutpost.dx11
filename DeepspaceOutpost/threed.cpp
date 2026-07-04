@@ -45,8 +45,6 @@ static inline void project_to_screen (double rx, double ry, double rz, int *sx, 
 
 void draw_solid_ship (struct local_object *obj)
 {
-	struct ship_data *ship = ship_list[obj->type];
-
 	/* Emit the ship as a GPU 3D model. Scene3D applies the model->camera rotation
 	 * (transpose of obj->rotmat) + translation, projects it with a real perspective and
 	 * resolves visibility with the hardware z-buffer - replacing the old CPU vertex
@@ -66,47 +64,61 @@ void draw_solid_ship (struct local_object *obj)
 	}
 	md.distance = obj->distance;
 	Neuron::Graphics::Scene3D::SubmitModel (md);
+}
 
-	/* The laser bolt stays on the 2D path for now: project just the muzzle vertex
-	 * through the same transform the GPU uses and draw the depth-sorted 2D line. */
-	if (obj->flags & FLG_FIRING)
-	{
-		Matrix trans_mat;
-		double tmp;
-		struct vector vec;
-		double rx, ry, rz;
-		int sx, sy;
-		int lasv;
-		int col;
 
-		for (int i = 0; i < 3; i++)
-			trans_mat[i] = obj->rotmat[i];
+/*
+ * Draw the firing beam for ANOTHER ship (an NPC or a remote player) whose
+ * FLG_FIRING is set: project its muzzle vertex through the same transform the
+ * mesh uses and draw the depth-sorted 2D bolt from the gun to a screen edge.
+ *
+ * This is the counterpart to the LOCAL player's laser visual (draw_laser_lines,
+ * space.cpp) - a different beam, fired from the hull's gun vertex rather than the
+ * screen corners. Kept out of draw_solid_ship so that stays pure mesh submission.
+ */
 
-		tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
-		tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
-		tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
+static void draw_ship_laser (const struct local_object *obj)
+{
+	if (!(obj->flags & FLG_FIRING))
+		return;
 
-		lasv = ship->front_laser;
-		vec.x = ship->points[lasv].x;
-		vec.y = ship->points[lasv].y;
-		vec.z = ship->points[lasv].z;
-		mult_vector (&vec, trans_mat);
+	struct ship_data *ship = ship_list[obj->type];
 
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
-		if (rz <= 0)
-			rz = 1;
+	Matrix trans_mat;
+	double tmp;
+	struct vector vec;
+	double rx, ry, rz;
+	int sx, sy;
+	int lasv;
+	int col;
 
-		project_to_screen (rx, ry, rz, &sx, &sy);
+	for (int i = 0; i < 3; i++)
+		trans_mat[i] = obj->rotmat[i];
 
-		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
+	tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
+	tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
+	tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
 
-		gfx_render_line (sx, sy,
-						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
-						 (int) rz, col);
-	}
+	lasv = ship->front_laser;
+	vec.x = ship->points[lasv].x;
+	vec.y = ship->points[lasv].y;
+	vec.z = ship->points[lasv].z;
+	mult_vector (&vec, trans_mat);
+
+	rx = vec.x + obj->location.x;
+	ry = vec.y + obj->location.y;
+	rz = vec.z + obj->location.z;
+	if (rz <= 0)
+		rz = 1;
+
+	project_to_screen (rx, ry, rz, &sx, &sy);
+
+	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+	col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
+
+	gfx_render_line (sx, sy,
+					 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
+					 (int) rz, col);
 }
 
 
@@ -359,5 +371,6 @@ void draw_ship (struct local_object *ship)
 		return;
 
 	draw_solid_ship (ship);
+	draw_ship_laser (ship);   // firing beam (only when FLG_FIRING); no-op otherwise
 }
 
