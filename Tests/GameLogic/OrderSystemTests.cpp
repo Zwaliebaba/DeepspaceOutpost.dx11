@@ -21,6 +21,12 @@ namespace
     return e;
   }
 
+  // NB: avoid C++ digit separators (e.g. 1'000'000) INSIDE the gtest EXPECT_*
+  // macros below - MSVC's macro-argument pre-scanner mis-tokenizes the ' as a
+  // char-literal delimiter when it sits next to a nested call, breaking comma
+  // counting. Use this named constant / plain literals inside the macros instead.
+  constexpr int64_t MAX_MOVE = 1000000;
+
   double Dist(const Math::Vector3i64& _a, const Math::Vector3i64& _b)
   {
     const double dx = static_cast<double>(_b.x - _a.x);
@@ -48,7 +54,7 @@ TEST(OrderSystem, ClampToChebyshevPassesNearPointsAndClampsFarOnes)
   EXPECT_TRUE(ClampToChebyshev(from, Math::Vector3i64{ 1500, -2500, 900 }, 1000)
               == Math::Vector3i64{ 1500, -2500, 900 });
   // Beyond on +x, -y and +z: each axis clamped to the box face, others untouched.
-  const Math::Vector3i64 c = ClampToChebyshev(from, Math::Vector3i64{ 9'999'999, -9'999'999, 800 }, 1000);
+  const Math::Vector3i64 c = ClampToChebyshev(from, Math::Vector3i64{ 9999999, -9999999, 800 }, 1000);
   EXPECT_EQ(c.x, from.x + 1000);
   EXPECT_EQ(c.y, from.y - 1000);
   EXPECT_EQ(c.z, 800);
@@ -63,16 +69,16 @@ TEST(OrderSystem, RejectsUnitYouDoNotOwn)
   const ECS::EntityId theirs = MakeUnit(w, /*player*/ 9, { 0, 0, 0 });
 
   // Player 7 ordering player 9's unit -> NotYours.
-  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(theirs.index, 100, 0, 0), 1'000'000).status
+  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(theirs.index, 100, 0, 0), MAX_MOVE).status
               == Msg::OrderStatus::NotYours);
   // Player 0 (no identity) -> NotYours even for a real unit.
-  EXPECT_TRUE(PlanUnitOrder(w, 0, Move(mine.index, 100, 0, 0), 1'000'000).status
+  EXPECT_TRUE(PlanUnitOrder(w, 0, Move(mine.index, 100, 0, 0), MAX_MOVE).status
               == Msg::OrderStatus::NotYours);
   // A spoofed / dead unit index -> NotYours (no owner).
-  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(9999, 100, 0, 0), 1'000'000).status
+  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(9999, 100, 0, 0), MAX_MOVE).status
               == Msg::OrderStatus::NotYours);
   // Own unit -> Accepted.
-  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(mine.index, 100, 0, 0), 1'000'000).status
+  EXPECT_TRUE(PlanUnitOrder(w, 7, Move(mine.index, 100, 0, 0), MAX_MOVE).status
               == Msg::OrderStatus::Accepted);
 }
 
@@ -80,9 +86,9 @@ TEST(OrderSystem, MovePlanClampsTheDestination)
 {
   ECS::Registry w;
   const ECS::EntityId u = MakeUnit(w, 1, { 0, 0, 0 });
-  const OrderPlan plan = PlanUnitOrder(w, 1, Move(u.index, 5'000'000, 0, 0), 1'000'000);
+  const OrderPlan plan = PlanUnitOrder(w, 1, Move(u.index, 5000000, 0, 0), MAX_MOVE);
   ASSERT_TRUE(plan.status == Msg::OrderStatus::Accepted);
-  EXPECT_EQ(plan.order.targetPos.x, 1'000'000);   // clamped to the reach
+  EXPECT_EQ(plan.order.targetPos.x, MAX_MOVE);   // clamped to the reach
 }
 
 TEST(OrderSystem, DockedUnitRefusesFlightOrdersButNotStop)
@@ -91,13 +97,13 @@ TEST(OrderSystem, DockedUnitRefusesFlightOrdersButNotStop)
   const ECS::EntityId u = MakeUnit(w, 1, { 0, 0, 0 });
   w.Get<DockState>(u).docked = true;
 
-  EXPECT_TRUE(PlanUnitOrder(w, 1, Move(u.index, 100, 0, 0), 1'000'000).status
+  EXPECT_TRUE(PlanUnitOrder(w, 1, Move(u.index, 100, 0, 0), MAX_MOVE).status
               == Msg::OrderStatus::Docked);
 
   Msg::UnitOrder stop;
   stop.unitId = u.index;
   stop.order = Msg::OrderKind::Stop;
-  EXPECT_TRUE(PlanUnitOrder(w, 1, stop, 1'000'000).status == Msg::OrderStatus::Accepted);
+  EXPECT_TRUE(PlanUnitOrder(w, 1, stop, MAX_MOVE).status == Msg::OrderStatus::Accepted);
 }
 
 TEST(OrderSystem, ReservedOrderKindsAreIllegal)
@@ -107,7 +113,7 @@ TEST(OrderSystem, ReservedOrderKindsAreIllegal)
   Msg::UnitOrder patrol;
   patrol.unitId = u.index;
   patrol.order = Msg::OrderKind::Patrol;   // reserved (F-track)
-  EXPECT_TRUE(PlanUnitOrder(w, 1, patrol, 1'000'000).status == Msg::OrderStatus::Illegal);
+  EXPECT_TRUE(PlanUnitOrder(w, 1, patrol, MAX_MOVE).status == Msg::OrderStatus::Illegal);
 }
 
 TEST(OrderSystem, TargetTypeGatesPerOrderKind)
@@ -134,7 +140,7 @@ TEST(OrderSystem, TargetTypeGatesPerOrderKind)
   auto order = [&](Msg::OrderKind _k, ECS::EntityId _t)
   {
     Msg::UnitOrder o; o.unitId = u.index; o.order = _k; o.target = _t.index;
-    return PlanUnitOrder(w, 1, o, 1'000'000).status;
+    return PlanUnitOrder(w, 1, o, MAX_MOVE).status;
   };
 
   // Right type accepts; wrong type is BadTarget.
@@ -149,7 +155,7 @@ TEST(OrderSystem, TargetTypeGatesPerOrderKind)
   EXPECT_TRUE(order(Msg::OrderKind::Approach, u)    == Msg::OrderStatus::BadTarget);
   // A dead target index -> BadTarget.
   Msg::UnitOrder dead; dead.unitId = u.index; dead.order = Msg::OrderKind::Approach; dead.target = 4242;
-  EXPECT_TRUE(PlanUnitOrder(w, 1, dead, 1'000'000).status == Msg::OrderStatus::BadTarget);
+  EXPECT_TRUE(PlanUnitOrder(w, 1, dead, MAX_MOVE).status == Msg::OrderStatus::BadTarget);
 }
 
 // --- StepOrders: order -> intent execution ---------------------------------------
