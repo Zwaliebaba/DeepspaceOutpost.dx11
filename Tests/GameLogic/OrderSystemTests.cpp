@@ -50,9 +50,12 @@ namespace
 TEST(OrderSystem, ClampToChebyshevPassesNearPointsAndClampsFarOnes)
 {
   const Math::Vector3i64 from{ 1000, -2000, 500 };
-  // Inside the box on every axis: unchanged.
-  EXPECT_TRUE(ClampToChebyshev(from, Math::Vector3i64{ 1500, -2500, 900 }, 1000)
-              == Math::Vector3i64{ 1500, -2500, 900 });
+  // Inside the box on every axis: unchanged. (The braced Vector3i64 is hoisted into
+  // a local: a brace-list's commas are NOT protected inside a gtest macro - only
+  // parentheses hide commas from the preprocessor - so an inline `== Vector3i64{...}`
+  // would be mis-split into extra macro arguments.)
+  const Math::Vector3i64 nearPoint{ 1500, -2500, 900 };
+  EXPECT_TRUE(ClampToChebyshev(from, nearPoint, 1000) == nearPoint);
   // Beyond on +x, -y and +z: each axis clamped to the box face, others untouched.
   const Math::Vector3i64 c = ClampToChebyshev(from, Math::Vector3i64{ 9999999, -9999999, 800 }, 1000);
   EXPECT_EQ(c.x, from.x + 1000);
