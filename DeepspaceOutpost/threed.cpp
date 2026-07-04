@@ -38,118 +38,6 @@ static inline void project_to_screen (double rx, double ry, double rz, int *sx, 
 
 
 /*
- * The following routine is used to draw a wireframe represtation of a ship.
- *
- * caveat: it is a work in progress.
- * A number of features (such as not showing detail at distance) have not yet been implemented.
- *
- */
-
-void draw_wireframe_ship (struct local_object *obj)
-{
-	Matrix trans_mat;
-	int i;
-	int sx,sy,ex,ey;
-	double rx,ry,rz;
-	int visible[32];
-	Vector vec;
-	Vector camera_vec;
-	double cos_angle;
-	double tmp;
-	struct ship_face_normal *ship_norm;
-	int num_faces;
-	struct ship_data *ship;
-	int lasv;
-
-	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-	
-	num_faces = ship->num_faces;
-	
-	for (i = 0; i < num_faces; i++)
-	{
-		ship_norm = ship->normals;
-
-		vec.x = ship_norm[i].x;
-		vec.y = ship_norm[i].y;
-		vec.z = ship_norm[i].z;
-
-		if ((vec.x == 0) && (vec.y == 0) && (vec.z == 0))
-			visible[i] = 1;
-		else
-		{
-			vec = unit_vector (&vec);
-			cos_angle = vector_dot_product (&vec, &camera_vec);
-			visible[i] = (cos_angle < -0.2);
-		}
-	}
-
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
-	for (i = 0; i < ship->num_points; i++)
-	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
-
-		mult_vector (&vec, trans_mat);
-
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
-
-		project_to_screen (rx, ry, rz, &sx, &sy);
-
-		point_list[i].x = sx;
-		point_list[i].y = sy;
-
-	}
-
-	for (i = 0; i < ship->num_lines; i++)
-	{
-		if (visible[ship->lines[i].face1] ||
-			visible[ship->lines[i].face2])
-		{
-			sx = point_list[ship->lines[i].start_point].x;
-			sy = point_list[ship->lines[i].start_point].y;
-
-			ex = point_list[ship->lines[i].end_point].x;
-			ey = point_list[ship->lines[i].end_point].y;
-
-			gfx_draw_line (sx, sy, ex, ey);
-		}
-	}
-
-
-	if (obj->flags & FLG_FIRING)
-	{
-		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		lasv = ship_list[obj->type]->front_laser;
-		gfx_draw_line (point_list[lasv].x, point_list[lasv].y,
-					   obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256);
-	}
-}
-
-
-
-
-/*
  * Hacked version of the draw ship routine to display solid ships...
  * This needs a lot of tidying...
  *
@@ -166,7 +54,6 @@ void draw_solid_ship (struct local_object *obj)
 	 * projection, signed-area backface test and painter's-sorted 2D polygons. */
 	Neuron::Render::ModelDraw md;
 	md.type = obj->type;
-	md.style = 0;
 	md.colour = -1;
 	md.flags = obj->flags;
 	md.location[0] = obj->location.x;
@@ -228,11 +115,7 @@ void draw_solid_ship (struct local_object *obj)
 
 
 /*
- * Draw a planet.
- * We can currently do three different types of planet...
- * - Wireframe.
- * - Fractal landscape.
- * - SNES-style.
+ * Draw a planet as a lit 3D sphere.
  */
 
 void draw_planet (struct local_object *planet)
@@ -247,7 +130,6 @@ void draw_planet (struct local_object *planet)
 	 * the mesh, so this uses the ship (per-vertex, lit) colour path (md.colour = -1). */
 	Neuron::Render::ModelDraw md;
 	md.type = SHIP_PLANET;
-	md.style = planet_render_style;
 	md.colour = -1;
 	md.location[0] = planet->location.x;
 	md.location[1] = planet->location.y;
@@ -477,9 +359,6 @@ void draw_ship (struct local_object *ship)
 		(fabs(ship->location.y) > Neuron::Client::HalfExtentY (vm, ship->location.z)))
 		return;
 
-	if (wireframe)
-		draw_wireframe_ship (ship);
-	else
-		draw_solid_ship (ship);
+	draw_solid_ship (ship);
 }
 

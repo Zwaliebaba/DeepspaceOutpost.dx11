@@ -891,9 +891,18 @@ The purchased items work, all server-validated (`EquipmentSystem`):
 
 The client is deliberately dumb. It keeps:
 
-- **Rendering:** DX11, legacy wireframe meshes, camera-relative floating
-  origin. Replicated entities are drawn from interpolated snapshots
-  (`SnapshotInterpolator` + dead-reckoning on `speed`).
+- **Rendering:** DX11, low-poly meshes, camera-relative floating origin.
+  Replicated entities are drawn from interpolated snapshots
+  (`SnapshotInterpolator` + dead-reckoning on `speed`). Ships render through a
+  single **solid** GPU mesh path (`draw_solid_ship` → `Scene3D::SubmitModel`);
+  the legacy CPU line-drawing `draw_wireframe_ship` and its `wireframe`
+  Solid/Wireframe toggle were **removed** (2026-07-04) — they were an unused
+  settings switch, not the retro-vector *art direction*, which is realized by
+  the low-poly meshes and lands as batched instanced rendering in Track H
+  (§13.2.1). The planet is one lit green 3D sphere; the multi-style planet
+  renderer (`planet_render_style`: Wireframe/Green/SNES/Fractal) went with it
+  (the client only ever shipped the classic green). Both settings dropped out
+  of the options window and the local `newkind.cfg`.
 - **A single fixed forward view.** The cockpit renders one view: straight
   ahead along the ship's nose. The legacy rear/left/right cockpit views were
   removed (2026-07-04) — F2/F3 no longer switch views (F4 keeps only its

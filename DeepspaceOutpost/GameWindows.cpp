@@ -16,9 +16,7 @@
 // Game config globals (declared in elite.h) and the config writer (file.h),
 // re-declared here so this winrt/widget-based translation unit stays free of the
 // legacy game headers (which define macros that don't mix with the GUI headers).
-extern int wireframe;
 extern int anti_alias_gfx;
-extern int planet_render_style;
 extern int scene_shading;
 extern int hoopy_casinos;
 extern int instant_dock;
@@ -137,9 +135,7 @@ namespace
         };
 
         // Mirror options.cpp's setting_list (name + value labels) and its global mapping.
-        addCycle("Graphics", &wireframe, {"Solid", "Wireframe"});
         addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
-        addCycle("Planet Style", &planet_render_style, {"Wireframe", "Green", "SNES", "Fractal"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
         addCycle("Planet Desc.", &hoopy_casinos, {"BBC", "MSX"});
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});

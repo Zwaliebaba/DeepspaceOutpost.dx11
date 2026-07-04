@@ -21,7 +21,6 @@ int carry_flag = 0;
 int current_screen = 0;
 int witchspace;
 
-int wireframe = 0;
 int anti_alias_gfx = 0;
 int hoopy_casinos = 0;
 int speed_cap = 75;
@@ -34,7 +33,6 @@ int scanner_cy;
 int compass_centre_x;
 int compass_centre_y;
 
-int planet_render_style = 0;
 int scene_shading = 0;   /* 0 = flat (faithful), 1 = lit (opt-in directional shading) */
 
 int game_over;

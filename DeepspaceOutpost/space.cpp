@@ -1178,16 +1178,6 @@ void draw_laser_lines (void)
 	const int x3 = (int)(vm.width * (208.0 / 256.0));
 	const int x4 = (int)(vm.width * (224.0 / 256.0));
 
-	if (wireframe)
-	{
-		gfx_draw_colour_line (x1, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x2, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x3, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x4, by, laser_x, laser_y, GFX_COL_WHITE);
-	}
-	else
-	{
-		gfx_draw_triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
-		gfx_draw_triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
-	}
+	gfx_draw_triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
+	gfx_draw_triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
 }

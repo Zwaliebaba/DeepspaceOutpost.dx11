@@ -105,7 +105,6 @@ extern int current_screen;
 
 extern struct ship_data *ship_list[];
 
-extern int wireframe;
 extern int anti_alias_gfx;
 extern char scanner_filename[256];
 extern int hoopy_casinos;
@@ -116,7 +115,6 @@ extern int scanner_cy;
 extern int compass_centre_x;
 extern int compass_centre_y;
 
-extern int planet_render_style;
 extern int scene_shading;
 
 extern int game_over;

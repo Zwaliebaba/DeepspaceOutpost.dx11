@@ -95,6 +95,8 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `NeuronCore/ClientInput.h` | `Net::ClientInput` alias | S7: one catalog name — `Msg::InputCommand` | **Delete alias**, mechanical rename at call sites (keep `NO_MISSILE_TARGET`, moved next to `InputCommand`) |
 | `DeepspaceOutpost/alg_main.h`, `menu.h` | whole headers | Included nowhere | **Delete** |
 | `AGENTS.md:247-248` | trailing `</content></invoke>` XML | Copy-paste artifact | **Delete** |
+| `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H) |
+| `DeepspaceOutpost/SceneMeshes.cpp`, `threed.cpp` + the `planet_render_style` global (`elite.*`, options window, `newkind.cfg`) and `ModelDraw::style`/`colour2` | Multi-style planet renderer (Wireframe/Green/SNES/Fractal) | Only the classic green ever shipped; `ModelDraw::style`/`colour2` had no reader | ✅ **Removed 2026-07-04** (planet is one lit green sphere) |
 
 Not dead, do not remove: `Messages/Catalog.h`, `CatalogTools.h`,
 `PacketInspect.h` (test/tooling infrastructure the governance and fuzz suites
@@ -1237,8 +1239,10 @@ Per §13.2.1, in order:
 1. **NetType indirection table** first (it is the seam everything else
    plugs into): a client-side table `NetType → {mesh id, glyph id, palette
    row}` replacing the `if/switch` in `draw_ship`/`build_ship_mesh`
-   (`threed.cpp:446-484`, `SceneMeshes.cpp:27-89`). Adding a hull (F3's
-   outpost) becomes a data row.
+   (`threed.cpp`, `SceneMeshes.cpp`). Adding a hull (F3's outpost) becomes a
+   data row. (The `draw_ship` seam is already simpler: the Solid/Wireframe
+   toggle and the multi-style planet branch were removed 2026-07-04 — ships
+   take the single solid mesh path and the planet is one green sphere.)
 2. **Batched instanced wireframe:** one persistent line-list vertex buffer
    per hull type, one per-frame instance buffer (transform + palette tint),
    one `DrawIndexedInstanced` per hull type. This work converts

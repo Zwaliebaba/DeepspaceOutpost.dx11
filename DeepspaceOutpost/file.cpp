@@ -43,12 +43,8 @@ void write_config_file (void)
 
 	fprintf (fp, "%d\t\t# Game Speed, the lower the number the faster the game.\n", speed_cap);
 
-	fprintf (fp, "%d\t\t# Graphics: 0 = Solid, 1 = Wireframe\n", wireframe);
+	fprintf (fp, "%d\t\t# Anti-Alias: 0 = Normal, 1 = Anti-Aliased\n", anti_alias_gfx);
 
-	fprintf (fp, "%d\t\t# Anti-Alias Wireframe: 0 = Normal, 1 = Anti-Aliased\n", anti_alias_gfx);
-
-	fprintf (fp, "%d\t\t# Planet style: 0 = Wireframe, 1 = Green, 2 = SNES, 3 = Fractal\n", planet_render_style);
-	
 	fprintf (fp, "%d\t\t# Planet Descriptions: 0 = Tree Grubs, 1 = Hoopy Casinos\n", hoopy_casinos);
 
 	fprintf (fp, "%d\t\t# Instant dock: 0 = off, 1 = on\n", instant_dock);
@@ -141,14 +137,8 @@ void read_config_file (void)
 	sscanf (str, "%d", &speed_cap);
 
 	read_cfg_line (str, sizeof(str), fp);
-	sscanf (str, "%d", &wireframe);
-
-	read_cfg_line (str, sizeof(str), fp);
 	sscanf (str, "%d", &anti_alias_gfx);
 
-	read_cfg_line (str, sizeof(str), fp);
-	sscanf (str, "%d", &planet_render_style);
-	
 	read_cfg_line (str, sizeof(str), fp);
 	sscanf (str, "%d", &hoopy_casinos);
 
