@@ -338,6 +338,7 @@ trait forbids queuing it on a reliable lane.
 | `ecm` | bool | fire the ECM burst (G8) |
 | `energyBomb` | bool | detonate the energy bomb (G8) |
 | `escapePod` | bool | eject in the escape pod (G8) |
+| `ackSnapshotTick` | u32 | latest snapshot baseline the client holds (E2b delta ack) |
 
 #### Lifecycle
 
@@ -535,7 +536,9 @@ the galaxy chart in bounded ranges (`GalaxyChunkRequest` → `GalaxyChunk`, Bulk
 until it holds all systems.
 
 **Fire → kill → respawn:** `InputCommand.fire` → server publishes `FireWeapon`
-→ `ResolveFireWeapon` applies damage, may publish `Crime` (wanted +1, police
+→ `ResolveFireWeapon` resolves the laser **lag-compensated** (E1: targets rewound
+to where the shooter saw them, via the 15-tick transform-history ring) and
+applies damage, may publish `Crime` (wanted +1, police
 launch from the nearest station with a warrant on the offender) and/or
 `EntityKilled` → the death subscriber pays the killer (`CreditKill`), scatters
 loot (`DropLoot` / `DropPlayerCargo`), and for a player victim: sends that
@@ -591,8 +594,10 @@ Every ~33 ms, in this order:
     players get a roster refresh.
 12. **Reap** idle sessions (300 ticks ≈ 10 s), diff live entities →
     `EntityDespawn` broadcasts.
-13. **Send** — per session: AOI snapshot (+ landmarks), on-change
-    `PlayerStatus`, then flush all reliable lanes.
+13. **Send** — per session: AOI snapshot (+ landmarks), budget-trimmed then
+    delta/keyframe-encoded against the client's acked baseline (E2); on-change
+    `PlayerStatus`; the strategic per-system rollup at its ~1 Hz cadence (E3);
+    then flush all reliable lanes.
 
 ### 5.2 Sessions (`ServerSessions`)
 
@@ -1054,9 +1059,8 @@ Preserved from the retired migration roadmap (its §0 and §2.4) — these are
 | Test harness | Headless `BotClient` over the real net stack for the 100-player load milestone |
 | Aesthetic | The faithful **low-poly wireframe / retro-vector** look is the art direction, not a placeholder — rendering work amplifies it, never replaces it |
 
-Phase status at retirement of the roadmap: 0/A/C ✅ · B/D/E/G 🟡 (BotClient,
-strategic tier, delta/quantization, prediction, chat outstanding) · F/H/I 🔴.
-Missions are deferred until after F. The **persistence-readiness rule** from
+Phase status: 0/A/B/C/D/E ✅ (as of 2026-07-04) · G 🟡 (client-side prediction
+and chat outstanding) · F/H/I 🔴. Missions are deferred until after F. The **persistence-readiness rule** from
 the Phase G plan is promoted to a standing invariant here: *every
 durable-in-spirit piece of state lives in a plain serializable component*
 (`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `Equipment`, …) or a plain
@@ -1236,24 +1240,24 @@ In dependency order; the first three block everything else being "real".
   against. Dogfighting at 100+ ms RTT punished exactly the players an MMO must
   keep.
 - **Replication depth (Phase D debt): quantization, delta, budgets.**
-  🟡 **Quantization done (E2a, 2026-07-04); delta + budgets pending (E2b/E2c).**
-  The v1 58-byte `EntitySnapshot` re-sent full `int64` positions and two full
-  float basis vectors every tick to every viewer; v2 is 32 bytes (int32
-  position offset from a per-packet int64 reference origin, int16 basis, u16
-  speed). Bandwidth — not CPU — is
-  the 4X scaling wall (units ≫ players). See §13.3-E4 for the concrete
-  re-cut; the *architectural* requirements are: per-session delta against a
-  last-acked baseline, per-lane byte budgets, and a documented snapshot send
-  rate (today implicitly "every tick", which is the knob this work turns).
-- **The strategic tier — the second AOI resolution §12 promises.** There is
-  exactly one interest radius. A commander with holdings in three systems is
-  blind to all of them; widening the tactical AOI is the wrong (bandwidth-
-  catastrophic) answer. Add a low-rate (0.5–1 Hz), reliable-lane summary
-  stream keyed by system id — aggregate counts, ownership, alerts ("your
-  station in Lave is under attack") — filtered by known systems (§13.2.3),
-  rendered by the chart screen and the iconic-LOD path (§13.2.1). This also
-  realizes the decoupled-clocks decision: tactical at tick rate, strategic
-  at its own cadence.
+  ✅ **Done (E2, 2026-07-04).** The v1 58-byte `EntitySnapshot` re-sent full
+  `int64` positions and two full float basis vectors every tick to every viewer;
+  v2 is 32 bytes (int32 position offset from a per-packet int64 reference origin,
+  int16 basis, u16 speed). On top of that: per-session **delta** against the
+  client's last-acked baseline with periodic keyframes (ack piggybacked on
+  `InputCommand`), and a per-session **send budget** that sheds the farthest
+  entities under load. Bandwidth — not CPU — is the 4X scaling wall (units ≫
+  players). See §13.3-E4. The one remaining tail: delta-fragment reassembly for a
+  *persistently* multi-datagram (extreme fleet-density) AOI.
+- **The strategic tier — the second AOI resolution §12 promises.**
+  ✅ **Done (E3, 2026-07-04).** A low-rate (~1 Hz), reliable-lane
+  `StrategicSummary` (`0x1004`) keyed by system id carries aggregate
+  friendly/hostile counts and an alert level, realizing the decoupled-clocks
+  decision (tactical at tick rate, strategic at its own cadence). v1 summarizes
+  the player's current system; the follow-ups the original note anticipated —
+  ownership-index-driven multi-system presence, known-system filtering
+  (§13.2.3), and the chart / iconic-LOD render (§13.2.1) — ride F1/F3 and the
+  render track.
 - **Ticking & concurrency shape.** One thread runs everything (§5.1). That
   is *correct today* — do not parallelize ahead of profiling — but the 4X
   entity counts will outgrow it, so keep the phases parallelizable:
@@ -1371,19 +1375,22 @@ speed, type) into a dedicated pool iterated linearly, so the packetizer
 streams from dense memory instead of probing four pools per entity.
 
 **E4 — Re-cut the snapshot for bandwidth (the real scaling wall).**
-🟡 **Quantization done (E2a, 2026-07-04); delta pending (E2b).** As built: the
-v2 format is **32 B/entity** (was 58). The header carries a full **int64
-reference origin** (the viewer's position); positions are **3×i32 offsets** from
-it (12 B, exact — no float loss — and the absolute world stays unbounded int64,
-since only the small AOI-bounded offset is int32). Orientation is kept as the
-**nose+roof basis quantized to i16 components** (12 B; 0/±1 exact) rather than a
-smallest-three quaternion — chosen for robustness under blind CI over the ~2 B it
-would have saved; speed is **u16 fixed-point** (1/256 unit). Original target and
-the still-pending pieces below. Per-session **delta compression** against the
-last-acked baseline with a periodic keyframe (the ack plumbing already exists
-in the reliable layer; snapshots stay unreliable with baseline acks
-piggybacked). Quantization rounds on the *server* (deterministic integer math)
-so all clients see identical values — never quantize client-side.
+✅ **Done (E2, 2026-07-04).** As built: the v2 format is **32 B/entity** (was
+58). The header carries a full **int64 reference origin** (the viewer's
+position); positions are **3×i32 offsets** from it (12 B, exact — no float loss —
+and the absolute world stays unbounded int64, since only the small AOI-bounded
+offset is int32). Orientation is the **nose+roof basis quantized to i16
+components** (12 B; 0/±1 exact) rather than a smallest-three quaternion — chosen
+for robustness under blind CI over the ~2 B it would have saved; speed is **u16
+fixed-point** (1/256 unit). Quantization rounds on the *server* (deterministic
+integer math) so all clients decode identical values. On top: per-session
+**delta compression** against the client's last-acked baseline with a periodic
+keyframe (acks piggybacked on `InputCommand`; snapshots stay unreliable, deltas
+based only on a `complete` snapshot the client provably holds), and a per-session
+**send budget** that sheds the farthest entities under load (reported to the D3
+metrics). The remaining tail: delta-fragment reassembly for a *persistently*
+multi-datagram (extreme fleet-density) AOI, which currently falls back to full
+snapshots.
 
 **E5 — SIMD, but determinism first.** The sim's cross-run determinism is a
 hard asset (golden tests, future replays). Rules: pin `/fp:strict` on

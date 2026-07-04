@@ -39,11 +39,13 @@ Conventions used throughout:
   256-system galaxy from seed `0xC0FFEE`, and the G8 equipment set
   (ECM/energy bomb/escape pod/laser temperature). The 13-step tick pipeline in
   `Server/GameServer.cpp` matches §5.1.
-- **NeuronCore matches §3–§4 and §11 exactly.** All 14 registered catalog
-  messages carry the documented ids, traits and fields; serialization caps
-  (4096), `SAFE_UDP_PAYLOAD` (1200), the 58-byte `EntitySnapshot`, the 16-byte
-  snapshot header, the 47-byte manifest entries, the three reliable lanes and
-  their drain order, and the ECS API are all as specified.
+- **NeuronCore matches §3–§4 and §11 exactly.** Every registered catalog
+  message carries the documented ids, traits and fields (incl. E1's `Ping`/`Pong`
+  and E3's `StrategicSummary`); serialization caps (4096), `SAFE_UDP_PAYLOAD`
+  (1200), the E2 v2 snapshot (32-byte `EntitySnapshot`, 41-byte header with the
+  int64 reference origin + `complete` flag, plus the delta stream), the 47-byte
+  manifest entries, the three reliable lanes and their drain order, and the ECS
+  API are all as specified.
 - **The dependency rule holds.** The client executable links only
   `NeuronClient` + `NeuronCore` — it never links `GameLogic`
   (`DeepspaceOutpost/CMakeLists.txt`).
@@ -1303,7 +1305,9 @@ Three items are genuinely open and block only their own bullets:
 3. **M3 "Empire-ready core"** ✅ — C + D1–D5 complete. Identity layer
    (playerId + Owner/OwnershipIndex + session records, wallet deferred to F)
    plus grid, arena, accumulator, metrics, BotClient smoke in CI.
-4. **M4 "Fair & scalable netcode"** — E1–E3 (validated by the 100-bot
-   soak) + G1–G3.
+4. **M4 "Fair & scalable netcode"** — 🟡 E1–E3 ✅ complete (time sync +
+   lag-compensated fire; snapshot quantization + per-session delta/keyframes +
+   send budget; strategic per-system tier), validated in unit tests and pending
+   the 100-bot bandwidth soak; G1–G3 remain.
 5. **M5 "The 4X turn"** — F1–F5, G4, with H landing in parallel.
 6. **M6 "Missions"** — G5, after M2 has soaked in production.
