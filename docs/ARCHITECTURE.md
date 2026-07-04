@@ -10,7 +10,9 @@ consolidated roadmap (§14).
 The former companion documents (`MIGRATION_ROADMAP.md`, `gameplay.md`,
 `ARCHITECTURE_REVIEW.md`) have been folded into §12–§14 and retired to prevent
 duplication. Sections 1–11 describe code that exists and is tested; §13–§14
-are critique and forward plan.
+are critique and forward plan. One companion document exists:
+**`docs/interaction.md`** — the canonical interaction design (pointer-first
+command interface, accepted 2026-07-04); §13.2.4 summarizes it.
 
 ---
 
@@ -928,19 +930,27 @@ The client is deliberately dumb. It keeps:
   There is **no offline simulation**: a disconnected client shows a
   connection-lost screen and retries (the single-player fallback was deleted —
   S4 extended).
-- **Input — camera-only control (piloting retired):** the player no longer
-  flies the hull. The per-frame `InputCommand` cadence continues (the delta
-  stream's ack rides it) with **zero flight axes** — the ship launches at rest
-  and idles; the server remains the sole mover. The combat and travel keys
-  stay: fire/missiles/ECM/bomb/pod flow as `ActionTriggered` (LocalOnly bus) →
-  command builder → `InputCommand`; station screens send `StationRequest`s;
-  the hyperspace key on a chart sends `TravelRequest{Hyperspace}`; the jump
-  key sends `TravelRequest{InSystemJump}`. The arrow keys steer the chart
-  crosshair on the chart screens and the camera in flight (the rig gates on
-  the flight view, so the uses never overlap). In-flight docking is
-  request-based and ship-relative: near the station, station off the hull's
-  nose, at rest → a Dock request; the docked flow starts on
-  `StationResponse{Dock, Ok}`.
+- **Input — camera-only control (piloting retired); order-based control
+  incoming.** The player no longer flies the hull. The per-frame
+  `InputCommand` cadence continues (the delta stream's ack rides it) with
+  **zero flight axes** — the ship launches at rest and idles; the server
+  remains the sole mover. **This is a transitional state: with piloting
+  retired the ship currently has no movement verb at all.** The accepted
+  replacement is the pointer-first **order model** (`docs/interaction.md`,
+  §13.2.4): select the ship, right-click/tap to issue validated
+  `UnitOrder`s (move/approach/dock/attack/collect) the server's autopilot
+  executes — the player's ship as the first ordered unit of the 4X
+  trajectory (Track I / roadmap #22). Until Track I lands, the combat and
+  travel keys stay: fire/missiles/ECM/bomb/pod flow as `ActionTriggered`
+  (LocalOnly bus) → command builder → `InputCommand`; station screens send
+  `StationRequest`s; the hyperspace key on a chart sends
+  `TravelRequest{Hyperspace}`; the jump key sends
+  `TravelRequest{InSystemJump}`. The arrow keys steer the chart crosshair on
+  the chart screens and the camera in flight (the rig gates on the flight
+  view, so the uses never overlap). In-flight docking is request-based and
+  ship-relative: near the station, station off the hull's nose, at rest → a
+  Dock request; the docked flow starts on `StationResponse{Dock, Ok}`.
+  (Track I replaces the heuristic with an explicit Dock order.)
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
@@ -1100,7 +1110,8 @@ Preserved from the retired migration roadmap (its §0 and §2.4) — these are
 | Trajectory | Gameplay evolves from space-flight toward a **4X / RTS-style MMO** (many units per player, empire/economy/territory, less twitch) — as an *extension*, never a rewrite |
 | World | One **seamless** absolute `int64³` space, no visible segments; an invisible cell partition underneath for interest management and future multi-process sharding |
 | Identity | **Account → Empire/Faction → owns N entities.** A player is *not* bound to one avatar; camera & interest are view-driven |
-| Input | Command/intent protocol (validated orders with costs/preconditions) — today flight axes, tomorrow unit orders; the anti-cheat boundary |
+| Input | Command/intent protocol (validated orders with costs/preconditions) — **unit orders** (flight axes retired 2026-07-04 with the free camera); the anti-cheat boundary |
+| Interaction | **Pointer-first indirect control** (decided 2026-07-04, `docs/interaction.md`): mouse and touch are the primary devices, one shared pointer grammar (select → order, context menus, move gizmo, ability bar); attack is an order the server executes; the keyboard is optional accelerators only — nothing is keyboard-exclusive |
 | Streaming | Multi-resolution AOI: a high-detail **tactical** tier + a low-detail **strategic** tier (territory/fleet summaries) |
 | Transport | Raw winsock UDP + the custom reliability layer; hand-rolled binary hot path |
 | Persistence | Microsoft SQL Server; async batched writes off the sim thread; the world simulates while players are offline; **never** per-tick positions to SQL |
@@ -1394,6 +1405,41 @@ player-built capitals, sharded mega-galaxy, voice. None is required by the 4X
 loop, and each strains the thin-client / 1200-byte / 30 Hz envelope that keeps
 this codebase testable and honest.
 
+#### 13.2.4 The interaction model — pointer-first indirect control
+
+**Design accepted 2026-07-04; canonical document: `docs/interaction.md`;
+implementation: IMPLEMENTATION.md Track I (roadmap #22).** The free-camera
+migration retired hull piloting, leaving the ship with no movement verb —
+the redesign restores movement as the §13.2.3-2 indirect-control model
+applied to the player's own ship, one roadmap item early:
+
+- **The ship is a unit, not an avatar.** Left-click/tap selects; right-click
+  or tap-with-selection issues the target's contextual default order
+  (empty space → Move via a Homeworld-style plane gizmo; enemy → Attack;
+  station → Dock; canister → Collect; planet → Approach); a long-press /
+  RMB-hold radial menu carries the full order set. Orders are validated
+  reliable Commands (`UnitOrder 0x1010` / `UnitOrderAck 0x1011`) —
+  ownership, legality, range, crime rules attributed to the owner — and a
+  server-side `OrderSystem` executes them by writing `FlightIntent` through
+  the *existing* NPC autopilot steering: no new steering math, and the
+  anti-cheat boundary is unchanged (the client still cannot move an inch).
+- **Attack is an order.** The server sets `focus` and engages with the NPC
+  fire discipline; "players fire only on command" survives one level up.
+  One-shot abilities (missile at the selected target, ECM, energy bomb,
+  escape pod) move off the unreliable input flags onto a reliable
+  `AbilityRequest 0x1014` driven by a HUD ability bar (hold-to-confirm for
+  bomb/pod). `InputCommand 0x0100` re-cuts to a pure heartbeat/ack carrier.
+- **Mouse and touch are co-primary.** One pointer grammar (select, command,
+  context, drag-orbit, pan, pinch/wheel zoom) with a full `WM_POINTER`
+  multi-touch gesture layer; the orbit camera (subject = selection) becomes
+  the default view; charts become pickable pan/zoom surfaces with a
+  hyperspace button; the keyboard shrinks to optional accelerators —
+  nothing is keyboard-exclusive. Selection replaces the cockpit-era
+  center-of-view missile lock.
+
+F1's escort then reuses `UnitOrder` and the whole selection/command UX
+verbatim — commanding a fleet is selecting a different unit.
+
 ### 13.3 Engineering & performance recommendations
 
 **E1 — Wire `Spatial::Grid` into every pairwise loop *before* entity counts
@@ -1501,7 +1547,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 9 | Time sync (ping/offset) → lag-compensated fire ✅ (done 2026-07-04; laser rewound, missile/travel cone-rewind deferred; client-reported RTT clamped to a 15-tick window) | §13.2.2 | Infra | M | PvP fairness |
 | 10 | Snapshot quantization + delta + budgets ✅ (done 2026-07-04: v2 format 58→32 B/entity with an int64 reference origin so the world stays unbounded; per-session delta vs an acked baseline + keyframes; distance-sorted send budget. Fleet-density delta-fragment reassembly is a noted follow-up) | E4 | Perf | M–L | bandwidth wall |
 | 11 | Strategic AOI summary tier ✅ (done 2026-07-04: `StrategicSummary 0x1004` + per-system aggregation at ~1 Hz; v1 covers the player's current system, multi-system presence rides F1/F3, chart glyph render is a client-UI follow-up) | §13.2.2 | Feature | M | empire visibility |
-| 12 | First ordered unit (`UnitOrder` escort) | §13.2.3-2 | Feature | M | the Darwinia loop |
+| 12 | First ordered unit (`UnitOrder` escort) — *the order infrastructure itself lands earlier with #22 (Track I); this item becomes the purchasable escort reusing it* | §13.2.3-2 | Feature | M | the Darwinia loop |
 | 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |
 | 14 | Fog of war (`KnownSystems`) + incremental manifest | §13.2.3-5, S2 | Feature | M | explore |
 | 15 | Ownership + claimable/deployable outposts | §13.2.3-6 | Feature | L | expand |
@@ -1511,7 +1557,10 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 19 | Travel protocol split; codec unification; band notes ✅ (done 2026-07-03); math-stack retirement rides item 13 | S2, S3, S6, S7 | Simplify | S | protocol hygiene |
 | 20 | BotClient harness → 100-player load test ✅ (harness + CI smoke done 2026-07-04; the 100-bot soak is a manual run of the same binary) | §12 | Test | M | validates 6–10 |
 | 21 | Delete client shield-regen fallback ✅ (done 2026-07-03, extended to the whole offline engine) | S4 | Simplify | XS | dogma integrity |
+| 22 | **Order-based interaction model** (Track I, `docs/interaction.md`): `UnitOrder`/`OrderSystem` restore ship movement; selection/picking; command UX + move gizmo; ability bar (`AbilityRequest`); touch/gesture layer; pointer charts; keyboard reduction | §13.2.4 | Feature | M–L | **playability** (movement is currently absent), 12, touch |
 
-Sequencing spine: **1 → 2/3/4 → 5 → 6/7/8 → 9/10/11 → 12+**, with 13 (render)
-and 19/21 (hygiene) parallelizable at any point, and 20 gating any entity-cap
-increase.
+Sequencing spine: **1 → 2/3/4 → 5 → 6/7/8 → 9/10/11 → 22 → 12+**, with 13
+(render) and 19/21 (hygiene) parallelizable at any point, and 20 gating any
+entity-cap increase. **#22's first slice (I1: UnitOrder + OrderSystem) is
+urgent** — the free-camera migration left the ship without any movement verb,
+so the game is unplayable as a game until it lands.
