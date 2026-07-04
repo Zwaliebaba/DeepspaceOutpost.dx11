@@ -133,11 +133,11 @@ void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
 void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
 
 /*
- * Render the fully-submitted 3D scene (skybox -> dust -> depth-tested models) onto the
- * back buffer. The game calls this at the very end of its world draw (once all
+ * Render the fully-submitted 3D scene (dust starfield background -> depth-tested models) onto
+ * the back buffer. The game calls this at the very end of its world draw (once all
  * Scene3D::SubmitModel + dust have been submitted for the frame), on the already-cleared
- * back buffer, before the 2D HUD/menus composite over it. A no-op cost when no models are
- * in view still draws the skybox, so empty space is not black. Replaces the old
+ * back buffer, before the 2D HUD/menus composite over it. Even when no models are in view it
+ * still draws the dust, so empty space is not black. Replaces the old
  * gfx_finish_render() + g_haveScene flag handshake: the game now drives the pass directly.
  */
 void gfx_render_3d_scene (void);

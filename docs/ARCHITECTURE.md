@@ -906,8 +906,8 @@ The client is deliberately dumb. It keeps:
 - **A single fixed forward view.** The cockpit renders one view: straight
   ahead along the ship's nose. The legacy rear/left/right cockpit views were
   removed (2026-07-04) — F2/F3 no longer switch views (F4 keeps only its
-  docked Equip-window role), the per-view starfields, star flipping, camera
-  axis-flips and skybox re-orientation are gone, and the ship has a single
+  docked Equip-window role), the per-view starfields, star flipping and camera
+  axis-flips are gone, and the ship has a single
   (front) laser mount, so the equip list's per-mount laser sub-menus collapsed
   to one row per laser type. The camera (`Camera.cpp`) always looks along the
   nose; the only view freedom left is the F12 cockpit ↔ chase eye offset. The
@@ -932,6 +932,14 @@ The client is deliberately dumb. It keeps:
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
+- **Scene background: the streaming "dust" starfield.** The flight scene pass
+  (`Scene3D`) draws the projected star quads (`SetDust`, fed from `stars.cpp`)
+  as the depth-disabled background behind the ships — the classic Elite
+  streaming-speed cue. The earlier cube-map **skybox** (which loaded
+  `Textures/Skybox.dds` and rotated it with the ship) was **removed**
+  (2026-07-04) along with its shaders, the `SetSkyboxOrientation`/`s_skybox`
+  plumbing, and the per-frame orientation math in `stars.cpp`; the dust is what
+  fills empty space now, so it is drawn unconditionally.
 - **No local config files.** The MMO client keeps no on-disk settings: the
   legacy `file.cpp`/`file.h` config subsystem (the `newkind.cfg` settings file
   and the `newscan.cfg` scanner/compass layout) was removed (2026-07-04). The

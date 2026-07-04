@@ -423,7 +423,7 @@ void update_local_objects (void)
 		}
 	}
 
-	/* The frame's 3D scene is fully submitted (skybox + dust + the models handed to
+	/* The frame's 3D scene is fully submitted (dust background + the models handed to
 	   Scene3D::SubmitModel above): draw it now, onto the cleared back buffer, under the 2D HUD. */
 	gfx_render_3d_scene();
 }

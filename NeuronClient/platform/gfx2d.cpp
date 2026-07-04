@@ -73,10 +73,10 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* The frame's 3D scene (skybox + dust + the models the game handed straight to Scene3D via
- * Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls directly at
- * the end of its world draw - even with no models in view (staring at empty space still shows
- * the skybox). Models live in Scene3D, not here. */
+/* The frame's 3D scene (the dust starfield background + the models the game handed straight to
+ * Scene3D via Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls
+ * directly at the end of its world draw - even with no models in view (staring at empty space
+ * still shows the stars). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
@@ -339,7 +339,7 @@ void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, t
 void gfx_clear_display(void)
 {
 	/* gfx2d_flush already clears the whole back buffer to black each frame, and in full-window
-	 * flight the 3D scene pass (skybox) fills it. Since the 2D layer now composites *on top of*
+	 * flight the 3D scene pass (the dust starfield) fills it. Since the 2D layer now composites *on top of*
 	 * the 3D (Phase 2 Step 3), a full-window 2D black rect here would paint over the scene - so
 	 * skip it in full-window mode. Retro mode (2D-only screens, no 3D pass) still clears just
 	 * the legacy play area so the persistent dashboard strip is untouched. */
@@ -587,12 +587,12 @@ void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
  *  Scene pass + 2D flush
  * ===================================================================== */
 
-/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun). The game calls
- * this directly at the end of its world draw (update_local_objects / render_replicated_objects),
+/* The 3D scene pass (dust starfield background -> depth-tested ships / planets / sun). The game
+ * calls this directly at the end of its world draw (update_local_objects / render_replicated_objects),
  * once all models are submitted (Scene3D::SubmitModel) and the dust is set - so it drives the
  * pass itself, with no separate scene-marker flag. No clear (ClientEngine::Frame clears the
  * back buffer once per frame, before the scene hook) and no 2D; the HUD / menus / GUI composite
- * over it later in gfx2d_flush. Runs unconditionally (drawing the skybox even with no models in
+ * over it later in gfx2d_flush. Runs unconditionally (drawing the dust even with no models in
  * view), and safely on a null rtv (device lost) - Scene3D still clears the frame's model list. */
 void gfx_render_3d_scene(void)
 {
