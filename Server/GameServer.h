@@ -17,6 +17,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <vector>
 
 #include "ECS.h"
@@ -26,8 +28,10 @@
 #include "Messages/Defs/Travel.h"         // TravelRequest / TravelResponse
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
+#include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
 
 #include "GameLogic.h"
+#include "PlayerPersistence.h"   // GameLogic: component <-> PlayerPersistState converters (B4)
 
 namespace DSOServer
 {
@@ -37,6 +41,10 @@ namespace DSOServer
     // Builds the world, provisions the services and registers the combat
     // subscribers. The socket stays owned by main (it is process lifetime).
     explicit GameServer(Neuron::Net::UdpSocket& _socket);
+
+    // On a graceful stop, snapshots every live player one last time; the
+    // persistence service then flushes on destruction (bounded).
+    ~GameServer();
 
     // One fixed simulation tick (the caller paces it and updates the clock).
     void RunTick();
@@ -51,15 +59,33 @@ namespace DSOServer
       }
     };
 
+    // Two durable snapshots are "the same" if every persisted field matches - the
+    // world tick differs every save, so it is excluded (else nothing is ever equal).
+    struct PersistStateEqual
+    {
+      bool operator()(const Neuron::Persist::PlayerPersistState& _a,
+                      const Neuron::Persist::PlayerPersistState& _b) const
+      {
+        return _a.commanderName == _b.commanderName && _a.credits == _b.credits
+            && _a.fuelTenths == _b.fuelTenths && _a.wantedLevel == _b.wantedLevel
+            && _a.score == _b.score && _a.holdCapacity == _b.holdCapacity
+            && _a.missiles == _b.missiles && _a.equipFlags == _b.equipFlags
+            && _a.lastSystemId == _b.lastSystemId && _a.inWitchspace == _b.inWitchspace
+            && _a.cargo == _b.cargo;
+      }
+    };
+
     // --- tick phases (in run order) ---
     void ReceiveDatagrams();
     void ProcessReliableRequests();
+    void ApplyCompletedLoads();   // B4: finish deferred handshakes whose load returned
     void AdvanceSimulation();
     void ResolveKills();
     void LootAndScoop();
     void DecayWantedRecords();
     void ReapAndDespawn();
     void PublishState();
+    void SavePlayers();           // B4: cadence snapshot of live players (on change)
 
     // --- handlers & helpers ---
     void RegisterSubscribers();
@@ -70,6 +96,13 @@ namespace DSOServer
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
     void SendCargoTo(uint32_t _entityIndex);
     void BroadcastPlayerInfo(uint32_t _entityIndex);
+
+    // B4 persistence: build the store from DSO_DB (null = disabled), and finish a
+    // deferred handshake by spawning + applying the loaded state (or fresh-spawning
+    // and creating the account when the commander is unknown).
+    static std::unique_ptr<Neuron::Persist::PersistenceService> MakePersistenceService();
+    void FinishLoadedSpawn(const Neuron::Net::Endpoint& _ep,
+                           const std::optional<Neuron::Persist::PlayerPersistState>& _state);
 
     // --- state ---
     Neuron::Net::UdpSocket& m_socket;
@@ -93,6 +126,11 @@ namespace DSOServer
 
     // Last PlayerStatus sent per session (by endpoint key): resend on change only.
     Neuron::Server::OnChangeCache<uint64_t, Neuron::Msg::PlayerStatus, StatusFieldsEqual> m_lastStatus;
+
+    // B4 persistence (null when DSO_DB is unset - the whole feature is off and the
+    // server behaves exactly as before). The change-cache skips unchanged saves.
+    std::unique_ptr<Neuron::Persist::PersistenceService> m_persist;
+    Neuron::Server::OnChangeCache<uint64_t, Neuron::Persist::PlayerPersistState, PersistStateEqual> m_lastPersist;
 
     // Rate-limited respawn logging.
     uint32_t m_lastRespawnLogTick = 0;

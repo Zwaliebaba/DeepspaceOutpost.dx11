@@ -80,6 +80,7 @@ namespace Neuron::GameLogic
     uint64_t token = 0;                // session token (B2 identity); 0 while a pending shell
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
+    bool loading = false;              // B4: version-checked, awaiting a persistence load before spawn
 
     // A session is LIVE once its ClientHello spawned an entity; before that it is
     // a pending shell that exists only to receive that reliable hello.
@@ -93,6 +94,8 @@ namespace Neuron::GameLogic
     Accepted,   // the front door: spawned the entity, queued HelloAck
     Resumed,    // a hello on an already-live session = a reconnect (B3): the entity
                 // is kept, a fresh HelloAck queued, and (maybe) the name changed.
+    Loading,    // deferred-spawn mode (B4): version OK, but the entity is NOT spawned
+                // yet - the caller loads the commander first, then calls SpawnLoaded.
   };
 
   struct HelloOutcome
@@ -172,8 +175,13 @@ namespace Neuron::GameLogic
     // first valid hello the player entity is spawned, the name adopted, and a
     // HelloAck queued. A hello on an already-live session is a RECONNECT (B3):
     // the entity is kept and a fresh HelloAck queued (the caller resends the rest).
+    //
+    // `_deferSpawn` (B4 persistence) does NOT spawn on a first valid hello: it just
+    // records the sanitized name and returns Loading, so the caller can load the
+    // commander's durable state from the store FIRST and then call SpawnLoaded - a
+    // returning commander is never spawned-fresh (which a save would then alias).
     HelloOutcome OnHello(ECS::Registry& _world, const Net::Endpoint& _ep,
-                         const Msg::ClientHello& _hello, uint32_t _tick)
+                         const Msg::ClientHello& _hello, uint32_t _tick, bool _deferSpawn = false)
     {
       const uint64_t key = EndpointKey(_ep);
       Session& s = m_sessions.try_emplace(key).first->second;
@@ -200,6 +208,15 @@ namespace Neuron::GameLogic
         return out;
       }
 
+      if (_deferSpawn)
+      {
+        // Park the session: remember the sanitized (pre-dedup) name as the load key
+        // and wait. SpawnLoaded finishes the handshake once the load completes.
+        s.loading = true;
+        s.name = SanitizeName(_hello.commanderName);   // may be empty (blank commander)
+        return HelloOutcome{ HelloResult::Loading, {}, false };
+      }
+
       // First valid hello: spawn the controllable entity and adopt the name.
       s.entity = SpawnPlayer(_world);
       const std::string clean = SanitizeName(_hello.commanderName);
@@ -218,6 +235,35 @@ namespace Neuron::GameLogic
       return HelloOutcome{ HelloResult::Accepted, s.entity, true };
     }
 
+    // Finish a deferred (B4) handshake once the commander's load has completed:
+    // spawn the entity, adopt the parked name (default/dedup), mint the token, and
+    // queue HelloAck - exactly the accept path of OnHello, but split out so the
+    // caller can apply the loaded durable state to the returned entity before the
+    // first snapshot. Returns the spawned entity, or an invalid id if the endpoint
+    // is not (or no longer) a loading session.
+    ECS::EntityId SpawnLoaded(ECS::Registry& _world, const Net::Endpoint& _ep, uint32_t _tick)
+    {
+      const uint64_t key = EndpointKey(_ep);
+      auto it = m_sessions.find(key);
+      if (it == m_sessions.end() || !it->second.loading)
+        return ECS::EntityId{};
+
+      Session& s = it->second;
+      s.loading = false;
+      s.lastSeenTick = _tick;
+      s.entity = SpawnPlayer(_world);
+      const std::string clean = s.name;   // the sanitized (pre-dedup) name parked by OnHello
+      s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
+                             : UniqueName(clean, key);
+      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
+        pr->name = s.name;
+      s.token = NextToken();
+      m_byToken[s.token] = key;
+      s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
+                                   static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
+      return s.entity;
+    }
+
     // Drop idle sessions, destroying their entities. An authenticated (LIVE)
     // session gets the longer `_graceTicks` window (B3: it can reconnect and
     // resume within it); a pending pre-hello shell gets the short `_shellTicks`.
@@ -228,7 +274,9 @@ namespace Neuron::GameLogic
       std::vector<uint32_t> gone;
       for (auto it = m_sessions.begin(); it != m_sessions.end();)
       {
-        const uint32_t timeout = it->second.Live() ? _graceTicks : _shellTicks;
+        // A live session, or one still awaiting its persistence load, gets the long
+        // grace window; a bare pre-hello shell gets the short shell timeout.
+        const uint32_t timeout = (it->second.Live() || it->second.loading) ? _graceTicks : _shellTicks;
         if (_tick - it->second.lastSeenTick > timeout)
         {
           if (_world.IsValid(it->second.entity))

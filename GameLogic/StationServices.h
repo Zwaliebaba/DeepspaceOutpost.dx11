@@ -380,6 +380,31 @@ namespace Neuron::GameLogic
     return true;
   }
 
+  // Wake a loaded commander (B4 persistence) docked at the station of `_systemId`
+  // (or the nearest station if `_systemId` < 0 or that system has none), WITHOUT
+  // touching cargo - unlike RespawnAtNearestStation, a load keeps the held goods.
+  // Returns false (leaving the player in place) if it lacks a transform/dock or no
+  // station exists.
+  inline bool DockAtSystemOrNearest(ECS::Registry& _world, ECS::EntityId _player, int _systemId)
+  {
+    WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+    DockState* dock = _world.TryGet<DockState>(_player);
+    if (pt == nullptr || dock == nullptr)
+      return false;
+
+    ECS::EntityId station = (_systemId >= 0) ? FindStationBySystem(_world, _systemId) : ECS::EntityId{};
+    if (station.index == ECS::INVALID_INDEX)
+      station = NearestStation(_world, pt->position, INT64_MAX / 4);
+    const WorldTransform* st = (station.index != ECS::INVALID_INDEX) ? _world.TryGet<WorldTransform>(station) : nullptr;
+    if (st == nullptr)
+      return false;
+
+    pt->position = st->position;
+    dock->docked = true;
+    dock->stationId = station.index;
+    return true;
+  }
+
   // Apply a station request to `_player`'s authoritative components and the market
   // of the station they are docked at, returning the response to send back. Dock
   // attaches to the nearest in-range station; trades hit THAT station's market.

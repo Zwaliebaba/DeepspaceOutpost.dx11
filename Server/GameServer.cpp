@@ -3,7 +3,9 @@
 #include "GameServer.h"
 
 #include <cstdio>
+#include <cstdlib>   // getenv (DSO_DB)
 #include <ranges>
+#include <utility>
 
 #include "SnapshotPacketizer.h"
 #include "Messages/Defs/InputCommand.h"
@@ -41,6 +43,10 @@ namespace DSOServer
     // token must be unguessable, and determinism rules stop at the GameLogic edge.
     m_sessions.SetTokenSource(&SecureRandom64);
 
+    // Persistence (B4): null unless DSO_DB is set (then the connect flow defers the
+    // spawn until the commander's durable state loads).
+    m_persist = MakePersistenceService();
+
     // Datagram routing: 'NMSG' packets carry the unreliable InputCommand lane;
     // 'NRLB' datagrams feed each session's reliable lanes (and provision a pending
     // shell for a brand-new endpoint so its ClientHello can be received).
@@ -54,6 +60,29 @@ namespace DSOServer
     };
 
     RegisterSubscribers();
+  }
+
+  GameServer::~GameServer()
+  {
+    // Graceful stop: snapshot every live player one last time, then let m_persist's
+    // destructor stop the writer thread after a final flush. (A hard kill skips
+    // this; the ~5 s cadence save bounds the loss.)
+    if (m_persist)
+      for (auto& kv : m_sessions.All())
+        if (m_world.IsValid(kv.second.entity))
+          m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(m_world, kv.second.entity, m_tick));
+  }
+
+  std::unique_ptr<Neuron::Persist::PersistenceService> GameServer::MakePersistenceService()
+  {
+    const char* db = std::getenv("DSO_DB");
+    if (db == nullptr || db[0] == '\0')
+      return nullptr;   // persistence disabled: the server behaves exactly as before
+
+    // B4.2 wires the flow against the in-memory store (durable only within a run);
+    // B4.3 branches on the DSO_DB connection string to the SQL-Server OdbcStore.
+    auto store = std::make_unique<Neuron::Persist::InMemoryStore>();
+    return std::make_unique<Neuron::Persist::PersistenceService>(std::move(store), /*startThread*/ true);
   }
 
   void GameServer::RunTick()
@@ -70,6 +99,10 @@ namespace DSOServer
     //     a client and broadcasts the refreshed roster), plus station/travel/chart
     //     requests from already-connected sessions.
     ProcessReliableRequests();
+
+    // 1c. Finish any deferred (persistence) handshakes whose load has returned:
+    //     spawn the commander from their durable state (B4). No-op when disabled.
+    ApplyCompletedLoads();
 
     // 2. NPC tactics + the simulation tick + dynamic spawning + shield regen.
     AdvanceSimulation();
@@ -88,6 +121,10 @@ namespace DSOServer
 
     // 4. Per-viewer snapshots + on-change private status + reliable flush.
     PublishState();
+
+    // 5. Persist changed players on a slow cadence (B4). No-op when disabled.
+    if (m_persist && m_tick % Cfg::PERSIST_INTERVAL == 0)
+      SavePlayers();
   }
 
   // --- receive ---------------------------------------------------------------
@@ -155,7 +192,11 @@ namespace DSOServer
         Msg::ClientHello hello;
         if (Msg::TryDecode(msg, hello))
         {
-          const GameLogic::HelloOutcome out = m_sessions.OnHello(m_world, s.endpoint, hello, m_tick);
+          // With persistence on, defer the spawn: OnHello parks the session and we
+          // load the commander first (ApplyCompletedLoads finishes the handshake),
+          // so a returning commander is never spawned-fresh.
+          const bool defer = (m_persist != nullptr);
+          const GameLogic::HelloOutcome out = m_sessions.OnHello(m_world, s.endpoint, hello, m_tick, defer);
           if (out.result == GameLogic::HelloResult::Accepted)
           {
             printf("Client connected: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
@@ -163,6 +204,15 @@ namespace DSOServer
             // the joiner. (A leaver's ship goes out as EntityDespawn on reap.)
             for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
               m_sessions.Broadcast(pi);
+          }
+          else if (out.result == GameLogic::HelloResult::Loading)
+          {
+            // Parked (persistence): a named commander is loaded from the store; a
+            // blank name has no account, so spawn it fresh right away.
+            if (s.name.empty())
+              FinishLoadedSpawn(s.endpoint, std::nullopt);
+            else
+              m_persist->RequestLoad(s.name);
           }
           else if (out.result == GameLogic::HelloResult::Resumed)
           {
@@ -197,6 +247,84 @@ namespace DSOServer
           m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane
       }
     }
+  }
+
+  void GameServer::ApplyCompletedLoads()
+  {
+    if (!m_persist)
+      return;
+
+    for (const Neuron::Persist::PlayerLoadResult& r : m_persist->DrainLoads())
+    {
+      // Find the still-loading session that requested this commander (loads are
+      // keyed by name). A duplicate result (from a lost-load re-request) finds no
+      // loading session and is harmlessly skipped by FinishLoadedSpawn.
+      const Neuron::GameLogic::Session* found = nullptr;
+      for (const auto& kv : m_sessions.All())
+        if (kv.second.loading && kv.second.name == r.commanderName)
+        {
+          found = &kv.second;
+          break;
+        }
+      if (found != nullptr)
+        FinishLoadedSpawn(found->endpoint, r.state);
+    }
+  }
+
+  void GameServer::FinishLoadedSpawn(const Net::Endpoint& _ep,
+                                     const std::optional<Neuron::Persist::PlayerPersistState>& _state)
+  {
+    const ECS::EntityId e = m_sessions.SpawnLoaded(m_world, _ep, m_tick);
+    if (!m_world.IsValid(e))
+      return;   // not (or no longer) a loading session
+
+    if (_state.has_value())
+    {
+      // Returning commander: restore durable state and wake them docked at their
+      // last system (or the nearest station / home if that system has none).
+      GameLogic::PlayerStateApplyToComponents(m_world, e, *_state);
+      GameLogic::DockAtSystemOrNearest(m_world, e, _state->lastSystemId);
+      printf("Client connected (loaded \"%s\"): entity %u\n", _state->commanderName.c_str(), e.index);
+    }
+    else if (m_persist)
+    {
+      // Unknown commander: the fresh spawn's defaults ARE the new account - persist
+      // it now so the row exists to reload next time.
+      m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(m_world, e, m_tick));
+      printf("Client connected (new account): entity %u\n", e.index);
+    }
+
+    // Same connect side-effects as the immediate-spawn path: everyone learns the
+    // joiner, and the joiner gets its full cargo manifest.
+    for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+      m_sessions.Broadcast(pi);
+    SendCargoTo(e.index);
+  }
+
+  void GameServer::SavePlayers()
+  {
+    if (!m_persist)
+      return;
+
+    // Snapshot every LIVE player (a loading session has no entity and no durable
+    // state to save yet), enqueuing only those whose durable fields changed since
+    // the last accepted snapshot.
+    for (auto& [key, s] : m_sessions.All())
+    {
+      if (!m_world.IsValid(s.entity))
+        continue;
+      Neuron::Persist::PlayerPersistState st = GameLogic::PlayerStateFromComponents(m_world, s.entity, m_tick);
+      if (m_lastPersist.Changed(key, st))
+        m_persist->QueuePlayerSnapshot(st);
+    }
+
+    // Lost-load recovery: re-request loads for any session still parked (a store
+    // error dropped its earlier load); duplicate results are ignored downstream.
+    for (const auto& kv : m_sessions.All())
+      if (kv.second.loading && !kv.second.name.empty())
+        m_persist->RequestLoad(kv.second.name);
+
+    m_lastPersist.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
   }
 
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)

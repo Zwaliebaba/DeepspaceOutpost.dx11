@@ -595,10 +595,22 @@ validated by a manual soak on Windows (documented in the PR), not by CI.
 
 #### B4.6 Sub-milestones
 
-1. Store interface + `InMemoryStore` + `PlayerPersistState` + service
-   (queues/thread) + full headless test suite.
-2. GameServer wiring: load-on-hello (post-B1), cadence saves,
-   reap/shutdown flush, spawn-from-state.
+1. ✅ **done 2026-07-04** — Store interface + `InMemoryStore` +
+   `PlayerPersistState` + service (queues/thread) + full headless test suite.
+2. ✅ **done 2026-07-04** — GameServer wiring: load-on-hello (deferred spawn),
+   cadence saves, shutdown flush, spawn-from-state. *As built:* `OnHello` gained a
+   `_deferSpawn` flag - with persistence on it parks the session (`HelloResult::
+   Loading`, no entity) and `SpawnLoaded` finishes the handshake once the load
+   returns, so a returning commander is never spawned-fresh (which a save would
+   then alias). GameServer's `ApplyCompletedLoads` drains completed loads and spawns
+   + `PlayerStateApplyToComponents` + `DockAtSystemOrNearest` (a cargo-preserving
+   dock helper) at the last system; an unknown commander fresh-spawns and the
+   account row is created. `SavePlayers` snapshots live players every
+   `PERSIST_INTERVAL` (150) ticks through an `OnChangeCache` (durable-field
+   equality, tick excluded) and re-requests lost loads; the destructor final-saves.
+   Loading sessions get the B3 grace window. `DSO_DB` unset ⇒ `m_persist` null ⇒
+   zero behavior change (the CI path); set ⇒ in-memory store for now (B4.3 swaps in
+   ODBC). ServerSessions loading primitives are unit-tested.
 3. `OdbcStore` + `schema.sql` + manual Windows soak.
 4. Command log + the replay-smoke test (station requests replayed from the
    log against a fresh world reproduce identical wallet outcomes).

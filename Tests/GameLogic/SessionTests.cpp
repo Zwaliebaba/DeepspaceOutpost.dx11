@@ -429,6 +429,63 @@ TEST(Session, PendingShellIsExcludedFromTheRoster)
   EXPECT_TRUE(sessions.Roster(world).empty());     // ...but is not a roster member
 }
 
+TEST(Session, DeferredHelloParksWithoutSpawning)
+{
+  // B4: with deferred spawn, a valid hello parks the session (records the name,
+  // no entity, no HelloAck) so the caller can load the commander first.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 7001 };
+  GameLogic::HelloOutcome out = sessions.OnHello(world, a, Hello("Jameson"), /*tick*/ 1, /*deferSpawn*/ true);
+
+  EXPECT_TRUE(out.result == GameLogic::HelloResult::Loading);
+  EXPECT_FALSE(world.IsValid(out.entity));
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+  EXPECT_TRUE(s.loading);
+  EXPECT_FALSE(s.Live());
+  EXPECT_EQ(s.name, "Jameson");                       // the parked load key
+  EXPECT_TRUE(s.events.PendingOutgoing() == 0);       // no HelloAck yet
+  EXPECT_EQ(s.token, 0u);                             // no token until spawn
+}
+
+TEST(Session, SpawnLoadedCompletesTheDeferredHandshake)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 7002 };
+  sessions.OnHello(world, a, Hello("Jameson"), /*tick*/ 1, /*deferSpawn*/ true);
+
+  ECS::EntityId e = sessions.SpawnLoaded(world, a, /*tick*/ 2);
+  ASSERT_TRUE(world.IsValid(e));
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+  EXPECT_FALSE(s.loading);
+  EXPECT_TRUE(s.Live());
+  EXPECT_TRUE(s.entity == e);
+  EXPECT_NE(s.token, 0u);                             // token minted on spawn
+  EXPECT_TRUE(s.events.PendingOutgoing() == 1);       // HelloAck queued
+  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Jameson");
+
+  // A second SpawnLoaded is a no-op (the session is no longer loading).
+  EXPECT_FALSE(world.IsValid(sessions.SpawnLoaded(world, a, 3)));
+}
+
+TEST(Session, LoadingSessionSurvivesOnTheGraceWindow)
+{
+  // A parked (loading) session gets the long grace window, not the short shell
+  // timeout, so a slow load isn't reaped out from under it.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 7003 };
+  sessions.OnHello(world, a, Hello("Slow"), /*tick*/ 1, /*deferSpawn*/ true);
+
+  sessions.Reap(world, /*tick*/ 200, /*shell*/ 100, /*grace*/ 1800);
+  EXPECT_TRUE(sessions.Has(a));                        // survived the shell timeout
+  EXPECT_TRUE(sessions.All().at(GameLogic::EndpointKey(a)).loading);
+}
+
 TEST(Session, ClientAckClearsTheReliableQueue)
 {
   ECS::Registry world;
