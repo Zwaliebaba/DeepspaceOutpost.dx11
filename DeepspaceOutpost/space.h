@@ -1,5 +1,9 @@
 /*
  * space.h
+ *
+ * The client's flight presentation: the local display-object pool, the
+ * replicated-world renderer, the cockpit HUD, and the weapon/dock visuals.
+ * Presentation only - all game rules live on the server.
  */
 
 #ifndef SPACE_H
@@ -58,10 +62,9 @@ extern int ship_count[NO_OF_SHIPS + 1];  /* many */
 void create_local_object_slots (void);
 
 
-
+/* The display-object pool (intro parade, game-over debris, replicated mirror). */
 void clear_local_objects (void);
 int add_new_ship (int ship_type, int x, int y, int z, struct vector *rotmat, int rotx, int rotz);
-void add_new_station (double sx, double sy, double sz, Matrix rotmat);
 void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
@@ -73,27 +76,33 @@ unsigned int find_lock_target (void);
 // reticle on the locked ship.
 extern unsigned int g_missile_lock_target;
 
+/* Weapon / HUD presentation state (the server owns the authoritative state). */
+#define MISSILE_UNARMED	-2
+#define MISSILE_ARMED	-1
+
+extern int ecm_active;       // E indicator countdown (set 32 on EcmPulse)
+extern int missile_target;   // HUD lock indicator state
+
+void reset_weapons (void);
+int fire_laser (void);          // beam visual trigger (server resolves the shot)
+void cool_laser (void);         // beam-visual pacing
+void time_ecm (void);           // E indicator countdown
+void draw_laser_lines (void);
+
 void update_console (void);
 
-void update_altitude (void);
-void update_cabin_temp (void);
-void regenerate_shields (void);
+void update_altitude (void);    // display-only HUD dial (never a consequence)
 
 void increase_flight_roll (void);
 void decrease_flight_roll (void);
 void increase_flight_climb (void);
 void decrease_flight_climb (void);
+
+/* Sync local state to a server-confirmed docked state (respawn/pod/startup). */
 void dock_player (void);
+/* Ask the server to dock; the docked flow starts on StationResponse{Dock, Ok}. */
+void request_dock (void);
 
-void damage_ship (int damage, int front);
-void decrease_energy (int amount);
-
-extern int hyper_ready;
-
-void start_hyperspace (void);
-void start_galactic_hyperspace (void);
-void display_hyper_status (void);
-void countdown_hyperspace (void);
 void jump_warp (void);
 void launch_player (void);
 
@@ -105,4 +114,3 @@ namespace Neuron::Net { struct EntitySnapshot; }
 void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap);
 
 #endif
-

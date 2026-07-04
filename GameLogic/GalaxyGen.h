@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "Vector3i64.h"
-#include "GalaxyManifest.h"   // Net::GalaxySystemInfo (the wire form)
+#include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo (the manifest entry)
 
 #include "Galaxy.h"   // GalaxySeed, PlanetData, GeneratePlanet, NamePlanet
 

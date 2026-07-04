@@ -231,7 +231,7 @@ TEST(EquipmentSys, BombingTheLawIsACrimePerVictim)
   int crimes = 0;
   bus.Subscribe<Crime>([&crimes](const Crime&) { ++crimes; });
 
-  ResolveFireWeapon(w, bus, FireWeapon{ bomber, Weapon::EnergyBomb, Net::NO_MISSILE_TARGET }, 6000, 0.9);
+  ResolveFireWeapon(w, bus, FireWeapon{ bomber, Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET }, 6000, 0.9);
   bus.Dispatch();
 
   EXPECT_EQ(crimes, 2);                            // the cop and the civilian
@@ -318,7 +318,7 @@ TEST(EquipmentSys, AnOverheatedLaserFiresNoShot)
   const ECS::EntityId prey = SpawnNpcShip(w, { 0, 0, 1000 });   // dead ahead
 
   Msg::MessageBus bus;
-  ResolveFireWeapon(w, bus, FireWeapon{ shooter, Weapon::Laser, Net::NO_MISSILE_TARGET }, 6000, 0.9);
+  ResolveFireWeapon(w, bus, FireWeapon{ shooter, Weapon::Laser, Msg::NO_MISSILE_TARGET }, 6000, 0.9);
   bus.Dispatch();
 
   EXPECT_EQ(w.Get<Combatant>(prey).energy, 80);   // untouched: the trigger was locked

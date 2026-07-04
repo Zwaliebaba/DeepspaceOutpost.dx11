@@ -18,17 +18,22 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "NetLib.h"
 #include "SnapshotInterpolator.h"
+#include "SnapshotStream.h"                // Net::SnapshotStreamDecoder (delta stream, E2b)
 #include "ReliableChannel.h"
-#include "ClientInput.h"
+#include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
-#include "GalaxyManifest.h"
+#include "Messages/Defs/GalaxyChunks.h"    // Net::GalaxySystemInfo / the chunk pull protocol
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
+#include "Messages/Defs/TimeSync.h"        // Msg::Ping / Pong (E1 time sync)
+#include "Messages/Defs/Strategic.h"       // Msg::StrategicSummary (E3 strategic tier)
+#include "LatencyEstimate.h"               // Net::LatencyEstimate (smoothed RTT)
 
 namespace Neuron::Client
 {
@@ -46,25 +51,32 @@ namespace Neuron::Client
 
     // Drain all datagrams currently queued on the socket, routing each by magic
     // into the interpolator or the reliable channel, and auto-applying the
-    // AssignPlayer handshake. No-op when closed; bounded so a flood can't stall.
+    // HelloAck/HelloReject handshake reply. No-op when closed; bounded so a flood
+    // can't stall.
     void Pump();
 
     // Send the player's intent to the server (no-op until the server endpoint is
     // known and the socket is open).
-    void SendInput(const Net::ClientInput& _input);
+    void SendInput(const Msg::InputCommand& _input);
+
+    // Queue any reliable catalog message to the server on its declared lane
+    // (station requests, travel requests, ...). No-op until the client is open.
+    template <Msg::Message M>
+    void Send(const M& _m)
+    {
+      if (m_open)
+        m_events.Send(_m);
+    }
 
     // Queue a reliable station request (dock/undock/buy/sell) to the server. The
     // authoritative StationResponse arrives later via PollEvent(). No-op until
     // the client is open.
-    void SendStationRequest(const Net::StationRequest& _request)
-    {
-      if (m_open)
-        m_events.Send(_request);   // Gameplay lane
-    }
+    void SendStationRequest(const Net::StationRequest& _request) { Send(_request); }
 
     // Queue the opening handshake: protocol version + the player's commander name.
-    // Rides the reliable Control lane, so it is redelivered until the server (which
-    // connects the session on first input) acknowledges it. No-op until open.
+    // Since B1 this is the FRONT DOOR - the server spawns nothing until this valid,
+    // version-checked hello arrives. Rides the reliable Control lane, redelivered
+    // until the server replies with HelloAck (or HelloReject). No-op until open.
     void SendHello(uint32_t _protocolVersion, const std::string& _name)
     {
       if (m_open)
@@ -82,6 +94,12 @@ namespace Neuron::Client
       return m_interp.SampleAll(_alpha);
     }
 
+    // The interpolation alpha to sample at THIS frame: renders ~one snapshot
+    // interval in the past and tweens prev->curr, from the measured snapshot
+    // arrival cadence (presentation only; see Net::InterpolationAlpha). Returns
+    // 1.0 (show latest) until two snapshots have been timed.
+    [[nodiscard]] double InterpolationAlpha() const;
+
     void EvictStale(uint32_t _maxAge) { m_interp.EvictStale(_maxAge); }
 
     // Drop one entity now (on an authoritative despawn/death), so a destroyed
@@ -93,19 +111,54 @@ namespace Neuron::Client
     [[nodiscard]] uint32_t LatestTick() const { return m_interp.LatestTick(); }
 
     // Pop the next reliably-delivered application event (despawn/death/chat), in
-    // order, or false if none are ready. (AssignPlayer and the galaxy manifest are
-    // consumed internally.)
+    // order, or false if none are ready. (The HelloAck/HelloReject handshake and
+    // the galaxy chunks are consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
 
-    // The galaxy's system list, as delivered by the server's manifest (empty until
-    // it arrives). The galactic chart renders and teleports from this.
+    // The session token from HelloAck (0 until connected). Stamped on every
+    // outbound datagram (B2) so the server authenticates us by token, not address.
+    [[nodiscard]] uint64_t SessionToken() const { return m_sessionToken; }
+
+    // Our player identity from HelloAck (C: the §12 Account → Empire → owns N
+    // entities layer - player, not hull). 0 until connected. LocalPlayer() stays
+    // the PRIMARY controlled entity; rosters and future multi-unit ownership key
+    // off this id.
+    [[nodiscard]] uint32_t PlayerId() const { return m_playerId; }
+
+    // The smoothed round-trip time to the server (ms), from the ~1 Hz Ping/Pong
+    // exchange (E1). 0 and !HasLatency() until the first Pong closes a round trip.
+    [[nodiscard]] double SmoothedRttMs() const { return m_latency.rttMs; }
+    [[nodiscard]] bool HasLatency() const { return m_latency.valid; }
+
+    // The latest strategic per-system rollup (E3), keyed by systemId - the friendly/
+    // hostile counts and alert the chart draws for systems the player has presence
+    // in. Consumed internally from the reliable stream; empty until the first
+    // arrives.
+    [[nodiscard]] const std::unordered_map<uint32_t, Msg::StrategicSummary>& Strategic() const { return m_strategic; }
+
+    // The server tick reported by the most recent Pong (0 until one arrives). A
+    // coarse clock reference for presentation; the authoritative tick still rides
+    // every snapshot header.
+    [[nodiscard]] uint32_t LastServerTick() const { return m_lastServerTick; }
+
+    // True once the server refused our ClientHello (e.g. a protocol-version
+    // mismatch): the client shows a connect error instead of a world.
+    [[nodiscard]] bool HelloRejected() const { return m_helloRejected; }
+
+    // The galaxy's system list, pulled from the server in bounded chunk ranges
+    // (empty until the first chunk arrives, growing until complete). The
+    // galactic chart renders and teleports from this - progressively, so a
+    // partially-pulled chart already works.
     [[nodiscard]] const std::vector<Net::GalaxySystemInfo>& Galaxy() const { return m_galaxy; }
     [[nodiscard]] bool HasGalaxy() const { return !m_galaxy.empty(); }
+    [[nodiscard]] bool GalaxyComplete() const
+    {
+      return m_galaxyKnownTotal && m_galaxy.size() >= m_galaxyTotal;
+    }
 
     // The entity id the local player controls - its replicated position is the
-    // floating origin and it is not drawn. Learned primarily from the snapshot
-    // header (reliable via the working snapshot channel); the AssignPlayer
-    // handshake is a fallback.
+    // floating origin and it is not drawn. Learned from the HelloAck handshake
+    // reply (B1), and also carried in every snapshot header (either sets it).
     void SetLocalPlayer(uint32_t _id) { m_localPlayer = _id; }
     [[nodiscard]] uint32_t LocalPlayer() const
     {
@@ -116,13 +169,29 @@ namespace Neuron::Client
   private:
     Net::UdpSocket m_socket;
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
+    Net::SnapshotStreamDecoder m_stream;           // E2b: full+delta snapshot decode/baseline
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
-    std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (AssignPlayer filtered out)
-    std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart manifest (filled on connect)
+    std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (handshake/chunks filtered out)
+    uint64_t m_sessionToken = 0;                   // from HelloAck; stamped on every outbound datagram (B2)
+    uint32_t m_playerId = 0;                       // from HelloAck; our player identity (C)
+    bool m_helloRejected = false;                  // server refused the handshake
+    Net::LatencyEstimate m_latency;                // E1: smoothed RTT from Ping/Pong
+    double m_lastPingMs = 0.0;                      // wall-clock of our last sent Ping (send cadence)
+    uint32_t m_lastServerTick = 0;                 // server tick from the most recent Pong
+    std::unordered_map<uint32_t, Msg::StrategicSummary> m_strategic;   // E3: latest per-system rollups
+    std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
+    uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk
+    bool m_galaxyKnownTotal = false;
+    uint32_t m_galaxyRequestedUpTo = 0;            // exclusive end of the last chunk request
     Net::Endpoint m_server;
     uint32_t m_localPlayer = 0xFFFFFFFFu;   // sentinel until assigned (never entity 0)
     bool m_haveServer = false;
     bool m_open = false;
+
+    // Snapshot arrival timing for render interpolation (presentation only).
+    double m_currArrivalMs = 0.0;        // wall-clock when the latest tick first appeared
+    double m_interpIntervalMs = 33.0;    // measured gap between the last two snapshots (~1 tick seed)
+    uint32_t m_lastInterpTick = 0;       // latest tick we have timestamped
   };
 
   // Process-wide replication client (mirrors GameUniverse()'s temporary global).

@@ -74,7 +74,7 @@ TEST(Hyperspace, ASuccessfulJumpSpendsFuelAndArrivesInFlight)
   uint32_t rng = SeedRollingOver(/*witchspace*/ false);
   const HyperspaceOutcome out = Hyperspace(w, p, 7, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::Arrived);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::Arrived);
   EXPECT_TRUE(out.jumped);
   EXPECT_FALSE(out.witchspace);
   EXPECT_EQ(w.Get<Fuel>(p).tenths, MAX_FUEL_TENTHS - 10);   // 1.0 LY burned
@@ -96,7 +96,7 @@ TEST(Hyperspace, ATooExpensiveJumpIsRejectedWithoutSpendingFuel)
   uint32_t rng = 1u;
   const HyperspaceOutcome out = Hyperspace(w, p, 7, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::NotEnoughFuel);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::NotEnoughFuel);
   EXPECT_FALSE(out.jumped);
   EXPECT_EQ(w.Get<Fuel>(p).tenths, 5);                 // untouched
   EXPECT_TRUE(w.Get<DockState>(p).docked);             // still on the pad
@@ -111,7 +111,7 @@ TEST(Hyperspace, ADestinationBeyondAFullTankIsOutOfRange)
   uint32_t rng = 1u;
   const HyperspaceOutcome out = Hyperspace(w, p, 7, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::OutOfRange);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::OutOfRange);
   EXPECT_FALSE(out.jumped);
   EXPECT_EQ(w.Get<Fuel>(p).tenths, MAX_FUEL_TENTHS);   // full tank untouched
 }
@@ -125,7 +125,7 @@ TEST(Hyperspace, AnUnknownDestinationCantDock)
   uint32_t rng = 1u;
   const HyperspaceOutcome out = Hyperspace(w, p, /*no such system*/ 99, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::CantDock);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::UnknownSystem);
   EXPECT_FALSE(out.jumped);
   EXPECT_EQ(w.Get<Fuel>(p).tenths, MAX_FUEL_TENTHS);
 }
@@ -140,7 +140,7 @@ TEST(Hyperspace, AMisjumpStrandsYouInWitchspaceWithThargoids)
   uint32_t rng = SeedRollingOver(/*witchspace*/ true);
   const HyperspaceOutcome out = Hyperspace(w, p, 7, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::Witchspace);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::Witchspace);
   EXPECT_TRUE(out.jumped);
   EXPECT_TRUE(out.witchspace);
   EXPECT_TRUE(w.Has<Witchspace>(p));                       // marked stranded
@@ -162,18 +162,17 @@ TEST(Hyperspace, AnOnwardJumpClearsWitchspace)
   uint32_t rng = SeedRollingOver(/*witchspace*/ false);
   const HyperspaceOutcome out = Hyperspace(w, p, 7, rng);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::Arrived);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::Arrived);
   EXPECT_FALSE(w.Has<Witchspace>(p));                     // escaped
 }
 
 TEST(Hyperspace, KillsInWitchspacePayNoBounty)
 {
   ECS::Registry w;
-  // A killer player with a wallet + record, stranded in witchspace.
+  // A killer player with a wallet, stranded in witchspace.
   const ECS::EntityId killer = w.Create();
   w.Add<WorldTransform>(killer, WorldTransform{ { 0, 0, 0 } });
   w.Add<Wallet>(killer, Wallet{ 1000 });
-  w.Add<PlayerRecord>(killer, PlayerRecord{});
   w.Add<PlayerTag>(killer, PlayerTag{});
   w.Add<Witchspace>(killer, Witchspace{});
   // A bountied Thargoid victim.
@@ -181,11 +180,11 @@ TEST(Hyperspace, KillsInWitchspacePayNoBounty)
   w.Add<Combatant>(thargoid, Combatant{ Team::Pirate, 1, 4, 5000, true });
   w.Add<Bounty>(thargoid, Bounty{ THARGOID_BOUNTY });
 
-  const int paid = CreditKill(w, killer.index, thargoid);
+  const KillCredit credit = CreditKill(w, killer.index, thargoid);
 
-  EXPECT_EQ(paid, 0);                                   // bounty withheld in witchspace
+  EXPECT_EQ(credit.bounty, 0);                          // bounty withheld in witchspace
   EXPECT_EQ(w.Get<Wallet>(killer).credits, 1000);       // wallet untouched
-  EXPECT_EQ(w.Get<PlayerRecord>(killer).score, 1);      // but the kill still scores
+  EXPECT_EQ(credit.score, 1);                           // but the kill still scores
 }
 
 // --- In-system jump ---------------------------------------------------------
@@ -201,7 +200,7 @@ TEST(Hyperspace, InSystemJumpHopsTowardThePlanet)
 
   const JumpDriveOutcome out = InSystemJump(w, p);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::Ok);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::Jumped);
   EXPECT_TRUE(out.jumped);
   EXPECT_EQ(w.Get<WorldTransform>(p).position.z, IN_SYSTEM_JUMP_MAX);   // shoved down-system
 }
@@ -221,7 +220,7 @@ TEST(Hyperspace, InSystemJumpIsMassLockedByANearbyShip)
 
   const JumpDriveOutcome out = InSystemJump(w, p);
 
-  EXPECT_TRUE(out.status == Net::StationStatus::MassLocked);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::MassLocked);
   EXPECT_FALSE(out.jumped);
   EXPECT_EQ(w.Get<WorldTransform>(p).position.z, 0);   // didn't move
 }
@@ -236,7 +235,7 @@ TEST(Hyperspace, InSystemJumpIsMassLockedByAClosePlanet)
   w.Add<NetType>(planet, NetType{ ShipType::Planet });
 
   const JumpDriveOutcome out = InSystemJump(w, p);
-  EXPECT_TRUE(out.status == Net::StationStatus::MassLocked);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::MassLocked);
   EXPECT_FALSE(out.jumped);
 }
 
@@ -253,7 +252,7 @@ TEST(Hyperspace, InSystemJumpIsMassLockedByAStation)
   w.Add<Combatant>(station, Combatant{ Team::Station, 1000000, 0, 1, false });
 
   const JumpDriveOutcome out = InSystemJump(w, p);
-  EXPECT_TRUE(out.status == Net::StationStatus::MassLocked);
+  EXPECT_TRUE(out.status == Msg::TravelStatus::MassLocked);
 }
 
 // --- Refuel -----------------------------------------------------------------

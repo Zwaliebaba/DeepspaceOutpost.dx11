@@ -1,14 +1,14 @@
 name: CI (Windows build)
 
-# Phase 0 of the MMO migration: a Windows build oracle.
+# A Windows build oracle.
 # The project is MSVC / Direct3D 11 / C++/WinRT and only builds on Windows, so
 # every change is verified here (it cannot be compiled in a Linux dev container).
-# See docs/MIGRATION_ROADMAP.md.
+# See docs/ARCHITECTURE.md and docs/IMPLEMENTATION.md.
 
 on:
   push:
     branches:
-      - "claude/mmo-space-game-migration-mebbox"
+      - "claude/**"   # agent work branches build on push, before a PR exists
       - main
       - master
   pull_request:

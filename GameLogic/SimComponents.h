@@ -63,6 +63,16 @@ namespace Neuron::GameLogic
     int type = 0;
   };
 
+  // Which PLAYER owns this entity (C: the §12 "Account → Empire → owns N
+  // entities" identity layer). Today exactly one hull per player carries it; the
+  // F-track's ordered units (drones, outposts) reuse the same component. The
+  // playerId is the server-allocated session identity (0 = unowned); "all my
+  // units" is answered by the ECS::OwnershipIndex, not a registry scan.
+  struct Owner
+  {
+    uint32_t playerId = 0;
+  };
+
   // Authoritative flight state of a steerable craft, in absolute world space.
   //
   // This is the server-side inverse of the legacy player-relative model: instead

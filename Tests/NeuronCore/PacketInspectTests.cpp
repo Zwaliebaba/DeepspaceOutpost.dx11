@@ -54,6 +54,7 @@ TEST(PacketInspect, UnknownIdReportsPlaceholderName)
   w.WriteU32(Msg::MESSAGE_MAGIC);
   w.WriteU16(Msg::PROTOCOL_VERSION);
   w.WriteU8(static_cast<uint8_t>(Msg::MessageLane::Gameplay));
+  w.WriteU64(0);        // session token (B2)
   w.WriteU16(0x7777);   // unknown id
   w.WriteU16(2);        // payload length
   w.WriteU8(1);

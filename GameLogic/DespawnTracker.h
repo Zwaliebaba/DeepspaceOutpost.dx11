@@ -24,16 +24,20 @@ namespace Neuron::GameLogic
     // tick but are now gone. Updates the tracked set in place.
     std::vector<uint32_t> Update(const std::vector<uint32_t>& _currentIds)
     {
-      std::unordered_set<uint32_t> current(_currentIds.begin(), _currentIds.end());
+      // D2: fill the persistent scratch set (clear, not free) instead of
+      // constructing a fresh one from the range every call, then swap it with
+      // m_previous - an O(1) exchange of bucket arrays, not a reallocation.
+      m_currentScratch.clear();
+      m_currentScratch.insert(_currentIds.begin(), _currentIds.end());
 
       std::vector<uint32_t> despawned;
       for (uint32_t id : m_previous)
       {
-        if (current.find(id) == current.end())
+        if (m_currentScratch.find(id) == m_currentScratch.end())
           despawned.push_back(id);
       }
 
-      m_previous = std::move(current);
+      m_previous.swap(m_currentScratch);
       return despawned;
     }
 
@@ -41,5 +45,6 @@ namespace Neuron::GameLogic
 
   private:
     std::unordered_set<uint32_t> m_previous;
+    std::unordered_set<uint32_t> m_currentScratch;
   };
 }

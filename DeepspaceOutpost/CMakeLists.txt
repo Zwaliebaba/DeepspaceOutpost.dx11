@@ -5,21 +5,18 @@
 # seam, camera/projection math, replication client, and the Win32/Direct3D 11/
 # XAudio2 backend - lives in the NeuronClient library and is linked in.
 
-# ---- Portable game logic (formerly C, now compiled as C++23) ----
+# ---- Portable presentation code (formerly the ported C game, now thin-client only) ----
 set(GAME_SOURCES
     main.cpp
     LocalObjects.cpp
     elite.cpp
     space.cpp
     threed.cpp
-    swat.cpp
     docked.cpp
     shipdata.cpp
     shipface.cpp
     stars.cpp
     planet.cpp
-    pilot.cpp
-    missions.cpp
     trade.cpp
     intro.cpp
     file.cpp

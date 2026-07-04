@@ -14,7 +14,6 @@
 #include "gfx.h"
 #include "elite.h"
 #include "planet.h"
-#include "missions.h"
 
 
 extern struct galaxy_seed hyperspace_planet;
@@ -436,15 +435,6 @@ void expand_description (char *source)
 
 char *describe_planet (struct galaxy_seed planet)
 {
-	char *mission_text;
-	
-	if (cmdr.mission == 1)
-	{
-		mission_text = mission_planet_desc (planet);
-		if (mission_text != NULL)
-			return mission_text;
-	}
-	
 	rnd_seed.a = planet.c;
 	rnd_seed.b = planet.d;
 	rnd_seed.c = planet.e;

@@ -5,9 +5,9 @@
 // The client renders a short time in the PAST and interpolates between the two
 // most recent snapshots that bracket the render time, so motion stays smooth even
 // though snapshots arrive at a coarse, jittery tick rate (and some are lost). This
-// is the client-side complement to the reliability-free transport: SnapshotReceiver
-// keeps only the freshest state (good for logic), the interpolator keeps the last
-// two states per entity (needed to tween for rendering).
+// is the client-side complement to the reliability-free transport: it keeps the
+// last two states per entity (needed to tween for rendering), ingesting datagrams
+// last-writer-wins by tick so stale/reordered data never displaces fresh.
 //
 // Ingest is last-writer-wins by tick, same as the receiver - a stale/reordered
 // datagram never displaces a newer one. Sample(id, alpha) blends position from the
@@ -155,6 +155,22 @@ namespace Neuron::Net
     uint32_t m_latestTick = 0;
     uint32_t m_viewerId = 0xFFFFFFFFu;
   };
+
+  // Render interpolation alpha: the fraction in [0,1] of the way from the
+  // previous snapshot to the current one, for rendering ~one snapshot interval in
+  // the PAST so the prev->curr segment is always available to tween across
+  // (classic entity interpolation). `_nowMs` is the current time, `_currArrivalMs`
+  // when the current snapshot arrived, `_intervalMs` the measured gap between the
+  // last two snapshots. At arrival alpha is 0 (show prev); one interval later it
+  // reaches 1 (show curr). Degenerate inputs (no interval yet) return 1.0 = show
+  // the latest. Pure arithmetic (no clock) so it is unit-testable.
+  [[nodiscard]] inline double InterpolationAlpha(double _nowMs, double _currArrivalMs, double _intervalMs)
+  {
+    if (_intervalMs <= 0.0)
+      return 1.0;
+    const double a = (_nowMs - _currArrivalMs) / _intervalMs;
+    return a < 0.0 ? 0.0 : (a > 1.0 ? 1.0 : a);
+  }
 
   // Rebase an absolute snapshot into the local float render frame around
   // `_originAbs` (the floating origin, typically the local player's world

@@ -145,6 +145,23 @@ TEST(Interp, LocalOffsetRebasesToFloatingOrigin)
   EXPECT_TRUE(local.z == 300.0);
 }
 
+TEST(Interp, RenderAlphaAdvancesFromPrevToCurrOverOneInterval)
+{
+  // Snapshot arrived at t=1000ms, measured interval 33ms. The render clock
+  // walking from arrival to arrival+interval walks alpha from 0 (show prev) to 1
+  // (show curr), rendering one interval in the past the whole way.
+  EXPECT_TRUE(Net::InterpolationAlpha(1000.0, 1000.0, 33.0) == 0.0);         // just arrived -> prev
+  EXPECT_TRUE(Net::InterpolationAlpha(1016.5, 1000.0, 33.0) == 0.5);         // halfway -> midpoint
+  EXPECT_TRUE(Net::InterpolationAlpha(1033.0, 1000.0, 33.0) == 1.0);         // one interval later -> curr
+}
+
+TEST(Interp, RenderAlphaClampsAndHandlesDegenerateInterval)
+{
+  EXPECT_TRUE(Net::InterpolationAlpha(2000.0, 1000.0, 33.0) == 1.0);   // way past -> clamp to curr
+  EXPECT_TRUE(Net::InterpolationAlpha(900.0, 1000.0, 33.0) == 0.0);    // before arrival -> clamp to prev
+  EXPECT_TRUE(Net::InterpolationAlpha(1000.0, 0.0, 0.0) == 1.0);       // no interval yet -> show latest
+}
+
 TEST(Interp, ForgetDropsAnEntityImmediately)
 {
   Net::SnapshotInterpolator interp;

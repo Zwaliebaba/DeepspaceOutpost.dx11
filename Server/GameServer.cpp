@@ -3,10 +3,13 @@
 #include "GameServer.h"
 
 #include <cstdio>
+#include <cstdlib>   // getenv (DSO_DB)
 #include <ranges>
+#include <utility>
 
 #include "SnapshotPacketizer.h"
-#include "ClientInput.h"
+#include "SnapshotBudget.h"   // per-session send budget + distance-sorted drop (E2c)
+#include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
 #include "Messages/Framing.h"
 #include "Messages/Reliable.h"
@@ -17,11 +20,28 @@
 #include "ServerConfig.h"
 #include "SnapshotHelpers.h"
 #include "WorldBuilder.h"
+#include "SecureRandom.h"   // OS CSPRNG for session tokens (B2)
+#include "OdbcStore.h"      // SQL-Server backend (B4.3), compiled only under DSO_ENABLE_ODBC
 
 using namespace Neuron;
 
 namespace DSOServer
 {
+  namespace
+  {
+    // High-resolution wall clock in milliseconds for tick METRICS only (D3). This
+    // is off the simulation's determinism path - it times phases, it never feeds
+    // the sim - so reading the wall clock here does not violate the §12 rule.
+    [[nodiscard]] double QpcMs()
+    {
+      LARGE_INTEGER freq;
+      LARGE_INTEGER now;
+      QueryPerformanceFrequency(&freq);
+      QueryPerformanceCounter(&now);
+      return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+    }
+  }
+
   GameServer::GameServer(Net::UdpSocket& _socket)
     : m_socket(_socket)
     , m_aoi(Cfg::AOI_CELL_SIZE)
@@ -36,37 +56,100 @@ namespace DSOServer
     m_landmarks = std::move(setup.landmarks);
     m_sessions.SetManifest(std::move(setup.manifest));
 
+    // Session tokens (B2) come from the OS CSPRNG, not a gameplay RNG stream: a
+    // token must be unguessable, and determinism rules stop at the GameLogic edge.
+    m_sessions.SetTokenSource(&SecureRandom64);
+
+    // Persistence (B4): null unless DSO_DB is set (then the connect flow defers the
+    // spawn until the commander's durable state loads).
+    m_persist = MakePersistenceService();
+
     // Datagram routing: 'NMSG' packets carry the unreliable InputCommand lane;
-    // 'NRLB' datagrams feed each session's reliable lanes.
+    // 'NRLB' datagrams feed each session's reliable lanes (and provision a pending
+    // shell for a brand-new endpoint so its ClientHello can be received).
     m_routes = {
       { Msg::MESSAGE_MAGIC,
         [this](const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
         { OnInputPacket(_from, _data, _size); } },
       { Msg::RELIABLE_MAGIC,
         [this](const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
-        { m_sessions.OnReliable(_from, _data, _size); } },
+        { m_sessions.OnReliable(_from, _data, _size, m_tick); } },
     };
 
     RegisterSubscribers();
   }
 
+  GameServer::~GameServer()
+  {
+    // Graceful stop: snapshot every live player one last time, then let m_persist's
+    // destructor stop the writer thread after a final flush. (A hard kill skips
+    // this; the ~5 s cadence save bounds the loss.)
+    if (m_persist)
+      for (auto& kv : m_sessions.All())
+        if (m_world.IsValid(kv.second.entity))
+          m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(
+              m_world, kv.second.entity, m_tick, kv.second.name, kv.second.score));
+  }
+
+  std::unique_ptr<Neuron::Persist::PersistenceService> GameServer::MakePersistenceService()
+  {
+    const char* db = std::getenv("DSO_DB");
+    if (db == nullptr || db[0] == '\0')
+      return nullptr;   // persistence disabled: the server behaves exactly as before
+
+    std::unique_ptr<Neuron::Persist::IPersistenceStore> store;
+#ifdef DSO_ENABLE_ODBC
+    // Production: connect to SQL Server. A connect failure disables persistence
+    // ENTIRELY (no store, no deferred load) rather than falling back to a volatile
+    // store - a transient DB outage must never spawn a commander fresh and then
+    // alias their real saved rows over the top.
+    store = MakeOdbcStore(db);
+    if (!store)
+    {
+      std::fprintf(stderr, "[persist] ODBC connect failed for DSO_DB; running WITHOUT persistence\n");
+      return nullptr;
+    }
+#else
+    // Built without the ODBC backend: an in-memory store proves the wiring (durable
+    // only within a run). This is the dev/CI path when DSO_DB is set.
+    store = std::make_unique<Neuron::Persist::InMemoryStore>();
+#endif
+    return std::make_unique<Neuron::Persist::PersistenceService>(std::move(store), /*startThread*/ true);
+  }
+
   void GameServer::RunTick()
   {
-    // 1. Receive client input and acks; new endpoints connect on their first
-    //    input. Then resolve this tick's fire commands -> Crime / EntityKilled
-    //    facts (police dispatch and death/destroy happen in their subscribers)
-    //    before the simulation advances.
+    const double tickStartMs = QpcMs();
+    if (m_metricsWindowStartMs == 0.0)
+      m_metricsWindowStartMs = tickStartMs;
+    m_bytesThisTick = 0;
+    m_candidatePairsThisTick = 0;   // fed by D1's grid queries
+    m_droppedThisTick = 0;          // fed by E2c's per-session send budget
+
+    // 1. Receive client input and acks. Input from an endpoint that hasn't
+    //    completed the ClientHello handshake is ignored (the hello is the front
+    //    door - see ProcessReliableRequests). Then resolve this tick's fire
+    //    commands -> Crime / EntityKilled facts (police dispatch and death/destroy
+    //    happen in their subscribers) before the simulation advances.
     ReceiveDatagrams();
     m_bus.Dispatch();
 
-    BroadcastRosterIfMembershipChanged();
-
-    // 1b. Process station requests (dock/buy/sell/equip/refuel/jumps) delivered
-    //     on each session's reliable channel.
+    // 1b. Process the reliable channel: the ClientHello handshake (which connects
+    //     a client and broadcasts the refreshed roster), plus station/travel/chart
+    //     requests from already-connected sessions.
     ProcessReliableRequests();
+
+    // 1c. Finish any deferred (persistence) handshakes whose load has returned:
+    //     spawn the commander from their durable state (B4). No-op when disabled.
+    ApplyCompletedLoads();
 
     // 2. NPC tactics + the simulation tick + dynamic spawning + shield regen.
     AdvanceSimulation();
+
+    // 2a'. Record this tick's final transforms for lag compensation (E1): next
+    //      tick's player-fire resolution rewinds targets against this ring. Derived
+    //      state only - it never feeds back into the authoritative simulation.
+    m_combatHistory.Capture(m_world);
 
     // 2b. Missiles, realtime combat and collision grinding -> the death pipeline.
     ResolveKills();
@@ -82,6 +165,36 @@ namespace DSOServer
 
     // 4. Per-viewer snapshots + on-change private status + reliable flush.
     PublishState();
+
+    // 5. Persist changed players on a slow cadence (B4). No-op when disabled.
+    if (m_persist && m_tick % Cfg::PERSIST_INTERVAL == 0)
+      SavePlayers();
+
+    // 6. Record this tick's metrics (D3) and emit a rolling summary line.
+    Server::TickSample sample;
+    sample.durationMs = QpcMs() - tickStartMs;
+    sample.entityCount = static_cast<uint32_t>(m_world.AliveCount());
+    sample.sessionCount = static_cast<uint32_t>(m_sessions.Count());
+    sample.candidatePairs = m_candidatePairsThisTick;
+    sample.bytesSent = m_bytesThisTick;
+    sample.droppedEntities = m_droppedThisTick;
+    m_metrics.Record(sample);
+
+    if (m_metrics.WindowTicks() >= Cfg::METRICS_WINDOW_TICKS)
+    {
+      const double nowMs = QpcMs();
+      const double windowSec = (nowMs - m_metricsWindowStartMs) / 1000.0;
+      const Server::TickSummary s = m_metrics.Snapshot(windowSec > 0.0 ? windowSec : 1.0);
+      printf("[metrics] ticks=%llu avg=%.2fms max=%.2fms overruns=%llu entities=%u sessions=%u pairs=%llu bytes/s=%llu dropped=%llu\n",
+             static_cast<unsigned long long>(s.ticks), s.avgMs, s.maxMs,
+             static_cast<unsigned long long>(s.overruns), s.entities, s.sessions,
+             static_cast<unsigned long long>(s.avgCandidatePairs),
+             static_cast<unsigned long long>(s.bytesPerSecond),
+             static_cast<unsigned long long>(s.droppedEntities));
+      fflush(stdout);   // the D5 harness parses this line from a redirected pipe
+      m_metrics.Reset();
+      m_metricsWindowStartMs = nowMs;
+    }
   }
 
   // --- receive ---------------------------------------------------------------
@@ -106,47 +219,34 @@ namespace DSOServer
       // if it decodes (direction is guaranteed by the message type: InputCommand
       // is ClientToServer). Malformed/unknown records are dropped;
       // stale/duplicate inputs are rejected by OnInput's sequence.
-      static_assert(Net::ClientInput::Dir == Msg::Direction::ClientToServer);
-      if (rec.id != Net::ClientInput::Id)
+      static_assert(Msg::InputCommand::Dir == Msg::Direction::ClientToServer);
+      if (rec.id != Msg::InputCommand::Id)
         continue;
-      Net::ClientInput in;
+      Msg::InputCommand in;
       if (!Msg::DecodeRecord(rec, in))
         continue;
 
-      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, in, m_tick);
+      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
 
       // Player weapon/equipment intent becomes FireWeapon commands on the bus;
       // the combat subscriber resolves them to facts after the receive loop.
       if (m_world.IsValid(player))
       {
         if (in.fire)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
         if (in.fireMissile)
           m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
         if (in.ecm)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Msg::NO_MISSILE_TARGET });
         if (in.energyBomb)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET });
         if (in.escapePod)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Net::NO_MISSILE_TARGET });
+          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Msg::NO_MISSILE_TARGET });
       }
     }
   }
 
   // --- roster / reliable requests ---------------------------------------------
-
-  void GameServer::BroadcastRosterIfMembershipChanged()
-  {
-    if (m_sessions.Count() == m_lastSessions)
-      return;
-    m_lastSessions = m_sessions.Count();
-    printf("Clients connected: %zu\n", m_lastSessions);
-    // Membership changed: replay the full roster to everyone, so a joiner learns
-    // the others and the others learn the joiner. (A leaver's ship is removed
-    // via EntityDespawn; the client drops its roster entry there.)
-    for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
-      m_sessions.Broadcast(pi);
-  }
 
   void GameServer::ProcessReliableRequests()
   {
@@ -155,52 +255,219 @@ namespace DSOServer
       Net::ReliableMessage msg;
       while (s.events.Receive(msg))
       {
-        Net::StationRequest req;
+        // The ClientHello is the front door (Control lane, drained first): a valid
+        // one connects a pending client (spawns its entity, queues HelloAck), or
+        // resumes a live one that reconnected (B3). A version mismatch is rejected
+        // inside OnHello.
         Msg::ClientHello hello;
+        if (Msg::TryDecode(msg, hello))
+        {
+          // With persistence on, defer the spawn: OnHello parks the session and we
+          // load the commander first (ApplyCompletedLoads finishes the handshake),
+          // so a returning commander is never spawned-fresh.
+          const bool defer = (m_persist != nullptr);
+          const GameLogic::HelloOutcome out = m_sessions.OnHello(m_world, s.endpoint, hello, m_tick, defer);
+          if (out.result == GameLogic::HelloResult::Accepted)
+          {
+            printf("Client connected: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
+            // Replay the full roster: the joiner learns everyone, everyone learns
+            // the joiner. (A leaver's ship goes out as EntityDespawn on reap.)
+            for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+              m_sessions.Broadcast(pi);
+          }
+          else if (out.result == GameLogic::HelloResult::Loading)
+          {
+            // Parked (persistence): a named commander is loaded from the store; a
+            // blank name has no account, so spawn it fresh right away.
+            if (s.name.empty())
+              FinishLoadedSpawn(s.endpoint, std::nullopt);
+            else
+              m_persist->RequestLoad(s.name);
+          }
+          else if (out.result == GameLogic::HelloResult::Resumed)
+          {
+            // Reconnect (B3): OnHello already re-queued HelloAck. Re-sync this one
+            // client - replay the full roster to it, resend its cargo, and force a
+            // PlayerStatus resend (evict the change-cache) - and, if the reconnect
+            // also renamed, tell everyone.
+            printf("Client resumed: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
+            for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+              s.events.Send(pi);
+            SendCargoTo(out.entity.index);
+            m_lastStatus.Forget(GameLogic::EndpointKey(s.endpoint));
+            if (out.nameChanged)
+              BroadcastPlayerInfo(out.entity.index);
+          }
+          continue;
+        }
+
+        // Everything else is gameplay: a pending (pre-hello) shell can't do it, so
+        // ignore until the session is live.
+        if (!s.Live())
+          continue;
+
+        Net::StationRequest req;
+        Msg::TravelRequest travel;
+        Msg::GalaxyChunkRequest chunkReq;
+        Msg::Ping ping;
         if (Msg::TryDecode(msg, req))
         {
+          LogCommand(s, msg);   // audit/replay (before the mutation it authorizes)
           HandleStationRequest(s, req);
         }
-        else if (Msg::TryDecode(msg, hello))
+        else if (Msg::TryDecode(msg, travel))
         {
-          // Adopt the client's commander name (sanitized + de-duplicated). If it
-          // actually changed, tell everyone via the roster.
-          if (m_sessions.ApplyName(m_world, s.endpoint, hello.commanderName))
-            BroadcastPlayerInfo(s.entity.index);
+          LogCommand(s, msg);
+          HandleTravelRequest(s, travel);
+        }
+        else if (Msg::TryDecode(msg, chunkReq))
+          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
+        else if (Msg::TryDecode(msg, ping))
+        {
+          // Time sync (E1): record the client's reported RTT for lag compensation
+          // (stored raw; the fire path clamps it to the history window), and echo
+          // the timestamp + our current tick so the client can measure RTT and
+          // align its clock. Not logged - it mutates no game state.
+          s.rttMs = ping.rttMs;
+          s.events.Send(Msg::Pong{ ping.clientTimeMs, m_tick });
         }
       }
     }
   }
 
+  void GameServer::ApplyCompletedLoads()
+  {
+    if (!m_persist)
+      return;
+
+    for (const Neuron::Persist::PlayerLoadResult& r : m_persist->DrainLoads())
+    {
+      // Find the still-loading session that requested this commander (loads are
+      // keyed by name). A duplicate result (from a lost-load re-request) finds no
+      // loading session and is harmlessly skipped by FinishLoadedSpawn.
+      const Neuron::GameLogic::Session* found = nullptr;
+      for (const auto& kv : m_sessions.All())
+        if (kv.second.loading && kv.second.name == r.commanderName)
+        {
+          found = &kv.second;
+          break;
+        }
+      if (found != nullptr)
+        FinishLoadedSpawn(found->endpoint, r.state);
+    }
+  }
+
+  void GameServer::FinishLoadedSpawn(const Net::Endpoint& _ep,
+                                     const std::optional<Neuron::Persist::PlayerPersistState>& _state)
+  {
+    const ECS::EntityId e = m_sessions.SpawnLoaded(m_world, _ep, m_tick);
+    if (!m_world.IsValid(e))
+      return;   // not (or no longer) a loading session
+
+    // SpawnLoaded just spawned for this endpoint, so its session must exist; the
+    // per-player record (name/score, C2) lives on it.
+    auto sit = m_sessions.All().find(GameLogic::EndpointKey(_ep));
+    if (sit == m_sessions.All().end())
+      return;   // unreachable in practice
+    GameLogic::Session& session = sit->second;
+
+    if (_state.has_value())
+    {
+      // Returning commander: restore durable state (hull components + the
+      // session's score record) and wake them docked at their last system (or
+      // the nearest station / home if that system has none).
+      GameLogic::PlayerStateApplyToComponents(m_world, e, *_state);
+      session.score = _state->score;
+      GameLogic::DockAtSystemOrNearest(m_world, e, _state->lastSystemId);
+      printf("Client connected (loaded \"%s\"): entity %u\n", _state->commanderName.c_str(), e.index);
+    }
+    else if (m_persist)
+    {
+      // Unknown commander: the fresh spawn's defaults ARE the new account - persist
+      // it now so the row exists to reload next time.
+      m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(
+          m_world, e, m_tick, session.name, session.score));
+      printf("Client connected (new account): entity %u\n", e.index);
+    }
+
+    // Same connect side-effects as the immediate-spawn path: everyone learns the
+    // joiner, and the joiner gets its full cargo manifest.
+    for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+      m_sessions.Broadcast(pi);
+    SendCargoTo(e.index);
+  }
+
+  void GameServer::LogCommand(const GameLogic::Session& _s, const Net::ReliableMessage& _msg)
+  {
+    if (!m_persist)
+      return;
+    Neuron::Persist::CommandLogEntry e;
+    e.worldTick = m_tick;
+    e.playerId = static_cast<int32_t>(_s.playerId);   // the real player identity (C)
+    e.messageId = static_cast<int32_t>(_msg.type);
+    e.payload = _msg.payload;   // the message's generic-codec encoding (no re-encode)
+    m_persist->QueueCommand(e);
+  }
+
+  void GameServer::SavePlayers()
+  {
+    if (!m_persist)
+      return;
+
+    // Snapshot every LIVE player (a loading session has no entity and no durable
+    // state to save yet), enqueuing only those whose durable fields changed since
+    // the last accepted snapshot.
+    for (auto& [key, s] : m_sessions.All())
+    {
+      if (!m_world.IsValid(s.entity))
+        continue;
+      Neuron::Persist::PlayerPersistState st = GameLogic::PlayerStateFromComponents(
+          m_world, s.entity, m_tick, s.name, s.score);
+      if (m_lastPersist.Changed(key, st))
+        m_persist->QueuePlayerSnapshot(st);
+    }
+
+    // Lost-load recovery: re-request loads for any session still parked (a store
+    // error dropped its earlier load); duplicate results are ignored downstream.
+    for (const auto& kv : m_sessions.All())
+      if (kv.second.loading && !kv.second.name.empty())
+        m_persist->RequestLoad(kv.second.name);
+
+    m_lastPersist.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
+  }
+
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)
   {
-    Net::StationResponse resp;
+    // Docking + commerce only. The retired travel kinds (Teleport/JumpDrive)
+    // fall through to the station dispatcher, which rejects them - travel rides
+    // TravelRequest (HandleTravelRequest) since the protocol split.
+    const Net::StationResponse resp =
+        GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
+    _session.events.Send(resp);   // Gameplay lane
+  }
+
+  void GameServer::HandleTravelRequest(GameLogic::Session& _session, const Msg::TravelRequest& _req)
+  {
+    Msg::TravelResponse resp;
     resp.kind = _req.kind;
 
-    if (_req.kind == Net::StationRequestKind::Teleport)
+    if (_req.kind == Msg::TravelKind::Hyperspace)
     {
-      // G7: a real fuel-gated hyperspace jump (may misfire into witchspace),
-      // NOT the old docked instant-teleport. Routed through HyperspaceSystem.
+      // G7: a fuel-gated hyperspace jump (may misfire into witchspace).
       const GameLogic::HyperspaceOutcome hj =
-          GameLogic::Hyperspace(m_world, _session.entity, _req.stationId, m_hyperRng);
+          GameLogic::Hyperspace(m_world, _session.entity, _req.systemId, m_hyperRng);
       resp.status = hj.status;
-      if (const auto* wal = m_world.TryGet<GameLogic::Wallet>(_session.entity))
-        resp.credits = wal->credits;
       if (hj.wantedChanged)
         BroadcastPlayerInfo(_session.entity.index);
       if (hj.jumped)
         printf("[tick %u] player %u hyperspace -> system %u (%s)\n", m_tick, _session.entity.index,
-               _req.stationId, hj.witchspace ? "WITCHSPACE misjump" : "arrived");
+               _req.systemId, hj.witchspace ? "WITCHSPACE misjump" : "arrived");
     }
-    else if (_req.kind == Net::StationRequestKind::JumpDrive)
+    else if (_req.kind == Msg::TravelKind::InSystemJump)
     {
       // G7: in-system fast jump toward the planet (mass-lock gated).
       const GameLogic::JumpDriveOutcome jd = GameLogic::InSystemJump(m_world, _session.entity);
       resp.status = jd.status;
-    }
-    else
-    {
-      resp = GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
     }
 
     _session.events.Send(resp);   // Gameplay lane
@@ -210,11 +477,17 @@ namespace DSOServer
 
   void GameServer::AdvanceSimulation()
   {
+    // Safe-park (B3): a live client that has gone silent (disconnect / reconnect
+    // gap) has its flight intent zeroed so its ship stops coasting on stale input
+    // instead of flying off during the grace window. A resumed client's next input
+    // overrides this immediately.
+    m_sessions.SafeParkSilent(m_world, m_tick, Cfg::SESSION_PARK_TICKS);
+
     // NPC tactics decide their flight intents (pursue/break-off/flee + panic
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
     // inside StepAi; their removal rides the despawn diff.
-    GameLogic::StepAi(m_world, m_tick, m_aiRng);
+    GameLogic::StepAi(m_world, m_tick, m_aiRng, m_scratch);
     GameLogic::Tick(m_world);
     ++m_tick;
     m_spawner.Step(m_world, m_tick);
@@ -239,13 +512,14 @@ namespace DSOServer
     // skips already-resolved entities.
     // G8: a missile homing on an ECM-fitted target can be jammed mid-flight;
     // every jam is broadcast as the classic ECM cue.
-    std::vector<uint32_t> ecmPulses;
-    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses);
+    std::vector<uint32_t>& ecmPulses = m_scratch.ecmPulses;
+    ecmPulses.clear();   // StepMissiles only appends; a reused buffer must start empty
+    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses, m_scratch);
     for (uint32_t defender : ecmPulses)
       m_sessions.Broadcast(Msg::EcmPulse{ defender });
-    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world))
+    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
-    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world))
+    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
     for (const GameLogic::Kill& kill : kills)
       m_bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
@@ -257,8 +531,8 @@ namespace DSOServer
     // Age cargo canisters (despawning the expired) and let players scoop the
     // ones they fly into; a player whose hold changed gets a fresh cargo
     // manifest. Both the expired and the scooped canisters ride the despawn diff.
-    GameLogic::StepLoot(m_world);
-    for (uint32_t scoopedBy : GameLogic::ScoopSystem(m_world))
+    GameLogic::StepLoot(m_world, m_scratch);
+    for (uint32_t scoopedBy : GameLogic::ScoopSystem(m_world, m_scratch))
       SendCargoTo(scoopedBy);
   }
 
@@ -276,8 +550,9 @@ namespace DSOServer
   {
     // Reap idle clients, then broadcast every despawn (reaped players + props)
     // as a reliable event to all remaining clients.
-    m_sessions.Reap(m_world, m_tick, Cfg::SESSION_TIMEOUT_TICKS);
-    for (uint32_t goneId : m_despawns.Update(CurrentIds(m_world)))
+    m_sessions.Reap(m_world, m_tick, Cfg::SESSION_TIMEOUT_TICKS, Cfg::SESSION_GRACE_TICKS);
+    CurrentIds(m_world, m_currentIdsScratch);
+    for (uint32_t goneId : m_despawns.Update(m_currentIdsScratch))
       m_sessions.Broadcast(Msg::EntityDespawn{ goneId });
   }
 
@@ -288,23 +563,40 @@ namespace DSOServer
     m_aoi.Rebuild(m_world);
     for (auto& [key, s] : m_sessions.All())
     {
-      Math::Vector3i64 viewerPos{ 0, 0, 0 };
-      if (m_world.IsValid(s.entity))
-        viewerPos = m_world.Get<GameLogic::WorldTransform>(s.entity).position;
-
-      Net::WorldSnapshot snap =
-          m_aoi.SnapshotFor(m_world, m_tick, viewerPos, Cfg::AOI_RADIUS_CELLS, s.entity.index);
-      // Keep the local system's planet/station visible across the whole system,
-      // not just the +/-1 ship cell, so the body you fly toward never pops out.
-      AppendLandmarks(m_world, snap, viewerPos, m_landmarks);
-      for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
-        m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
-
-      // The owner's private HUD vitals, on change only. Queued on the Gameplay
-      // lane; flushed with the events below.
-      Msg::PlayerStatus ps;
+      // A pending (pre-hello) shell has no entity: don't stream it world state,
+      // only flush its control lane (the HelloAck/HelloReject + acks) below.
       if (m_world.IsValid(s.entity))
       {
+        const Math::Vector3i64 viewerPos = m_world.Get<GameLogic::WorldTransform>(s.entity).position;
+
+        Net::WorldSnapshot snap =
+            m_aoi.SnapshotFor(m_world, m_tick, viewerPos, Cfg::AOI_RADIUS_CELLS, s.entity.index);
+        // Keep the local system's planet/station visible across the whole system,
+        // not just the +/-1 ship cell, so the body you fly toward never pops out.
+        AppendLandmarks(m_world, snap, viewerPos, m_landmarks, m_landmarkPresentScratch);
+        // Send positions as int32 offsets from the viewer (E2): every entity is
+        // within the AOI, so the offset always fits int32 while absolute positions
+        // stay unbounded int64.
+        snap.refX = viewerPos.x;
+        snap.refY = viewerPos.y;
+        snap.refZ = viewerPos.z;
+        // Cap this viewer's per-tick state (E2c): if the AOI is overloaded, keep the
+        // entities closest to the viewer and shed the farthest (they update on a
+        // later tick). Trimmed BEFORE delta-encoding so baseline and current agree.
+        m_droppedThisTick += Net::TrimSnapshotToBudget(
+            snap.entities, viewerPos.x, viewerPos.y, viewerPos.z, Net::SnapshotEntityBudget());
+        // Delta-encode against the baseline the client last acknowledged (E2b): a
+        // small delta most ticks, a full keyframe periodically or when no baseline
+        // is held. Falls back to a full for a crowded (multi-datagram) AOI.
+        for (const std::vector<uint8_t>& datagram : s.snapshotEncoder.Encode(snap, s.ackedSnapshotTick))
+        {
+          m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
+          m_bytesThisTick += datagram.size();   // D3 metrics
+        }
+
+        // The owner's private HUD vitals, on change only. Queued on the Gameplay
+        // lane; flushed with the events below.
+        Msg::PlayerStatus ps;
         if (const auto* c = m_world.TryGet<GameLogic::Combatant>(s.entity)) ps.energy = c->energy;
         if (const auto* sh = m_world.TryGet<GameLogic::Shields>(s.entity)) { ps.frontShield = sh->front; ps.aftShield = sh->aft; }
         if (const auto* fu = m_world.TryGet<GameLogic::Fuel>(s.entity)) ps.fuel = fu->tenths;
@@ -312,19 +604,67 @@ namespace DSOServer
         if (const auto* eq = m_world.TryGet<GameLogic::Equipment>(s.entity)) ps.missiles = eq->missiles;
         if (const auto* h = m_world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
-        if (const auto* pr = m_world.TryGet<GameLogic::PlayerRecord>(s.entity)) ps.score = pr->score;
+        ps.score = s.score;   // the session's per-player record (C2)
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
+        if (m_lastStatus.Changed(key, ps))
+          s.events.Send(ps);
+
+        // Strategic tier (E3): a slow per-system rollup for the chart, queued on the
+        // reliable Gameplay lane at the strategic cadence and flushed with the events
+        // below - decoupled from the tactical snapshot clock (§12).
+        if (m_tick % Cfg::STRATEGIC_INTERVAL == 0)
+          PublishStrategicFor(s);
       }
-      if (m_lastStatus.Changed(key, ps))
-        s.events.Send(ps);
 
       for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
+      {
         m_socket.SendTo(s.endpoint, dg.data(), dg.size());
+        m_bytesThisTick += dg.size();   // D3 metrics
+      }
     }
 
     // Drop cached status for endpoints that are no longer sessions (reaped
     // clients), so the change-cache can't grow without bound over a long uptime.
     m_lastStatus.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
+  }
+
+  void GameServer::PublishStrategicFor(GameLogic::Session& _s)
+  {
+    // The viewer's current system = the station nearest their ship (works docked or
+    // in flight); its position anchors the per-system rollup. Chebyshev distance
+    // avoids squaring huge absolute coordinates.
+    const Math::Vector3i64 pos = m_world.Get<GameLogic::WorldTransform>(_s.entity).position;
+    int systemId = -1;
+    Math::Vector3i64 center = pos;
+    int64_t best = -1;
+    m_world.Each<GameLogic::ServerStation, GameLogic::WorldTransform>(
+        [&](ECS::EntityId, GameLogic::ServerStation& _st, GameLogic::WorldTransform& _t)
+    {
+      const int64_t dx = _t.position.x - pos.x;
+      const int64_t dy = _t.position.y - pos.y;
+      const int64_t dz = _t.position.z - pos.z;
+      const int64_t ax = dx < 0 ? -dx : dx;
+      const int64_t ay = dy < 0 ? -dy : dy;
+      const int64_t az = dz < 0 ? -dz : dz;
+      int64_t cheb = ax;
+      if (ay > cheb) cheb = ay;
+      if (az > cheb) cheb = az;
+      if (best < 0 || cheb < best)
+      {
+        best = cheb;
+        systemId = _st.systemId;
+        center = _t.position;
+      }
+    });
+
+    const GameLogic::StrategicCounts counts = GameLogic::SummarizeStrategic(m_world, center);
+    Msg::StrategicSummary summary;
+    summary.systemId = static_cast<uint32_t>(systemId);
+    summary.friendlyCount = counts.friendly;
+    summary.hostileCount = counts.hostile;
+    summary.alert = static_cast<uint8_t>(counts.hostile > 0 ? Msg::StrategicAlert::UnderAttack
+                                                            : Msg::StrategicAlert::None);
+    _s.events.Send(summary);   // reliable Gameplay lane
   }
 
   // --- combat subscribers ---------------------------------------------------------
@@ -335,7 +675,12 @@ namespace DSOServer
     // geometry / missile spawn unchanged), publishing the resulting facts.
     m_bus.Subscribe<GameLogic::FireWeapon>([this](const GameLogic::FireWeapon& _fw)
     {
-      GameLogic::ResolveFireWeapon(m_world, m_bus, _fw, Cfg::FIRE_RANGE, Cfg::AIM_CONE);
+      // Lag-compensate the laser (E1): rewind targets by the shooter's own latency
+      // (rtt/2 + render interpolation delay), clamped to the history window. A
+      // non-session shooter reports 0 rtt -> minimal (interp-delay) rewind.
+      const uint32_t ticksBack = GameLogic::LagCompTicks(m_sessions.RttForEntity(_fw.shooter.index));
+      GameLogic::ResolveFireWeapon(m_world, m_bus, _fw, Cfg::FIRE_RANGE, Cfg::AIM_CONE,
+                                   &m_combatHistory, ticksBack);
     });
 
     m_bus.Subscribe<GameLogic::Crime>([this](const GameLogic::Crime& _c) { OnCrime(_c); });
@@ -406,8 +751,11 @@ namespace DSOServer
 
       // Pay the killer a wanted-derived bounty (if the victim was a fugitive)
       // BEFORE the record is wiped by the respawn below; a clean-player kill
-      // pays nothing but still bumps the killer's score.
-      GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      // pays nothing but still scores. The score delta routes to the killer's
+      // session record (C2: score lives on the player, not the hull).
+      const GameLogic::KillCredit credit = GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      if (credit.score != 0)
+        m_sessions.AddScore(_k.killer, credit.score);
 
       if (GameLogic::Combatant* c = m_world.TryGet<GameLogic::Combatant>(_k.victim))
       {
@@ -472,7 +820,9 @@ namespace DSOServer
     // counts as a score, nor sheds loot.
     if (m_world.Has<GameLogic::Combatant>(_k.victim))
     {
-      GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      const GameLogic::KillCredit credit = GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      if (credit.score != 0)
+        m_sessions.AddScore(_k.killer, credit.score);   // score is a player record (C2)
       GameLogic::DropLoot(m_world, _k.victim, m_lootRng);   // legacy launch_loot: alloy + cargo canisters
     }
 

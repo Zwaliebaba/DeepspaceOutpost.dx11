@@ -92,3 +92,29 @@ TEST(Grid, RemoveEmptiesCell)
   g.Remove(2, p);
   EXPECT_TRUE(g.OccupiedCellCount() == 0);      // cell pruned when empty
 }
+
+TEST(Grid, ClearEmptiesEveryCellButKeepsWorking)
+{
+  // D2: AreaOfInterest::Rebuild calls Clear() every tick instead of replacing
+  // the whole Grid object; verify it fully resets query results (not just
+  // OccupiedCellCount) and the grid is still usable afterward.
+  Grid g(100);
+  const Vector3i64 p{ 50, 50, 50 };
+  g.Insert(1, p);
+  g.Insert(2, Vector3i64{ 150, 50, 50 });
+  EXPECT_TRUE(g.OccupiedCellCount() == 2);
+
+  g.Clear();
+  EXPECT_TRUE(g.OccupiedCellCount() == 0);
+
+  std::vector<uint64_t> afterClear;
+  g.QueryNear(p, 3, afterClear);
+  EXPECT_TRUE(afterClear.empty());   // nothing survives a clear, at any radius
+
+  // Cell size is preserved and the grid still indexes correctly afterward.
+  EXPECT_TRUE(g.CellSize() == 100);
+  g.Insert(3, p);
+  std::vector<uint64_t> after;
+  g.QueryNear(p, 0, after);
+  EXPECT_TRUE(after.size() == 1 && after[0] == 3);
+}

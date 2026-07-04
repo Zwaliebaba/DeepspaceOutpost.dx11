@@ -22,11 +22,8 @@
 #include "shipdata.h"
 #include "space.h"
 #include "sound.h"
-#include "swat.h"
 #include "random.h"
 #include "stars.h"
-#include "missions.h"
-#include "pilot.h"
 #include "file.h"
 #include "keyboard.h"
 #include "Camera.h"
@@ -36,6 +33,7 @@
 #include "Messages/Defs/CoreEvents.h"
 #include "Messages/Defs/InputActions.h"
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
+#include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
@@ -174,11 +172,8 @@ void initialise_game(void)
   PlayerDefense().energy = 255;
   draw_lasers = 0;
   mcount = 0;
-  hyper_ready = 0;
-  detonate_bomb = 0;
   find_input = 0;
   witchspace = 0;
-  auto_pilot = 0;
 
   create_new_stars();
   clear_local_objects();
@@ -429,13 +424,6 @@ void d_pressed(void)
     show_distance_to_planet();
     break;
 
-  case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
-    if (auto_pilot)
-      disengage_auto_pilot();
-    break;
   }
 }
 
@@ -492,156 +480,6 @@ void o_pressed()
   }
 }
 
-void auto_dock(void)
-{
-  struct local_object ship;
-
-  ship.location.x = 0;
-  ship.location.y = 0;
-  ship.location.z = 0;
-
-  set_init_matrix(ship.rotmat);
-  ship.rotmat[2].z = 1;
-  ship.rotmat[0].x = -1;
-  ship.type = -96;
-  ship.velocity = PlayerFlight().speed;
-  ship.acceleration = 0;
-  ship.bravery = 0;
-  ship.rotz = 0;
-  ship.rotx = 0;
-
-  auto_pilot_ship(&ship);
-
-  if (ship.velocity > 22)
-    PlayerFlight().speed = 22;
-  else
-    PlayerFlight().speed = ship.velocity;
-
-  if (ship.acceleration > 0)
-  {
-    PlayerFlight().speed++;
-    if (PlayerFlight().speed > 22)
-      PlayerFlight().speed = 22;
-  }
-
-  if (ship.acceleration < 0)
-  {
-    PlayerFlight().speed--;
-    if (PlayerFlight().speed < 1)
-      PlayerFlight().speed = 1;
-  }
-
-  if (ship.rotx == 0)
-    PlayerFlight().climb = 0;
-
-  if (ship.rotx < 0)
-  {
-    increase_flight_climb();
-
-    if (ship.rotx < -1)
-      increase_flight_climb();
-  }
-
-  if (ship.rotx > 0)
-  {
-    decrease_flight_climb();
-
-    if (ship.rotx > 1)
-      decrease_flight_climb();
-  }
-
-  if (ship.rotz == 127)
-    PlayerFlight().roll = -14;
-  else
-  {
-    if (ship.rotz == 0)
-      PlayerFlight().roll = 0;
-
-    if (ship.rotz > 0)
-    {
-      increase_flight_roll();
-
-      if (ship.rotz > 1)
-        increase_flight_roll();
-    }
-
-    if (ship.rotz < 0)
-    {
-      decrease_flight_roll();
-
-      if (ship.rotz < -1)
-        decrease_flight_roll();
-    }
-  }
-}
-
-void run_escape_sequence(void)
-{
-  int i;
-  int newship;
-  Matrix rotmat;
-
-  current_screen = SCR_ESCAPE_POD;
-
-  PlayerFlight().speed = 1;
-  PlayerFlight().roll = 0;
-  PlayerFlight().climb = 0;
-
-  set_init_matrix(rotmat);
-  rotmat[2].z = 1.0;
-
-  newship = add_new_ship(SHIP_COBRA3, 0, 0, 200, rotmat, -127, -127);
-  local_objects[newship].velocity = 7;
-  snd_play_sample(SND_LAUNCH);
-
-  for (i = 0; i < 90; i++)
-  {
-    if (i == 40)
-    {
-      local_objects[newship].flags |= FLG_DEAD;
-      snd_play_sample(SND_EXPLODE);
-    }
-
-    gfx_set_clip_region(1, 1, 510, 383);
-    gfx_clear_display();
-    update_starfield();
-    update_local_objects();
-
-    local_objects[newship].location.x = 0;
-    local_objects[newship].location.y = 0;
-    local_objects[newship].location.z += 2;
-
-    gfx_display_centre_text(358, "Escape pod launched - Ship auto-destuct initiated.", 120, GFX_COL_WHITE);
-
-    update_console();
-    gfx_update_screen();
-  }
-
-  while ((ship_count[SHIP_CORIOLIS] == 0) && (ship_count[SHIP_DODEC] == 0))
-  {
-    auto_dock();
-
-    if ((abs(PlayerFlight().roll) < 3) && (abs(PlayerFlight().climb) < 3))
-    {
-      for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
-      {
-        if (local_objects[i].type != 0)
-          local_objects[i].location.z -= 1500;
-      }
-    }
-
-    warp_stars = 1;
-    gfx_set_clip_region(1, 1, 510, 383);
-    gfx_clear_display();
-    update_starfield();
-    update_local_objects();
-    update_console();
-    gfx_update_screen();
-  }
-
-  abandon_ship();
-}
-
 // Pending fire-missile intent + the locked target it launches at, for the next
 // input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
 // send_player_input().
@@ -654,18 +492,12 @@ static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 // launches at. Global so the renderer can read it.
 unsigned int g_missile_lock_target = 0xFFFFFFFFu;
 
-// Lock the missile onto the ship in the crosshairs (T key). Thin client: the server
-// is authoritative, so we pick the target from the replicated view and remember its
+// Lock the missile onto the ship in the crosshairs (T key). The server is
+// authoritative, so we pick the target from the replicated view and remember its
 // id; M then launches a homing missile at exactly that target. With nothing in the
-// sights, nothing locks. Falls back to the legacy arm when not replicated.
+// sights, nothing locks.
 static void lock_missile_target(void)
 {
-  if (!Client::ReplicationClientInstance().IsOpen())
-  {
-    arm_missile();
-    return;
-  }
-
   if (cmdr.missiles == 0)
     return;
 
@@ -680,35 +512,21 @@ static void lock_missile_target(void)
 // Clear the missile lock (U key).
 static void unlock_missile_target(void)
 {
-  if (!Client::ReplicationClientInstance().IsOpen())
-  {
-    unarm_missile();
-    return;
-  }
-
   g_missile_lock_target = 0xFFFFFFFFu;
   missile_target = MISSILE_UNARMED; // HUD: no lock
   snd_play_sample(SND_BOOP);
 }
 
-// Launch a missile (M key). Thin client: only when a target is locked (T) and a
-// round is in the rack; the server spawns a projectile that homes that specific
-// locked target. No lock -> nothing fires. Falls back to the legacy local spawn
-// when not replicated.
+// Launch a missile (M key): only when a target is locked (T) and a round is in
+// the rack; the server spawns a projectile that homes that specific locked
+// target and the rack count comes back on PlayerStatus. No lock -> nothing fires.
 static void launch_missile(void)
 {
-  if (!Client::ReplicationClientInstance().IsOpen())
-  {
-    fire_missile();
-    return;
-  }
-
   if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
     return;
 
   s_fire_missile_intent = true;
   s_fire_missile_target = g_missile_lock_target;
-  cmdr.missiles--;
   g_missile_lock_target = 0xFFFFFFFFu;
   missile_target = MISSILE_UNARMED; // lock consumed
   snd_play_sample(SND_MISSILE);
@@ -795,13 +613,8 @@ void handle_flight_keys(void)
   if (kbd_F7_pressed)
   {
     find_input = 0;
-    // Single-player: the GUI planet-data window (local generated data). In thin-client
-    // (MMO) mode the legacy screen shows server-replicated system data + chart cursor
-    // selection, so keep it there.
-    if (Neuron::Client::ReplicationClientInstance().IsOpen())
-      display_data_on_planet();
-    else
-      OpenPlanetDataWindow();
+    // The legacy screen shows server-replicated system data + chart cursor selection.
+    display_data_on_planet();
   }
 
   if (kbd_F8_pressed && (!witchspace))
@@ -880,13 +693,11 @@ void handle_flight_keys(void)
 
   if (kbd_dock_pressed)
   {
+    // The docking computer requests a dock when within the server's range; the
+    // docked flow starts on the StationResponse. (The legacy client-side
+    // autopilot was retired with the single-player fallback.)
     if (!docked && cmdr.docking_computer)
-    {
-      if (instant_dock)
-        engage_docking_computer();
-      else
-        engage_auto_pilot();
-    }
+      engage_docking_computer();
   }
 
   if (kbd_d_pressed)
@@ -903,18 +714,11 @@ void handle_flight_keys(void)
   if (kbd_find_pressed)
     f_pressed();
 
-  if (kbd_hyperspace_pressed && (!docked))
-  {
-    if (kbd_ctrl_pressed)
-      start_galactic_hyperspace();
-    else
-      start_hyperspace();
-  }
-
-  // Docked at a station's "teleport building": the hyperspace key on either chart
-  // jumps to the system under the crosshair (server-validated). Thin-client only;
-  // teleport_to_cursor() is a no-op without a replicated galaxy.
-  if (kbd_hyperspace_pressed && docked && ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
+  // The hyperspace key on either chart jumps to the system under the crosshair
+  // (server-validated fuel/range; works docked or in flight, per the protocol).
+  // teleport_to_cursor() is a no-op without a replicated galaxy. The legacy
+  // local countdown/witchspace jump was retired with the single-player fallback.
+  if (kbd_hyperspace_pressed && ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
     teleport_to_cursor();
 
   if (kbd_jump_pressed && (!docked) && (!witchspace))
@@ -973,8 +777,10 @@ void handle_flight_keys(void)
 
   if (kbd_energy_bomb_pressed)
   {
-    // Thin client: the server validates ownership and applies the blast; clear
-    // the local mirror optimistically (it is one-shot either way).
+    // The server validates ownership and applies the blast. The local flag is
+    // cleared optimistically because no wire message mirrors equipment consumption
+    // yet (PlayerStatus carries no equipment bits) - a known residue, documented
+    // in IMPLEMENTATION.md; the server ignores duplicate detonate intents anyway.
     if ((!docked) && (cmdr.energy_bomb))
     {
       g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
@@ -1106,28 +912,20 @@ static void start_new_game(void)
   enter_intro1();
 }
 
-// After the game-over animation. In thin-client mode the server has respawned us
-// DOCKED at the nearest station (the G3 death rule, minus cargo), so enter the
-// station menus rather than resuming flight - mirroring enter_flight. dock_player()
+// After the game-over animation. The server has respawned us DOCKED at the
+// nearest station (the G3 death rule, minus cargo), so enter the station menus
+// rather than resuming flight - mirroring enter_flight. dock_player()
 // re-confirms the dock with the server and resets our ship state; the replicated
-// snapshots (now at the station) drive the view when we launch. The degraded
-// single-player fallback has no server to respawn us, so it starts a fresh game.
+// snapshots (now at the station) drive the view when we launch.
 static void respawn_after_death(void)
 {
-  if (Client::ReplicationClientInstance().IsOpen())
-  {
-    game_over = 0;
-    // The server dropped our cargo on death; clear the local display to match (the
-    // authoritative hold is already empty server-side).
-    memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
-    dock_player();
-    display_commander_status();
-    s_state = GameState::Flight;
-  }
-  else
-  {
-    start_new_game();
-  }
+  game_over = 0;
+  // The server dropped our cargo on death; clear the local display to match (the
+  // authoritative hold is already empty server-side).
+  memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
+  dock_player();
+  display_commander_status();
+  s_state = GameState::Flight;
 }
 
 /*
@@ -1150,7 +948,6 @@ void display_break_pattern(void)
 
   if (docked)
   {
-    check_mission_brief();
     display_commander_status();
     update_console();
   }
@@ -1202,25 +999,82 @@ static void register_client_event_handlers(void)
     return;
   registered = true;
 
-  // Commerce: apply the authoritative station result to the local commander.
-  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  // Travel: the authoritative outcome of a hyperspace / in-system jump request.
+  // Position and fuel changes ride the snapshot stream and PlayerStatus; this
+  // drives the screen flow and the classic messages.
+  g_clientBus.Subscribe<Neuron::Msg::TravelResponse>([](const Neuron::Msg::TravelResponse& _t)
   {
     // A hyperspace jump (G7) arrives in FLIGHT near the destination, or misfires
     // into a witchspace ambush - either way, leave the station screen for space.
-    // The server owns our new position/fuel (they ride snapshots + PlayerStatus).
-    if (_resp.kind == Net::StationRequestKind::Teleport &&
-        (_resp.status == Net::StationStatus::Arrived || _resp.status == Net::StationStatus::Witchspace))
+    // The witchspace flag is mirrored for the HUD/UX guards (compass, market key).
+    if (_t.kind == Neuron::Msg::TravelKind::Hyperspace &&
+        (_t.status == Neuron::Msg::TravelStatus::Arrived || _t.status == Neuron::Msg::TravelStatus::Witchspace))
     {
+      witchspace = (_t.status == Neuron::Msg::TravelStatus::Witchspace) ? 1 : 0;
       docked = 0;
       current_screen = SCR_BREAK_PATTERN;
       snd_play_sample(SND_HYPERSPACE);
       return;
     }
 
+    if (_t.status == Neuron::Msg::TravelStatus::MassLocked)
+      info_message("Mass Locked");
+    else if (_t.status == Neuron::Msg::TravelStatus::NotEnoughFuel ||
+             _t.status == Neuron::Msg::TravelStatus::OutOfRange)
+      info_message("Out Of Fuel Range");
+  });
+
+  // Commerce: apply the authoritative station result to the local commander.
+  g_clientBus.Subscribe<Net::StationResponse>([](const Net::StationResponse& _resp)
+  {
     if (_resp.status != Net::StationStatus::Ok)
       return;
+
+    // The server confirmed a dock request: NOW the docked flow starts (the
+    // client never flips itself docked on a proximity guess - see request_dock).
+    if (_resp.kind == Net::StationRequestKind::Dock)
+    {
+      if (!docked)
+      {
+        docked = 1;
+        PlayerFlight().speed = 0;
+        PlayerFlight().roll = 0;
+        PlayerFlight().climb = 0;
+        PlayerCaps().altitude = 255;   // display defaults; vitals mirror PlayerStatus
+        PlayerCaps().cabTemp = 30;
+        reset_weapons();
+        g_missile_lock_target = 0xFFFFFFFFu;
+        snd_play_sample(SND_DOCK);
+        current_screen = SCR_BREAK_PATTERN;
+      }
+      cmdr.credits = _resp.credits;
+      return;
+    }
+
     cmdr.credits = _resp.credits;
-    if (_resp.commodity < NO_OF_STOCK_ITEMS)
+
+    // An equipment purchase confirmed: mirror the granted item's ownership (the
+    // server owns the fact; we only reflect its echoed result). Missiles and fuel
+    // ride PlayerStatus, so nothing to do for those here.
+    if (_resp.kind == Net::StationRequestKind::Equip)
+    {
+      switch (static_cast<Net::EquipItem>(_resp.commodity))
+      {
+        case Net::EquipItem::LargeCargoBay: cmdr.cargo_capacity = 35; break;
+        case Net::EquipItem::Ecm:           cmdr.ecm = 1;             break;
+        case Net::EquipItem::FuelScoop:     cmdr.fuel_scoop = 1;      break;
+        case Net::EquipItem::EnergyBomb:    cmdr.energy_bomb = 1;     break;
+        case Net::EquipItem::EscapePod:     cmdr.escape_pod = 1;      break;
+        case Net::EquipItem::Missile:       break;   // count rides PlayerStatus
+      }
+      return;
+    }
+
+    // Buy/Sell echo the affected commodity's resulting hold quantity. (Guard the
+    // kind: an Equip response reuses `commodity` for the EquipItem id, which would
+    // otherwise clobber a cargo slot of the same index.)
+    if ((_resp.kind == Net::StationRequestKind::Buy || _resp.kind == Net::StationRequestKind::Sell) &&
+        _resp.commodity < NO_OF_STOCK_ITEMS)
       cmdr.current_cargo[_resp.commodity] = _resp.cargo;
   });
 
@@ -1272,16 +1126,19 @@ static void register_client_event_handlers(void)
   {
     cmdr.credits = _ps.credits;
     cmdr.fuel = _ps.fuel;   // hyperspace tank (G7): server-owned, drives the fuel gauge
+    cmdr.missiles = _ps.missiles;   // rack count: server-owned (buy/launch/respawn)
     PlayerDefense().frontShield = _ps.frontShield;
     PlayerDefense().aftShield = _ps.aftShield;
     PlayerDefense().energy = _ps.energy;
     PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
   });
 
-  // ECM burst (G8): someone's unit fired - play the classic buzz. The downed
-  // missiles arrive as EntityDeath events (explosions) alongside.
+  // ECM burst (G8): someone's unit fired - play the classic buzz and light the
+  // E indicator (it counts down via time_ecm). The downed missiles arrive as
+  // EntityDeath events (explosions) alongside.
   g_clientBus.Subscribe<Neuron::Msg::EcmPulse>([](const Neuron::Msg::EcmPulse&)
   {
+    ecm_active = 32;
     snd_play_sample(SND_ECM);
   });
 
@@ -1359,6 +1216,7 @@ static void process_server_events(void)
   while (rc.PollEvent(msg))
   {
     Net::StationResponse resp;
+    Neuron::Msg::TravelResponse travel;
     Neuron::Msg::EntityDeath death;
     Neuron::Msg::EntityDespawn despawn;
     Neuron::Msg::PlayerInfo info;
@@ -1369,6 +1227,8 @@ static void process_server_events(void)
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
+    else if (Neuron::Msg::TryDecode(msg, travel))
+      g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))
       g_clientBus.Publish(death);
     else if (Neuron::Msg::TryDecode(msg, despawn))
@@ -1407,7 +1267,7 @@ static void send_player_input(void)
   const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
   const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
 
-  Net::ClientInput in;
+  Msg::InputCommand in;
   in.sequence = ++seq;
   // The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
   // whose handedness is the transpose of the world basis the server rotates and
@@ -1425,7 +1285,7 @@ static void send_player_input(void)
   register_client_event_handlers();
   s_frameFire = false;
   s_frameMissile = false;
-  s_frameMissileTarget = Net::NO_MISSILE_TARGET;
+  s_frameMissileTarget = Msg::NO_MISSILE_TARGET;
   s_frameEcm = false;
   s_frameEnergyBomb = false;
   s_frameEscapePod = false;
@@ -1440,12 +1300,38 @@ static void send_player_input(void)
 
   in.fire = s_frameFire;
   in.fireMissile = s_frameMissile;
-  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Net::NO_MISSILE_TARGET;
+  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Msg::NO_MISSILE_TARGET;
   in.ecm = s_frameEcm;
   in.energyBomb = s_frameEnergyBomb;
   in.escapePod = s_frameEscapePod;
 
   Client::ReplicationClientInstance().SendInput(in);
+}
+
+// The client's connection configuration (read once from the environment in
+// game_main) and the retry that keeps trying to (re)establish the socket if it
+// failed to open. There is no offline mode: the server owns the game.
+static uint16_t s_bindPort = 50000;
+static Net::Endpoint s_serverEndpoint;
+
+static void ensure_connection(void)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  if (rc.IsOpen())
+    return;
+
+  static int retryCountdown = 0;
+  if (retryCountdown-- > 0)
+    return;
+  retryCountdown = 120;   // retry roughly every 2 s at display rate
+
+  if (rc.Open(s_bindPort))
+  {
+    rc.SetServerEndpoint(s_serverEndpoint);
+    // The opening handshake (protocol version + commander name) rides the
+    // reliable Control lane, redelivered until the server accepts it.
+    rc.SendHello(Neuron::Msg::PROTOCOL_VERSION, cmdr.name);
+  }
 }
 
 // Per-frame logic for the in-flight/docked state: drain replicated state, advance sound,
@@ -1459,18 +1345,16 @@ static void game_update_flight(void)
     return;
   }
 
-  // Drain any replicated world state that arrived since last frame. This is a no-op
-  // until ReplicationClientInstance().Open() is called, so the single-player path is
-  // unchanged; once open, the client consumes the server's authoritative snapshots here
-  // instead of simulating locally.
+  // The server owns the game: keep the connection up (retries if the socket
+  // failed to open), then drain the replicated world state that arrived since
+  // last frame. Everything below no-ops harmlessly while disconnected; the
+  // render pass shows the connection-lost state instead of a world.
+  ensure_connection();
   Client::ReplicationClientInstance().Pump();
-  if (Client::ReplicationClientInstance().IsOpen())
-  {
-    process_server_events();
-    // Backstop: forget entities that silently left our area of interest (no despawn
-    // event is sent for those), so they don't pile up as ghosts. ~3s at 30 Hz.
-    Client::ReplicationClientInstance().EvictStale(90);
-  }
+  process_server_events();
+  // Backstop: forget entities that silently left our area of interest (no despawn
+  // event is sent for those), so they don't pile up as ghosts. ~3s at 30 Hz.
+  Client::ReplicationClientInstance().EvictStale(90);
 
   snd_update_sound();
 
@@ -1484,9 +1368,8 @@ static void game_update_flight(void)
 
   handle_flight_keys();
 
-  // In thin-client mode, the player's intent goes to the server.
-  if (Client::ReplicationClientInstance().IsOpen())
-    send_player_input();
+  // The player's intent goes to the server (no-op while disconnected).
+  send_player_input();
 
   if (message_count > 0)
     message_count--;
@@ -1539,6 +1422,18 @@ static void game_render_flight(void)
 
   if (!docked)
   {
+    // No offline mode: without a connection there is no world to render. Show
+    // the connection-lost state (ensure_connection keeps retrying) instead of
+    // simulated vitals.
+    if (!Client::ReplicationClientInstance().IsOpen())
+    {
+      gfx_clear_display();
+      int ch;
+      gfx_canvas_size(nullptr, &ch);
+      gfx_display_centre_text(ch / 2 - 10, "CONNECTION LOST - RECONNECTING", 140, GFX_COL_GOLD);
+      return;
+    }
+
     if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
       == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
     {
@@ -1546,19 +1441,8 @@ static void game_render_flight(void)
       update_starfield();
     }
 
-    if (auto_pilot)
-    {
-      auto_dock();
-      if ((mcount & 127) == 0)
-        info_message("Docking Computers On");
-    }
-
-    // In thin-client mode the server owns the world: render the replicated, interpolated
-    // state instead of simulating locally.
-    if (Client::ReplicationClientInstance().IsOpen())
-      render_replicated_objects();
-    else
-      update_local_objects();
+    // The server owns the world: render the replicated, interpolated state.
+    render_replicated_objects();
 
     if (docked)
     {
@@ -1581,23 +1465,13 @@ static void game_render_flight(void)
     if (message_count > 0)
       gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
 
-    if (hyper_ready)
-    {
-      display_hyper_status();
-      if ((mcount & 3) == 0)
-        countdown_hyperspace();
-    }
-
     mcount--;
     if (mcount < 0)
       mcount = 255;
 
-    // The server regenerates and replicates shields/energy in thin-client mode
-    // (see the PlayerStatus handler); only the degraded single-player fallback
-    // regenerates locally.
-    if ((mcount & 7) == 0 && !Client::ReplicationClientInstance().IsOpen())
-      regenerate_shields();
-
+    // Display-only upkeep: the energy-low warning and the altitude dial read the
+    // server-mirrored vitals and the replicated planet; the laser/ECM steps pace
+    // the beam visual and the E indicator. No game rule runs client-side.
     if ((mcount & 31) == 10)
     {
       if (PlayerDefense().energy < 50)
@@ -1608,12 +1482,6 @@ static void game_render_flight(void)
 
       update_altitude();
     }
-
-    if ((mcount & 31) == 20)
-      update_cabin_temp();
-
-    if ((mcount == 0) && (!witchspace))
-      random_encounter();
 
     cool_laser();
     time_ecm();
@@ -1720,31 +1588,25 @@ int game_main(void)
   // Server-only client: single-player has been retired, so we always connect to
   // the authoritative server and render its world. The bind port and server
   // address can be overridden with DSO_BIND / DSO_SERVER (dotted-quad host);
-  // they default to loopback for local play. The local-simulation path remains
-  // only as a degraded fallback if networking fails to initialise.
+  // they default to loopback for local play. If the socket fails to open,
+  // ensure_connection keeps retrying and the flight screen shows the
+  // connection-lost state - there is no offline simulation.
   {
-    Client::ReplicationClient& rc = Client::ReplicationClientInstance();
-
-    uint16_t bindPort = 50000;
     if (const char* b = getenv("DSO_BIND"))
-      bindPort = static_cast<uint16_t>(atoi(b));
+      s_bindPort = static_cast<uint16_t>(atoi(b));
 
     int a = 127, c = 0, d = 0, e = 1;
     if (const char* host = getenv("DSO_SERVER"))
       sscanf(host, "%d.%d.%d.%d", &a, &c, &d, &e);
 
-    rc.Open(bindPort);
-    rc.SetServerEndpoint(Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
-                                           static_cast<uint8_t>(e), 40000));
-    // Send the opening handshake with the player's commander name. It rides the
-    // reliable Control lane, so it is redelivered until the server (which connects
-    // the session on first input) accepts it; a blank name keeps the server default.
-    rc.SendHello(Neuron::Msg::PROTOCOL_VERSION, cmdr.name);
-    // LocalPlayer is set by the server's AssignPlayer handshake; default 0.
+    s_serverEndpoint = Net::MakeEndpoint(static_cast<uint8_t>(a), static_cast<uint8_t>(c), static_cast<uint8_t>(d),
+                                         static_cast<uint8_t>(e), 40000);
+    ensure_connection();
+    // LocalPlayer is learned from the server's HelloAck handshake reply; the
+    // sentinel (unassigned) holds until then.
   }
 
   finish = 0;
-  auto_pilot = 0;
 
   // The whole game now runs through the GameMain lifecycle: each gfx_update_screen()
   // drives ClientEngine::Frame() -> GameApp::Update/RenderScene -> game_update()/

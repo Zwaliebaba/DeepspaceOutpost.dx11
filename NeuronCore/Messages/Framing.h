@@ -3,10 +3,15 @@
 // Framing - the 'NMSG' wire envelope and length-prefixed records (NeuronCore).
 //
 // One envelope replaces the old per-schema magics. A packet is a magic + protocol
-// version + lane byte, followed by zero or more records, each a (MessageId,
-// payloadLength, payloadBytes) triple. The MANDATORY per-record length lets a
-// single reliable packet carry several messages and bounds each decoder to exactly
-// its own bytes (so a malformed message can't run a reader into the next record).
+// version + lane byte + session token, followed by zero or more records, each a
+// (MessageId, payloadLength, payloadBytes) triple. The MANDATORY per-record length
+// lets a single reliable packet carry several messages and bounds each decoder to
+// exactly its own bytes (so a malformed message can't run a reader into the next
+// record). The session token (B2) authenticates a client->server datagram: the
+// server keys sessions by token, not by endpoint, so a spoofed source address with
+// the wrong (or no) token is dropped before any decode, and a NAT rebind that
+// changes the source address heals silently. It is 0 (unauthenticated) on the
+// opening ClientHello and echoed on server->client packets.
 //
 // Mechanism only: this is the transport binding shared by client and server. The
 // reliable lanes (Control/Gameplay/Bulk) each carry their own packet stream over a
@@ -27,7 +32,8 @@
 namespace Neuron::Msg
 {
   inline constexpr uint32_t MESSAGE_MAGIC = 0x4E4D5347;   // 'NMSG'
-  inline constexpr uint16_t PROTOCOL_VERSION = 1;
+  inline constexpr uint16_t PROTOCOL_VERSION = 3;   // 2: session token after the lane byte (B2)
+                                                    // 3: playerId in HelloAck/PlayerInfo (C)
 
   // Read the leading magic of a datagram without consuming it (route by protocol).
   [[nodiscard]] inline uint32_t PeekMessageMagic(const uint8_t* _data, std::size_t _size)
@@ -44,11 +50,17 @@ namespace Neuron::Msg
   class PacketWriter
   {
   public:
-    explicit PacketWriter(MessageLane _lane)
+    // `_token` is the sender's session token (B2). A client stamps the token it
+    // learned from HelloAck; it is 0 on the pre-handshake ClientHello and on
+    // server->client packets (the client authenticates the server by address, not
+    // token). The server drops a client datagram whose token doesn't match a live
+    // session before decoding it.
+    explicit PacketWriter(MessageLane _lane, uint64_t _token = 0)
     {
       m_w.WriteU32(MESSAGE_MAGIC);
       m_w.WriteU16(PROTOCOL_VERSION);
       m_w.WriteU8(static_cast<uint8_t>(_lane));
+      m_w.WriteU64(_token);
     }
 
     template <Message M>
@@ -78,6 +90,7 @@ namespace Neuron::Msg
   struct PacketHeader
   {
     MessageLane lane = MessageLane::Unreliable;
+    uint64_t token = 0;   // sender's session token (B2); 0 = unauthenticated
   };
 
   // Parse a packet into its header and records. Returns false on a foreign/old/
@@ -92,8 +105,9 @@ namespace Neuron::Msg
     if (r.ReadU16() != PROTOCOL_VERSION)
       return false;
     _hdr.lane = static_cast<MessageLane>(r.ReadU8());
+    _hdr.token = r.ReadU64();
     if (!r.Ok())
-      return false;
+      return false;   // truncated header (e.g. a short/garbage token field) -> drop
 
     _out.clear();
     while (r.Remaining() > 0)

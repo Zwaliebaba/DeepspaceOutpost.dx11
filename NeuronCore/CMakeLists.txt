@@ -19,6 +19,7 @@ set(NEURONCORE_HEADERS
     NeuronCore.h
     EventManager.h
     ECS.h
+    OwnershipIndex.h
     Vector3i64.h
     Vector3d.h
     SpatialGrid.h
@@ -26,10 +27,8 @@ set(NEURONCORE_HEADERS
     DataReader.h
     Replication.h
     SnapshotPacketizer.h
-    SnapshotReceiver.h
     SnapshotInterpolator.h
     ReliableChannel.h
-    ClientInput.h
     StationProtocol.h
     NetLib.h
     Debug.h
@@ -55,6 +54,17 @@ set(NEURONCORE_HEADERS
     Messages/Defs/InputCommand.h
     Messages/Defs/CoreEvents.h
     Messages/Defs/InputActions.h
+    Messages/Defs/PlayerSession.h
+    Messages/Defs/EquipmentEvents.h
+    Messages/Defs/Travel.h
+    Messages/Defs/GalaxyChunks.h
+    Messages/Defs/TimeSync.h
+    Messages/Defs/Strategic.h
+    LatencyEstimate.h
+    Quantization.h
+    SnapshotDelta.h
+    SnapshotStream.h
+    SnapshotBudget.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

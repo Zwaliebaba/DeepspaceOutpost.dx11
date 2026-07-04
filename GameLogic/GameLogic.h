@@ -13,6 +13,8 @@
 #include "ECS.h"
 
 #include "SimComponents.h"
+#include "Broadphase.h"
+#include "FrameScratch.h"
 #include "MotionSystem.h"
 #include "FlightInput.h"
 #include "FlightSystem.h"
@@ -24,6 +26,7 @@
 #include "AreaOfInterest.h"
 #include "DespawnTracker.h"
 #include "ServerSessions.h"
+#include "TransformHistory.h"
 #include "CombatSystem.h"
 #include "MissileSystem.h"
 #include "AiSystem.h"
@@ -35,6 +38,7 @@
 #include "HyperspaceSystem.h"
 #include "EquipmentSystem.h"
 #include "CombatMessages.h"
+#include "StrategicView.h"   // E3: per-system strategic rollup (SummarizeStrategic)
 
 namespace Neuron::GameLogic
 {

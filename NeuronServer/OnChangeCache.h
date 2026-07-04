@@ -42,6 +42,11 @@ namespace Neuron::Server
       return true;
     }
 
+    // Forget one key's cached value, so the next `Changed()` for it returns true
+    // (a forced resend - e.g. a reconnecting client must be re-sent its state even
+    // though it hasn't changed on the server).
+    void Forget(const Key& _key) { m_last.erase(_key); }
+
     // Drop every entry whose key fails `_keep(key)` (e.g. a reaped session).
     template <typename Keep>
     void Prune(Keep&& _keep)

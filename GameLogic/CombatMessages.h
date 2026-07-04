@@ -14,7 +14,7 @@
 // half): EntityKilled drives the server's death handling, which broadcasts the
 // catalog wire EntityDeath (Messages/Defs/CoreEvents.h) to clients. FireWeapon is
 // the command the client will eventually send; in Phase 1 the server synthesises it
-// from ClientInput so the same resolution path serves both today and tomorrow.
+// from InputCommand so the same resolution path serves both today and tomorrow.
 //
 // Header-only and server-only (GameLogic): it builds on the header-only Msg
 // mechanism in NeuronCore and the existing combat systems; the client links none
@@ -58,7 +58,7 @@ namespace Neuron::GameLogic
   };
 
   // A request to fire a weapon. In Phase 1 the server publishes this from a
-  // client's ClientInput; later it becomes the wire command the client sends.
+  // client's InputCommand; later it becomes the wire command the client sends.
   struct FireWeapon
   {
     static constexpr Msg::MessageId    Id    = static_cast<Msg::MessageId>(CombatMsgId::FireWeapon);
@@ -178,8 +178,15 @@ namespace Neuron::GameLogic
   // dispatch, death broadcast and logging live in the bus subscribers (server side).
   //
   // Combat geometry is delegated unchanged to ResolvePlayerFire / SpawnMissile.
+  //
+  // Lag compensation (E1): `_history` + `_ticksBack` are forwarded to the laser
+  // hit test so it rewinds targets to where the shooter saw them; null (the
+  // default) leaves the un-compensated behaviour, so existing callers/tests are
+  // unchanged. Only the instant laser is compensated - a missile is a homing
+  // projectile resolved over subsequent ticks, not an instant hit.
   inline void ResolveFireWeapon(ECS::Registry& _world, Msg::MessageBus& _bus,
-                                const FireWeapon& _fw, int64_t _fireRange, double _aimCone)
+                                const FireWeapon& _fw, int64_t _fireRange, double _aimCone,
+                                const TransformHistory* _history = nullptr, uint32_t _ticksBack = 0)
   {
     if (!_world.IsValid(_fw.shooter))
       return;
@@ -192,7 +199,7 @@ namespace Neuron::GameLogic
         // laser and sips the energy bank (legacy fire_laser) whether it hits or not.
         if (!SpendLaserShot(_world, _fw.shooter))
           return;
-        const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone);
+        const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone, _history, _ticksBack);
         if (!shot.hit)
           return;
         FlagIfCrime(_world, _bus, _fw.shooter, shot.target, shot.targetTeam);

@@ -25,15 +25,31 @@ TEST(PlayerSession, ClientHelloRoundTrips)
 TEST(PlayerSession, PlayerInfoRoundTrips)
 {
   PlayerInfo in;
+  in.playerId = 7;   // the C identity key: player, not hull
   in.entityId = 42;
   in.name = "Trader Jane";
   in.wantedLevel = 3;
 
   PlayerInfo out;
   ASSERT_TRUE(Decode(Encode(in), out));
+  EXPECT_EQ(out.playerId, 7u);
   EXPECT_EQ(out.entityId, 42u);
   EXPECT_EQ(out.name, "Trader Jane");
   EXPECT_EQ(out.wantedLevel, 3);
+}
+
+TEST(PlayerSession, HelloAckRoundTripsIdentityAndToken)
+{
+  HelloAck in;
+  in.sessionToken = 0xA1B2C3D4E5F60708ull;
+  in.playerId = 12;
+  in.entityId = 99;
+  in.protocolVersion = PROTOCOL_VERSION;
+
+  HelloAck out;
+  ASSERT_TRUE(Decode(Encode(in), out));
+  EXPECT_TRUE(in.Fields() == out.Fields());   // every field preserved
+  EXPECT_EQ(out.playerId, 12u);
 }
 
 TEST(PlayerSession, PlayerStatusRoundTripsAllFields)

@@ -8,9 +8,12 @@
 add_executable(GameLogic.Tests
     AiSystemTests.cpp
     AreaOfInterestTests.cpp
+    BroadphaseEquivalenceTests.cpp
+    FrameScratchTests.cpp
     CombatSystemTests.cpp
     CombatMessagesTests.cpp
     CombatTests.cpp
+    LagCompensationTests.cpp
     CollisionSystemTests.cpp
     KillRewardsTests.cpp
     LootSystemTests.cpp
@@ -29,6 +32,7 @@ add_executable(GameLogic.Tests
     StationServicesTests.cpp
     ReplicationTests.cpp
     GalaxyManifestTests.cpp
+    StrategicTests.cpp
 )
 
 target_compile_features(GameLogic.Tests PRIVATE cxx_std_23)

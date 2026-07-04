@@ -102,6 +102,25 @@ TEST(MessageEndpoint, ForeignDatagramRejected)
   EXPECT_FALSE(ep.OnDatagram(foreign.data(), foreign.size()));
 }
 
+TEST(MessageEndpoint, SessionTokenIsCarriedAndPeekable)
+{
+  // The session token (B2) rides the reliable header and is readable without
+  // routing the datagram (the server authenticates by it before delivery).
+  Msg::MessageEndpoint ep;
+  ep.SetToken(0xABCDEF0123456789ull);
+  ep.Send(Msg::EntityDeath{ 1, 2 });
+
+  const std::vector<std::vector<uint8_t>> dgs = ep.WriteDatagrams();
+  ASSERT_FALSE(dgs.empty());
+  EXPECT_EQ(Msg::PeekReliableToken(dgs[0].data(), dgs[0].size()), 0xABCDEF0123456789ull);
+
+  // A datagram truncated inside the token field has no readable token and is
+  // rejected (no over-read).
+  Msg::MessageEndpoint sink;
+  EXPECT_EQ(Msg::PeekReliableToken(dgs[0].data(), 6), 0u);
+  EXPECT_FALSE(sink.OnDatagram(dgs[0].data(), 6));
+}
+
 TEST(MessageEndpoint, SurvivesLossOnTheBulkLane)
 {
   // The bulk lane drops every other datagram; resends still get the payload through,

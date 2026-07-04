@@ -33,6 +33,7 @@
 // Pure apart from the world it mutates; returns the kills for the caller's death
 // pipeline. Unit-tested headlessly.
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
@@ -43,6 +44,8 @@
 #include "SimComponents.h"     // WorldTransform, NetType, ShipType
 #include "CombatSystem.h"      // Combatant, Team, Kill, ApplyDamage
 #include "StationServices.h"   // DockState
+#include "Broadphase.h"        // BROADPHASE_CELL + the sorted-candidates discipline (D1)
+#include "FrameScratch.h"      // CollisionUnit + persistent scratch storage (D2)
 
 namespace Neuron::GameLogic
 {
@@ -71,24 +74,23 @@ namespace Neuron::GameLogic
   // Advance collision resolution one tick: grind overlapping hulls, crash ships
   // against station hulls, and kill anything inside a planet. Returns the kills
   // (each victim reported once); the caller feeds them to the death pipeline.
-  [[nodiscard]] inline std::vector<Kill> StepCollisions(ECS::Registry& _world)
+  // `_candidatePairs` (optional) accumulates how many narrowed pairs the exact
+  // test actually ran on - the D3 metrics counter that validates the D1 grid.
+  // `_scratch` (D2) is reusable per-tick working storage; the default lets every
+  // existing call site (tests) omit it - see FrameScratch.h.
+  [[nodiscard]] inline std::vector<Kill> StepCollisions(ECS::Registry& _world,
+                                                        uint64_t* _candidatePairs = nullptr,
+                                                        FrameScratch& _scratch = Detail::DefaultScratch())
   {
-    struct Unit
-    {
-      ECS::EntityId id;
-      Math::Vector3i64 pos;
-      Combatant* c;
-      bool station;
-    };
-
     // Everything with a hull that is actually out in space (docked = inside).
-    std::vector<Unit> units;
+    std::vector<CollisionUnit>& units = _scratch.collisionUnits;
+    units.clear();
     _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
     {
       const DockState* dock = _world.TryGet<DockState>(_id);
       if (dock != nullptr && dock->docked)
         return;
-      units.push_back(Unit{ _id, _t.position, &_c, _c.team == Team::Station });
+      units.push_back(CollisionUnit{ _id, _t.position, &_c, _c.team == Team::Station });
     });
 
     auto within = [](const Math::Vector3i64& _a, const Math::Vector3i64& _b, int64_t _range) -> bool
@@ -100,27 +102,45 @@ namespace Neuron::GameLogic
     };
 
     std::vector<Kill> kills;
-    std::unordered_set<uint32_t> dead;   // each victim reported once
+    std::unordered_set<uint32_t>& dead = _scratch.collisionDead;   // each victim reported once
+    dead.clear();
     auto report = [&kills, &dead](ECS::EntityId _victim, uint32_t _killer)
     {
       if (dead.insert(_victim.index).second)
         kills.push_back(Kill{ _victim, _killer });
     };
 
-    // Ship <-> ship and ship <-> station, over all pairs (fleet sizes are small).
+    // Ship <-> ship and ship <-> station. The grid narrows each unit's partners to
+    // its +/-1-cell neighbourhood (cell >= both contact ranges, so nothing in range
+    // is ever missed); iterating the sorted j > i candidates reproduces the exact
+    // pair order of the old full i<j sweep, so outcomes are bit-identical.
+    Spatial::Grid& grid = _scratch.collisionGrid;
+    grid.Clear();
     for (std::size_t i = 0; i < units.size(); ++i)
-      for (std::size_t j = i + 1; j < units.size(); ++j)
+      grid.Insert(i, units[i].pos);
+
+    std::vector<uint64_t>& nearby = _scratch.collisionNearby;
+    for (std::size_t i = 0; i < units.size(); ++i)
+    {
+      QuerySortedNeighbours(grid, units[i].pos, 1, nearby);
+      for (const uint64_t jj : nearby)
       {
-        Unit& a = units[i];
-        Unit& b = units[j];
+        if (jj <= i)
+          continue;   // each pair once, in ascending (i, j) order
+        const std::size_t j = static_cast<std::size_t>(jj);
+        if (_candidatePairs != nullptr)
+          ++*_candidatePairs;
+
+        CollisionUnit& a = units[i];
+        CollisionUnit& b = units[j];
         if (a.station && b.station)
           continue;
 
         if (a.station || b.station)
         {
           // A ship scraping the station hull: the ship alone takes the damage.
-          Unit& ship = a.station ? b : a;
-          const Unit& hull = a.station ? a : b;
+          CollisionUnit& ship = a.station ? b : a;
+          const CollisionUnit& hull = a.station ? a : b;
           if (!within(ship.pos, hull.pos, STATION_CONTACT_RANGE))
             continue;
           if (ship.c->invulnTicks > 0 || dead.count(ship.id.index) != 0)
@@ -142,20 +162,23 @@ namespace Neuron::GameLogic
           if (ApplyDamage(_world, b.id, SHIP_RAM_DAMAGE, a.pos))
             report(b.id, a.id.index);
       }
+    }
 
-    // Ship <-> planet: no damage model, just death (legacy altitude-zero rule).
-    std::vector<Unit> planets;
+    // Ship <-> planet: linear over the planets (a handful of landmarks per
+    // system), not gridded - O(units x planets) with a tiny planet count.
+    std::vector<CollisionUnit>& planets = _scratch.collisionPlanets;
+    planets.clear();
     _world.Each<WorldTransform, NetType>([&planets](ECS::EntityId _id, WorldTransform& _t, NetType& _nt)
     {
       if (_nt.type == ShipType::Planet)
-        planets.push_back(Unit{ _id, _t.position, nullptr, false });
+        planets.push_back(CollisionUnit{ _id, _t.position, nullptr, false });
     });
     if (!planets.empty())
-      for (Unit& u : units)
+      for (CollisionUnit& u : units)
       {
         if (u.station || u.c->invulnTicks > 0 || dead.count(u.id.index) != 0)
           continue;
-        for (const Unit& p : planets)
+        for (const CollisionUnit& p : planets)
           if (within(u.pos, p.pos, PLANET_KILL_RADIUS))
           {
             u.c->energy = 0;

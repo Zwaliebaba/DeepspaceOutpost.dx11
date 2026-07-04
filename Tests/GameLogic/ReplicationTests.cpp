@@ -7,6 +7,22 @@
 
 using namespace Neuron;
 
+namespace
+{
+  // Test-local full-world builder over MakeEntitySnapshot. The server itself
+  // only ever sends per-viewer AOI snapshots (AreaOfInterest::SnapshotFor).
+  Net::WorldSnapshot BuildWorldSnapshot(ECS::Registry& _world, uint32_t _tick)
+  {
+    Net::WorldSnapshot snap;
+    snap.tick = _tick;
+    _world.Each<GameLogic::WorldTransform>([&_world, &snap](ECS::EntityId _id, GameLogic::WorldTransform& _t)
+    {
+      snap.entities.push_back(GameLogic::MakeEntitySnapshot(_world, _id, _t));
+    });
+    return snap;
+  }
+}
+
 TEST(Wire, ScalarsRoundTripLittleEndian)
 {
   Net::DataWriter w;
@@ -113,7 +129,7 @@ TEST(Replication, BuildSnapshotReadsAuthoritativeComponents)
   world.Add<GameLogic::WorldTransform>(b, GameLogic::WorldTransform{ { -7, 0, 0 } });
   // b has no Flight -> default facing, speed 0
 
-  Net::WorldSnapshot snap = GameLogic::BuildWorldSnapshot(world, 5);
+  Net::WorldSnapshot snap = BuildWorldSnapshot(world, 5);
   EXPECT_TRUE(snap.tick == 5);
   EXPECT_TRUE(snap.entities.size() == 2);
 

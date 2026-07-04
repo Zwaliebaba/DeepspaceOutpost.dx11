@@ -346,59 +346,31 @@ TEST(Station, ProcessEquipNeedsDocking)
   EXPECT_TRUE(w.Get<GameLogic::Equipment>(p).fuelScoop);
 }
 
-TEST(Station, TeleportJumpsToTheDestinationStation)
+TEST(Station, TravelKindsAreNotStationServices)
 {
+  // Teleport (the fuel-gated hyperspace jump) and JumpDrive are intercepted by
+  // the server loop and routed through HyperspaceSystem; if one ever reaches
+  // the station dispatcher it must be rejected, never acted on.
   ECS::Registry w;
   ECS::EntityId s0 = SpawnSystemStation(w, /*system*/ 0, 0, 0, 0);
-  ECS::EntityId s1 = SpawnSystemStation(w, /*system*/ 1, 5'000'000, 0, 0);
+  SpawnSystemStation(w, /*system*/ 1, 5'000'000, 0, 0);
   ECS::EntityId p = SpawnTrader(w, 0, 1000);
 
   Net::StationRequest dock;
   dock.kind = Net::StationRequestKind::Dock;
   (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
   EXPECT_TRUE(w.Get<GameLogic::DockState>(p).docked);
-  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == s0.index);
 
-  Net::StationRequest tp;
-  tp.kind = Net::StationRequestKind::Teleport;
-  tp.stationId = 1;   // target system id
-  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
-
-  EXPECT_TRUE(r.status == Net::StationStatus::Ok);
-  EXPECT_TRUE((w.Get<GameLogic::WorldTransform>(p).position == Math::Vector3i64{ 5'000'000, 0, 0 }));
-  EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == s1.index);   // now docked at the destination
-}
-
-TEST(Station, TeleportRequiresBeingDocked)
-{
-  ECS::Registry w;
-  SpawnSystemStation(w, 0, 0, 0, 0);
-  SpawnSystemStation(w, 1, 5'000'000, 0, 0);
-  ECS::EntityId p = SpawnTrader(w, 0, 1000);   // not docked
-
-  Net::StationRequest tp;
-  tp.kind = Net::StationRequestKind::Teleport;
-  tp.stationId = 1;
-  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
-  EXPECT_TRUE(r.status == Net::StationStatus::NotDocked);
-  EXPECT_TRUE((w.Get<GameLogic::WorldTransform>(p).position == Math::Vector3i64{ 0, 0, 0 }));   // did not move
-}
-
-TEST(Station, TeleportToUnknownSystemFails)
-{
-  ECS::Registry w;
-  SpawnSystemStation(w, 0, 0, 0, 0);
-  ECS::EntityId p = SpawnTrader(w, 0, 1000);
-
-  Net::StationRequest dock;
-  dock.kind = Net::StationRequestKind::Dock;
-  (void)GameLogic::ProcessStationRequest(w, p, 5000, dock);
-
-  Net::StationRequest tp;
-  tp.kind = Net::StationRequestKind::Teleport;
-  tp.stationId = 999;   // no such system
-  Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
-  EXPECT_TRUE(r.status == Net::StationStatus::CantDock);
+  for (const Net::StationRequestKind kind : { Net::StationRequestKind::Teleport, Net::StationRequestKind::JumpDrive })
+  {
+    Net::StationRequest tp;
+    tp.kind = kind;
+    tp.stationId = 1;
+    Net::StationResponse r = GameLogic::ProcessStationRequest(w, p, 5000, tp);
+    EXPECT_TRUE(r.status == Net::StationStatus::BadCommodity);
+    EXPECT_TRUE((w.Get<GameLogic::WorldTransform>(p).position == Math::Vector3i64{ 0, 0, 0 }));   // did not move
+    EXPECT_TRUE(w.Get<GameLogic::DockState>(p).stationId == s0.index);                            // still docked here
+  }
 }
 
 TEST(Station, ProcessUndock)

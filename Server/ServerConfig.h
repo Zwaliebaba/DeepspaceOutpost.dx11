@@ -17,7 +17,13 @@ namespace DSOServer::Cfg
 
   inline constexpr int64_t AOI_CELL_SIZE = 100000;          // interest-management cell size
   inline constexpr int AOI_RADIUS_CELLS = 1;                // viewers see +/- 1 cell
-  inline constexpr uint32_t SESSION_TIMEOUT_TICKS = 300;    // reap a client idle this long (~10s)
+  inline constexpr uint32_t SESSION_TIMEOUT_TICKS = 300;    // reap a pending (pre-hello) shell idle this long (~10s)
+  inline constexpr uint32_t SESSION_GRACE_TICKS = 1800;     // keep an AUTHENTICATED session alive this long on silence (~60s) for reconnect (B3)
+  inline constexpr uint32_t SESSION_PARK_TICKS = 45;        // after this much silence, safe-park a live ship (zero its intent) (~1.5s) (B3)
+  inline constexpr uint32_t PERSIST_INTERVAL = 150;        // snapshot live players to the store this often (~5s) (B4)
+  inline constexpr uint64_t METRICS_WINDOW_TICKS = 150;    // emit a tick-metrics summary line this often (~5s) (D3)
+  inline constexpr uint32_t STRATEGIC_INTERVAL = 30;       // send each viewer a strategic per-system rollup this often (~1s) (E3)
+  inline constexpr int TICK_MAX_CATCHUP = 5;               // max catch-up ticks per loop pump before declaring overrun (D3)
 
   inline constexpr int64_t DOCK_RANGE = 5000;               // how close a player must be to dock
   inline constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach

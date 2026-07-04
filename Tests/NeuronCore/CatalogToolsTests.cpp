@@ -12,8 +12,8 @@ using namespace MsgTest;
 TEST(CatalogTools, ExportListsEntriesSortedById)
 {
   Msg::MessageRegistry reg;
-  reg.Add<Pong>("Pong");         // 0x0102
-  reg.Add<Kitchen>("Kitchen");   // 0x0101
+  reg.Add<MsgTest::Pong>("Pong");   // 0x0102 (qualify: Neuron::Msg::Pong now also exists, E1)
+  reg.Add<Kitchen>("Kitchen");      // 0x0101
 
   const std::string text = Msg::ExportCatalogText(reg);
   const std::string::size_type kpos = text.find("Kitchen");
@@ -29,13 +29,13 @@ TEST(CatalogTools, ExportListsEntriesSortedById)
 TEST(CatalogTools, DiffDetectsAddedRemovedChanged)
 {
   Msg::MessageRegistry oldReg;
-  oldReg.Add<Kitchen>("Kitchen");   // 0x0101
-  oldReg.Add<Pong>("Pong");         // 0x0102
-  oldReg.Add<TickEv>("TickEv");     // 0x8001
+  oldReg.Add<Kitchen>("Kitchen");        // 0x0101
+  oldReg.Add<MsgTest::Pong>("Pong");     // 0x0102
+  oldReg.Add<TickEv>("TickEv");          // 0x8001
 
   Msg::MessageRegistry newReg;
-  newReg.Add<Kitchen>("Kitchen");        // unchanged
-  newReg.Add<Pong>("PongRenamed");       // same id, new name -> changed
+  newReg.Add<Kitchen>("Kitchen");            // unchanged
+  newReg.Add<MsgTest::Pong>("PongRenamed");  // same id, new name -> changed
   newReg.Add<CtrlMsg>("CtrlMsg");        // 0x0002 -> added
 
   const Msg::CatalogDiff d = Msg::DiffCatalogs(oldReg, newReg);
@@ -44,7 +44,7 @@ TEST(CatalogTools, DiffDetectsAddedRemovedChanged)
   ASSERT_EQ(d.removed.size(), 1u);
   EXPECT_TRUE(d.removed[0] == TickEv::Id);
   ASSERT_EQ(d.changed.size(), 1u);
-  EXPECT_TRUE(d.changed[0] == Pong::Id);
+  EXPECT_TRUE(d.changed[0] == MsgTest::Pong::Id);
   EXPECT_FALSE(d.Empty());
   EXPECT_NE(Msg::FormatDiff(d).find("0x0002"), std::string::npos);
 }

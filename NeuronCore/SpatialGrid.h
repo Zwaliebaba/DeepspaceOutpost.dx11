@@ -100,6 +100,12 @@ namespace Neuron::Spatial
 
     [[nodiscard]] std::size_t OccupiedCellCount() const { return m_cells.size(); }
 
+    // Empty every cell WITHOUT discarding the outer map's bucket array (D2): a
+    // caller that rebuilds the grid every tick (AreaOfInterest::Rebuild) can
+    // clear-then-reinsert instead of replacing the whole Grid object, so the
+    // allocator isn't churned every tick just to re-grow back to the same size.
+    void Clear() { m_cells.clear(); }
+
   private:
     // Floor division so negative coordinates map to the correct cell
     // (e.g. -1 with cell size 100 is cell -1, not 0).

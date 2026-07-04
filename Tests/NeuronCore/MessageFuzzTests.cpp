@@ -62,6 +62,7 @@ TEST(MessageFuzz, OverlongRecordLengthRejected)
   w.WriteU32(Msg::MESSAGE_MAGIC);
   w.WriteU16(Msg::PROTOCOL_VERSION);
   w.WriteU8(static_cast<uint8_t>(Msg::MessageLane::Gameplay));
+  w.WriteU64(0);          // session token (B2) - header well-formed up to the record
   w.WriteU16(0x0201);     // EntityDeath id
   w.WriteU16(60000);      // claims 60000 bytes that aren't there
   w.WriteU8(1);

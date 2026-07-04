@@ -104,14 +104,17 @@ namespace Neuron::GameLogic
   // of being jammed: it dies as a kill credited to the defender (so its pop shows
   // on every client) and the defender's index is appended to `_ecmPulses` so the
   // server can broadcast the classic ECM cue. `_rng` is a caller-owned
-  // deterministic stream.
+  // deterministic stream. `_scratch` (D2) is reusable per-tick working storage;
+  // the default lets every existing call site (tests) omit it.
   [[nodiscard]] inline std::vector<Kill> StepMissiles(ECS::Registry& _world, uint32_t& _rng,
-                                                      std::vector<uint32_t>& _ecmPulses)
+                                                      std::vector<uint32_t>& _ecmPulses,
+                                                      FrameScratch& _scratch = Detail::DefaultScratch())
   {
     std::vector<Kill> kills;
 
     // Snapshot the live missile ids first, since we Destroy() as we go.
-    std::vector<ECS::EntityId> missiles;
+    std::vector<ECS::EntityId>& missiles = _scratch.missileIds;
+    missiles.clear();
     _world.Each<Missile, WorldTransform>([&missiles](ECS::EntityId _id, Missile&, WorldTransform&)
     {
       missiles.push_back(_id);
