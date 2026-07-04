@@ -12,23 +12,24 @@
 
 #include "Mesh.h"
 #include "ModelDraw.h"        // Neuron::Render::ModelDraw
-#include "SceneProjection.h"  // Neuron::Client::Matrix4 / ViewMetrics
+#include "Camera.h"           // Neuron::Client::Camera - the view + projection source
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the
 // CPU-projected flight scene. Where the legacy path projected each ship's vertices on
 // the CPU and depth-sorted flat 2D polygons (painter's algorithm), Scene3D uploads each
-// ship type's geometry once into an immutable vertex/index buffer and draws it with a
-// real perspective matrix + hardware depth buffer.
+// ship type's geometry once into an immutable vertex/index buffer and draws it with the
+// Camera's view + projection matrices and the hardware depth buffer.
 //
 // Sibling to Render2D (same all-static lifetime, same GraphicsCore device + back buffer
 // and the depth buffer alongside it), but a genuinely separate pipeline: a 3-component
 // position + normal vertex, a perspective/model constant buffer, and depth-test +
 // (currently) cull-off state - none of which fit Render2D's strict-2D contract.
 //
-// The scene is fed through the render seam: the sim records ModelDraw commands (camera-
-// space transform, no D3D), and the client replays them here (see gfx2d's scene marker).
-// Mesh geometry is provided by the game layer through a callback (it owns the ship
-// tables), so this renderer carries no game-specific data.
+// The scene is fed through the render seam: the game submits ModelDraw commands in the
+// WORLD frame (floating-origin-relative position + world basis, no D3D); RenderModels
+// composes model * View() * Projection() per draw. Mesh geometry is provided by the
+// game layer through a callback (it owns the ship tables), so this renderer carries no
+// game-specific data.
 
 namespace Neuron::Graphics
 {
@@ -49,43 +50,27 @@ namespace Neuron::Graphics
       // unaffected. The game toggles this from its "Ship Shading" setting.
       static void SetLightingEnabled(bool _enabled) { s_lit = _enabled; }
 
-      // Opt-in procedural skybox (star migration): a gradient + procedural-star background
-      // drawn behind the scene, replacing the black clear. Off by default (behaviour
-      // unchanged). NOTE: when on it fills the scene viewport, so it currently occludes the
-      // legacy 2D starfield - the 3D "dust" that replaces that starfield is the next step.
-      static void SetSkyboxEnabled(bool _enabled) { s_skybox = _enabled; }
-      static bool IsSkyboxEnabled() { return s_skybox; }
-
-      // Camera->world rotation for the skybox (star migration): a row-major 3x3 (9 floats)
-      // the game accumulates from the player's roll/pitch and the per-view look direction, so
-      // the cubemap stays fixed in the world while the ship turns. Identity looks down +Z.
-      static void SetSkyboxOrientation(const float _rot3x3[9])
-      {
-        for (int i = 0; i < 9; ++i)
-          s_skyRot[i] = _rot3x3[i];
-      }
-
-      // Dust points for this frame (star migration): the streaming starfield rendered in the
-      // scene pass over the skybox instead of the legacy 2D batch. The game projects the stars
-      // with the scene optics and hands over small clip-space quads (6 verts each); Scene3D
-      // draws them - but only when the skybox is enabled (otherwise the legacy 2D starfield
-      // still shows). One vertex = clip-space XY + brightness.
+      // Dust points for this frame: the streaming starfield rendered in the scene pass (behind
+      // the ships) instead of the legacy 2D batch. The game projects the stars with the scene
+      // optics and hands over small clip-space quads (6 verts each); Scene3D draws them every
+      // frame as the background. One vertex = clip-space XY + brightness.
       struct DustVertex { float x, y, bright; };
       static void SetDust(const DustVertex* _pts, int _count);
 
-      // Submit one camera-space model (ship / planet / sun) for this frame's scene pass. The
+      // Submit one WORLD-frame model (ship / planet / sun) for this frame's scene pass. The
       // game's draw pass calls this directly - the successor to routing ModelDraws through the
       // RenderQueue -> GfxRenderSink -> gfx2d round-trip. Accumulated into s_models, consumed
       // and cleared by RenderModels (mirrors how SetDust feeds the dust pass).
       static void SubmitModel(const Neuron::Render::ModelDraw& _model);
 
       // Render this frame's submitted models (SubmitModel) to _rtv with depth-testing against
-      // _dsv. The projection comes from _view (the live flight optics); the scene is placed in
-      // the letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target pixels - the same rect the
-      // 2D batch uses, so 3D and HUD align. Clears DEPTH only (the colour target already holds
-      // the 2D background) and clears s_models. A no-op if the device/resources are unavailable.
+      // _dsv. The view + projection come from _camera (Camera::View() / Projection()); the
+      // scene is placed in the letterbox content rect (_vpX, _vpY, _vpW, _vpH) in target
+      // pixels - the same rect the 2D batch uses, so 3D and HUD align. Clears DEPTH only (the
+      // colour target already holds the 2D background) and clears s_models. A no-op if the
+      // device/resources are unavailable.
       static void RenderModels(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
-                               const Neuron::Client::ViewMetrics& _view, int _vpX, int _vpY, int _vpW, int _vpH);
+                               Neuron::Client::Camera& _camera, int _vpX, int _vpY, int _vpW, int _vpH);
 
     private:
       struct GpuMesh
@@ -100,16 +85,13 @@ namespace Neuron::Graphics
       // return a mesh with indexCount == 0 (cached "no geometry") - callers skip those.
       static const GpuMesh* MeshForType(int _type);
 
-      // Render one camera-space planet/sun billboard (a depth-tested quad) for a
-      // SHIP_PLANET / SHIP_SUN model. Shares the depth/cull/blend state with the ship
-      // pass; uses the billboard shader + a per-billboard params buffer.
-      static void renderBillboard(const Neuron::Render::ModelDraw& _model, const Neuron::Client::Matrix4& _proj);
+      // Render one sun billboard (a depth-tested camera-facing quad) for a SHIP_SUN
+      // model. The world-frame centre is view-transformed here; the quad itself is
+      // built in camera space and drawn with the projection alone. Shares the
+      // depth/cull/blend state with the ship pass.
+      static void renderBillboard(const Neuron::Render::ModelDraw& _model);
 
-      // Draw the procedural skybox background (full-screen, depth-disabled) at the start of
-      // the scene pass, before the depth-tested ships.
-      static void renderSkybox();
-
-      // Draw this frame's dust quads (SetDust) over the skybox, behind the ships.
+      // Draw this frame's dust quads (SetDust) as the background, behind the depth-tested ships.
       static void renderDust();
 
       inline static winrt::com_ptr<ID3D11VertexShader> s_vs;
@@ -127,31 +109,24 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11PixelShader> s_bbPs;
       inline static winrt::com_ptr<ID3D11Buffer> s_bbVb;
       inline static winrt::com_ptr<ID3D11Buffer> s_bbParamsCb;
-      // Procedural skybox program (star migration) + its b0 params. No vertex buffer -
-      // the VS builds a full-screen triangle from SV_VertexID.
-      inline static winrt::com_ptr<ID3D11VertexShader> s_skyVs;
-      inline static winrt::com_ptr<ID3D11PixelShader> s_skyPs;
-      inline static winrt::com_ptr<ID3D11Buffer> s_skyCb;
-      inline static winrt::com_ptr<ID3D11DepthStencilState> s_skyDepth; // depth test/write off
-      inline static bool s_skybox = true;                               // opt-in (default off)
-      // Camera->world rotation (row-major 3x3); identity until the game feeds an orientation.
-      inline static float s_skyRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-      inline static winrt::com_ptr<ID3D11SamplerState> s_skySampler;       // cube sampler (s0)
-      inline static winrt::com_ptr<ID3D11ShaderResourceView> s_skyCubeSrv; // Skybox.dds cube (t0)
 
-      // Dust program (star migration) + its dynamic vertex buffer and this frame's quads.
+      // Dust program (the scene-pass starfield) + its dynamic vertex buffer, this frame's
+      // quads, and the depth-off state the background pass draws with.
       inline static winrt::com_ptr<ID3D11VertexShader> s_dustVs;
       inline static winrt::com_ptr<ID3D11PixelShader> s_dustPs;
       inline static winrt::com_ptr<ID3D11InputLayout> s_dustLayout;
       inline static winrt::com_ptr<ID3D11Buffer> s_dustVb;
+      inline static winrt::com_ptr<ID3D11DepthStencilState> s_dustDepth; // depth test/write off
       inline static size_t s_dustCapacity = 0;
       inline static std::vector<DustVertex> s_dust;
 
       // This frame's submitted models (SubmitModel), consumed + cleared by RenderModels.
       inline static std::vector<Neuron::Render::ModelDraw> s_models;
 
-      // Viewport optics for the in-progress RenderModels pass (billboard sizing).
-      inline static Neuron::Client::ViewMetrics s_view;
+      // The in-progress pass's view / projection (from the Camera), stored unloaded so the
+      // statics need no SIMD alignment. Row-vector DirectXMath convention (p' = p * M).
+      inline static DirectX::XMFLOAT4X4 s_viewMat;
+      inline static DirectX::XMFLOAT4X4 s_projMat;
 
       inline static std::unordered_map<int, GpuMesh> s_meshes;
       inline static MeshProvider s_provider;

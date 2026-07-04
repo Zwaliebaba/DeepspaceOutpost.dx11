@@ -9,7 +9,7 @@
 
 #include "Renderer.h" // master palette (palette index -> RGBA)
 #include "gfx.h"      // GFX_COL_* palette indices
-#include "elite.h"    // ship_list, planet_render_style
+#include "elite.h"    // ship_list
 #include "shipdata.h"
 #include "shipface.h"
 
@@ -27,15 +27,12 @@ static constexpr float kPlanetRadius = 24576.0f;
 static bool build_ship_mesh(int _type, Neuron::Graphics::MeshData& _out)
 {
   // The planet is a procedural 3D sphere (migrated from the old camera-facing billboard):
-  // a smooth UV-sphere lit per-vertex by the scene's directional light. Its colour is baked
-  // from the current planet style at build time - green for the classic look, blue-ish for
-  // the SNES/fractal styles. The mesh is cached, so a mid-session style change takes effect
-  // on the next Scene3D load (acceptable; the style toggle is a settings-window nicety).
+  // a smooth UV-sphere lit per-vertex by the scene's directional light, in the classic
+  // green. The mesh is cached as immutable vertex/index buffers on first use.
   if (_type == SHIP_PLANET)
   {
     Renderer* r = platform_renderer();
-    const int colIdx = (planet_render_style >= 2) ? GFX_COL_BLUE_1 : GFX_COL_GREEN_1;
-    const uint32_t rgba = (r ? r->paletteColour(colIdx) : 0xFF33AA33u) | 0xFF000000u;
+    const uint32_t rgba = (r ? r->paletteColour(GFX_COL_GREEN_1) : 0xFF33AA33u) | 0xFF000000u;
     _out = Neuron::Graphics::BuildUVSphere(kPlanetRadius, 32, 48, rgba);
     return !_out.vertices.empty() && !_out.indices.empty();
   }

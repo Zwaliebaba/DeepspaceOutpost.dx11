@@ -22,104 +22,72 @@ namespace
   }
 }
 
-TEST(Scene, LocalPlayerIsTheOriginAndIsNotDrawn)
+TEST(Scene, RecordsAreRebasedAboutTheFloatingOrigin)
 {
+  // The camera is decoupled from the ship: records rebase about an arbitrary
+  // floating origin (the camera eye) with NO rotation - the view transform is
+  // the Camera's job at render time.
   std::vector<Net::EntitySnapshot> ents;
-  ents.push_back(At(1, 1000, 0, 0));   // local player
-  ents.push_back(At(2, 1100, 0, 0));   // 100 ahead on x
-  ents[1].type = 2;                    // Coriolis - should pass through
+  ents.push_back(At(2, 1100, 50, -20));
+  ents[0].type = 2;   // Coriolis - should pass through
 
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, 1000, 50, -20);
 
   EXPECT_TRUE(recs.size() == 1);
   EXPECT_TRUE(recs[0].id == 2);
   EXPECT_TRUE(recs[0].type == 2);             // replicated type carried to the render record
-  EXPECT_TRUE(recs[0].location.x == 100.0);   // rebased relative to the local player
+  EXPECT_TRUE(recs[0].location.x == 100.0);   // world offset from the origin
   EXPECT_TRUE(recs[0].location.y == 0.0);
   EXPECT_TRUE(recs[0].location.z == 0.0);
   EXPECT_TRUE(recs[0].distance == 100.0);
 }
 
-TEST(Scene, UnknownLocalPlayerRendersNothing)
+TEST(Scene, EveryEntityIsIncludedIncludingTheLocalShip)
 {
-  std::vector<Net::EntitySnapshot> ents;
-  ents.push_back(At(2, 5, 6, 7));
-
-  // We are not in the snapshot yet (unknown local player) -> draw nothing, rather
-  // than rebase against a bogus origin.
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 999);
-  EXPECT_TRUE(recs.empty());
-}
-
-TEST(Scene, OnlyTheLocalPlayerIsSkipped)
-{
+  // With no cockpit view, the player's own hull renders like any other entity:
+  // nothing is skipped.
   std::vector<Net::EntitySnapshot> ents;
   ents.push_back(At(1, 0, 0, 0));
-  ents.push_back(At(2, 10, 0, 0));   // local player
+  ents.push_back(At(2, 10, 0, 0));   // the local player's ship
   ents.push_back(At(3, 20, 0, 0));
 
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, 2);
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, 0, 0, 0);
 
-  EXPECT_TRUE(recs.size() == 2);
+  EXPECT_TRUE(recs.size() == 3);
+  bool sawLocal = false;
   for (const Client::RenderRecord& r : recs)
-    EXPECT_TRUE(r.id != 2);
+    sawLocal = sawLocal || (r.id == 2);
+  EXPECT_TRUE(sawLocal);
 }
 
-TEST(Scene, CameraRotatesWithTheLocalShipRoll)
+TEST(Scene, RebaseIsExactAtLargeCoordinates)
 {
-  // The local ship is rolled 90 degrees: nose still +z, but roof points +x. The
-  // view projects each world offset onto the ship's axes (Bᵀ), so a prop directly
-  // "above" in the world (+y) lands on the side axis (side = roof x nose = -y):
-  // offset.side = (0,100,0).(0,-1,0) = -100, offset.roof = (0,100,0).(1,0,0) = 0.
-  // i.e. world-up is now to the cockpit's left (camera -x) - exactly where the sky
-  // sits when you bank 90 degrees to the right.
+  // Floating-origin doctrine: the int64 subtraction happens BEFORE any float
+  // math, so precision holds however far from the world origin the camera is.
+  const int64_t big = 90000000;   // ~galaxy scale (systems span +/-100M)
   std::vector<Net::EntitySnapshot> ents;
-  Net::EntitySnapshot me = At(1, 0, 0, 0);
-  me.noseX = 0.0f; me.noseY = 0.0f; me.noseZ = 1.0f;   // nose +z
-  me.roofX = 1.0f; me.roofY = 0.0f; me.roofZ = 0.0f;   // roof +x (rolled)
-  ents.push_back(me);
-  ents.push_back(At(2, 0, 100, 0));                    // 100 "up" in the world
+  ents.push_back(At(7, big + 3, big - 4, big + 12));
 
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, big, big, big);
+
   EXPECT_TRUE(recs.size() == 1);
-  EXPECT_TRUE(recs[0].location.x == -100.0);   // world-up projected onto the side axis (now world -y)
-  EXPECT_TRUE(recs[0].location.y == 0.0);
-  EXPECT_TRUE(recs[0].location.z == 0.0);
-  EXPECT_TRUE(recs[0].distance == 100.0);      // distance is frame-independent
+  EXPECT_TRUE(recs[0].location.x == 3.0);
+  EXPECT_TRUE(recs[0].location.y == -4.0);
+  EXPECT_TRUE(recs[0].location.z == 12.0);
 }
 
-TEST(Scene, PitchIsShipRelativeWhenBanked)
+TEST(Scene, OrientationStaysInTheWorldFrame)
 {
-  // Regression for "pitch goes up for the universe, not against the ship": with the
-  // ship banked 90 deg right (roof = world +x) a dead-ahead object that the server
-  // has pitched about the ship's OWN side axis must slide along the cockpit
-  // VERTICAL, not sideways. Server pitch keeps side fixed and tilts nose/roof; here
-  // the object directly off the (now world +x) roof axis must project onto camera
-  // +y (screen vertical), and contribute nothing to camera x (no sideways drift).
+  // No rotation happens here: the record's basis is the entity's WORLD basis
+  // (nose/roof replicated, side = roof x nose). The camera's view matrix
+  // rotates it at render time.
   std::vector<Net::EntitySnapshot> ents;
-  Net::EntitySnapshot me = At(1, 0, 0, 0);
-  me.noseX = 0.0f; me.noseY = 0.0f; me.noseZ = 1.0f;   // nose +z
-  me.roofX = 1.0f; me.roofY = 0.0f; me.roofZ = 0.0f;   // roof +x (banked 90 deg)
-  ents.push_back(me);
-  ents.push_back(At(2, 100, 0, 0));                     // object along the cockpit "up" (world +x)
-
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 1);
-  EXPECT_TRUE(recs.size() == 1);
-  EXPECT_TRUE(recs[0].location.x == 0.0);     // no sideways (world-frame) slide
-  EXPECT_TRUE(recs[0].location.y == 100.0);   // moves along the cockpit vertical (roof)
-  EXPECT_TRUE(recs[0].location.z == 0.0);
-}
-
-TEST(Scene, RotmatIsBuiltFromTheOrientationBasis)
-{
-  std::vector<Net::EntitySnapshot> ents;
-  ents.push_back(At(99, 0, 0, 0));                  // the local player (origin)
   Net::EntitySnapshot e = At(5, 0, 0, 0);
   e.noseX = 1.0f; e.noseY = 0.0f; e.noseZ = 0.0f;   // nose +x
   e.roofX = 0.0f; e.roofY = 0.0f; e.roofZ = 1.0f;   // roof +z
   ents.push_back(e);
 
-  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, /*localPlayer*/ 99);
+  std::vector<Client::RenderRecord> recs = Client::BuildRenderRecords(ents, 0, 0, 0);
   EXPECT_TRUE(recs.size() == 1);
 
   // nose and roof preserved, side = roof x nose = (0,1,0).

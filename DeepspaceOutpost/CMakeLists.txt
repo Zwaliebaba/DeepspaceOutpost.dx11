@@ -19,12 +19,11 @@ set(GAME_SOURCES
     planet.cpp
     trade.cpp
     intro.cpp
-    file.cpp
     random.cpp
 )
 
 # ---- Game-specific client glue (kept here; coupled to legacy game state) ----
-# Camera.cpp adapts the legacy local_object render struct + current_screen, and
+# CameraRig.cpp drives the NeuronClient free camera from game input/state, and
 # GameUniverse is this game's ECS world. WinMain.cpp is the exe entry point (a
 # static library's entry point would not be pulled in by the linker), which boots
 # the NeuronClient platform layer and calls game_main().
@@ -35,13 +34,22 @@ set(GAME_CLIENT_SOURCES
     GameWindows.cpp
     SceneMeshes.h
     SceneMeshes.cpp
-    Camera.cpp
+    CameraRig.h
+    CameraRig.cpp
     GameUniverse.cpp
 )
 
 add_executable(DeepspaceOutpost WIN32 pch.cpp ${GAME_SOURCES} ${GAME_CLIENT_SOURCES})
 
 target_compile_features(DeepspaceOutpost PRIVATE cxx_std_23)
+
+# The retro 512-wide logical canvas selects the GFX_SCALE=2 metrics block in
+# gfx.h (centre 256,192 - the values the charts/HUD are drawn against). This was
+# formerly set by the legacy DeepspaceOutpost/config.h header (#define
+# RES_800_600, since removed); it is a build-time canvas constant, so it now
+# lives as a target definition applied to every translation unit regardless of
+# include order.
+target_compile_definitions(DeepspaceOutpost PRIVATE RES_800_600)
 
 # Precompiled header (pch.h / pch.cpp). pch.h pulls in NeuronClient.h ->
 # NeuronCore.h, so the engine core is available to every translation unit.

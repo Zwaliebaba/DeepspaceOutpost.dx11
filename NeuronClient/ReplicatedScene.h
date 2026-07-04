@@ -3,119 +3,71 @@
 // ReplicatedScene - turn replicated snapshots into client render records.
 //
 // The bridge for the client's "last hop": it takes the interpolated, absolute
-// int64 entity snapshots and produces draw-ready records in the legacy render
-// frame - position relative to a floating origin (the local player), and the
-// orientation basis unpacked into the legacy rotmat (side/roof/nose). The local
-// player is the origin and is not drawn (you don't render your own cockpit ship).
+// int64 entity snapshots and produces draw-ready records in the WORLD frame,
+// rebased about a floating origin (the camera's eye). The camera is decoupled
+// from the ship, so no rotation happens here - the view transform is the
+// Camera's job (Scene3D applies View() * Projection() on the GPU; the few CPU
+// paths view-transform per object). The local player's ship is included: with
+// no cockpit view it renders like any other entity.
 //
 // Pure math over POD types (no D3D, no game state), so the conversion is unit-
 // tested headlessly; the thin glue that pushes records through draw_ship() lives
 // in the client and is build-verified.
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include "vector.h"          // legacy Vector / Matrix (POD)
 
-#include "Vector3i64.h"
 #include "Replication.h"
 
 namespace Neuron::Client
 {
-  // A single draw-ready entity in the legacy render frame.
+  // A single draw-ready entity in the world frame (floating-origin-relative).
   struct RenderRecord
   {
     uint32_t id = 0;
     int type = 0;                       // replicated ship type (legacy SHIP_*)
-    Vector location{ 0.0, 0.0, 0.0 };   // relative to the floating origin
-    Matrix rotmat{};                    // [0]=side, [1]=roof, [2]=nose
-    double distance = 0.0;
+    Vector location{ 0.0, 0.0, 0.0 };   // world offset from the floating origin
+    Matrix rotmat{};                    // world basis: [0]=side, [1]=roof, [2]=nose
+    double distance = 0.0;              // distance from the origin (the camera)
   };
 
-  // Build render records for every replicated entity except the local player.
-  // Build render records relative to the local player's ship. The camera IS the
-  // ship: the world is rebased to the ship's position (floating origin) AND rotated
-  // into the ship's basis (side/roof/nose), so rolling/pitching the ship rotates
-  // the view. Until the local ship is present in the snapshot we render nothing
-  // (rather than rebase against a bogus origin). With a default ship orientation
-  // (nose +z, roof +y) the rotation is the identity, so the legacy front view is
-  // reproduced exactly.
+  // Build render records for every replicated entity, rebased about the given
+  // floating origin (the camera eye, rounded to int64). Positions become small
+  // world-frame offsets (exact integer subtraction before any float math, per
+  // the floating-origin doctrine); orientations stay in the world frame - the
+  // camera's view matrix rotates them at render time.
   [[nodiscard]] inline std::vector<RenderRecord> BuildRenderRecords(
-      const std::vector<Net::EntitySnapshot>& _entities, uint32_t _localPlayerId)
+      const std::vector<Net::EntitySnapshot>& _entities,
+      int64_t _originX, int64_t _originY, int64_t _originZ)
   {
-    const Net::EntitySnapshot* me = nullptr;
-    for (const Net::EntitySnapshot& e : _entities)
-    {
-      if (e.id == _localPlayerId)
-      {
-        me = &e;
-        break;
-      }
-    }
-
     std::vector<RenderRecord> records;
-    if (me == nullptr)
-      return records;   // we don't know where we are yet
-
-    const Math::Vector3i64 origin{ me->x, me->y, me->z };
-
-    const Vector pNose{ me->noseX, me->noseY, me->noseZ };
-    const Vector pRoof{ me->roofX, me->roofY, me->roofZ };
-    const Vector pSide{ pRoof.y * pNose.z - pRoof.z * pNose.y,
-                        pRoof.z * pNose.x - pRoof.x * pNose.z,
-                        pRoof.x * pNose.y - pRoof.y * pNose.x };
-
-    // Rotate a world-frame offset into the ship's cockpit (view) frame: the
-    // textbook view transform, which PROJECTS the offset onto each ship axis
-    //   cam = (offset.side, offset.roof, offset.nose)  ==  Bᵀ · offset
-    // where B is the ship basis (columns side/roof/nose). This is the ONLY frame
-    // that stays ship-relative at every orientation: a pitch always slides the
-    // scene along the cockpit vertical and a roll always spins it about the
-    // cockpit nose, no matter how the ship is already banked.
-    //
-    // An earlier version rebuilt the offset FROM the basis instead
-    //   (_x*side + _y*roof + _z*nose  ==  B · offset),
-    // which is B's transpose/inverse. That happens to agree at the identity
-    // orientation, so the level-flight front view looked right, but for a banked
-    // ship it applies the INVERSE rotation: pitching then slid the world along the
-    // *world* vertical (it looked like "up for the universe"), and after a 90° roll
-    // a pure pitch slid the scene sideways. Projecting (Bᵀ) fixes that. The control
-    // sign convention (legacy screen-handed roll/pitch) is reconciled where the
-    // client builds its flight intent (send_player_input), so the felt direction of
-    // roll and level pitch is unchanged while banked pitch is now ship-relative.
-    const auto toCamera = [&](double _x, double _y, double _z) -> Vector
-    {
-      return Vector{ _x * pSide.x + _y * pSide.y + _z * pSide.z,
-                     _x * pRoof.x + _y * pRoof.y + _z * pRoof.z,
-                     _x * pNose.x + _y * pNose.y + _z * pNose.z };
-    };
-
     records.reserve(_entities.size());
+
     for (const Net::EntitySnapshot& e : _entities)
     {
-      if (e.id == _localPlayerId)
-        continue;
-
-      const double wx = static_cast<double>(e.x - origin.x);
-      const double wy = static_cast<double>(e.y - origin.y);
-      const double wz = static_cast<double>(e.z - origin.z);
+      const double wx = static_cast<double>(e.x - _originX);
+      const double wy = static_cast<double>(e.y - _originY);
+      const double wz = static_cast<double>(e.z - _originZ);
 
       RenderRecord r;
       r.id = e.id;
       r.type = e.type;
-      r.location = toCamera(wx, wy, wz);
+      r.location = Vector{ wx, wy, wz };
       r.distance = std::sqrt(wx * wx + wy * wy + wz * wz);
 
-      // The entity's own orientation, also expressed in the camera frame.
+      // The entity's world basis: nose/roof replicate; side = roof x nose.
       const Vector eNose{ e.noseX, e.noseY, e.noseZ };
       const Vector eRoof{ e.roofX, e.roofY, e.roofZ };
       const Vector eSide{ eRoof.y * eNose.z - eRoof.z * eNose.y,
                           eRoof.z * eNose.x - eRoof.x * eNose.z,
                           eRoof.x * eNose.y - eRoof.y * eNose.x };
 
-      r.rotmat[0] = toCamera(eSide.x, eSide.y, eSide.z);
-      r.rotmat[1] = toCamera(eRoof.x, eRoof.y, eRoof.z);
-      r.rotmat[2] = toCamera(eNose.x, eNose.y, eNose.z);
+      r.rotmat[0] = eSide;
+      r.rotmat[1] = eRoof;
+      r.rotmat[2] = eNose;
 
       records.push_back(r);
     }

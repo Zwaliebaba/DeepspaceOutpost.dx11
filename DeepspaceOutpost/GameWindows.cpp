@@ -13,16 +13,13 @@
 #include <utility>
 #include <vector>
 
-// Game config globals (declared in elite.h) and the config writer (file.h),
-// re-declared here so this winrt/widget-based translation unit stays free of the
-// legacy game headers (which define macros that don't mix with the GUI headers).
-extern int wireframe;
+// Game config globals (declared in elite.h), re-declared here so this
+// winrt/widget-based translation unit stays free of the legacy game headers
+// (which define macros that don't mix with the GUI headers).
 extern int anti_alias_gfx;
-extern int planet_render_style;
 extern int scene_shading;
 extern int hoopy_casinos;
 extern int instant_dock;
-extern void write_config_file(void);
 
 // Render-free market API (docked.h / docked.cpp), declared here to keep this TU off
 // the legacy game headers.
@@ -97,14 +94,6 @@ namespace
       std::vector<std::string> m_options;
   };
 
-  // Persists the current settings to the config file (the legacy "Save Settings" row).
-  class SaveSettingsButton : public GuiButton
-  {
-    public:
-      SaveSettingsButton() { m_centered = true; }
-      void MouseUp() override { write_config_file(); }
-  };
-
   class SettingsWindow : public GuiWindow
   {
     public:
@@ -136,21 +125,15 @@ namespace
           y += rowH;
         };
 
-        // Mirror options.cpp's setting_list (name + value labels) and its global mapping.
-        addCycle("Graphics", &wireframe, {"Solid", "Wireframe"});
+        // In-session settings (name + value labels) mapped to their globals. The
+        // MMO client keeps no local config file, so there is nothing to persist -
+        // these toggles apply for the session only.
         addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
-        addCycle("Planet Style", &planet_render_style, {"Wireframe", "Green", "SNES", "Fractal"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
         addCycle("Planet Desc.", &hoopy_casinos, {"BBC", "MSX"});
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});
 
         y += 4;
-        auto* save = NEW SaveSettingsButton();
-        save->SetProperties("Save", x, y, w, btnH, "Save Settings");
-        RegisterButton(save);
-        m_buttonOrder.push_back(save);
-        y += rowH;
-
         auto* close = NEW CloseButton();
         close->m_centered = true;
         close->SetProperties("Close", x, y, w, btnH, "Close");
@@ -482,9 +465,8 @@ namespace
 
   // ----- Equip Ship ---------------------------------------------------------
 
-  // A row in the equip list: clicking buys the item, or expands a laser sub-menu
-  // (handled render-free by equip_do). The window rebuilds its rows when the visible
-  // set changes (i.e. after a sub-menu expand).
+  // A row in the equip list: clicking buys the item (handled render-free by
+  // equip_do). The window rebuilds its rows when the visible set changes.
   class EquipButton : public GuiButton
   {
     public:
@@ -498,9 +480,9 @@ namespace
       int m_index;
   };
 
-  // Equip Ship: the dynamic buy-list (tech-level filtered, with laser sub-menus). Rows
-  // are rebuilt only when the visible set changes; otherwise captions/enabled state
-  // refresh from live state each frame.
+  // Equip Ship: the dynamic buy-list (tech-level filtered). Rows are rebuilt only
+  // when the visible set changes; otherwise captions/enabled state refresh from
+  // live state each frame.
   class EquipWindow : public GuiWindow
   {
     public:
@@ -509,7 +491,7 @@ namespace
       {
         SetTitle("Equip Ship");
         Centre(this, 360, 460);
-        equip_reset(); // start at the top-level list
+        equip_reset();
       }
 
       void Create() override

@@ -33,4 +33,8 @@ void input_suppress_game_keys(bool suppress);/* hide keys from the game's kbd_* 
 /* Mouse / primary-pointer state in client pixels (full-window GUI space). */
 void input_mouse_state(int& x, int& y, bool& lmb, bool& rmb);
 
+/* Wheel notches accumulated since the previous call (consumed once per frame by
+ * the camera rig; + = wheel up). */
+float input_take_mouse_wheel(void);
+
 #endif /* INPUT_WIN_H */

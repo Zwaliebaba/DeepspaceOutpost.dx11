@@ -10,7 +10,6 @@
 
 #include "pch.h"
 
-#include "config.h"
 #include "gfx.h"
 #include "GameUniverse.h"
 #include "GameComponents.h"
@@ -24,9 +23,8 @@
 #include "sound.h"
 #include "random.h"
 #include "stars.h"
-#include "file.h"
 #include "keyboard.h"
-#include "Camera.h"
+#include "CameraRig.h"
 #include "ReplicationClient.h"
 #include "Messages/MessageBus.h"
 #include "Messages/Framing.h"            // Neuron::Msg::PROTOCOL_VERSION (handshake)
@@ -53,83 +51,17 @@ int draw_lasers;
 int mcount;
 int message_count;
 char message_string[80];
-int rolling;
-int climbing;
 
 int find_input;
 char find_name[20];
 
 /*
- * Flight-control responsiveness.
- *
- * PlayerFlight().roll / PlayerFlight().climb hold the ship's current turn rate (consumed by
- * move_local_object as alpha/beta). While a control key is held the rate ramps
- * toward full deflection; when released it auto-centres back to zero. These
- * steps set how many rate units we add/remove per frame - i.e. how snappily
- * the ship reacts - without changing the top turn rate (PlayerCaps().maxRoll /
- * max_climb), so handling and turn radius stay balanced. Higher = snappier.
- * This is frame-rate independent of game speed (speed_cap): it changes how
- * many frames the ramp takes, not how fast the game runs.
+ * Piloting is retired: the player flies the CAMERA (see CameraRig), not the
+ * hull. The ship's flight intent is always zero - the legacy roll/climb ramp
+ * and auto-centre machinery went with the cockpit view. PlayerFlight() remains
+ * as presentation state (the intro parade and game-over debris animate off its
+ * speed) and as the zero source send_player_input reads.
  */
-#define ROLL_RAMP_STEP     4		/* was 2: ramp roll to full in ~8 frames not ~16 */
-#define CLIMB_RAMP_STEP    2		/* was 1: ramp climb to full in ~4 frames not 8  */
-#define ROLL_CENTRE_STEP   3		/* was 1: recentre roll ~3x faster on release    */
-#define CLIMB_CENTRE_STEP  2		/* was 1: recentre climb ~2x faster on release   */
-
-/*
- * Nudge the current turn rate toward full deflection by |steps| units this
- * frame (steps > 0 rolls/climbs one way, < 0 the other). Reuses the single-
- * step primitives so the per-ship max_roll / max_climb clamp still applies.
- */
-static void ramp_flight_roll(int steps)
-{
-  int i;
-
-  for (i = 0; i < steps; i++)
-    increase_flight_roll();
-  for (i = 0; i > steps; i--)
-    decrease_flight_roll();
-}
-
-static void ramp_flight_climb(int steps)
-{
-  int i;
-
-  for (i = 0; i < steps; i++)
-    increase_flight_climb();
-  for (i = 0; i > steps; i--)
-    decrease_flight_climb();
-}
-
-/*
- * Auto-centre the turn rate back toward zero when no key is held, moving up to
- * CENTRE_STEP units per frame but never overshooting past zero into a reversal.
- */
-static void centre_flight_roll(void)
-{
-  int i;
-
-  for (i = 0; i < ROLL_CENTRE_STEP && PlayerFlight().roll != 0; i++)
-  {
-    if (PlayerFlight().roll > 0)
-      decrease_flight_roll();
-    else
-      increase_flight_roll();
-  }
-}
-
-static void centre_flight_climb(void)
-{
-  int i;
-
-  for (i = 0; i < CLIMB_CENTRE_STEP && PlayerFlight().climb != 0; i++)
-  {
-    if (PlayerFlight().climb > 0)
-      decrease_flight_climb();
-    else
-      increase_flight_climb();
-  }
-}
 
 /*
  * Initialise the game parameters.
@@ -252,76 +184,12 @@ void draw_cross(int cx, int cy)
   gfx_set_clip_region(1, 1, 510, 383);
 }
 
-void draw_laser_sights(void)
-{
-  int laser = 0;
-  int x1, y1, x2, y2;
-
-  switch (current_screen)
-  {
-  case SCR_FRONT_VIEW:
-    gfx_display_centre_text(32, "Front View", 120, GFX_COL_WHITE);
-    laser = cmdr.front_laser;
-    break;
-
-  case SCR_REAR_VIEW:
-    gfx_display_centre_text(32, "Rear View", 120, GFX_COL_WHITE);
-    laser = cmdr.rear_laser;
-    break;
-
-  case SCR_LEFT_VIEW:
-    gfx_display_centre_text(32, "Left View", 120, GFX_COL_WHITE);
-    laser = cmdr.left_laser;
-    break;
-
-  case SCR_RIGHT_VIEW:
-    gfx_display_centre_text(32, "Right View", 120, GFX_COL_WHITE);
-    laser = cmdr.right_laser;
-    break;
-  }
-
-  if (laser)
-  {
-    // Centre the cross-hairs on the live view (window middle in full-window
-    // flight, 256,192 in retro) with arm lengths that scale with the optics.
-    const Client::ViewMetrics& vm = gfx_view_metrics();
-    const int cx = static_cast<int>(vm.cx);
-    const int cy = static_cast<int>(vm.cy);
-    const double s = vm.focal / 256.0; // retro == GFX_SCALE (2)
-    const int in8 = static_cast<int>(8 * s);
-    const int in16 = static_cast<int>(16 * s);
-
-    x1 = cx;
-    y1 = cy - in8;
-    y2 = cy - in16;
-
-    gfx_draw_colour_line(x1 - 1, y1, x1 - 1, y2, GFX_COL_GREY_1);
-    gfx_draw_colour_line(x1, y1, x1, y2, GFX_COL_WHITE);
-    gfx_draw_colour_line(x1 + 1, y1, x1 + 1, y2, GFX_COL_GREY_1);
-
-    y1 = cy + in8;
-    y2 = cy + in16;
-
-    gfx_draw_colour_line(x1 - 1, y1, x1 - 1, y2, GFX_COL_GREY_1);
-    gfx_draw_colour_line(x1, y1, x1, y2, GFX_COL_WHITE);
-    gfx_draw_colour_line(x1 + 1, y1, x1 + 1, y2, GFX_COL_GREY_1);
-
-    x1 = cx - in8;
-    y1 = cy;
-    x2 = cx - in16;
-
-    gfx_draw_colour_line(x1, y1 - 1, x2, y1 - 1, GFX_COL_GREY_1);
-    gfx_draw_colour_line(x1, y1, x2, y1, GFX_COL_WHITE);
-    gfx_draw_colour_line(x1, y1 + 1, x2, y1 + 1, GFX_COL_GREY_1);
-
-    x1 = cx + in8;
-    x2 = cx + in16;
-
-    gfx_draw_colour_line(x1, y1 - 1, x2, y1 - 1, GFX_COL_GREY_1);
-    gfx_draw_colour_line(x1, y1, x2, y1, GFX_COL_WHITE);
-    gfx_draw_colour_line(x1, y1 + 1, x2, y1 + 1, GFX_COL_GREY_1);
-  }
-}
+/*
+ * The arrow keys own the CHART crosshair on the chart screens; in flight they
+ * belong to the camera rig (CameraRig gathers them directly, gated on the
+ * flight view, so the two uses never overlap). The old cockpit roll/climb
+ * handling is gone with piloting.
+ */
 
 void arrow_right(void)
 {
@@ -330,19 +198,6 @@ void arrow_right(void)
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(1, 0);
-    break;
-
-  case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
-    if (PlayerFlight().roll > 0)
-      PlayerFlight().roll = 0;
-    else
-    {
-      ramp_flight_roll(-ROLL_RAMP_STEP);
-      rolling = 1;
-    }
     break;
   }
 }
@@ -355,19 +210,6 @@ void arrow_left(void)
   case SCR_GALACTIC_CHART:
     move_cross(-1, 0);
     break;
-
-  case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
-    if (PlayerFlight().roll < 0)
-      PlayerFlight().roll = 0;
-    else
-    {
-      ramp_flight_roll(ROLL_RAMP_STEP);
-      rolling = 1;
-    }
-    break;
   }
 }
 
@@ -379,17 +221,6 @@ void arrow_up(void)
   case SCR_GALACTIC_CHART:
     move_cross(0, -1);
     break;
-
-  case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
-    if (PlayerFlight().climb > 0)
-      PlayerFlight().climb = 0;
-    else
-      ramp_flight_climb(-CLIMB_RAMP_STEP);
-    climbing = 1;
-    break;
   }
 }
 
@@ -400,17 +231,6 @@ void arrow_down(void)
   case SCR_SHORT_RANGE:
   case SCR_GALACTIC_CHART:
     move_cross(0, 1);
-    break;
-
-  case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
-    if (PlayerFlight().climb < 0)
-      PlayerFlight().climb = 0;
-    else
-      ramp_flight_climb(CLIMB_RAMP_STEP);
-    climbing = 1;
     break;
   }
 }
@@ -545,41 +365,7 @@ void handle_flight_keys(void)
     if (docked)
       launch_player();
     else
-    {
-      if (current_screen != SCR_FRONT_VIEW)
-      {
-        current_screen = SCR_FRONT_VIEW;
-        flip_stars();
-      }
-    }
-  }
-
-  if (kbd_F2_pressed)
-  {
-    find_input = 0;
-
-    if (!docked)
-    {
-      if (current_screen != SCR_REAR_VIEW)
-      {
-        current_screen = SCR_REAR_VIEW;
-        flip_stars();
-      }
-    }
-  }
-
-  if (kbd_F3_pressed)
-  {
-    find_input = 0;
-
-    if (!docked)
-    {
-      if (current_screen != SCR_LEFT_VIEW)
-      {
-        current_screen = SCR_LEFT_VIEW;
-        flip_stars();
-      }
-    }
+      current_screen = SCR_FRONT_VIEW;   // back to the cockpit (e.g. from a chart)
   }
 
   if (kbd_F4_pressed)
@@ -588,14 +374,6 @@ void handle_flight_keys(void)
 
     if (docked)
       OpenEquipWindow();
-    else
-    {
-      if (current_screen != SCR_RIGHT_VIEW)
-      {
-        current_screen = SCR_RIGHT_VIEW;
-        flip_stars();
-      }
-    }
   }
 
   if (kbd_F5_pressed)
@@ -646,17 +424,14 @@ void handle_flight_keys(void)
     GuiOverlay::Open();
   }
 
-  // F12 toggles cockpit <-> chase camera (the ship/camera-seam payoff). Edge-
-  // triggered so holding the key flips the view exactly once.
+  // F12 toggles the camera controller: first-person free flight <-> orbit around
+  // the selected object (the missile-lock target, else the own ship). Edge-
+  // triggered so holding the key flips the mode exactly once.
   static int f12_was_down = 0;
   if (kbd_F12_pressed)
   {
     if (!f12_was_down)
-    {
-      Neuron::Client::SetCameraMode(Client::GetCameraMode() == Client::CameraMode::Cockpit
-                                      ? Client::CameraMode::Chase
-                                      : Client::CameraMode::Cockpit);
-    }
+      camera_rig_toggle_mode();
     f12_was_down = 1;
   }
   else
@@ -745,23 +520,8 @@ void handle_flight_keys(void)
       unlock_missile_target();
   }
 
-  if (kbd_inc_speed_pressed)
-  {
-    if (!docked)
-    {
-      if (PlayerFlight().speed < PlayerCaps().maxSpeed)
-        PlayerFlight().speed++;
-    }
-  }
-
-  if (kbd_dec_speed_pressed)
-  {
-    if (!docked)
-    {
-      if (PlayerFlight().speed > 1)
-        PlayerFlight().speed--;
-    }
-  }
+  /* (The speed keys went with piloting: the hull idles and the CAMERA moves -
+   * see CameraRig. The arrow keys below only steer the chart crosshair now.) */
 
   if (kbd_up_pressed)
     arrow_up();
@@ -798,25 +558,6 @@ void handle_flight_keys(void)
   }
 }
 
-void set_commander_name(char* path)
-{
-  char *fname, *cname;
-  int i;
-
-  fname = get_filename(path);
-  cname = cmdr.name;
-
-  for (i = 0; i < 31; i++)
-  {
-    if (!isalnum(*fname))
-      break;
-
-    *cname++ = toupper(*fname++);
-  }
-
-  *cname = '\0';
-}
-
 // ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
 //
 // The classic intro -> flight -> game-over sequence used to be a stack of blocking
@@ -842,10 +583,12 @@ enum class GameState
 static GameState s_state = GameState::Intro1;
 static int s_gameOverFrame = 0;   // game-over frames rendered (the animation runs 100)
 
-// Enter the first intro screen (title + Elite theme).
+// Enter the first intro screen (title + Elite theme). The intro scenes animate
+// in camera space, so the rig resets to the identity camera.
 static void enter_intro1(void)
 {
   current_screen = SCR_INTRO_ONE;
+  camera_rig_reset();
   snd_play_midi(SND_ELITE_THEME, TRUE);
   initialise_intro1();
   s_state = GameState::Intro1;
@@ -855,9 +598,10 @@ static void enter_intro1(void)
 static void enter_intro2(void)
 {
   current_screen = SCR_INTRO_TWO;
+  camera_rig_reset();
   snd_play_midi(SND_BLUE_DANUBE, TRUE);
   initialise_intro2();
-  PlayerFlight().speed = 3;
+  PlayerFlight().speed = 3;   // presentation only: paces the parade's approach
   PlayerFlight().roll = 0;
   PlayerFlight().climb = 0;
   s_state = GameState::Intro2;
@@ -872,12 +616,16 @@ static void enter_flight(void)
 }
 
 // Enter the game-over animation: a dead Cobra tumbling through wreckage for 100 frames.
+// The scene animates in camera space against the identity camera (camera_rig_reset):
+// the wreck spawns well ahead at +z and drifts toward the eye; +1000 with speed 6
+// keeps it in front for the whole 100-frame animation.
 static void enter_game_over(void)
 {
   current_screen = SCR_GAME_OVER;
+  camera_rig_reset();
   gfx_set_clip_region(1, 1, 510, 383);
 
-  PlayerFlight().speed = 6;
+  PlayerFlight().speed = 6;   // presentation only: paces the drift toward the wreck
   PlayerFlight().roll = 0;
   PlayerFlight().climb = 0;
   clear_local_objects();
@@ -885,13 +633,13 @@ static void enter_game_over(void)
   Matrix rotmat;
   set_init_matrix(rotmat);
 
-  int newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
+  int newship = add_new_ship(SHIP_COBRA3, 0, 0, 1000, rotmat, 0, 0);
   local_objects[newship].flags |= FLG_DEAD;
 
   for (int i = 0; i < 5; i++)
   {
     const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
-    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, -400, rotmat, 0, 0);
+    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, 1000, rotmat, 0, 0);
     local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
     local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
     local_objects[newship].velocity = rand255() & 15;
@@ -1247,37 +995,28 @@ static void process_server_events(void)
   g_clientBus.Dispatch();
 }
 
-// The four in-flight cockpit views render the 3D scene full-window; every other
-// screen (charts, station, intro, game-over, save/load) stays on the retro
-// letterboxed canvas.
+// The in-flight scene renders the 3D full-window; every other screen (charts,
+// station, intro, game-over, save/load) stays on the retro letterboxed canvas.
 static int is_flight_view(int scr)
 {
-  return (scr == SCR_FRONT_VIEW) || (scr == SCR_REAR_VIEW) || (scr == SCR_LEFT_VIEW) || (scr == SCR_RIGHT_VIEW);
+  return scr == SCR_FRONT_VIEW;
 }
 
-// Gather the player's flight intent and send it to the server. Driven from the
-// legacy flight state (PlayerFlight roll/climb/speed) that the flight keys and
-// the cockpit HUD already maintain, normalized to axes, so the server moves the
-// ship at exactly the speed shown on the dashboard. Used only in thin-client mode.
+// Send the player's per-frame intent to the server. Piloting is retired (the
+// player flies the CAMERA; the hull idles), so the flight axes are always zero -
+// but the command still carries the discrete combat intents AND the snapshot ack
+// the delta stream depends on, so the cadence must not stop. Thin-client only.
 static void send_player_input(void)
 {
   static uint32_t seq = 0;
 
-  const int maxRoll = (PlayerCaps().maxRoll > 0) ? PlayerCaps().maxRoll : 1;
-  const int maxClimb = (PlayerCaps().maxClimb > 0) ? PlayerCaps().maxClimb : 1;
-  const int maxSpeed = (PlayerCaps().maxSpeed > 0) ? PlayerCaps().maxSpeed : 1;
-
   Msg::InputCommand in;
   in.sequence = ++seq;
-  // The legacy roll/climb controls are expressed in the SCREEN (cockpit) frame,
-  // whose handedness is the transpose of the world basis the server rotates and
-  // the client renders (BuildRenderRecords projects with Bᵀ). Negating the two
-  // rotation axes maps the screen-handed control into that world frame, so the
-  // felt direction of roll and level pitch is identical to before while a banked
-  // pitch now pivots about the ship's own axes instead of the world's.
-  in.rollAxis = -static_cast<float>(PlayerFlight().roll) / static_cast<float>(maxRoll);
-  in.pitchAxis = -static_cast<float>(PlayerFlight().climb) / static_cast<float>(maxClimb);
-  in.throttle = static_cast<float>(PlayerFlight().speed) / static_cast<float>(maxSpeed);
+  // Zero flight intent: the ship holds station (the server clamps and decays
+  // motion authoritatively; a zero throttle brings the hull to rest).
+  in.rollAxis = 0.0f;
+  in.pitchAxis = 0.0f;
+  in.throttle = 0.0f;
 
   // Discrete combat actions flow as LocalOnly ActionTriggered messages through the
   // client bus into this frame's intent (the command-builder pattern): the input
@@ -1358,27 +1097,25 @@ static void game_update_flight(void)
 
   snd_update_sound();
 
-  // Full-window 3D for cockpit views (retro/letterboxed for menus); this also sets the
-  // aspect-aware optics used by the projection in the render pass.
+  // Full-window 3D for the flight view (retro/letterboxed for menus); this also sets
+  // the main Camera's projection for the live viewport.
   gfx_set_scene_fullwindow(is_flight_view(current_screen));
   gfx_set_scene_clip();
 
-  rolling = 0;
-  climbing = 0;
+  // The free camera: gather mouse/wheel/key input, advance the active controller
+  // (first-person or orbit), and write this frame's view. Runs before the key
+  // handler so a fresh missile lock orbits from the next frame.
+  camera_rig_update();
 
   handle_flight_keys();
 
-  // The player's intent goes to the server (no-op while disconnected).
+  // The player's remaining intent goes to the server (no-op while disconnected):
+  // zero flight axes - piloting is retired - plus the combat intents and the
+  // snapshot ack the delta stream needs.
   send_player_input();
 
   if (message_count > 0)
     message_count--;
-
-  if (!rolling)
-    centre_flight_roll();
-
-  if (!climbing)
-    centre_flight_climb();
 }
 
 // Per-frame draw for the in-flight/docked state: the 3D scene, HUD and overlays the old
@@ -1434,8 +1171,8 @@ static void game_render_flight(void)
       return;
     }
 
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-      == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
+        (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
     {
       gfx_clear_display();
       update_starfield();
@@ -1450,17 +1187,11 @@ static void game_render_flight(void)
       return;
     }
 
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-      == SCR_RIGHT_VIEW))
-    {
-      if (draw_lasers)
-      {
-        draw_laser_lines();
-        draw_lasers--;
-      }
-
-      draw_laser_sights();
-    }
+    // The local hull's beam visual: while armed (fire_laser), the own ship's
+    // render record carries FLG_FIRING and the muzzle bolt draws with the ship
+    // (render_replicated_objects). Count the frames down here.
+    if ((current_screen == SCR_FRONT_VIEW) && draw_lasers)
+      draw_lasers--;
 
     if (message_count > 0)
       gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
@@ -1574,8 +1305,6 @@ void game_render_scene(void)
 
 int game_main(void)
 {
-  read_config_file();
-
   if (gfx_graphics_startup() == 1)
     return 1;
 

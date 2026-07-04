@@ -27,7 +27,7 @@
  * closed so the various for(;;) sequence loops unwind cleanly. */
 extern int finish;
 
-/* Game speed regulator (ms per frame) from newkind.cfg. */
+/* Game speed regulator (ms per frame); a fixed client default (elite.cpp). */
 extern int speed_cap;
 
 namespace {

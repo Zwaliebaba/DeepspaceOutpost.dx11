@@ -17,9 +17,6 @@
 
 #include "vector.h"
 
-#include "alg_data.h"
-
-#include "config.h"
 #include "elite.h"
 #include "gfx.h"
 #include "GameUniverse.h"
@@ -33,7 +30,8 @@
 #include "main.h"
 #include "random.h"
 #include "stars.h"
-#include "Camera.h"
+#include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers
+#include "CameraRig.h"   // the free camera: origin, world->camera transforms
 #include "ReplicationClient.h"
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
@@ -49,9 +47,7 @@ int ecm_active;                       // E indicator + countdown (set 32 on EcmP
 int missile_target = MISSILE_UNARMED; // HUD lock indicator state
 
 static int laser_counter;            // pulse pacing for the beam visual
-static int laser;                     // the view's laser type while firing
-static int laser_x;                   // beam aim point (view centre + jitter)
-static int laser_y;
+static int laser;                     // the ship's laser type while firing
 
 // ---- The local display-object pool (moved from the retired swat.cpp) ---------
 //
@@ -365,34 +361,22 @@ void update_altitude (void)
 
 
 /*
- * Transform an object from ship-space into the current view's camera-space.
- *
- * The camera is now an explicit object (Neuron::Client::Camera) instead of the
- * implicit "eye fused to the ship at the origin". This still reproduces the old
- * four fixed views bit for bit - the eye sits on the ship - but the seam now
- * exists for a detached / third-person camera (a non-zero Camera::position).
- */
-
-void switch_to_view (struct local_object *flip)
-{
-	Neuron::Client::ApplyCamera (Neuron::Client::CurrentCamera(), flip);
-}
-
-
-/*
  * Animate and draw the local display objects.
  *
  * Presentation only: this drives the intro ship parade and the game-over debris
  * tumble. No AI, no combat, no docking, no scooping - the legacy local
  * simulation was retired with the single-player fallback; the live game renders
  * the server's replicated world (render_replicated_objects) instead.
+ *
+ * These scenes run against the IDENTITY camera (camera_rig_reset), so the
+ * world-frame objects draw_ship expects coincide with the legacy camera-space
+ * animation; draw_ship writes any explosion progress back into the slot.
  */
 
 void update_local_objects (void)
 {
 	int i;
 	int type;
-	struct local_object flip;
 
 	for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
 	{
@@ -414,19 +398,11 @@ void update_local_objects (void)
 				continue;
 			}
 
-			flip = local_objects[i];
-			switch_to_view (&flip);
-
-			draw_ship (&flip);
-
-			// draw_ship advances the explosion animation on the copy; keep it.
-			local_objects[i].flags = flip.flags;
-			local_objects[i].exp_seed = flip.exp_seed;
-			local_objects[i].exp_delta = flip.exp_delta;
+			draw_ship (&local_objects[i]);
 		}
 	}
 
-	/* The frame's 3D scene is fully submitted (skybox + dust + the models handed to
+	/* The frame's 3D scene is fully submitted (dust background + the models handed to
 	   Scene3D::SubmitModel above): draw it now, onto the cleared back buffer, under the 2D HUD. */
 	gfx_render_3d_scene();
 }
@@ -487,17 +463,6 @@ void render_replicated_objects (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
 
-	// Interpolate at a render-time alpha: sample ~one snapshot interval in the past
-	// and tween prev->curr, so replicated motion is smooth at display rate instead
-	// of snapping to the latest tick. The same alpha rebases the floating origin
-	// (the local player) below, keeping every entity's frame coherent.
-	const double alpha = rc.InterpolationAlpha();
-	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(alpha);
-	std::vector<Neuron::Client::RenderRecord> records =
-		Neuron::Client::BuildRenderRecords(ents, rc.LocalPlayer());
-
-	const Neuron::Client::Camera cam = Neuron::Client::CurrentCamera();
-
 	// Rebuild ship_count[] from what the server actually replicated this tick, so
 	// the legacy "is a station nearby?" tests (safe zone, docking computer) work
 	// off the live world instead of the retired single-player spawner.
@@ -508,9 +473,8 @@ void render_replicated_objects (void)
 
 	// Mirror the replicated world into local_objects[] each frame so the legacy HUD that
 	// reads that array - the scanner blips and the compass - reflects the live server world.
-	// The thin client does not run the local object sim, so without this the array is empty
-	// and the scanner shows no blips at all. Slots 0/1 are reserved for planet/station (the
-	// compass convention, update_compass reads [0]/[1]); everything else fills from slot 2 up.
+	// Slots 0/1 are reserved for planet/station (the compass convention, update_compass
+	// reads [0]/[1]); everything else fills from slot 2 up.
 	{
 		struct local_object empty;
 		memset (&empty, 0, sizeof (empty));
@@ -518,6 +482,36 @@ void render_replicated_objects (void)
 			local_objects[i] = empty;
 	}
 	int localFill = 2;
+
+	// The camera rig anchors to the replicated ship; until it has, there is no
+	// floating origin to rebase around - draw just the background.
+	if (!camera_rig_ready())
+	{
+		gfx_render_3d_scene();
+		return;
+	}
+
+	// Interpolate at a render-time alpha: sample ~one snapshot interval in the past
+	// and tween prev->curr, so replicated motion is smooth at display rate instead
+	// of snapping to the latest tick.
+	const double alpha = rc.InterpolationAlpha();
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll(alpha);
+
+	// World-frame records rebased about the CAMERA's floating origin. The camera is
+	// decoupled from the ship, so the records include the player's own hull - with
+	// no cockpit view, the active ship renders like any other entity.
+	const long long* org = camera_rig_origin();
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords(ents, org[0], org[1], org[2]);
+
+	// The ship's own world position (origin-relative), for the SHIP-relative gates
+	// below (docking proximity, nearest-station range) - those are about the hull,
+	// not about where the camera happens to float.
+	Neuron::Net::EntitySnapshot meSnap;
+	const bool haveMe = rc.Sample (rc.LocalPlayer(), alpha, meSnap);
+	const double meX = haveMe ? static_cast<double>(meSnap.x - org[0]) : 0.0;
+	const double meY = haveMe ? static_cast<double>(meSnap.y - org[1]) : 0.0;
+	const double meZ = haveMe ? static_cast<double>(meSnap.z - org[2]) : 0.0;
 
 	int drawn = 0;
 	for (const Neuron::Client::RenderRecord& rec : records)
@@ -532,25 +526,39 @@ void render_replicated_objects (void)
 		obj.type = (rec.type != 0) ? rec.type : SHIP_VIPER;
 		if (obj.type > 0 && obj.type <= NO_OF_SHIPS)
 			ship_count[obj.type]++;
-		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && rec.distance < s_nearest_station_dist)
-			s_nearest_station_dist = rec.distance;
 		obj.location = rec.location;
 		obj.rotmat[0] = rec.rotmat[0];
 		obj.rotmat[1] = rec.rotmat[1];
 		obj.rotmat[2] = rec.rotmat[2];
 		obj.distance = (int) rec.distance;
 
-		Neuron::Client::ApplyCamera (cam, &obj);
+		// The player's own beam: with the cockpit view gone the local hull renders
+		// like any other ship, so its shots use the same muzzle-beam visual
+		// (draw_lasers is armed by fire_laser and counted down in main.cpp).
+		if (haveMe && rec.id == rc.LocalPlayer() && draw_lasers > 0)
+			obj.flags |= FLG_FIRING;
 
-		// Record this entity for the scanner / compass (see the clear above): planet -> slot 0,
-		// station -> slot 1, everything else fills from slot 2 up. Uses camera-frame location,
-		// the same the scanner expects.
+		// Ship-relative offsets for the dock/nearest-station gates.
+		const double sdx = rec.location.x - meX;
+		const double sdy = rec.location.y - meY;
+		const double sdz = rec.location.z - meZ;
+		const double shipDist = haveMe ? sqrt (sdx * sdx + sdy * sdy + sdz * sdz) : 1.0e18;
+
+		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) && shipDist < s_nearest_station_dist)
+			s_nearest_station_dist = shipDist;
+
+		// Record this entity for the scanner / compass (see the clear above): planet ->
+		// slot 0, station -> slot 1, everything else from slot 2 up. The mirror holds
+		// CAMERA-SPACE positions (the frame the blip layout expects), so the scanner
+		// and compass read relative to the view.
+		struct local_object camObj = obj;
+		camera_view_object (&camObj);
 		{
 			const int slot = (obj.type == SHIP_PLANET) ? 0
 						   : (obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) ? 1
 						   : (localFill < MAX_LOCAL_OBJECTS ? localFill++ : -1);
 			if (slot >= 0)
-				local_objects[slot] = obj;
+				local_objects[slot] = camObj;
 		}
 
 		draw_ship (&obj);
@@ -558,86 +566,85 @@ void render_replicated_objects (void)
 
 		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) on the
 		// missile-locked ship, centred and SIZED to the ship's on-screen extent so
-		// it sits just around the hull (not a fixed oversized box). The centre is
-		// projected the same way draw_ship projects a vertex at the ship's centre;
-		// the half-size is the ship's bounding radius (ship_data.size is r^2)
-		// projected the same way, with a small margin.
-		if (rec.id == g_missile_lock_target && obj.location.z > 0.0)
+		// it sits just around the hull (not a fixed oversized box). Projected from
+		// the camera-space centre through the same optics the meshes use.
+		if (rec.id == g_missile_lock_target && camObj.location.z > 0.0)
 		{
-			// Project the ship centre with the current frame's optics so the lock
-			// marker tracks the hull when the 3D fills the window.
-			const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
+			int w, h;
+			gfx_scene_size (&w, &h);
+			Neuron::Client::Camera& camera = Neuron::Client::MainCamera();
+			const double focal = Neuron::Client::CameraFocalPixels (camera, (float) h);
+
 			double fx, fy;
-			Neuron::Client::ProjectPoint (vm, obj.location.x, obj.location.y, obj.location.z, fx, fy);
-			const int sx = (int)fx;
-			const int sy = (int)fy;
+			if (Neuron::Client::CameraSpaceToPixels (camera, camObj.location.x, camObj.location.y,
+													 camObj.location.z, w, h, fx, fy))
+			{
+				const int sx = (int)fx;
+				const int sy = (int)fy;
 
-			const double radius =
-				(obj.type > 0 && obj.type <= NO_OF_SHIPS && ship_list[obj.type] != NULL)
-					? sqrt (ship_list[obj.type]->size) : 80.0;
-			double half = (radius * vm.focal / obj.location.z) * 1.15;
-			const double clampScale = vm.focal / 512.0;   // keep the box proportional to the view
-			if (half < 8.0  * clampScale) half = 8.0  * clampScale;
-			if (half > 80.0 * clampScale) half = 80.0 * clampScale;
+				const double radius =
+					(obj.type > 0 && obj.type <= NO_OF_SHIPS && ship_list[obj.type] != NULL)
+						? sqrt (ship_list[obj.type]->size) : 80.0;
+				double half = (radius * focal / camObj.location.z) * 1.15;
+				const double clampScale = focal / 512.0;   // keep the box proportional to the view
+				if (half < 8.0  * clampScale) half = 8.0  * clampScale;
+				if (half > 80.0 * clampScale) half = 80.0 * clampScale;
 
-			const int box = (int)(half * 2.0);
-			gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
+				const int box = (int)(half * 2.0);
+				gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
+			}
 		}
 
 		// Docking. Authentic Elite demands a precise slot alignment, but with a
-		// static (non-spinning) station and network lag that is punishing, and a
-		// fresh commander has no docking computer. So we dock forgivingly: fly up
-		// to the station (within ~600 units) with it ahead of you, AT LOW SPEED,
-		// and a dock REQUEST goes to the server. The docked flow starts only when
-		// the server's StationResponse{Dock, Ok} arrives (see main.cpp) - the
-		// client never flips itself docked on a proximity guess.
+		// static (non-spinning) station and network lag that is punishing. So we
+		// dock forgivingly: when the SHIP is near the station (within ~600 units),
+		// station roughly off its nose, at low speed, a dock REQUEST goes to the
+		// server. Ship-relative on purpose - the camera floats freely and has no
+		// bearing on where the hull is. The docked flow starts only when the
+		// server's StationResponse{Dock, Ok} arrives (see main.cpp).
 		const int dockSpeedLimit = (PlayerCaps().maxSpeed > 0) ? (PlayerCaps().maxSpeed / 4) : 10;
-		if ((obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
-			obj.distance < 600 && PlayerFlight().speed <= dockSpeedLimit)
+		if (haveMe && (obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
+			shipDist < 600 && PlayerFlight().speed <= dockSpeedLimit)
 		{
-			struct vector approach = unit_vector (&obj.location);
-			if (approach.z > 0.5)   // station roughly ahead -> ask to dock
+			const double ahead = (shipDist > 1.0)
+				? (sdx * meSnap.noseX + sdy * meSnap.noseY + sdz * meSnap.noseZ) / shipDist
+				: 1.0;
+			if (ahead > 0.5)   // station roughly off the ship's nose -> ask to dock
 				request_dock ();
 		}
 	}
 
 	// Replicated explosions: draw each dying ship's debris burst, world-anchored via
-	// the same floating-origin rebasing the ships use (feed the local player + each
-	// explosion's world position through BuildRenderRecords), until the legacy
-	// animation finishes (FLG_REMOVE) or the safety lifetime elapses.
+	// the same floating-origin rebasing the ships use, until the legacy animation
+	// finishes (FLG_REMOVE) or the safety lifetime elapses. draw_ship writes the
+	// per-frame explosion progress back into the persistent object.
 	if (!s_explosions.empty())
 	{
-		Neuron::Net::EntitySnapshot meSnap;
-		if (rc.Sample (rc.LocalPlayer(), alpha, meSnap))
+		std::vector<Neuron::Net::EntitySnapshot> es;
+		es.reserve (s_explosions.size());
+		for (size_t i = 0; i < s_explosions.size(); i++)
 		{
-			std::vector<Neuron::Net::EntitySnapshot> es;
-			es.reserve (s_explosions.size() + 1);
-			es.push_back (meSnap);   // the floating origin (skipped by BuildRenderRecords)
-			for (size_t i = 0; i < s_explosions.size(); i++)
-			{
-				Neuron::Net::EntitySnapshot s;   // defaults: nose +z, roof +y
-				s.id = 0x80000000u | (uint32_t) i;   // synthetic id, distinct from real + local
-				s.x = s_explosions[i].worldPos.x;
-				s.y = s_explosions[i].worldPos.y;
-				s.z = s_explosions[i].worldPos.z;
-				s.type = (int16_t) s_explosions[i].obj.type;
-				es.push_back (s);
-			}
+			Neuron::Net::EntitySnapshot s;   // defaults: nose +z, roof +y
+			s.id = 0x80000000u | (uint32_t) i;   // synthetic id, distinct from real + local
+			s.x = s_explosions[i].worldPos.x;
+			s.y = s_explosions[i].worldPos.y;
+			s.z = s_explosions[i].worldPos.z;
+			s.type = (int16_t) s_explosions[i].obj.type;
+			es.push_back (s);
+		}
 
-			std::vector<Neuron::Client::RenderRecord> exrecs =
-				Neuron::Client::BuildRenderRecords (es, meSnap.id);   // order matches s_explosions
+		std::vector<Neuron::Client::RenderRecord> exrecs =
+			Neuron::Client::BuildRenderRecords (es, org[0], org[1], org[2]);   // order matches s_explosions
 
-			for (size_t i = 0; i < exrecs.size() && i < s_explosions.size(); i++)
-			{
-				struct local_object& o = s_explosions[i].obj;
-				o.location = exrecs[i].location;
-				o.rotmat[0] = exrecs[i].rotmat[0];
-				o.rotmat[1] = exrecs[i].rotmat[1];
-				o.rotmat[2] = exrecs[i].rotmat[2];
-				o.distance = (int) exrecs[i].distance;
-				Neuron::Client::ApplyCamera (cam, &o);
-				draw_ship (&o);   // FLG_DEAD -> explosion; grows exp_delta; sets FLG_REMOVE when done
-			}
+		for (size_t i = 0; i < exrecs.size() && i < s_explosions.size(); i++)
+		{
+			struct local_object& o = s_explosions[i].obj;
+			o.location = exrecs[i].location;
+			o.rotmat[0] = exrecs[i].rotmat[0];
+			o.rotmat[1] = exrecs[i].rotmat[1];
+			o.rotmat[2] = exrecs[i].rotmat[2];
+			o.distance = (int) exrecs[i].distance;
+			draw_ship (&o);   // FLG_DEAD -> explosion; grows exp_delta; sets FLG_REMOVE when done
 		}
 
 		for (ReplicatedExplosion& ex : s_explosions)
@@ -654,32 +661,39 @@ void render_replicated_objects (void)
 }
 
 
-// Pick the missile lock target (T key): the nearest ship in the crosshairs from the
-// replicated view. The server then homes a missile at exactly this entity, so we
-// return its replicated entity index (0xFFFFFFFF when nothing suitable is ahead).
-// Planets, the sun, and other missiles are not lockable.
+// Pick the missile lock target / camera selection (T key): the nearest ship near
+// the CENTRE OF THE VIEW. The server then homes a missile at exactly this entity,
+// so we return its replicated entity index (0xFFFFFFFF when nothing suitable is
+// ahead); the orbit camera also treats it as its selected object. Planets, the
+// sun, other missiles, and the player's own hull are not lockable.
 unsigned int find_lock_target (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen())
+	if (!rc.IsOpen() || !camera_rig_ready())
 		return 0xFFFFFFFFu;
 
+	const long long* org = camera_rig_origin();
 	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
 	std::vector<Neuron::Client::RenderRecord> records =
-		Neuron::Client::BuildRenderRecords (ents, rc.LocalPlayer());
+		Neuron::Client::BuildRenderRecords (ents, org[0], org[1], org[2]);
 
 	unsigned int best = 0xFFFFFFFFu;
 	double bestDist = 1.0e18;
 
 	for (const Neuron::Client::RenderRecord& rec : records)
 	{
-		// Lockable = a ship (not the planet/sun, not another missile) ahead of us...
+		// Lockable = a ship (not the planet/sun, not another missile, not us)...
 		if (rec.type < 0 || rec.type == SHIP_MISSILE)
 			continue;
-		if (rec.location.z <= 0.0)
+		if (rec.id == rc.LocalPlayer())
 			continue;
-		// ...and inside the forward cone (roughly the crosshairs).
-		if (fabs (rec.location.x) > rec.location.z || fabs (rec.location.y) > rec.location.z)
+
+		// ...in front of the camera and inside the central cone of the view.
+		struct vector camPos = rec.location;
+		camera_view_point (&camPos);
+		if (camPos.z <= 0.0)
+			continue;
+		if (fabs (camPos.x) > camPos.z || fabs (camPos.y) > camPos.z)
 			continue;
 
 		if (rec.distance < bestDist)
@@ -1016,33 +1030,6 @@ void update_console (void)
 	gfx_set_draw_origin (0, 0);
 }
 
-void increase_flight_roll (void)
-{
-	if (PlayerFlight().roll < PlayerCaps().maxRoll)
-		PlayerFlight().roll++;
-}
-
-
-void decrease_flight_roll (void)
-{
-	if (PlayerFlight().roll > -PlayerCaps().maxRoll)
-		PlayerFlight().roll--;
-}
-
-
-void increase_flight_climb (void)
-{
-	if (PlayerFlight().climb < PlayerCaps().maxClimb)
-		PlayerFlight().climb++;
-}
-
-void decrease_flight_climb (void)
-{
-	if (PlayerFlight().climb > -PlayerCaps().maxClimb)
-		PlayerFlight().climb--;
-}
-
-
 void jump_warp (void)
 {
 	// The server owns the mass-lock rules and moves the ship (G7); ask it to
@@ -1069,8 +1056,10 @@ void launch_player (void)
 		Neuron::Client::ReplicationClientInstance().SendStationRequest(req);
 	}
 
-	PlayerFlight().speed = 12;
-	PlayerFlight().roll = -15;
+	// Piloting is retired (camera-only client): the hull launches at rest and
+	// idles outside the station; the player flies the CAMERA around it.
+	PlayerFlight().speed = 0;
+	PlayerFlight().roll = 0;
 	PlayerFlight().climb = 0;
 	create_new_stars();
 	clear_local_objects();
@@ -1115,32 +1104,15 @@ void reset_weapons (void)
 // resolved by the server from InputCommand.fire; damage and heat come back via
 // PlayerStatus). Honours the server-mirrored trigger lock (laserTemp >= 242) and
 // the legacy pulse pacing so the beam flashes like the original. Returns the
-// number of frames to draw the beam (0 = no laser in this view / too hot).
+// number of frames to draw the beam (0 = no laser / too hot). The beam itself is
+// the ship's muzzle bolt: while draw_lasers counts down, the local hull's render
+// record carries FLG_FIRING and draw_ship_laser draws it - the old cockpit
+// corner-beams went with the cockpit view.
 int fire_laser (void)
 {
 	if ((laser_counter == 0) && (PlayerDefense().laserHeat < 242))
 	{
-		switch (current_screen)
-		{
-			case SCR_FRONT_VIEW:
-				laser = cmdr.front_laser;
-				break;
-
-			case SCR_REAR_VIEW:
-				laser = cmdr.rear_laser;
-				break;
-
-			case SCR_RIGHT_VIEW:
-				laser = cmdr.right_laser;
-				break;
-
-			case SCR_LEFT_VIEW:
-				laser = cmdr.left_laser;
-				break;
-
-			default:
-				laser = 0;
-		}
+		laser = cmdr.front_laser;
 
 		if (laser != 0)
 		{
@@ -1148,12 +1120,6 @@ int fire_laser (void)
 			laser &= 127;
 
 			snd_play_sample (SND_PULSE);
-
-			// Aim point is the view centre (with a little jitter), so it tracks the
-			// cross-hairs whether the 3D fills the window or the retro play area.
-			const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-			laser_x = (int)(vm.cx) + ((rand() & 3) - 2);
-			laser_y = (int)(vm.cy) + ((rand() & 3) - 2);
 
 			return 2;
 		}
@@ -1182,32 +1148,4 @@ void time_ecm (void)
 {
 	if (ecm_active != 0)
 		ecm_active--;
-}
-
-
-void draw_laser_lines (void)
-{
-	// The beams rise from the bottom corners of the live view and converge on the
-	// aim point (laser_x,laser_y). The four x origins keep their fraction of the
-	// width, and the bottom edge follows the view, so they fire correctly whether
-	// the 3D is the retro play area or the full window.
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-	const int by = vm.height - 1;
-	const int x1 = (int)(vm.width * (32.0  / 256.0));
-	const int x2 = (int)(vm.width * (48.0  / 256.0));
-	const int x3 = (int)(vm.width * (208.0 / 256.0));
-	const int x4 = (int)(vm.width * (224.0 / 256.0));
-
-	if (wireframe)
-	{
-		gfx_draw_colour_line (x1, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x2, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x3, by, laser_x, laser_y, GFX_COL_WHITE);
-		gfx_draw_colour_line (x4, by, laser_x, laser_y, GFX_COL_WHITE);
-	}
-	else
-	{
-		gfx_draw_triangle (x1, by, laser_x, laser_y, x2, by, GFX_COL_RED);
-		gfx_draw_triangle (x3, by, laser_x, laser_y, x4, by, GFX_COL_RED);
-	}
 }

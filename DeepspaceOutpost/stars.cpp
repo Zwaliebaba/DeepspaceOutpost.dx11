@@ -1,12 +1,27 @@
 #include "pch.h"
 #include "elite.h"
 #include "gfx.h"
-#include "GameUniverse.h"
 #include "Scene3D.h"
+#include "Camera.h"
 #include "stars.h"
 #include "random.h"
 
 int warp_stars;
+
+/* The camera's motion this frame, fed by the camera rig (set_starfield_motion):
+ * forward speed along the look (legacy-speed scaled) and the frame's look deltas
+ * as screen-space pan. The dust used to stream with the SHIP's speed/roll/climb;
+ * with the camera decoupled it streams with the CAMERA instead. */
+static double s_cueSpeed = 0.0;
+static double s_cuePanX = 0.0;
+static double s_cuePanY = 0.0;
+
+void set_starfield_motion(double legacy_speed, double pan_x, double pan_y)
+{
+  s_cueSpeed = legacy_speed;
+  s_cuePanX = pan_x;
+  s_cuePanY = pan_y;
+}
 
 struct star
 {
@@ -19,42 +34,46 @@ star stars[20];
 
 /*
  * Map a star-space coordinate (roughly [-128,128] x [-96,96]) to screen pixels
- * using the current frame's optics, so the starfield fills the whole window in
+ * using the main Camera's optics, so the starfield fills the whole window in
  * full-window flight. At the retro 4:3 viewport this is the old
  * "(s + centre) * GFX_SCALE" mapping (focal 512 -> scale 2, centre 256,192).
  */
 static inline void star_to_screen(double sx_in, double sy_in, int* sx, int* sy)
 {
-  const Client::ViewMetrics& vm = gfx_view_metrics();
-  const double scale = vm.focal / 256.0;
-  *sx = static_cast<int>(sx_in * scale + vm.cx);
-  *sy = static_cast<int>(sy_in * scale + vm.cy);
+  int w, h;
+  gfx_scene_size(&w, &h);
+  const double focal = Client::CameraFocalPixels(Client::MainCamera(), static_cast<float>(h));
+  const double scale = focal / 256.0;
+  *sx = static_cast<int>(sx_in * scale + w * 0.5);
+  *sy = static_cast<int>(sy_in * scale + h * 0.5);
 }
 
 static inline int star_on_screen(int sx, int sy)
 {
-  const Client::ViewMetrics& vm = gfx_view_metrics();
-  return (sx >= 1) && (sx <= vm.width - 1) && (sy >= 1) && (sy <= vm.height - 1);
+  int w, h;
+  gfx_scene_size(&w, &h);
+  return (sx >= 1) && (sx <= w - 1) && (sy >= 1) && (sy <= h - 1);
 }
 
 /* The starfield as scene-pass "dust": each drawn star is collected as a small clip-space
- * quad, which Scene3D draws over the skybox (the streaming-speed cue). This replaced the
- * legacy 2D white-pixel starfield. */
+ * quad, which Scene3D draws as the scene background (the streaming-speed cue). This replaced
+ * the legacy 2D white-pixel starfield. */
 static std::vector<Graphics::Scene3D::DustVertex> s_dustQuads;
 
 static void push_dust(int sx, int sy, double zz)
 {
-  const Client::ViewMetrics& vm = gfx_view_metrics();
-  if (vm.width <= 0 || vm.height <= 0)
+  int w, h;
+  gfx_scene_size(&w, &h);
+  if (w <= 0 || h <= 0)
     return;
 
   /* A touch bigger for nearer stars (smaller z), echoing the legacy 1-4px dots. Sizes
-   * are in pixels; tune to taste with the skybox. */
+   * are in pixels; tune to taste. */
   const float sizePx = (zz < 0x90) ? 2.4f : (zz < 0xC0 ? 1.8f : 1.2f);
-  const float hx = sizePx / static_cast<float>(vm.width);
-  const float hy = sizePx / static_cast<float>(vm.height);
-  const float cx = 2.0f * static_cast<float>(sx) / static_cast<float>(vm.width) - 1.0f;
-  const float cy = 1.0f - 2.0f * static_cast<float>(sy) / static_cast<float>(vm.height);
+  const float hx = sizePx / static_cast<float>(w);
+  const float hy = sizePx / static_cast<float>(h);
+  const float cx = 2.0f * static_cast<float>(sx) / static_cast<float>(w) - 1.0f;
+  const float cy = 1.0f - 2.0f * static_cast<float>(sy) / static_cast<float>(h);
   constexpr float b = 1.0f;
 
   using DV = Graphics::Scene3D::DustVertex;
@@ -87,11 +106,12 @@ void front_starfield(void)
 
   int nstars = witchspace ? 3 : 12;
 
-  double delta = warp_stars ? 50 : PlayerFlight().speed;
-  double alpha = static_cast<double>(PlayerFlight().roll);
-  double beta = static_cast<double>(PlayerFlight().climb);
+  /* The streaming/panning inputs come from the CAMERA's motion (set by the rig
+   * each frame): delta streams the stars toward/away from the eye as the camera
+   * dollies; the pan terms slide the whole field opposite to a look turn, the
+   * successor to the old ship roll/climb drift. Warp jumps still force streaks. */
+  double delta = warp_stars ? 50 : s_cueSpeed;
 
-  alpha /= 256.0;
   delta /= 2.0;
 
   for (int i = 0; i < nstars; i++)
@@ -101,7 +121,7 @@ void front_starfield(void)
     double zz = stars[i].z;
     star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
 
-    /* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
+    /* Each on-screen star becomes a small 3D "dust" quad drawn as the background in the
        scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
     if ((!warp_stars) && star_on_screen(sx, sy))
       push_dust(sx, sy, zz);
@@ -115,14 +135,8 @@ void front_starfield(void)
     double xx = stars[i].x + (stars[i].x * Q);
     zz = stars[i].z;
 
-    yy = yy + (xx * alpha);
-    xx = xx - (yy * alpha);
-
-    /*
-        tx = yy * beta;
-        xx = xx + (tx * tx * 2);
-    */
-    yy = yy + beta;
+    xx = xx + s_cuePanX;
+    yy = yy + s_cuePanY;
 
     stars[i].y = yy;
     stars[i].x = xx;
@@ -148,272 +162,9 @@ void front_starfield(void)
   warp_stars = 0;
 }
 
-void rear_starfield(void)
-{
-  int sx, sy;
-  int ex, ey;
-
-  int nstars = witchspace ? 3 : 12;
-
-  double delta = warp_stars ? 50 : PlayerFlight().speed;
-  double alpha = -PlayerFlight().roll;
-  double beta = -PlayerFlight().climb;
-
-  alpha /= 256.0;
-  delta /= 2.0;
-
-  for (int i = 0; i < nstars; i++)
-  {
-    /* Plot the stars in their current locations... */
-
-    double zz = stars[i].z;
-    star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
-
-    /* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
-       scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
-    if ((!warp_stars) && star_on_screen(sx, sy))
-      push_dust(sx, sy, zz);
-
-    /* Move the stars to their new locations...*/
-
-    double Q = delta / stars[i].z;
-
-    stars[i].z += delta;
-    double yy = stars[i].y - (stars[i].y * Q);
-    double xx = stars[i].x - (stars[i].x * Q);
-    zz = stars[i].z;
-
-    yy = yy + (xx * alpha);
-    xx = xx - (yy * alpha);
-
-    /*
-        tx = yy * beta;
-        xx = xx + (tx * tx * 2);
-    */
-    yy = yy + beta;
-
-    if (warp_stars)
-    {
-      star_to_screen(xx, yy, &ex, &ey);
-
-      if (star_on_screen(sx, sy) && star_on_screen(ex, ey))
-        gfx_draw_line(sx, sy, ex, ey);
-    }
-
-    stars[i].y = yy;
-    stars[i].x = xx;
-
-    if ((zz >= 300) || (abs(static_cast<int>(yy)) >= 110))
-    {
-      stars[i].z = (rand255() & 127) + 51;
-
-      if (rand255() & 1)
-      {
-        stars[i].x = rand255() - 128;
-        stars[i].y = (rand255() & 1) ? -115 : 115;
-      }
-      else
-      {
-        stars[i].x = (rand255() & 1) ? -126 : 126;
-        stars[i].y = rand255() - 128;
-      }
-    }
-  }
-
-  warp_stars = 0;
-}
-
-void side_starfield(void)
-{
-  int sx;
-  int sy;
-
-  int nstars = witchspace ? 3 : 12;
-
-  double delta = warp_stars ? 50 : PlayerFlight().speed;
-  double alpha = PlayerFlight().roll;
-  double beta = PlayerFlight().climb;
-
-  if (current_screen == SCR_LEFT_VIEW)
-  {
-    delta = -delta;
-    alpha = -alpha;
-    beta = -beta;
-  }
-
-  for (int i = 0; i < nstars; i++)
-  {
-    double zz = stars[i].z;
-    star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
-
-    /* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
-       scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
-    if ((!warp_stars) && star_on_screen(sx, sy))
-      push_dust(sx, sy, zz);
-
-    double yy = stars[i].y;
-    double xx = stars[i].x;
-    zz = stars[i].z;
-
-    double delt8 = delta / (zz / 32);
-    xx = xx + delt8;
-
-    xx += (yy * (beta / 256));
-    yy -= (xx * (beta / 256));
-
-    xx += ((yy / 256) * (alpha / 256)) * (-xx);
-    yy += ((yy / 256) * (alpha / 256)) * (yy);
-
-    yy += alpha;
-
-    stars[i].y = yy;
-    stars[i].x = xx;
-
-    if (warp_stars)
-    {
-      int ex, ey;
-      star_to_screen(xx, yy, &ex, &ey);
-      gfx_draw_line(sx, sy, ex, ey);
-    }
-
-    if (abs(static_cast<int>(stars[i].x)) >= 116)
-    {
-      stars[i].y = rand255() - 128;
-      stars[i].x = (current_screen == SCR_LEFT_VIEW) ? 115 : -115;
-      stars[i].z = rand255() | 8;
-    }
-    else if (abs(static_cast<int>(stars[i].y)) >= 116)
-    {
-      stars[i].x = rand255() - 128;
-      stars[i].y = (alpha > 0) ? -110 : 110;
-      stars[i].z = rand255() | 8;
-    }
-  }
-
-  warp_stars = 0;
-}
-
-/*
- * When we change view, flip the stars over so they look like other stars.
- */
-
-void flip_stars(void)
-{
-  int nstars = witchspace ? 3 : 12;
-  for (int i = 0; i < nstars; i++)
-  {
-    int sy = stars[i].y;
-    int sx = stars[i].x;
-    stars[i].x = sy;
-    stars[i].y = sx;
-  }
-}
-
-/* Skybox camera->world orientation. The cube skybox is sampled by view direction, so it
-   needs the camera's orientation in the world. We track the ship's orientation as a 3x3 that
-   maps view-space (x right, y up, z forward) to the world the cubemap art is authored in,
-   integrating the player's roll (about forward/z) and climb (about right/x) each frame; the
-   per-view look direction (rear/left/right) is composed on top. Rotation rates are tuned for
-   feel - the sky is a distant backdrop, and the cubemap can be re-oriented to match. */
-static float s_shipRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // view->world, accumulated
-
-/* Per-frame integration gains (radians per unit of roll/climb). */
-static constexpr double kSkyRollGain = 1.0 / 256.0;
-static constexpr double kSkyPitchGain = 1.0 / 256.0;
-
-/* C = A * B for row-major 3x3 (element (r,c) = m[r*3+c]). */
-static void mat3_mul(const float a[9], const float b[9], float out[9])
-{
-  float tmp[9];
-  for (int r = 0; r < 3; r++)
-  {
-    for (int c = 0; c < 3; c++)
-    {
-      tmp[r * 3 + c] = a[r * 3 + 0] * b[0 * 3 + c] + a[r * 3 + 1] * b[1 * 3 + c] + a[r * 3 + 2] * b[2 * 3 + c];
-    }
-  }
-  for (int i = 0; i < 9; i++)
-    out[i] = tmp[i];
-}
-
-/* Gram-Schmidt renormalise so repeated multiplies don't drift off SO(3). */
-static void mat3_orthonormalise(float m[9])
-{
-  /* rows as basis vectors */
-  float* x = &m[0];
-  float* y = &m[3];
-  float* z = &m[6];
-  auto norm = [](float* v)
-  {
-    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    if (l > 1e-6f)
-    {
-      v[0] /= l;
-      v[1] /= l;
-      v[2] /= l;
-    }
-  };
-  auto dot = [](const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
-  norm(x);
-  float dy = dot(y, x);
-  y[0] -= dy * x[0];
-  y[1] -= dy * x[1];
-  y[2] -= dy * x[2];
-  norm(y);
-  /* z = x cross y */
-  z[0] = x[1] * y[2] - x[2] * y[1];
-  z[1] = x[2] * y[0] - x[0] * y[2];
-  z[2] = x[0] * y[1] - x[1] * y[0];
-}
-
-static void accumulate_skybox_orientation(void)
-{
-  const double roll = static_cast<double>(PlayerFlight().roll) * kSkyRollGain;
-  const double climb = static_cast<double>(PlayerFlight().climb) * kSkyPitchGain;
-
-  /* Local-frame increments (compose on the right of the current orientation): roll about
-     the view forward axis (z), pitch about the view right axis (x). */
-  const float cr = static_cast<float>(cos(roll)), sr = static_cast<float>(sin(roll));
-  const float cp = static_cast<float>(cos(climb)), sp = static_cast<float>(sin(climb));
-  const float rz[9] = {cr, -sr, 0, sr, cr, 0, 0, 0, 1};
-  const float rx[9] = {1, 0, 0, 0, cp, -sp, 0, sp, cp};
-
-  mat3_mul(s_shipRot, rz, s_shipRot);
-  mat3_mul(s_shipRot, rx, s_shipRot);
-  mat3_orthonormalise(s_shipRot);
-
-  /* Per-view look direction (about the up axis y): front = identity, rear = 180,
-     left/right = -/+90 degrees. */
-  float view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-  if (current_screen == SCR_REAR_VIEW || current_screen == SCR_GAME_OVER)
-  {
-    constexpr float v[9] = {-1, 0, 0, 0, 1, 0, 0, 0, -1}; // yaw 180
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-  else if (current_screen == SCR_LEFT_VIEW)
-  {
-    constexpr float v[9] = {0, 0, -1, 0, 1, 0, 1, 0, 0}; // yaw -90
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-  else if (current_screen == SCR_RIGHT_VIEW)
-  {
-    constexpr float v[9] = {0, 0, 1, 0, 1, 0, -1, 0, 0}; // yaw +90
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-
-  float cam[9];
-  mat3_mul(s_shipRot, view, cam); // camera->world = ship * viewLook
-  Graphics::Scene3D::SetSkyboxOrientation(cam);
-}
-
 void update_starfield(void)
 {
   s_dustQuads.clear();
-
-  accumulate_skybox_orientation();
 
   switch (current_screen)
   {
@@ -421,22 +172,13 @@ void update_starfield(void)
   case SCR_INTRO_ONE:
   case SCR_INTRO_TWO:
   case SCR_ESCAPE_POD:
-    front_starfield();
-    break;
-
-  case SCR_REAR_VIEW:
   case SCR_GAME_OVER:
-    rear_starfield();
-    break;
-
-  case SCR_LEFT_VIEW:
-  case SCR_RIGHT_VIEW:
-    side_starfield();
+    front_starfield();
     break;
   }
 
-  /* Hand this frame's stars to the scene pass as dust; Scene3D draws them over the
-     skybox as the streaming-speed cue. (The warp-jump streaks above are drawn straight
+  /* Hand this frame's stars to the scene pass as dust; Scene3D draws them as the scene
+     background - the streaming-speed cue. (The warp-jump streaks above are drawn straight
      through gfx_draw_line now - no render queue.) */
   Graphics::Scene3D::SetDust(s_dustQuads.data(), static_cast<int>(s_dustQuads.size()));
 }

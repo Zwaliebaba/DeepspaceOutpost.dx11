@@ -6,10 +6,11 @@
 #include <math.h>
 #include <ctype.h>
 
-#include "config.h"
 #include "elite.h"
 #include "gfx.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass
+#include "Camera.h"  // MainCamera() - the CPU paths project through the same optics as the GPU
+#include "CameraRig.h"
 #include "planet.h"
 #include "vector.h"
 #include "shipdata.h"
@@ -24,129 +25,25 @@ static struct point point_list[100];
 
 /*
  * Project a camera-space point (x right, y up, z forward) to integer screen
- * pixels using the current frame's optics (gfx_view_metrics). This replaces the
- * old fixed "(r*256)/z + 128/96, *GFX_SCALE" inline, so the 3D follows the
- * window size; at the legacy 4:3 viewport it produces the same pixels.
+ * pixels through the main Camera's projection - the same optics the GPU scene
+ * pass uses, so the CPU-drawn effects (explosion debris, firing beams) land on
+ * the same pixels as the meshes.
  */
 static inline void project_to_screen (double rx, double ry, double rz, int *sx, int *sy)
 {
+	int w, h;
+	gfx_scene_size (&w, &h);
+
 	double fx, fy;
-	Neuron::Client::ProjectPoint (gfx_view_metrics(), rx, ry, rz, fx, fy);
+	if (!Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera(), rx, ry, rz, w, h, fx, fy))
+	{
+		*sx = 0;
+		*sy = 0;
+		return;
+	}
 	*sx = (int) fx;
 	*sy = (int) fy;
 }
-
-
-/*
- * The following routine is used to draw a wireframe represtation of a ship.
- *
- * caveat: it is a work in progress.
- * A number of features (such as not showing detail at distance) have not yet been implemented.
- *
- */
-
-void draw_wireframe_ship (struct local_object *obj)
-{
-	Matrix trans_mat;
-	int i;
-	int sx,sy,ex,ey;
-	double rx,ry,rz;
-	int visible[32];
-	Vector vec;
-	Vector camera_vec;
-	double cos_angle;
-	double tmp;
-	struct ship_face_normal *ship_norm;
-	int num_faces;
-	struct ship_data *ship;
-	int lasv;
-
-	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-	
-	num_faces = ship->num_faces;
-	
-	for (i = 0; i < num_faces; i++)
-	{
-		ship_norm = ship->normals;
-
-		vec.x = ship_norm[i].x;
-		vec.y = ship_norm[i].y;
-		vec.z = ship_norm[i].z;
-
-		if ((vec.x == 0) && (vec.y == 0) && (vec.z == 0))
-			visible[i] = 1;
-		else
-		{
-			vec = unit_vector (&vec);
-			cos_angle = vector_dot_product (&vec, &camera_vec);
-			visible[i] = (cos_angle < -0.2);
-		}
-	}
-
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-
-	for (i = 0; i < ship->num_points; i++)
-	{
-		vec.x = ship->points[i].x;
-		vec.y = ship->points[i].y;
-		vec.z = ship->points[i].z;
-
-		mult_vector (&vec, trans_mat);
-
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
-
-		project_to_screen (rx, ry, rz, &sx, &sy);
-
-		point_list[i].x = sx;
-		point_list[i].y = sy;
-
-	}
-
-	for (i = 0; i < ship->num_lines; i++)
-	{
-		if (visible[ship->lines[i].face1] ||
-			visible[ship->lines[i].face2])
-		{
-			sx = point_list[ship->lines[i].start_point].x;
-			sy = point_list[ship->lines[i].start_point].y;
-
-			ex = point_list[ship->lines[i].end_point].x;
-			ey = point_list[ship->lines[i].end_point].y;
-
-			gfx_draw_line (sx, sy, ex, ey);
-		}
-	}
-
-
-	if (obj->flags & FLG_FIRING)
-	{
-		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		lasv = ship_list[obj->type]->front_laser;
-		gfx_draw_line (point_list[lasv].x, point_list[lasv].y,
-					   obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256);
-	}
-}
-
-
 
 
 /*
@@ -158,15 +55,12 @@ void draw_wireframe_ship (struct local_object *obj)
 
 void draw_solid_ship (struct local_object *obj)
 {
-	struct ship_data *ship = ship_list[obj->type];
-
-	/* Emit the ship as a GPU 3D model. Scene3D applies the model->camera rotation
-	 * (transpose of obj->rotmat) + translation, projects it with a real perspective and
-	 * resolves visibility with the hardware z-buffer - replacing the old CPU vertex
-	 * projection, signed-area backface test and painter's-sorted 2D polygons. */
+	/* Emit the ship as a GPU 3D model in the WORLD frame (floating-origin-relative
+	 * position + world basis). Scene3D composes it with the Camera's view and
+	 * projection and resolves visibility with the hardware z-buffer - replacing the
+	 * old CPU vertex projection, backface test and painter's-sorted 2D polygons. */
 	Neuron::Render::ModelDraw md;
 	md.type = obj->type;
-	md.style = 0;
 	md.colour = -1;
 	md.flags = obj->flags;
 	md.location[0] = obj->location.x;
@@ -180,47 +74,60 @@ void draw_solid_ship (struct local_object *obj)
 	}
 	md.distance = obj->distance;
 	Neuron::Graphics::Scene3D::SubmitModel (md);
+}
 
-	/* The laser bolt stays on the 2D path for now: project just the muzzle vertex
-	 * through the same transform the GPU uses and draw the depth-sorted 2D line. */
-	if (obj->flags & FLG_FIRING)
-	{
-		Matrix trans_mat;
-		double tmp;
-		struct vector vec;
-		double rx, ry, rz;
-		int sx, sy;
-		int lasv;
-		int col;
 
-		for (int i = 0; i < 3; i++)
-			trans_mat[i] = obj->rotmat[i];
+/*
+ * Draw the firing beam for a ship whose FLG_FIRING is set - NPCs, remote players
+ * AND (with the cockpit view gone) the player's own hull: project its muzzle
+ * vertex and draw the 2D bolt from the gun to a screen edge. Works on the
+ * CAMERA-SPACE copy draw_ship builds (the CPU projection needs camera coords).
+ * Kept out of draw_solid_ship so that stays pure mesh submission.
+ */
 
-		tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
-		tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
-		tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
+static void draw_ship_laser (const struct local_object *obj)
+{
+	if (!(obj->flags & FLG_FIRING))
+		return;
 
-		lasv = ship->front_laser;
-		vec.x = ship->points[lasv].x;
-		vec.y = ship->points[lasv].y;
-		vec.z = ship->points[lasv].z;
-		mult_vector (&vec, trans_mat);
+	struct ship_data *ship = ship_list[obj->type];
 
-		rx = vec.x + obj->location.x;
-		ry = vec.y + obj->location.y;
-		rz = vec.z + obj->location.z;
-		if (rz <= 0)
-			rz = 1;
+	Matrix trans_mat;
+	double tmp;
+	struct vector vec;
+	double rx, ry, rz;
+	int sx, sy;
+	int lasv;
+	int col;
 
-		project_to_screen (rx, ry, rz, &sx, &sy);
+	for (int i = 0; i < 3; i++)
+		trans_mat[i] = obj->rotmat[i];
 
-		const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-		col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
+	tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
+	tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
+	tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
 
-		gfx_render_line (sx, sy,
-						 obj->location.x > 0 ? 0 : vm.width - 1, (rand255() * vm.height) / 256,
-						 (int) rz, col);
-	}
+	lasv = ship->front_laser;
+	vec.x = ship->points[lasv].x;
+	vec.y = ship->points[lasv].y;
+	vec.z = ship->points[lasv].z;
+	mult_vector (&vec, trans_mat);
+
+	rx = vec.x + obj->location.x;
+	ry = vec.y + obj->location.y;
+	rz = vec.z + obj->location.z;
+	if (rz <= 0)
+		rz = 1;
+
+	project_to_screen (rx, ry, rz, &sx, &sy);
+
+	int w, h;
+	gfx_scene_size (&w, &h);
+	col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
+
+	gfx_render_line (sx, sy,
+					 obj->location.x > 0 ? 0 : w - 1, (rand255() * h) / 256,
+					 (int) rz, col);
 }
 
 
@@ -228,26 +135,19 @@ void draw_solid_ship (struct local_object *obj)
 
 
 /*
- * Draw a planet.
- * We can currently do three different types of planet...
- * - Wireframe.
- * - Fractal landscape.
- * - SNES-style.
+ * Draw a planet as a lit 3D sphere.
  */
 
 void draw_planet (struct local_object *planet)
 {
-	if (planet->location.z <= 0)
-		return;
-
 	/* Emit the planet as a real 3D sphere: a lit UV-sphere mesh (built by SceneMeshes),
-	 * drawn through the same depth-tested mesh pipeline as the ships - replacing the old
-	 * camera-facing billboard disk. Scene3D applies the model->camera rotation + translation
-	 * and the hardware z-buffer resolves occlusion against the ships. The colour is baked into
-	 * the mesh, so this uses the ship (per-vertex, lit) colour path (md.colour = -1). */
+	 * drawn through the same depth-tested mesh pipeline as the ships, in the world frame
+	 * (Scene3D applies the Camera's view + projection); the hardware z-buffer resolves
+	 * occlusion against the ships. The colour is baked into the mesh, so this uses the
+	 * ship (per-vertex, lit) colour path (md.colour = -1). The behind-the-eye guard runs
+	 * in draw_ship, on the camera-space copy. */
 	Neuron::Render::ModelDraw md;
 	md.type = SHIP_PLANET;
-	md.style = planet_render_style;
 	md.colour = -1;
 	md.location[0] = planet->location.x;
 	md.location[1] = planet->location.y;
@@ -266,11 +166,9 @@ void draw_planet (struct local_object *planet)
 
 void draw_sun (struct local_object *planet)
 {
-	if (planet->location.z <= 0)
-		return;
-
 	/* Emit the sun as a GPU billboard (depth-tested radial-gradient disk), replacing the
-	 * per-pixel render_sun rasterizer. Scene3D draws the white->yellow->orange bands. */
+	 * per-pixel render_sun rasterizer. Scene3D view-transforms the world-frame centre and
+	 * draws the white->yellow->orange bands. */
 	Neuron::Render::ModelDraw md;
 	md.type = SHIP_SUN;
 	md.location[0] = planet->location.x;
@@ -430,33 +328,43 @@ void draw_explosion (struct local_object *obj)
 
 
 /*
- * Draws an object in local space.
- * (Ship, Planet, Sun etc).
+ * Draws an object handed in the WORLD frame (floating-origin-relative position +
+ * world basis). The camera is decoupled from the ship: a camera-space copy is
+ * built here through the Camera's view matrix for everything the CPU still does
+ * (behind-the-eye and frustum culls, the explosion debris, the firing beam),
+ * while the meshes are submitted world-frame and Scene3D applies view*projection
+ * on the GPU. Explosion state advanced on the copy is written back to the
+ * caller's object (the animation persists across frames).
  */
 
 void draw_ship (struct local_object *ship)
 {
 
-	if ((current_screen != SCR_FRONT_VIEW) && (current_screen != SCR_REAR_VIEW) && 
-		(current_screen != SCR_LEFT_VIEW) && (current_screen != SCR_RIGHT_VIEW) &&
+	if ((current_screen != SCR_FRONT_VIEW) &&
 		(current_screen != SCR_INTRO_ONE) && (current_screen != SCR_INTRO_TWO) &&
 		(current_screen != SCR_GAME_OVER) && (current_screen != SCR_ESCAPE_POD))
 		return;
-	
-	if ((ship->flags & FLG_DEAD) && !(ship->flags & FLG_EXPLOSION))
+
+	struct local_object cam = *ship;
+	camera_view_object (&cam);
+
+	if ((cam.flags & FLG_DEAD) && !(cam.flags & FLG_EXPLOSION))
 	{
-		ship->flags |= FLG_EXPLOSION;
-		ship->exp_seed = randint();
-		ship->exp_delta = 18; 
+		cam.flags |= FLG_EXPLOSION;
+		cam.exp_seed = randint();
+		cam.exp_delta = 18;
 	}
 
-	if (ship->flags & FLG_EXPLOSION)
+	if (cam.flags & FLG_EXPLOSION)
 	{
-		draw_explosion (ship);
+		draw_explosion (&cam);
+		ship->flags = cam.flags;
+		ship->exp_seed = cam.exp_seed;
+		ship->exp_delta = cam.exp_delta;
 		return;
 	}
-	
-	if (ship->location.z <= 0)	/* Only display ships in front of us. */
+
+	if (cam.location.z <= 0)	/* Only display objects in front of the camera. */
 		return;
 
 	if (ship->type == SHIP_PLANET)
@@ -470,17 +378,20 @@ void draw_ship (struct local_object *ship)
 		draw_sun (ship);
 		return;
 	}
-	
-	/* Field-of-vision cull against the real (aspect-aware) frustum, so ships at
-	 * the edges of a wide window are not dropped early. */
-	const Neuron::Client::ViewMetrics& vm = gfx_view_metrics();
-	if ((fabs(ship->location.x) > Neuron::Client::HalfExtentX (vm, ship->location.z)) ||
-		(fabs(ship->location.y) > Neuron::Client::HalfExtentY (vm, ship->location.z)))
-		return;
 
-	if (wireframe)
-		draw_wireframe_ship (ship);
-	else
-		draw_solid_ship (ship);
+	/* Field-of-vision cull against the camera's real frustum (|x| <= z*tan(fovX/2),
+	 * |y| <= z*tan(fovY/2)), so ships at the edges of a wide window are not
+	 * dropped early. */
+	{
+		Neuron::Client::Camera& camera = Neuron::Client::MainCamera();
+		const double tx = Neuron::Client::CameraTanHalfFovX (camera);
+		const double ty = Neuron::Client::CameraTanHalfFovY (camera);
+		if ((fabs(cam.location.x) > cam.location.z * tx) ||
+			(fabs(cam.location.y) > cam.location.z * ty))
+			return;
+	}
+
+	draw_solid_ship (ship);       // world-frame mesh; Scene3D applies the view + projection
+	draw_ship_laser (&cam);       // firing beam (only when FLG_FIRING); CPU camera-space
 }
 

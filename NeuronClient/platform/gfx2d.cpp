@@ -27,7 +27,7 @@
 #include "Canvas.h" // Canvas::Start/End - the shared 2D-pass bracket (Phase 2)
 
 #include "gfx.h"
-#include "ViewMetrics.h"
+#include "Camera.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -73,21 +73,24 @@ std::vector<ColorVertex> g_cverts;
 std::vector<TexVertex>   g_tverts;
 std::vector<Cmd>         g_cmds;
 
-/* The frame's 3D scene (skybox + dust + the models the game handed straight to Scene3D via
- * Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls directly at
- * the end of its world draw - even with no models in view (staring at empty space still shows
- * the skybox). Models live in Scene3D, not here. */
+/* The frame's 3D scene (the dust starfield background + the models the game handed straight to
+ * Scene3D via Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls
+ * directly at the end of its world draw - even with no models in view (staring at empty space
+ * still shows the stars). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
 bool                     g_xor_mode = false;
 
 /* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
- * is set for the frame and g_view carries the aspect-aware optics; the HUD is
- * floated by adding (g_origin_x,g_origin_y) to every emitted coordinate and to
- * the clip rect. In retro mode all three are inert (origin 0, legacy optics). */
+ * is set for the frame and (g_scene_w, g_scene_h) is the live client size; the
+ * HUD is floated by adding (g_origin_x,g_origin_y) to every emitted coordinate
+ * and to the clip rect. In retro mode all three are inert (origin 0, 512x384
+ * scene canvas). The projection itself lives on the main Camera - see
+ * gfx_set_scene_fullwindow. */
 int                        g_origin_x  = 0;
 int                        g_origin_y  = 0;
 bool                       g_scene_full = false;
-Neuron::Client::ViewMetrics g_view = Neuron::Client::MakeViewMetrics(512, 384);
+int                        g_scene_w = 512;
+int                        g_scene_h = 384;
 
 /* The virtual coordinate space the 2D batch is authored in: the retro 512x514 canvas,
  * or the live client area when the in-flight 3D fills the window. (Formerly the size of
@@ -339,7 +342,7 @@ void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, t
 void gfx_clear_display(void)
 {
 	/* gfx2d_flush already clears the whole back buffer to black each frame, and in full-window
-	 * flight the 3D scene pass (skybox) fills it. Since the 2D layer now composites *on top of*
+	 * flight the 3D scene pass (the dust starfield) fills it. Since the 2D layer now composites *on top of*
 	 * the 3D (Phase 2 Step 3), a full-window 2D black rect here would paint over the scene - so
 	 * skip it in full-window mode. Retro mode (2D-only screens, no 3D pass) still clears just
 	 * the legacy play area so the persistent dashboard strip is untouched. */
@@ -395,27 +398,38 @@ void xor_mode(int on) { g_xor_mode = (on != 0); }
 /* ---- full-window scene / floating HUD ---- */
 
 // Select the canvas/projection mode for the frame about to be drawn: full-window
-// (the in-flight 3D fills the client area, aspect-aware optics) or retro (the
-// letterboxed 512x514 canvas for menus/charts/station). Recomputes the optics
-// from the live client size each call, so it is safe to call every frame.
+// (the in-flight 3D fills the client area) or retro (the letterboxed 512x514
+// canvas for menus/charts/station). Re-issues the main Camera's projection for
+// the live viewport each call - the legacy vertical field of view at the current
+// aspect ratio - so it is safe to call every frame.
 void gfx_set_scene_fullwindow(int on)
 {
 	Renderer* r = platform_renderer();
 	if (on && r)
 	{
 		g_scene_full = true;
-		g_view = Neuron::Client::MakeViewMetrics(r->clientWidth(), r->clientHeight());
+		g_scene_w = r->clientWidth();
+		g_scene_h = r->clientHeight();
 	}
 	else
 	{
 		g_scene_full = false;
-		g_view = Neuron::Client::MakeViewMetrics(512, 384);   // legacy play-area optics
+		g_scene_w = 512;   // legacy play-area optics
+		g_scene_h = 384;
 	}
+
+	const float aspect = (g_scene_h > 0) ? static_cast<float>(g_scene_w) / static_cast<float>(g_scene_h) : 4.0f / 3.0f;
+	Neuron::Client::MainCamera().SetProjParams(Neuron::Client::kLegacySceneFovY, aspect,
+											   Neuron::Client::kSceneNearZ, Neuron::Client::kSceneFarZ);
 }
 
-// The aspect-aware optics for the current frame (used by the software projection
-// in threed.cpp / stars.cpp).
-const Neuron::Client::ViewMetrics& gfx_view_metrics(void) { return g_view; }
+// The scene canvas size for the current frame, in logical pixels (the space the
+// CPU-projected HUD bits in threed.cpp / space.cpp / stars.cpp draw in).
+void gfx_scene_size(int* w, int* h)
+{
+	if (w) *w = g_scene_w;
+	if (h) *h = g_scene_h;
+}
 
 // Offset every subsequent emitted coordinate (and clip rect) by (x,y). Used to
 // float the HUD; pass (0,0) to draw in the canvas's own space again.
@@ -587,12 +601,12 @@ void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
  *  Scene pass + 2D flush
  * ===================================================================== */
 
-/* The 3D scene pass (skybox -> dust -> depth-tested ships / planets / sun). The game calls
- * this directly at the end of its world draw (update_local_objects / render_replicated_objects),
+/* The 3D scene pass (dust starfield background -> depth-tested ships / planets / sun). The game
+ * calls this directly at the end of its world draw (update_local_objects / render_replicated_objects),
  * once all models are submitted (Scene3D::SubmitModel) and the dust is set - so it drives the
  * pass itself, with no separate scene-marker flag. No clear (ClientEngine::Frame clears the
  * back buffer once per frame, before the scene hook) and no 2D; the HUD / menus / GUI composite
- * over it later in gfx2d_flush. Runs unconditionally (drawing the skybox even with no models in
+ * over it later in gfx2d_flush. Runs unconditionally (drawing the dust even with no models in
  * view), and safely on a null rtv (device lost) - Scene3D still clears the frame's model list. */
 void gfx_render_3d_scene(void)
 {
@@ -600,7 +614,7 @@ void gfx_render_3d_scene(void)
 
 	const CanvasPlacement cp = canvasPlacement();
 	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
-											g_view, cp.dstX, cp.dstY,
+											Neuron::Client::MainCamera(), cp.dstX, cp.dstY,
 											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
 }
 
