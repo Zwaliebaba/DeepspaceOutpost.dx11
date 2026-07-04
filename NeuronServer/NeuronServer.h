@@ -5,3 +5,6 @@
 // Server-side engine pieces (generic, game-agnostic).
 #include "DatagramPump.h"
 #include "OnChangeCache.h"
+#include "PlayerPersistState.h"
+#include "PersistenceStore.h"
+#include "PersistenceService.h"

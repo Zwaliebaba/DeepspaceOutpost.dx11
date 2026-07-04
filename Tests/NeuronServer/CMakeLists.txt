@@ -9,11 +9,14 @@ add_executable(NeuronServer.Tests
     SmokeTests.cpp
     DatagramPumpTests.cpp
     OnChangeCacheTests.cpp
+    PersistenceTests.cpp
 )
 
 target_compile_features(NeuronServer.Tests PRIVATE cxx_std_23)
 
-target_link_libraries(NeuronServer.Tests PRIVATE NeuronServer GTest::gtest_main)
+# NeuronServer for the store/service; GameLogic for the component<->state converters
+# (PlayerPersistence.h) and the ECS world the persistence round-trip test drives.
+target_link_libraries(NeuronServer.Tests PRIVATE NeuronServer GameLogic GTest::gtest_main)
 
 if(MSVC)
     target_compile_options(NeuronServer.Tests PRIVATE /W4)

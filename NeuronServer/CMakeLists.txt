@@ -5,6 +5,7 @@
 # server-only systems land here as the migration progresses.
 
 set(NEURONSERVER_SOURCES
+    PersistenceService.cpp
     pch.cpp
 )
 
@@ -12,6 +13,9 @@ set(NEURONSERVER_HEADERS
     NeuronServer.h
     DatagramPump.h
     OnChangeCache.h
+    PlayerPersistState.h
+    PersistenceStore.h
+    PersistenceService.h
     pch.h
 )
 

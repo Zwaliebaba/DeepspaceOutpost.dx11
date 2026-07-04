@@ -35,6 +35,7 @@ set(GAMELOGIC_HEADERS
     SpawnDirector.h
     StationServices.h
     CombatMessages.h
+    PlayerPersistence.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})
@@ -52,8 +53,11 @@ if(MSVC)
 endif()
 
 # PUBLIC so consumers (Server, Tests) get GameLogic's headers and the header-only
-# NeuronCore engine headers it builds on.
+# NeuronCore engine headers it builds on. NeuronServer is on the path for the
+# header-only PlayerPersistState struct that PlayerPersistence.h converts to/from
+# (a POD only - GameLogic does not link the NeuronServer library).
 target_include_directories(GameLogic PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/NeuronCore
+    ${CMAKE_SOURCE_DIR}/NeuronServer
 )
