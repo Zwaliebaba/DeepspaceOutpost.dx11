@@ -140,7 +140,67 @@ hygiene parallelizable, #20 gating entity-cap increases).
 | **G — MMO polish & deferred gameplay** | kill VFX, missile-lock validation, chat, suns & cabin heat, missions | #18 + §14 preamble | #18 early; suns/missions late |
 | **H — Rendering** | instanced wireframe, iconic LOD, post chain, NetType table | #13 | any time |
 
----## 3. Track A — Truth & hygiene
+---
+
+## 2.1 Recommended model per phase
+
+Which Claude to point at each phase, tuned to *this* repo's constraint: the Linux
+agent sandbox cannot compile (MSVC/DX11/WinRT), so **CI is the only oracle** and a
+subtle mistake in un-runtime-tested code (wire ABI, native ODBC, `/fp:strict`
+determinism, threading, security) is expensive to catch. The tiers:
+
+- **Opus 4.8 / Fable 5** (top tier — pick either; Fable 5 is the faster of the
+  two): security-sensitive work, code CI compiles but never *runs* (ODBC, the
+  render path), behaviour-preserving refactors that must stay bit-identical under
+  `/fp:strict`, off-thread/async correctness, and cross-cutting design where one
+  wrong assumption cascades. Default to this tier whenever a bug would be silent.
+- **Sonnet 5** (strong mid): well-scoped, CI-testable implementation with clear
+  acceptance criteria and a fast feedback loop — most gameplay systems and
+  mechanical-but-nontrivial wiring.
+- **Haiku 4.5** (fast/cheap): trivial, low-risk mechanical work — deletions, tiny
+  guards, doc passes.
+
+When unsure, size **up** — the sandbox can't catch what a stronger model wouldn't
+have written. Model ids: `claude-opus-4-8`, `claude-fable-5`, `claude-sonnet-5`,
+`claude-haiku-4-5`.
+
+| Phase | Rec. model | Why |
+|---|---|---|
+| A1 Purge client game rules | Sonnet 5 | Large but mechanical deletion; CI + existing tests catch regressions. |
+| A2 Wire equip/refuel | Sonnet 5 | Well-scoped server wiring with tests. |
+| A3 Snapshot interpolation | Sonnet 5 | Contained client-render change, testable. |
+| A4 Delete dead code | Haiku 4.5 | Pure deletion by an inventory list. |
+| A5 Protocol hygiene (codec/ABI) | **Opus 4.8 / Fable 5** | Permanent message-id ABI + generic codec — wire mistakes are silent and forever. |
+| A6 Determinism & build hygiene | Haiku 4.5 | Tiny flag/build tweaks. |
+| A7 Documentation truth pass | Haiku 4.5 | Prose reconciliation. |
+| B1 `ClientHello`-first handshake | **Opus 4.8 / Fable 5** | Inverted connection state machine; include-sufficiency traps only CI sees. |
+| B2 Session token (security) | **Opus 4.8 / Fable 5** | Security-critical: token auth, spoof/replay, rate limits — do not economize. |
+| B3 Reconnect grace & resume | **Opus 4.8 / Fable 5** | Reliable-lane sequencing + endpoint migration edge cases. |
+| B4 SQL persistence | **Opus 4.8 / Fable 5** | Off-sim-thread service + raw ODBC CI never runs + never-alias-a-save correctness. |
+| C Identity layer | **Opus 4.8 / Fable 5** | Relational ownership index with generation-recycle correctness; cross-cutting. |
+| D1 Spatial grid in pairwise loops | **Opus 4.8 / Fable 5** | Must stay bit-identical under `/fp:strict`; deterministic candidate ordering. |
+| D2 Frame arena / scratch reuse | Sonnet 5 | Mechanical, golden-preserving buffer reuse. |
+| D3 Accumulator + tick metrics | Sonnet 5 | Pure, testable pacer/metrics logic. |
+| D4 Rate/cadence guards | Haiku 4.5 | One small per-session counter. |
+| D5 BotClient harness | **Opus 4.8 / Fable 5** | New headless target + real-UDP timing + a process-level CI smoke lane. |
+| E1 Time sync → lag compensation | **Opus 4.8 / Fable 5** | Transform ring buffers + the derived-state/determinism boundary. |
+| E2 Snapshot quantization/delta | **Opus 4.8 / Fable 5** | New wire format, server-rounded exactness, delta/keyframe resync. |
+| E3 Strategic AOI tier | Sonnet 5 | A new tier over the existing AOI grid; scoped and testable. |
+| F1 First ordered unit (escort) | Sonnet 5 | Reuses AI/flight/combat; a validated order message. |
+| F2 Fog of war | Sonnet 5 | `KnownSystems` + incremental manifest, testable. |
+| F3 Ownership & territory | **Opus 4.8 / Fable 5** | Large, stateful, persistence-integrated claim/deploy. |
+| F4 Living economy | **Opus 4.8 / Fable 5** | Market drift + persistence + emergent supply — many moving parts. |
+| F5 Factions & standings | Sonnet 5 | Standings matrix over existing crime/roster hooks. |
+| G1 Kill VFX broadcast | Haiku 4.5 | One broadcast message + client cue. |
+| G2 Missile-lock validation | Sonnet 5 | Server-side validation (anti-cheat flavour). |
+| G3 Chat + abuse controls | Sonnet 5 | Straightforward, but moderation deserves care. |
+| G4 Suns & cabin heat | Sonnet 5 | A new gameplay system, headless-testable. |
+| G5 Missions | **Opus 4.8 / Fable 5** | Large scripting/content system with persistence. |
+| H Rendering | **Opus 4.8 / Fable 5** | DX11 visual work CI can't verify; instancing/LOD/post correctness by inspection. |
+
+---
+
+## 3. Track A — Truth & hygiene
 
 ### A1 — Purge game rules from the client (extends S4 / #21) — **M** — ✅ **done 2026-07-03**
 
