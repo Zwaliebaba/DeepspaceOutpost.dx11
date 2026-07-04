@@ -14,6 +14,7 @@ set(GAMELOGIC_HEADERS
     GameLogic.h
     SimComponents.h
     Broadphase.h
+    FrameScratch.h
     MotionSystem.h
     FlightInput.h
     FlightSystem.h

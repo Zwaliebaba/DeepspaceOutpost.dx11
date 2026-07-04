@@ -13,6 +13,8 @@
 #include "ECS.h"
 
 #include "SimComponents.h"
+#include "Broadphase.h"
+#include "FrameScratch.h"
 #include "MotionSystem.h"
 #include "FlightInput.h"
 #include "FlightSystem.h"

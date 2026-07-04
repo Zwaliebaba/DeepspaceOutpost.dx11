@@ -23,7 +23,8 @@
 
 #include "SimComponents.h"
 #include "Combat.h"
-#include "Broadphase.h"   // BROADPHASE_CELL + the sorted-candidates discipline (D1)
+#include "Broadphase.h"      // BROADPHASE_CELL + the sorted-candidates discipline (D1)
+#include "FrameScratch.h"    // CombatUnit + persistent scratch storage (D2)
 
 namespace Neuron::GameLogic
 {
@@ -239,40 +240,40 @@ namespace Neuron::GameLogic
   // Advance combat one tick. Returns the kills; the caller destroys the victims
   // and broadcasts death events. `_candidatePairs` (optional) accumulates the
   // number of narrowed shooter->target candidates the exact tests ran on (D3
-  // metrics, validating the D1 grid).
+  // metrics, validating the D1 grid). `_scratch` (D2) is reusable per-tick
+  // working storage; the default lets every existing call site (tests) omit it.
   [[nodiscard]] inline std::vector<Kill> StepCombat(ECS::Registry& _world,
-                                                    uint64_t* _candidatePairs = nullptr)
+                                                    uint64_t* _candidatePairs = nullptr,
+                                                    FrameScratch& _scratch = Detail::DefaultScratch())
   {
-    struct Unit
-    {
-      ECS::EntityId id;
-      Math::Vector3i64 pos;
-      Combatant* c;
-    };
-
-    std::vector<Unit> units;
+    std::vector<CombatUnit>& units = _scratch.combatUnits;
+    units.clear();
     _world.Each<WorldTransform, Combatant>([&units](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
     {
-      units.push_back(Unit{ _id, _t.position, &_c });
+      units.push_back(CombatUnit{ _id, _t.position, &_c });
     });
 
     // D1 broadphase: bucket every potential target by its units-vector index. Each
     // shooter's nearest-enemy scan then walks only its neighbourhood, sorted - a
     // strict subsequence of the old full scan, so the chosen target (including
     // distance ties, broken by scan order) is bit-identical.
-    Spatial::Grid grid(BROADPHASE_CELL);
+    Spatial::Grid& grid = _scratch.combatGrid;
+    grid.Clear();
     for (std::size_t i = 0; i < units.size(); ++i)
       grid.Insert(i, units[i].pos);
-    std::vector<uint64_t> nearby;   // ("near" is a reserved legacy macro under <windows.h>)
+    std::vector<uint64_t>& nearby = _scratch.combatNearby;
 
     // Accumulate this tick's damage and the attacker that dealt it, so resolution
     // is simultaneous (firing order doesn't matter). The attacker's position is
     // kept too, so a player victim's directional shields know which side was hit.
-    std::unordered_map<uint32_t, int> damage;
-    std::unordered_map<uint32_t, uint32_t> attacker;
-    std::unordered_map<uint32_t, Math::Vector3i64> attackerPos;
+    std::unordered_map<uint32_t, int>& damage = _scratch.combatDamage;
+    std::unordered_map<uint32_t, uint32_t>& attacker = _scratch.combatAttacker;
+    std::unordered_map<uint32_t, Math::Vector3i64>& attackerPos = _scratch.combatAttackerPos;
+    damage.clear();
+    attacker.clear();
+    attackerPos.clear();
 
-    for (const Unit& a : units)
+    for (const CombatUnit& a : units)
     {
       if (!a.c->autoEngage)
         continue;   // players (and inert objects) don't initiate fire
@@ -286,7 +287,7 @@ namespace Neuron::GameLogic
       // In-range test is Chebyshev (no large multiplies on absolute coords);
       // only then is the squared distance computed, and only over the small
       // in-range delta, so it cannot overflow.
-      auto inRange = [&a](const Unit& _b) -> bool
+      auto inRange = [&a](const CombatUnit& _b) -> bool
       {
         const int64_t dx = _b.pos.x - a.pos.x;
         const int64_t dy = _b.pos.y - a.pos.y;
@@ -297,14 +298,14 @@ namespace Neuron::GameLogic
         return ax <= a.c->range && ay <= a.c->range && az <= a.c->range;
       };
 
-      const Unit* best = nullptr;
+      const CombatUnit* best = nullptr;
       int64_t bestDist2 = 0;
 
       // Target memory first (stage 4): a live, in-range, still-legitimate focus
       // outranks the nearest scan, so fire follows the AI's flight target (the
       // police shoot the offender they are chasing, not whoever drifts closest).
       if (a.c->focus != ECS::INVALID_INDEX)
-        for (const Unit& b : units)
+        for (const CombatUnit& b : units)
           if (b.id.index == a.c->focus)
           {
             if (b.c->team != a.c->team && inRange(b)
@@ -321,7 +322,7 @@ namespace Neuron::GameLogic
         QuerySortedNeighbours(grid, a.pos, CellsForRange(a.c->range), nearby);
         for (const uint64_t bi : nearby)
         {
-          const Unit& b = units[static_cast<std::size_t>(bi)];
+          const CombatUnit& b = units[static_cast<std::size_t>(bi)];
           if (_candidatePairs != nullptr)
             ++*_candidatePairs;
           if (b.c->team == a.c->team)
@@ -355,7 +356,7 @@ namespace Neuron::GameLogic
     // Apply damage, then collect deaths. Invulnerable combatants take none (and
     // their grace ticks down here, once per combat step).
     std::vector<Kill> kills;
-    for (const Unit& u : units)
+    for (const CombatUnit& u : units)
     {
       if (u.c->invulnTicks > 0)
       {

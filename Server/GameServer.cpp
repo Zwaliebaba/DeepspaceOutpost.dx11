@@ -456,7 +456,7 @@ namespace DSOServer
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
     // inside StepAi; their removal rides the despawn diff.
-    GameLogic::StepAi(m_world, m_tick, m_aiRng);
+    GameLogic::StepAi(m_world, m_tick, m_aiRng, m_scratch);
     GameLogic::Tick(m_world);
     ++m_tick;
     m_spawner.Step(m_world, m_tick);
@@ -481,13 +481,14 @@ namespace DSOServer
     // skips already-resolved entities.
     // G8: a missile homing on an ECM-fitted target can be jammed mid-flight;
     // every jam is broadcast as the classic ECM cue.
-    std::vector<uint32_t> ecmPulses;
-    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses);
+    std::vector<uint32_t>& ecmPulses = m_scratch.ecmPulses;
+    ecmPulses.clear();   // StepMissiles only appends; a reused buffer must start empty
+    std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses, m_scratch);
     for (uint32_t defender : ecmPulses)
       m_sessions.Broadcast(Msg::EcmPulse{ defender });
-    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world, &m_candidatePairsThisTick))
+    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
-    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick))
+    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
     for (const GameLogic::Kill& kill : kills)
       m_bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
@@ -499,8 +500,8 @@ namespace DSOServer
     // Age cargo canisters (despawning the expired) and let players scoop the
     // ones they fly into; a player whose hold changed gets a fresh cargo
     // manifest. Both the expired and the scooped canisters ride the despawn diff.
-    GameLogic::StepLoot(m_world);
-    for (uint32_t scoopedBy : GameLogic::ScoopSystem(m_world))
+    GameLogic::StepLoot(m_world, m_scratch);
+    for (uint32_t scoopedBy : GameLogic::ScoopSystem(m_world, m_scratch))
       SendCargoTo(scoopedBy);
   }
 
@@ -519,7 +520,8 @@ namespace DSOServer
     // Reap idle clients, then broadcast every despawn (reaped players + props)
     // as a reliable event to all remaining clients.
     m_sessions.Reap(m_world, m_tick, Cfg::SESSION_TIMEOUT_TICKS, Cfg::SESSION_GRACE_TICKS);
-    for (uint32_t goneId : m_despawns.Update(CurrentIds(m_world)))
+    CurrentIds(m_world, m_currentIdsScratch);
+    for (uint32_t goneId : m_despawns.Update(m_currentIdsScratch))
       m_sessions.Broadcast(Msg::EntityDespawn{ goneId });
   }
 
@@ -540,7 +542,7 @@ namespace DSOServer
             m_aoi.SnapshotFor(m_world, m_tick, viewerPos, Cfg::AOI_RADIUS_CELLS, s.entity.index);
         // Keep the local system's planet/station visible across the whole system,
         // not just the +/-1 ship cell, so the body you fly toward never pops out.
-        AppendLandmarks(m_world, snap, viewerPos, m_landmarks);
+        AppendLandmarks(m_world, snap, viewerPos, m_landmarks, m_landmarkPresentScratch);
         for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         {
           m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());

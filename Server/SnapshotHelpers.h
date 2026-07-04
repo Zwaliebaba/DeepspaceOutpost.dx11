@@ -20,29 +20,36 @@
 
 namespace DSOServer
 {
-  // Indices of every entity currently in the world (for the despawn diff).
-  [[nodiscard]] inline std::vector<uint32_t> CurrentIds(Neuron::ECS::Registry& _world)
+  // Indices of every entity currently in the world (for the despawn diff). `_out`
+  // is caller-owned scratch (D2): cleared here and refilled, so a caller that
+  // calls this every tick reuses its capacity instead of allocating a fresh
+  // vector each time.
+  inline void CurrentIds(Neuron::ECS::Registry& _world, std::vector<uint32_t>& _out)
   {
     using namespace Neuron;
-    std::vector<uint32_t> ids;
-    _world.Each<GameLogic::WorldTransform>([&ids](ECS::EntityId _id, GameLogic::WorldTransform&)
+    _out.clear();
+    _world.Each<GameLogic::WorldTransform>([&_out](ECS::EntityId _id, GameLogic::WorldTransform&)
     {
-      ids.push_back(_id.index);
+      _out.push_back(_id.index);
     });
-    return ids;
   }
 
   // Add landmark entities (planets/stations) within LANDMARK_VIS_DIST of the
   // viewer to an already-built AOI snapshot, skipping any the AOI pass already
   // included. Keeps the planet/station the player is flying around from popping
   // out at the ship-AOI boundary, without widening interest for ordinary ships.
+  // `_presentScratch` is caller-owned scratch (D2): this is called once PER
+  // SESSION per tick, so reusing it (instead of a fresh set every call) is the
+  // hottest allocation site this file touches.
   inline void AppendLandmarks(Neuron::ECS::Registry& _world, Neuron::Net::WorldSnapshot& _snap,
                               const Neuron::Math::Vector3i64& _viewerPos,
-                              const std::vector<Neuron::ECS::EntityId>& _landmarks)
+                              const std::vector<Neuron::ECS::EntityId>& _landmarks,
+                              std::unordered_set<uint32_t>& _presentScratch)
   {
     using namespace Neuron;
 
-    std::unordered_set<uint32_t> present;
+    std::unordered_set<uint32_t>& present = _presentScratch;
+    present.clear();
     present.reserve(_snap.entities.size() * 2);
     for (const Net::EntitySnapshot& e : _snap.entities)
       present.insert(e.id);

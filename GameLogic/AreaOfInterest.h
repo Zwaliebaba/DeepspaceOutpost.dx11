@@ -35,10 +35,12 @@ namespace Neuron::GameLogic
     [[nodiscard]] std::size_t OccupiedCellCount() const { return m_grid.OccupiedCellCount(); }
 
     // Re-index every entity that has a WorldTransform by its current cell. Cheap
-    // to call each tick; the grid is rebuilt from scratch so it never drifts.
+    // to call each tick; Clear() (D2) empties the grid's cells and the index
+    // without discarding their bucket arrays, so rebuilding every tick doesn't
+    // churn the allocator back to the same size it just freed.
     void Rebuild(ECS::Registry& _world)
     {
-      m_grid = Spatial::Grid(m_grid.CellSize());
+      m_grid.Clear();
       m_index.clear();
       _world.Each<WorldTransform>([this](ECS::EntityId _id, WorldTransform& _t)
       {
@@ -48,7 +50,10 @@ namespace Neuron::GameLogic
     }
 
     // Build a snapshot for a viewer at `_viewerPos` containing only the entities
-    // within `_radiusCells` cells of it. Call Rebuild() first each tick.
+    // within `_radiusCells` cells of it. Call Rebuild() first each tick. Called
+    // once per session per tick, so its internal candidate scratch (D2) is a
+    // `mutable` member reused across those calls - logically const (the method
+    // only reads the world/grid), physically just reusing scratch capacity.
     [[nodiscard]] Net::WorldSnapshot SnapshotFor(ECS::Registry& _world, uint32_t _tick,
                                                  const Math::Vector3i64& _viewerPos, int _radiusCells,
                                                  uint32_t _viewerId = 0xFFFFFFFFu) const
@@ -57,10 +62,14 @@ namespace Neuron::GameLogic
       snap.tick = _tick;
       snap.viewerId = _viewerId;   // so the client can identify its own ship
 
-      std::vector<uint64_t> nearby;
-      m_grid.QueryNear(_viewerPos, _radiusCells, nearby);
+      // QueryNear APPENDS to its out-param rather than clearing it (each cell in
+      // its radius adds its own entries within one call), so a scratch buffer
+      // REUSED across calls must be cleared here first, or candidates from every
+      // past call would still be sitting in it.
+      m_nearbyScratch.clear();
+      m_grid.QueryNear(_viewerPos, _radiusCells, m_nearbyScratch);
 
-      for (uint64_t raw : nearby)
+      for (uint64_t raw : m_nearbyScratch)
       {
         const auto it = m_index.find(static_cast<uint32_t>(raw));
         if (it == m_index.end())
@@ -76,5 +85,6 @@ namespace Neuron::GameLogic
   private:
     Spatial::Grid m_grid;
     std::unordered_map<uint32_t, ECS::EntityId> m_index;   // grid id (index) -> full handle
+    mutable std::vector<uint64_t> m_nearbyScratch;         // D2: SnapshotFor's per-call candidate list
   };
 }

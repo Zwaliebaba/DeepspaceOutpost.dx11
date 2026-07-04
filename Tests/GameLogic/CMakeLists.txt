@@ -9,6 +9,7 @@ add_executable(GameLogic.Tests
     AiSystemTests.cpp
     AreaOfInterestTests.cpp
     BroadphaseEquivalenceTests.cpp
+    FrameScratchTests.cpp
     CombatSystemTests.cpp
     CombatMessagesTests.cpp
     CombatTests.cpp

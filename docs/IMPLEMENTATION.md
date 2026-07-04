@@ -723,7 +723,7 @@ regression in the existing 218 tests.
 
 ---
 
-## 6. Track D — Performance & the load harness
+## 6. Track D — Performance & the load harness — ✅ **all of D1–D5 done 2026-07-04**
 
 ### D1 — Spatial grid into every pairwise loop (#6 / E1) — **M** — ✅ **done 2026-07-04**
 
@@ -758,7 +758,7 @@ so conversion is pure overhead until a *persistent* per-tick grid exists; that
 needs a staleness story across tick phases and rides fleet-scale work (E-track).
 The ship↔planet check stays linear over the handful of planet landmarks.
 
-### D2 — Frame arena / scratch reuse (#7 / E2) — **S**
+### D2 — Frame arena / scratch reuse (#7 / E2) — **S** — ✅ **done 2026-07-04**
 
 Persistent per-system scratch buffers with `clear()`-not-free semantics for
 the per-tick vectors confirmed in the audit (`CollisionSystem`, `StepCombat`,
@@ -766,6 +766,41 @@ the per-tick vectors confirmed in the audit (`CollisionSystem`, `StepCombat`,
 snapshot build and reliable-channel resend buffers. Simplest shape: a
 `FrameScratch` struct owned by `GameServer`, passed down by reference —
 no globals, no allocator cleverness until profiling demands it.
+
+*As built:* `GameLogic/FrameScratch.h` bundles the per-tick working-set storage
+for the five GameLogic systems named above (`StepCollisions`/`StepCombat` also
+had their own D1 `Spatial::Grid` — itself constructed fresh every call — folded
+in as a persistent, `Clear()`-not-reconstructed member alongside their unit
+vectors/maps). Every function taking a `FrameScratch&` gives it a trailing
+default argument bound to a process-wide fallback instance
+(`Detail::DefaultScratch()`), so every pre-existing test call site (~40 of them)
+compiles unchanged; `GameServer` owns and passes one real `m_scratch` explicitly
+by reference every tick (the "no globals" shape the spec asked for — the
+fallback is purely an escape hatch for callers that don't care). Two Server-side
+`SnapshotHelpers` functions (`CurrentIds`, `AppendLandmarks`) were converted to
+out-parameter scratch (the latter is called once PER SESSION per tick, the
+hottest allocation site in that file). `AreaOfInterest::Rebuild` reuses its grid
+via a new `Spatial::Grid::Clear()` (NeuronCore) instead of replacing the whole
+`Grid` object every tick; `SnapshotFor`'s internal candidate list is a `mutable`
+member for the same reason. `DespawnTracker::Update` swaps a persistent scratch
+set with `m_previous` instead of constructing-then-moving a fresh one every call.
+
+Every scratch field is unconditionally cleared by its owning function before
+use (verified field-by-field), so this is a pure allocator optimization with
+zero behaviour change — the existing suites (including D1's
+`BroadphaseEquivalenceTests`, which run the converted systems through their
+default scratch) still pass unmodified. Added `FrameScratchTests.cpp`, which
+deliberately shares one `FrameScratch` across two *different* worlds per system
+to prove no state leaks between calls (the actual risk this refactor
+introduces), plus a `Grid::Clear()` unit test in `SpatialTests.cpp`.
+
+**Scope note:** reliable-channel resend buffers (`ReliableChannel::WritePacket`,
+`MessageEndpoint::WriteDatagrams`) were deliberately NOT converted to out-params.
+They already return via RVO/move (no double-copy today), and making them
+out-params would be an API break across NeuronCore reaching every module
+(client and server) for comparatively little payoff — exactly the "no allocator
+cleverness until profiling demands it" the spec itself cautions against.
+Deferred until D3's metrics (bytes/lane) show it actually matters.
 
 ### D3 — Accumulator fixed timestep + tick metrics (#8 / S5, E8) — **S** — ✅ **done 2026-07-04**
 
@@ -1080,8 +1115,9 @@ Three items are genuinely open and block only their own bullets:
    literally true; protocol hygiene done; docs match code.
 2. **M2 "Durable world"** ✅ — B1–B4 complete. Secure token sessions, reconnect
    grace + resume, SQL persistence (ODBC soak-validated). Restart-safe commanders.
-3. **M3 "Empire-ready core"** — C + D1–D5. Identity layer, grid, arena,
-   accumulator, metrics, BotClient smoke in CI.
+3. **M3 "Empire-ready core"** — C + D1–D5. D1–D5 ✅ complete (grid, arena,
+   accumulator, metrics, BotClient smoke in CI); Track C (identity layer) is the
+   one piece left before this milestone is done.
 4. **M4 "Fair & scalable netcode"** — E1–E3 (validated by the 100-bot
    soak) + G1–G3.
 5. **M5 "The 4X turn"** — F1–F5, G4, with H landing in parallel.

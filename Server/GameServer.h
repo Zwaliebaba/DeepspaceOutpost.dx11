@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 #include "ECS.h"
@@ -149,6 +150,13 @@ namespace DSOServer
     uint64_t m_bytesThisTick = 0;
     uint64_t m_candidatePairsThisTick = 0;
     double m_metricsWindowStartMs = 0.0;
+
+    // D2: persistent per-tick working storage for the GameLogic systems (see
+    // FrameScratch.h) plus the two Server-side per-tick scratch buffers
+    // (SnapshotHelpers), owned once here instead of allocated fresh every tick.
+    Neuron::GameLogic::FrameScratch m_scratch;
+    std::vector<uint32_t> m_currentIdsScratch;
+    std::unordered_set<uint32_t> m_landmarkPresentScratch;
 
     // Rate-limited respawn logging.
     uint32_t m_lastRespawnLogTick = 0;

@@ -1375,7 +1375,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 4 | Reconnect grace + resume ✅ (done 2026-07-04) | §13.2.2 | Infra | S | player retention |
 | 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
 | 6 | Spatial grid into combat/collision/scoop/ECM loops ✅ (done 2026-07-04; per-event ECM/fire/bomb scans stay linear by design — see IMPLEMENTATION.md D1) | E1 | Perf | M | fleet scale |
-| 7 | Frame arena / scratch-buffer reuse | E2 | Perf | S | flat tick budget |
+| 7 | Frame arena / scratch-buffer reuse ✅ (done 2026-07-04) | E2 | Perf | S | flat tick budget |
 | 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |
 | 9 | Time sync (ping/offset) → lag-compensated fire | §13.2.2 | Infra | M | PvP fairness |
 | 10 | Snapshot quantization + delta + budgets | E4 | Perf | M–L | bandwidth wall |

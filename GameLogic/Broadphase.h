@@ -4,9 +4,11 @@
 // grid conversions (GameLogic).
 //
 // Every per-tick pairwise loop (collisions, combat target scans, scooping) narrows
-// its candidates through a Spatial::Grid built fresh inside the call, over exactly
-// the entity set it scans - so the grid can never be stale. The conversions are
-// BEHAVIOUR-PRESERVING by construction:
+// its candidates through a Spatial::Grid rebuilt every call (D2: the Grid OBJECT
+// persists in FrameScratch and is reused for its allocated capacity, but its
+// CONTENT is unconditionally cleared and refilled from exactly the entity set that
+// call scans - so it can never carry stale entries from a previous tick). The
+// conversions are BEHAVIOUR-PRESERVING by construction:
 //
 //   * entries are keyed by the system's own dense-array index (units[i], cans[i]),
 //     NOT the entity id, and candidates are sorted ascending - so iterating them

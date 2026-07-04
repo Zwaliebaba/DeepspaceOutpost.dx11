@@ -293,12 +293,15 @@ namespace Neuron::GameLogic
   // decides intent - pursue/break-off/evade/flee - plus the panic missile.
   // Returns the number of missiles launched (for the caller's logging); fled
   // ships that shook every enemy are destroyed here (their removal rides the
-  // caller's despawn diff).
-  inline int StepAi(ECS::Registry& _world, uint32_t _tick, uint32_t& _rng)
+  // caller's despawn diff). `_scratch` (D2) is reusable per-tick working storage;
+  // the default lets every existing call site (tests) omit it.
+  inline int StepAi(ECS::Registry& _world, uint32_t _tick, uint32_t& _rng,
+                    FrameScratch& _scratch = Detail::DefaultScratch())
   {
     // Snapshot the thinkers first: tactics can spawn missiles / despawn fled
     // ships, and the pools must not be mutated mid-iteration.
-    std::vector<ECS::EntityId> pilots;
+    std::vector<ECS::EntityId>& pilots = _scratch.aiPilots;
+    pilots.clear();
     _world.Each<AiPilot, Combatant>([&pilots, _tick](ECS::EntityId _id, AiPilot&, Combatant&)
     {
       if (((_id.index ^ _tick) & 7u) == 0u)

@@ -25,6 +25,7 @@
 #include "StationServices.h"   // CargoHold, Equipment, DockState, CountsAsTonnage, TotalTonnage
 #include "CombatSystem.h"      // PlayerTag
 #include "Broadphase.h"        // BROADPHASE_CELL + the sorted-candidates discipline (D1)
+#include "FrameScratch.h"      // LootCan + persistent scratch storage (D2)
 
 namespace Neuron::GameLogic
 {
@@ -164,10 +165,12 @@ namespace Neuron::GameLogic
 
   // Age every canister one tick and destroy the expired ones (collect-then-destroy,
   // so it is safe to call while nothing else iterates the loot pool). Returns the
-  // number despawned.
-  inline int StepLoot(ECS::Registry& _world)
+  // number despawned. `_scratch` (D2) is reusable per-tick working storage; the
+  // default lets every existing call site (tests) omit it.
+  inline int StepLoot(ECS::Registry& _world, FrameScratch& _scratch = Detail::DefaultScratch())
   {
-    std::vector<ECS::EntityId> expired;
+    std::vector<ECS::EntityId>& expired = _scratch.lootExpired;
+    expired.clear();
     _world.Each<LootItem>([&expired](ECS::EntityId _id, LootItem& _l)
     {
       if (--_l.life <= 0)
@@ -184,14 +187,16 @@ namespace Neuron::GameLogic
   // capacity); otherwise contact just smashes it. A canister is claimed by the first
   // player that reaches it (no double-scoop). Returns the entity indices of players
   // whose hold changed, so the caller can resend their cargo/status. Collect-then-
-  // destroy, safe to call standalone.
-  [[nodiscard]] inline std::vector<uint32_t> ScoopSystem(ECS::Registry& _world)
+  // destroy, safe to call standalone. `_scratch` (D2) is reusable per-tick working
+  // storage; the default lets every existing call site (tests) omit it.
+  [[nodiscard]] inline std::vector<uint32_t> ScoopSystem(ECS::Registry& _world,
+                                                         FrameScratch& _scratch = Detail::DefaultScratch())
   {
-    struct Can { ECS::EntityId id; Math::Vector3i64 pos; LootItem* loot; };
-    std::vector<Can> cans;
+    std::vector<LootCan>& cans = _scratch.scoopCans;
+    cans.clear();
     _world.Each<WorldTransform, LootItem>([&cans](ECS::EntityId _id, WorldTransform& _t, LootItem& _l)
     {
-      cans.push_back(Can{ _id, _t.position, &_l });
+      cans.push_back(LootCan{ _id, _t.position, &_l });
     });
     if (cans.empty())
       return {};
@@ -200,13 +205,15 @@ namespace Neuron::GameLogic
     // walks only its +/-1-cell neighbourhood (cell >= the scoop range), sorted -
     // the same canister order (minus out-of-range ones) as the old full sweep, so
     // first-player-claims outcomes are bit-identical.
-    Spatial::Grid grid(BROADPHASE_CELL);
+    Spatial::Grid& grid = _scratch.scoopGrid;
+    grid.Clear();
     for (std::size_t i = 0; i < cans.size(); ++i)
       grid.Insert(i, cans[i].pos);
-    std::vector<uint64_t> nearby;   // ("near" is a reserved legacy macro under <windows.h>)
+    std::vector<uint64_t>& nearby = _scratch.scoopNearby;
 
     std::vector<uint32_t> changed;
-    std::vector<ECS::EntityId> consumed;
+    std::vector<ECS::EntityId>& consumed = _scratch.scoopConsumed;
+    consumed.clear();
 
     _world.Each<WorldTransform, PlayerTag>([&](ECS::EntityId _pid, WorldTransform& _pt, PlayerTag&)
     {
@@ -223,7 +230,7 @@ namespace Neuron::GameLogic
       QuerySortedNeighbours(grid, _pt.position, 1, nearby);
       for (const uint64_t ci : nearby)
       {
-        Can& can = cans[static_cast<std::size_t>(ci)];
+        LootCan& can = cans[static_cast<std::size_t>(ci)];
         if (can.loot == nullptr)
           continue;   // already claimed by an earlier player this tick
 
