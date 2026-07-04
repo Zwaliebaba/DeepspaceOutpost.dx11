@@ -689,7 +689,7 @@ snapshot build and reliable-channel resend buffers. Simplest shape: a
 `FrameScratch` struct owned by `GameServer`, passed down by reference —
 no globals, no allocator cleverness until profiling demands it.
 
-### D3 — Accumulator fixed timestep + tick metrics (#8 / S5, E8) — **S**
+### D3 — Accumulator fixed timestep + tick metrics (#8 / S5, E8) — **S** — ✅ **done 2026-07-04**
 
 Replace `Sleep(33)` (`Server/Main.cpp:37`) with a QPC accumulator: run
 catch-up ticks when behind (capped, e.g. 5, then declare overrun), sleep the
@@ -698,6 +698,16 @@ histogram + overrun count, bytes/session/s per lane, entities per AOI
 snapshot, broadphase candidate-pair counts (validates D1), reliable resend
 rates, per-phase tick-time breakdown. Expose as a periodic console line +
 a queryable struct (the BotClient harness reads it).
+
+*As built:* `NeuronServer/TickPacer.h` is the pure accumulator (feed it elapsed
+ms → number of fixed steps to run, bounded by `TICK_MAX_CATCHUP`; overrun drops
+the backlog rather than spiralling; `SleepMs()` when ahead), driving `Main.cpp`'s
+loop off `Timer::Core`. `NeuronServer/TickMetrics.h` is the pure counter (per-tick
+duration avg/max, overruns, live entity/session counts, broadphase candidate
+pairs, bytes) that `GameServer` feeds each tick from QPC (off the sim's
+determinism path) and prints as a `[metrics]` line every `METRICS_WINDOW_TICKS`;
+`Metrics()` exposes it for D5. Both are unit-tested. (Bytes are the socket-send
+total; per-lane byte split and reliable-resend rate ride E2's packetizer rework.)
 
 ### D4 — Rate/cadence guards — **XS** — ✅ **done 2026-07-04**
 

@@ -26,6 +26,21 @@ using namespace Neuron;
 
 namespace DSOServer
 {
+  namespace
+  {
+    // High-resolution wall clock in milliseconds for tick METRICS only (D3). This
+    // is off the simulation's determinism path - it times phases, it never feeds
+    // the sim - so reading the wall clock here does not violate the §12 rule.
+    [[nodiscard]] double QpcMs()
+    {
+      LARGE_INTEGER freq;
+      LARGE_INTEGER now;
+      QueryPerformanceFrequency(&freq);
+      QueryPerformanceCounter(&now);
+      return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+    }
+  }
+
   GameServer::GameServer(Net::UdpSocket& _socket)
     : m_socket(_socket)
     , m_aoi(Cfg::AOI_CELL_SIZE)
@@ -102,6 +117,12 @@ namespace DSOServer
 
   void GameServer::RunTick()
   {
+    const double tickStartMs = QpcMs();
+    if (m_metricsWindowStartMs == 0.0)
+      m_metricsWindowStartMs = tickStartMs;
+    m_bytesThisTick = 0;
+    m_candidatePairsThisTick = 0;   // fed by D1's grid queries
+
     // 1. Receive client input and acks. Input from an endpoint that hasn't
     //    completed the ClientHello handshake is ignored (the hello is the front
     //    door - see ProcessReliableRequests). Then resolve this tick's fire
@@ -140,6 +161,29 @@ namespace DSOServer
     // 5. Persist changed players on a slow cadence (B4). No-op when disabled.
     if (m_persist && m_tick % Cfg::PERSIST_INTERVAL == 0)
       SavePlayers();
+
+    // 6. Record this tick's metrics (D3) and emit a rolling summary line.
+    Server::TickSample sample;
+    sample.durationMs = QpcMs() - tickStartMs;
+    sample.entityCount = static_cast<uint32_t>(m_world.AliveCount());
+    sample.sessionCount = static_cast<uint32_t>(m_sessions.Count());
+    sample.candidatePairs = m_candidatePairsThisTick;
+    sample.bytesSent = m_bytesThisTick;
+    m_metrics.Record(sample);
+
+    if (m_metrics.WindowTicks() >= Cfg::METRICS_WINDOW_TICKS)
+    {
+      const double nowMs = QpcMs();
+      const double windowSec = (nowMs - m_metricsWindowStartMs) / 1000.0;
+      const Server::TickSummary s = m_metrics.Snapshot(windowSec > 0.0 ? windowSec : 1.0);
+      printf("[metrics] ticks=%llu avg=%.2fms max=%.2fms overruns=%llu entities=%u sessions=%u pairs=%llu bytes/s=%llu\n",
+             static_cast<unsigned long long>(s.ticks), s.avgMs, s.maxMs,
+             static_cast<unsigned long long>(s.overruns), s.entities, s.sessions,
+             static_cast<unsigned long long>(s.avgCandidatePairs),
+             static_cast<unsigned long long>(s.bytesPerSecond));
+      m_metrics.Reset();
+      m_metricsWindowStartMs = nowMs;
+    }
   }
 
   // --- receive ---------------------------------------------------------------
@@ -497,7 +541,10 @@ namespace DSOServer
         // not just the +/-1 ship cell, so the body you fly toward never pops out.
         AppendLandmarks(m_world, snap, viewerPos, m_landmarks);
         for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
+        {
           m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());
+          m_bytesThisTick += datagram.size();   // D3 metrics
+        }
 
         // The owner's private HUD vitals, on change only. Queued on the Gameplay
         // lane; flushed with the events below.
@@ -516,7 +563,10 @@ namespace DSOServer
       }
 
       for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
+      {
         m_socket.SendTo(s.endpoint, dg.data(), dg.size());
+        m_bytesThisTick += dg.size();   // D3 metrics
+      }
     }
 
     // Drop cached status for endpoints that are no longer sessions (reaped

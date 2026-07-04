@@ -8,3 +8,5 @@
 #include "PlayerPersistState.h"
 #include "PersistenceStore.h"
 #include "PersistenceService.h"
+#include "TickPacer.h"
+#include "TickMetrics.h"

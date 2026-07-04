@@ -1376,7 +1376,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
 | 6 | Spatial grid into combat/collision/scoop/ECM loops | E1 | Perf | M | fleet scale |
 | 7 | Frame arena / scratch-buffer reuse | E2 | Perf | S | flat tick budget |
-| 8 | Accumulator fixed timestep + tick metrics | S5, E8 | Simplify | S | honest profiling |
+| 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |
 | 9 | Time sync (ping/offset) → lag-compensated fire | §13.2.2 | Infra | M | PvP fairness |
 | 10 | Snapshot quantization + delta + budgets | E4 | Perf | M–L | bandwidth wall |
 | 11 | Strategic AOI summary tier | §13.2.2 | Feature | M | empire visibility |

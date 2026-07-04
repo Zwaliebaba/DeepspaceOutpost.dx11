@@ -29,6 +29,7 @@
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
+#include "TickMetrics.h"      // NeuronServer: always-on tick counters (D3)
 
 #include "GameLogic.h"
 #include "PlayerPersistence.h"   // GameLogic: component <-> PlayerPersistState converters (B4)
@@ -48,6 +49,11 @@ namespace DSOServer
 
     // One fixed simulation tick (the caller paces it and updates the clock).
     void RunTick();
+
+    // D3: the server loop reports a dropped-backlog tick (fell behind the fixed
+    // step), and reads the rolling metrics (also read by the D5 BotClient harness).
+    void NoteOverrun() { m_metrics.NoteOverrun(); }
+    [[nodiscard]] const Neuron::Server::TickMetrics& Metrics() const { return m_metrics; }
 
   private:
     // Catalog messages compare via their Fields() tuple (no operator==).
@@ -135,6 +141,14 @@ namespace DSOServer
     // server behaves exactly as before). The change-cache skips unchanged saves.
     std::unique_ptr<Neuron::Persist::PersistenceService> m_persist;
     Neuron::Server::OnChangeCache<uint64_t, Neuron::Persist::PlayerPersistState, PersistStateEqual> m_lastPersist;
+
+    // D3 tick metrics: per-tick timing/counters, summarized periodically. The byte
+    // counter is summed across this tick's sends; the candidate-pair counter is
+    // fed by D1's grid. Timing comes from QPC (off the sim determinism path).
+    Neuron::Server::TickMetrics m_metrics;
+    uint64_t m_bytesThisTick = 0;
+    uint64_t m_candidatePairsThisTick = 0;
+    double m_metricsWindowStartMs = 0.0;
 
     // Rate-limited respawn logging.
     uint32_t m_lastRespawnLogTick = 0;

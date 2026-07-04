@@ -16,6 +16,8 @@ set(NEURONSERVER_HEADERS
     PlayerPersistState.h
     PersistenceStore.h
     PersistenceService.h
+    TickPacer.h
+    TickMetrics.h
     pch.h
 )
 
