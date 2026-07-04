@@ -263,7 +263,7 @@ namespace Neuron::GameLogic
     Spatial::Grid grid(BROADPHASE_CELL);
     for (std::size_t i = 0; i < units.size(); ++i)
       grid.Insert(i, units[i].pos);
-    std::vector<uint64_t> near;
+    std::vector<uint64_t> nearby;   // ("near" is a reserved legacy macro under <windows.h>)
 
     // Accumulate this tick's damage and the attacker that dealt it, so resolution
     // is simultaneous (firing order doesn't matter). The attacker's position is
@@ -318,8 +318,8 @@ namespace Neuron::GameLogic
         // Nearest enemy via the grid: candidates within the cells covering this
         // shooter's range (every range today fits +/-1 cell), in ascending units
         // order - the same order (minus out-of-range entries) as the old full scan.
-        QuerySortedNeighbours(grid, a.pos, CellsForRange(a.c->range), near);
-        for (const uint64_t bi : near)
+        QuerySortedNeighbours(grid, a.pos, CellsForRange(a.c->range), nearby);
+        for (const uint64_t bi : nearby)
         {
           const Unit& b = units[static_cast<std::size_t>(bi)];
           if (_candidatePairs != nullptr)

@@ -120,11 +120,11 @@ namespace Neuron::GameLogic
     for (std::size_t i = 0; i < units.size(); ++i)
       grid.Insert(i, units[i].pos);
 
-    std::vector<uint64_t> near;
+    std::vector<uint64_t> nearby;   // ("near" is a reserved legacy macro under <windows.h>)
     for (std::size_t i = 0; i < units.size(); ++i)
     {
-      QuerySortedNeighbours(grid, units[i].pos, 1, near);
-      for (const uint64_t jj : near)
+      QuerySortedNeighbours(grid, units[i].pos, 1, nearby);
+      for (const uint64_t jj : nearby)
       {
         if (jj <= i)
           continue;   // each pair once, in ascending (i, j) order

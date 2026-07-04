@@ -203,7 +203,7 @@ namespace Neuron::GameLogic
     Spatial::Grid grid(BROADPHASE_CELL);
     for (std::size_t i = 0; i < cans.size(); ++i)
       grid.Insert(i, cans[i].pos);
-    std::vector<uint64_t> near;
+    std::vector<uint64_t> nearby;   // ("near" is a reserved legacy macro under <windows.h>)
 
     std::vector<uint32_t> changed;
     std::vector<ECS::EntityId> consumed;
@@ -220,8 +220,8 @@ namespace Neuron::GameLogic
       const bool hasScoop = (eq != nullptr && eq->fuelScoop);
 
       bool scooped = false;
-      QuerySortedNeighbours(grid, _pt.position, 1, near);
-      for (const uint64_t ci : near)
+      QuerySortedNeighbours(grid, _pt.position, 1, nearby);
+      for (const uint64_t ci : nearby)
       {
         Can& can = cans[static_cast<std::size_t>(ci)];
         if (can.loot == nullptr)
