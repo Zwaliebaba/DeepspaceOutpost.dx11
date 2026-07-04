@@ -26,6 +26,7 @@ set(GAMELOGIC_HEADERS
     AreaOfInterest.h
     DespawnTracker.h
     ServerSessions.h
+    TransformHistory.h
     CombatSystem.h
     MissileSystem.h
     AiSystem.h

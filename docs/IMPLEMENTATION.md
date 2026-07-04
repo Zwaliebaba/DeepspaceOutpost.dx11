@@ -929,8 +929,30 @@ buffer imposes; a hardened version measures RTT from the reliable-ack loop
 (deferred). New additive ids `0x0006/0x0007`, no `PROTOCOL_VERSION` bump (nothing
 existing changed layout); `0x0005` stays reserved (the never-shipped
 `AssignControl`, folded into `HelloAck` at C1). Pure-math estimator +
-message-wire round-trips unit-tested (`TimeSyncTests.cpp`). E1b (the rewind)
-still pending.
+message-wire round-trips unit-tested (`TimeSyncTests.cpp`).
+
+*As built — E1b (lag-compensated fire), 2026-07-04:* `GameLogic/TransformHistory.h`
+keeps a 15-tick ring of `(position, nose)` per combat-relevant entity
+(`WorldTransform + Combatant`), captured once per tick after the sim advances
+(`GameServer::Capture`) — derived state that never feeds back into the
+authoritative sim, so determinism holds. On a player laser shot the server sizes
+the rewind from the shooter's own reported RTT (`ServerSessions::RttForEntity` →
+`LagCompTicks`, which folds in the ~1-tick render interpolation delay of A3 and
+CLAMPS to the ring), and `ResolvePlayerFire` tests each candidate TARGET at where
+the shooter saw it while keeping the shooter authoritative-current
+(favour-the-shooter); damage still lands on the live hull. The rewind is
+generation-safe (a recycled index whose slot holds an earlier tenant's sample is
+rejected — the C1 lesson), and passing no history (the default) reproduces the
+un-compensated path exactly, so every existing fire test is unchanged.
+`LagCompensationTests.cpp` covers the ms→ticks conversion, the ring
+(sample/clamp/recycle), and the acceptance case (a laterally-moving target that
+has left the cone is hit when rewound to its rendered position, and the live shot
+misses). **Scope note:** only the instant laser is compensated; the A5
+missile/travel cone validations are not yet rewound (the ring already stores nose
+for that future use). Only players are lag-compensated — NPC fire goes through
+`StepCombat`, never this path. **Trust bound:** the rewind depth is the client's
+self-reported RTT clamped to the 15-tick window; a server-authoritative RTT (from
+the ack loop) is the hardening follow-up.
 
 ### E2 — Snapshot quantization + delta + budgets (#10 / E4) — **M–L**
 

@@ -408,6 +408,17 @@ namespace Neuron::GameLogic
       return false;
     }
 
+    // The reported round-trip time (ms) of the session whose PRIMARY entity is
+    // `_entityIndex`, or 0 when no session owns it (an NPC / missile shooter, which
+    // is never lag-compensated). Used by the fire path to size the rewind (E1).
+    [[nodiscard]] uint32_t RttForEntity(uint32_t _entityIndex) const
+    {
+      for (const auto& e : m_sessions)
+        if (e.second.entity.index == _entityIndex)
+          return e.second.rttMs;
+      return 0;
+    }
+
     // The full roster (one PlayerInfo per live session) to replay to a joiner and
     // broadcast on membership changes.
     [[nodiscard]] std::vector<Msg::PlayerInfo> Roster(ECS::Registry& _world) const

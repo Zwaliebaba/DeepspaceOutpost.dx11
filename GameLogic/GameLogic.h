@@ -26,6 +26,7 @@
 #include "AreaOfInterest.h"
 #include "DespawnTracker.h"
 #include "ServerSessions.h"
+#include "TransformHistory.h"
 #include "CombatSystem.h"
 #include "MissileSystem.h"
 #include "AiSystem.h"

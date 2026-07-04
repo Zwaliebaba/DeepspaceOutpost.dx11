@@ -144,6 +144,11 @@ namespace DSOServer
     // 2. NPC tactics + the simulation tick + dynamic spawning + shield regen.
     AdvanceSimulation();
 
+    // 2a'. Record this tick's final transforms for lag compensation (E1): next
+    //      tick's player-fire resolution rewinds targets against this ring. Derived
+    //      state only - it never feeds back into the authoritative simulation.
+    m_combatHistory.Capture(m_world);
+
     // 2b. Missiles, realtime combat and collision grinding -> the death pipeline.
     ResolveKills();
 
@@ -607,7 +612,12 @@ namespace DSOServer
     // geometry / missile spawn unchanged), publishing the resulting facts.
     m_bus.Subscribe<GameLogic::FireWeapon>([this](const GameLogic::FireWeapon& _fw)
     {
-      GameLogic::ResolveFireWeapon(m_world, m_bus, _fw, Cfg::FIRE_RANGE, Cfg::AIM_CONE);
+      // Lag-compensate the laser (E1): rewind targets by the shooter's own latency
+      // (rtt/2 + render interpolation delay), clamped to the history window. A
+      // non-session shooter reports 0 rtt -> minimal (interp-delay) rewind.
+      const uint32_t ticksBack = GameLogic::LagCompTicks(m_sessions.RttForEntity(_fw.shooter.index));
+      GameLogic::ResolveFireWeapon(m_world, m_bus, _fw, Cfg::FIRE_RANGE, Cfg::AIM_CONE,
+                                   &m_combatHistory, ticksBack);
     });
 
     m_bus.Subscribe<GameLogic::Crime>([this](const GameLogic::Crime& _c) { OnCrime(_c); });

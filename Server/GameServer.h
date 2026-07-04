@@ -124,6 +124,7 @@ namespace DSOServer
     Neuron::GameLogic::ServerSessions m_sessions;
     Neuron::GameLogic::DespawnTracker m_despawns;
     Neuron::GameLogic::SpawnDirector m_spawner;
+    Neuron::GameLogic::TransformHistory m_combatHistory;   // E1: per-tick rewind buffer for lag comp
     Neuron::Msg::MessageBus m_bus;
 
     std::vector<Neuron::Server::MagicRoute> m_routes;   // datagram magic -> handler

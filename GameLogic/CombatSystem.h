@@ -25,6 +25,7 @@
 #include "Combat.h"
 #include "Broadphase.h"      // BROADPHASE_CELL + the sorted-candidates discipline (D1)
 #include "FrameScratch.h"    // CombatUnit + persistent scratch storage (D2)
+#include "TransformHistory.h" // lag-compensation rewind for player fire (E1)
 
 namespace Neuron::GameLogic
 {
@@ -386,8 +387,17 @@ namespace Neuron::GameLogic
   // Resolve `_shooter` firing forward: damage the nearest enemy Combatant that
   // lies within `_range` AND inside the aiming cone around the nose (dot with the
   // unit direction >= `_cosCone`). One shot, one target - the legacy front laser.
+  //
+  // Lag compensation (E1): when `_history` is non-null, each candidate TARGET is
+  // tested at where it was `_ticksBack` ticks ago (where the shooter saw it) rather
+  // than its live position, so a shot aimed at a target's rendered position
+  // connects. The shooter itself stays authoritative-current (favour-the-shooter),
+  // and damage still lands on the LIVE target. Passing null (the default) reproduces
+  // the un-compensated behaviour exactly - so every existing caller is unchanged.
   [[nodiscard]] inline FireOutcome ResolvePlayerFire(ECS::Registry& _world, ECS::EntityId _shooter,
-                                                     int64_t _range, double _cosCone)
+                                                     int64_t _range, double _cosCone,
+                                                     const TransformHistory* _history = nullptr,
+                                                     uint32_t _ticksBack = 0)
   {
     FireOutcome out;
 
@@ -415,9 +425,22 @@ namespace Neuron::GameLogic
       if (_c.team == sc->team && !otherPlayer)
         return;
 
-      const int64_t dx = _t.position.x - origin.x;
-      const int64_t dy = _t.position.y - origin.y;
-      const int64_t dz = _t.position.z - origin.z;
+      // Lag compensation: test against where the shooter SAW this target
+      // (`_ticksBack` ago) when history is supplied and has a matching entry;
+      // otherwise its live position. Only the target is rewound - the shooter's
+      // origin/nose stay current.
+      Math::Vector3i64 tpos = _t.position;
+      if (_history != nullptr)
+      {
+        Math::Vector3i64 rewoundPos;
+        Math::Vector3d rewoundNose;
+        if (_history->Sample(_id, _ticksBack, rewoundPos, rewoundNose))
+          tpos = rewoundPos;
+      }
+
+      const int64_t dx = tpos.x - origin.x;
+      const int64_t dy = tpos.y - origin.y;
+      const int64_t dz = tpos.z - origin.z;
       const int64_t ax = dx < 0 ? -dx : dx;
       const int64_t ay = dy < 0 ? -dy : dy;
       const int64_t az = dz < 0 ? -dz : dz;

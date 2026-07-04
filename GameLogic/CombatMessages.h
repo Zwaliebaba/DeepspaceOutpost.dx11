@@ -178,8 +178,15 @@ namespace Neuron::GameLogic
   // dispatch, death broadcast and logging live in the bus subscribers (server side).
   //
   // Combat geometry is delegated unchanged to ResolvePlayerFire / SpawnMissile.
+  //
+  // Lag compensation (E1): `_history` + `_ticksBack` are forwarded to the laser
+  // hit test so it rewinds targets to where the shooter saw them; null (the
+  // default) leaves the un-compensated behaviour, so existing callers/tests are
+  // unchanged. Only the instant laser is compensated - a missile is a homing
+  // projectile resolved over subsequent ticks, not an instant hit.
   inline void ResolveFireWeapon(ECS::Registry& _world, Msg::MessageBus& _bus,
-                                const FireWeapon& _fw, int64_t _fireRange, double _aimCone)
+                                const FireWeapon& _fw, int64_t _fireRange, double _aimCone,
+                                const TransformHistory* _history = nullptr, uint32_t _ticksBack = 0)
   {
     if (!_world.IsValid(_fw.shooter))
       return;
@@ -192,7 +199,7 @@ namespace Neuron::GameLogic
         // laser and sips the energy bank (legacy fire_laser) whether it hits or not.
         if (!SpendLaserShot(_world, _fw.shooter))
           return;
-        const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone);
+        const FireOutcome shot = ResolvePlayerFire(_world, _fw.shooter, _fireRange, _aimCone, _history, _ticksBack);
         if (!shot.hit)
           return;
         FlagIfCrime(_world, _bus, _fw.shooter, shot.target, shot.targetTeam);
