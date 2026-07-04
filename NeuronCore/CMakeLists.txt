@@ -58,6 +58,8 @@ set(NEURONCORE_HEADERS
     Messages/Defs/EquipmentEvents.h
     Messages/Defs/Travel.h
     Messages/Defs/GalaxyChunks.h
+    Messages/Defs/TimeSync.h
+    LatencyEstimate.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

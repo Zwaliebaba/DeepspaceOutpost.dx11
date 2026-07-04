@@ -99,6 +99,10 @@ namespace Neuron::GameLogic
                                        //   Owner component carries it (see OwnershipIndex).
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
+    uint32_t rttMs = 0;                // E1: the client's own reported round-trip time
+                                       //   (from Ping). Used, clamped to the transform-
+                                       //   history window, to rewind targets for lag-
+                                       //   compensated fire. Raw here; the consumer clamps.
     uint32_t inputWindowTick = 0;      // D4: tick the input-cadence window opened
     uint16_t inputsThisWindow = 0;     // D4: inputs applied this tick (capped)
     bool loading = false;              // B4: version-checked, awaiting a persistence load before spawn

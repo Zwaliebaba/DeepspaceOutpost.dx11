@@ -962,6 +962,9 @@ station screen into flight; position updates always come from snapshots.
 | `0x0002` | ClientHello | Control | Control | C→S |
 | `0x0003` | HelloAck | Control | Control | S→C |
 | `0x0004` | HelloReject | Control | Control | S→C |
+| `0x0005` | *reserved* (the never-shipped `AssignControl`; identity folded into `HelloAck` at C1) | — | — | — |
+| `0x0006` | Ping | Control | Control | C→S |
+| `0x0007` | Pong | Control | Control | S→C |
 | `0x0100` | InputCommand | Wire | Unreliable | C→S |
 | `0x0200` | EntityDespawn | Wire | Gameplay | S→C |
 | `0x0201` | EntityDeath | Wire | Gameplay | S→C |

@@ -915,6 +915,23 @@ this same binary with bigger numbers: `BotClient --smoke --server-exe ...
 *Acceptance:* headless test: target moving laterally at 100 ms simulated
 RTT is hittable when aimed at its rendered (delayed) position.
 
+*As built — E1a (time sync), 2026-07-04:* the Control-lane exchange landed as
+specified, with one deliberate addition: `Ping` also carries the client's own
+latest smoothed `rttMs`, so the server learns each session's latency the same
+tick it replies. The client (`ReplicationClient`) probes ~1 Hz once connected,
+computes RTT as the unsigned-32-bit echo difference (`Net::LatencyEstimate`, an
+EWMA that seeds on the first sample and discards non-positive/spike samples so a
+reliable-lane resend can't poison it), and reports it back; the server stores it
+raw on the session (`Session.rttMs`). **Trust note:** that RTT is the client's
+self-report, not a server-authoritative measurement, so E1b CLAMPS the rewind it
+drives to the transform-history window (≤ 15 ticks) — the same bound the ring
+buffer imposes; a hardened version measures RTT from the reliable-ack loop
+(deferred). New additive ids `0x0006/0x0007`, no `PROTOCOL_VERSION` bump (nothing
+existing changed layout); `0x0005` stays reserved (the never-shipped
+`AssignControl`, folded into `HelloAck` at C1). Pure-math estimator +
+message-wire round-trips unit-tested (`TimeSyncTests.cpp`). E1b (the rewind)
+still pending.
+
 ### E2 — Snapshot quantization + delta + budgets (#10 / E4) — **M–L**
 
 Successor snapshot format (version 2 of the `'NSNP'` header, negotiated by

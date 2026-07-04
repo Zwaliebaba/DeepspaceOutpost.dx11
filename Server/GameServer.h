@@ -27,6 +27,7 @@
 #include "Messages/MessageBus.h"
 #include "Messages/Defs/PlayerSession.h"
 #include "Messages/Defs/Travel.h"         // TravelRequest / TravelResponse
+#include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)

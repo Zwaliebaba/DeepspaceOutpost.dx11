@@ -29,6 +29,8 @@
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
+#include "Messages/Defs/TimeSync.h"        // Msg::Ping / Pong (E1 time sync)
+#include "LatencyEstimate.h"               // Net::LatencyEstimate (smoothed RTT)
 
 namespace Neuron::Client
 {
@@ -120,6 +122,16 @@ namespace Neuron::Client
     // off this id.
     [[nodiscard]] uint32_t PlayerId() const { return m_playerId; }
 
+    // The smoothed round-trip time to the server (ms), from the ~1 Hz Ping/Pong
+    // exchange (E1). 0 and !HasLatency() until the first Pong closes a round trip.
+    [[nodiscard]] double SmoothedRttMs() const { return m_latency.rttMs; }
+    [[nodiscard]] bool HasLatency() const { return m_latency.valid; }
+
+    // The server tick reported by the most recent Pong (0 until one arrives). A
+    // coarse clock reference for presentation; the authoritative tick still rides
+    // every snapshot header.
+    [[nodiscard]] uint32_t LastServerTick() const { return m_lastServerTick; }
+
     // True once the server refused our ClientHello (e.g. a protocol-version
     // mismatch): the client shows a connect error instead of a world.
     [[nodiscard]] bool HelloRejected() const { return m_helloRejected; }
@@ -153,6 +165,9 @@ namespace Neuron::Client
     uint64_t m_sessionToken = 0;                   // from HelloAck; stamped on every outbound datagram (B2)
     uint32_t m_playerId = 0;                       // from HelloAck; our player identity (C)
     bool m_helloRejected = false;                  // server refused the handshake
+    Net::LatencyEstimate m_latency;                // E1: smoothed RTT from Ping/Pong
+    double m_lastPingMs = 0.0;                      // wall-clock of our last sent Ping (send cadence)
+    uint32_t m_lastServerTick = 0;                 // server tick from the most recent Pong
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
     uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk
     bool m_galaxyKnownTotal = false;

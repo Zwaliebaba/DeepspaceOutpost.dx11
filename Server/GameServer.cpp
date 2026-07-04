@@ -300,6 +300,7 @@ namespace DSOServer
         Net::StationRequest req;
         Msg::TravelRequest travel;
         Msg::GalaxyChunkRequest chunkReq;
+        Msg::Ping ping;
         if (Msg::TryDecode(msg, req))
         {
           LogCommand(s, msg);   // audit/replay (before the mutation it authorizes)
@@ -312,6 +313,15 @@ namespace DSOServer
         }
         else if (Msg::TryDecode(msg, chunkReq))
           m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
+        else if (Msg::TryDecode(msg, ping))
+        {
+          // Time sync (E1): record the client's reported RTT for lag compensation
+          // (stored raw; the fire path clamps it to the history window), and echo
+          // the timestamp + our current tick so the client can measure RTT and
+          // align its clock. Not logged - it mutates no game state.
+          s.rttMs = ping.rttMs;
+          s.events.Send(Msg::Pong{ ping.clientTimeMs, m_tick });
+        }
       }
     }
   }

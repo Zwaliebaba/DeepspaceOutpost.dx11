@@ -20,12 +20,24 @@ namespace Neuron::Client
     // Cap datagrams processed per Pump() so a flood can never stall the frame.
     constexpr int kMaxDrainPerPump = 256;
 
+    // How often the client probes the server for a time-sync round trip (E1). ~1 Hz
+    // keeps the RTT estimate fresh at negligible cost.
+    constexpr double kPingIntervalMs = 1000.0;
+
     // Monotonic wall clock in milliseconds (presentation timing only - this is the
     // client render path, not the deterministic simulation).
     [[nodiscard]] double NowMs()
     {
       using namespace std::chrono;
       return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+    }
+
+    // NowMs() truncated into the 32-bit millisecond field the time-sync messages
+    // carry. RTT is computed as an UNSIGNED 32-bit difference so it stays correct
+    // across the ~49.7-day wrap (a short round trip never spans it).
+    [[nodiscard]] uint32_t NowMs32()
+    {
+      return static_cast<uint32_t>(static_cast<uint64_t>(NowMs()));
     }
   }
 
@@ -113,7 +125,19 @@ namespace Neuron::Client
       Msg::HelloAck ack;
       Msg::HelloReject reject;
       Msg::GalaxyChunk chunk;
-      if (Msg::TryDecode(msg, ack))
+      Msg::Pong pong;
+      if (Msg::TryDecode(msg, pong))
+      {
+        // Time sync (E1): close the round trip we opened with the matching Ping.
+        // The Pong echoes our send timestamp, so RTT is the unsigned 32-bit
+        // difference now - clientTimeMs; fold it into the smoothed estimate and
+        // note the server's tick for a coarse clock reference. Consumed internally
+        // - never surfaced as an app event.
+        const uint32_t rtt = NowMs32() - pong.clientTimeMs;
+        m_latency.AddRttSample(static_cast<double>(rtt));
+        m_lastServerTick = pong.serverTick;
+      }
+      else if (Msg::TryDecode(msg, ack))
       {
         // The handshake reply: our player identity (C) + primary entity + the
         // session token (B2). From here on every outbound datagram carries the
@@ -159,6 +183,20 @@ namespace Neuron::Client
       req.count = Msg::GALAXY_CHUNK_MAX_REQUEST;
       m_events.Send(req);
       m_galaxyRequestedUpTo = req.baseIndex + req.count;
+    }
+
+    // Time sync (E1): once connected, probe the server ~1 Hz. The Ping carries our
+    // local clock (echoed back to close the round trip) and our own latest smoothed
+    // RTT, which the server records per session for lag compensation. Queued on the
+    // reliable Control lane, so it goes out with the acks below.
+    if (LocalPlayer() != 0xFFFFFFFFu)
+    {
+      const double now = NowMs();
+      if (m_lastPingMs == 0.0 || now - m_lastPingMs >= kPingIntervalMs)
+      {
+        m_events.Send(Msg::Ping{ NowMs32(), static_cast<uint32_t>(m_latency.rttMs) });
+        m_lastPingMs = now;
+      }
     }
 
     // Send our cumulative acks back so the server stops resending delivered events

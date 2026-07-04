@@ -28,6 +28,7 @@ add_executable(NeuronCore.Tests
     MessageFuzzTests.cpp
     PlayerSessionTests.cpp
     TravelProtocolTests.cpp
+    TimeSyncTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)
