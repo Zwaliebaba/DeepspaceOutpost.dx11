@@ -10,7 +10,6 @@
 
 #include "pch.h"
 
-#include "config.h"
 #include "gfx.h"
 #include "GameUniverse.h"
 #include "GameComponents.h"

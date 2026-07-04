@@ -97,6 +97,7 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `AGENTS.md:247-248` | trailing `</content></invoke>` XML | Copy-paste artifact | **Delete** |
 | `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H) |
 | `DeepspaceOutpost/SceneMeshes.cpp`, `threed.cpp` + the `planet_render_style` global (`elite.*`, options window, `newkind.cfg`) and `ModelDraw::style`/`colour2` | Multi-style planet renderer (Wireframe/Green/SNES/Fractal) | Only the classic green ever shipped; `ModelDraw::style`/`colour2` had no reader | ✅ **Removed 2026-07-04** (planet is one lit green sphere) |
+| `DeepspaceOutpost/config.h`, `alg_data.h` | whole headers | `alg_data.h` = retired Allegro datafile indexes (unused); `config.h` = the `GFX_ALLEGRO` (dead) + `RES_800_600` macros, the latter still selecting `gfx.h`'s `GFX_SCALE=2` block | ✅ **Removed 2026-07-04** (`RES_800_600` moved to a DeepspaceOutpost target compile definition; every `#include` deleted) |
 
 Not dead, do not remove: `Messages/Catalog.h`, `CatalogTools.h`,
 `PacketInspect.h` (test/tooling infrastructure the governance and fuzz suites

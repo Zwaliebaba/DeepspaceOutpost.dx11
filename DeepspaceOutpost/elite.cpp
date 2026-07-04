@@ -2,7 +2,6 @@
 
 #include <stdlib.h>
 
-#include "config.h"
 #include "elite.h"
 #include "vector.h"
 #include "planet.h"

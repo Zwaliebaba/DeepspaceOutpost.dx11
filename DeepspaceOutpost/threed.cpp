@@ -6,7 +6,6 @@
 #include <math.h>
 #include <ctype.h>
 
-#include "config.h"
 #include "elite.h"
 #include "gfx.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass

@@ -2,7 +2,6 @@
 
 #include "Camera.h"
 
-#include "config.h"
 #include "elite.h"
 #include "space.h"
 
