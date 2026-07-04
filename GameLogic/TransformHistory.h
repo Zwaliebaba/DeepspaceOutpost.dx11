@@ -66,7 +66,7 @@ namespace Neuron::GameLogic
       _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant&)
       {
         Ring& ring = m_rings[_id.index];
-        Sample& s = ring.slots[ring.head];
+        Frame& s = ring.slots[ring.head];
         s.generation = _id.generation;
         s.position = _t.position;
         // Nose is stored for future missile/travel validation (A5); the laser cone
@@ -95,7 +95,7 @@ namespace Neuron::GameLogic
       const uint32_t back = (_ticksBack < ring.count) ? _ticksBack : (ring.count - 1);
       // Newest sample sits at head-1; step `back` further into the past, modulo ring.
       const uint32_t idx = (ring.head + LAGCOMP_HISTORY_TICKS - 1 - back) % LAGCOMP_HISTORY_TICKS;
-      const Sample& s = ring.slots[idx];
+      const Frame& s = ring.slots[idx];
       if (s.generation != _id.generation)
         return false;   // recycled index: the slot is a different entity's past
 
@@ -108,7 +108,9 @@ namespace Neuron::GameLogic
     [[nodiscard]] std::size_t TrackedCount() const { return m_rings.size(); }
 
   private:
-    struct Sample
+    // One captured transform (renamed off "Sample" so it doesn't collide with the
+    // public Sample() member function - the method name would hide the type).
+    struct Frame
     {
       uint32_t generation = 0;
       Math::Vector3i64 position{};
@@ -117,7 +119,7 @@ namespace Neuron::GameLogic
 
     struct Ring
     {
-      Sample slots[LAGCOMP_HISTORY_TICKS];
+      Frame slots[LAGCOMP_HISTORY_TICKS];
       uint32_t head = 0;    // index the NEXT sample goes to; newest is head-1
       uint32_t count = 0;   // valid samples (saturates at LAGCOMP_HISTORY_TICKS)
     };
