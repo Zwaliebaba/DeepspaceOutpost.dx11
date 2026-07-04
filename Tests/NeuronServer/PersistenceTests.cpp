@@ -5,6 +5,8 @@
 
 #include "GameLogic.h"              // ServerSessions (spawns a full player entity), components
 #include "PlayerPersistence.h"      // FromComponents / ApplyToComponents converters
+#include "StationProtocol.h"        // Net::StationRequest / StationRequestKind (replay test)
+#include "Messages/Serialize.h"     // Msg::Encode / Msg::Decode / Msg::Raw
 
 #include "PlayerPersistState.h"
 #include "PersistenceStore.h"
@@ -210,4 +212,75 @@ TEST(Persistence, RestartRebuildsCommanderFromTheStore)
     EXPECT_EQ(world.Get<GameLogic::Equipment>(e).missiles, 4);
     EXPECT_TRUE(world.Get<GameLogic::Equipment>(e).ecm);
   }
+}
+
+// --- command log replay -------------------------------------------------------
+
+namespace
+{
+  // A player near a stocked station (food at index 0), close enough to dock.
+  ECS::EntityId BuildTradeWorld(ECS::Registry& _world)
+  {
+    const ECS::EntityId station = _world.Create();
+    _world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, 0 } });
+    GameLogic::ServerStation st;
+    st.market[0].price = 10;
+    st.market[0].quantity = 50;
+    _world.Add<GameLogic::ServerStation>(station, st);
+
+    const ECS::EntityId player = _world.Create();
+    _world.Add<GameLogic::WorldTransform>(player, GameLogic::WorldTransform{ { 100, 0, 0 } });
+    _world.Add<GameLogic::Wallet>(player, GameLogic::Wallet{ 1000 });
+    _world.Add<GameLogic::CargoHold>(player, GameLogic::CargoHold{});
+    _world.Add<GameLogic::DockState>(player, GameLogic::DockState{});
+    return player;
+  }
+}
+
+TEST(Persistence, CommandLogReplayReproducesWalletOutcomes)
+{
+  // The command-log payloads are a message's own encoding; replaying them against
+  // a fresh identical world reproduces the same authoritative wallet outcome.
+  const Net::StationRequest requests[] = {
+    Net::StationRequest{ Net::StationRequestKind::Dock, 0, 0, 0 },
+    Net::StationRequest{ Net::StationRequestKind::Buy,  0, 5, 0 },
+    Net::StationRequest{ Net::StationRequestKind::Buy,  0, 3, 0 },
+  };
+
+  // World A: apply the requests, logging each as the server would.
+  Persist::InMemoryStore store;
+  int creditsA = 0;
+  {
+    ECS::Registry world;
+    const ECS::EntityId player = BuildTradeWorld(world);
+    std::vector<Persist::CommandLogEntry> log;
+    for (const Net::StationRequest& r : requests)
+    {
+      GameLogic::ProcessStationRequest(world, player, /*dockRange*/ 5000, r);
+      Persist::CommandLogEntry e;
+      e.messageId = static_cast<int32_t>(Msg::Raw(Net::StationRequest::Id));
+      e.payload = Msg::Encode(r);
+      log.push_back(std::move(e));
+    }
+    store.AppendCommands(log);
+    creditsA = world.Get<GameLogic::Wallet>(player).credits;
+  }
+  EXPECT_EQ(creditsA, 1000 - (5 + 3) * 10);   // bought 8 food @ 10
+
+  // World B ("restart / audit"): replay the log from the store; same wallet.
+  int creditsB = 0;
+  {
+    ECS::Registry world;
+    const ECS::EntityId player = BuildTradeWorld(world);
+    for (const Persist::CommandLogEntry& e : store.Commands())
+    {
+      ASSERT_EQ(e.messageId, static_cast<int32_t>(Msg::Raw(Net::StationRequest::Id)));
+      Net::StationRequest r;
+      ASSERT_TRUE(Msg::Decode(e.payload, r));
+      GameLogic::ProcessStationRequest(world, player, 5000, r);
+    }
+    creditsB = world.Get<GameLogic::Wallet>(player).credits;
+  }
+
+  EXPECT_EQ(creditsB, creditsA);
 }

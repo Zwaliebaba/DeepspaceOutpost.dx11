@@ -240,11 +240,17 @@ namespace DSOServer
         Msg::TravelRequest travel;
         Msg::GalaxyChunkRequest chunkReq;
         if (Msg::TryDecode(msg, req))
+        {
+          LogCommand(s, msg);   // audit/replay (before the mutation it authorizes)
           HandleStationRequest(s, req);
+        }
         else if (Msg::TryDecode(msg, travel))
+        {
+          LogCommand(s, msg);
           HandleTravelRequest(s, travel);
+        }
         else if (Msg::TryDecode(msg, chunkReq))
-          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane
+          m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
       }
     }
   }
@@ -299,6 +305,18 @@ namespace DSOServer
     for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
       m_sessions.Broadcast(pi);
     SendCargoTo(e.index);
+  }
+
+  void GameServer::LogCommand(const GameLogic::Session& _s, const Net::ReliableMessage& _msg)
+  {
+    if (!m_persist)
+      return;
+    Neuron::Persist::CommandLogEntry e;
+    e.worldTick = m_tick;
+    e.playerId = static_cast<int32_t>(_s.entity.index);   // Track C replaces this with PlayerId
+    e.messageId = static_cast<int32_t>(_msg.type);
+    e.payload = _msg.payload;   // the message's generic-codec encoding (no re-encode)
+    m_persist->QueueCommand(e);
   }
 
   void GameServer::SavePlayers()

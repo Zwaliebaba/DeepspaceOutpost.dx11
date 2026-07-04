@@ -104,6 +104,10 @@ namespace DSOServer
     void FinishLoadedSpawn(const Neuron::Net::Endpoint& _ep,
                            const std::optional<Neuron::Persist::PlayerPersistState>& _state);
 
+    // Append a reliable gameplay command (station/travel) to the audit/replay log,
+    // as the message's own encoded bytes. No-op when persistence is disabled.
+    void LogCommand(const Neuron::GameLogic::Session& _s, const Neuron::Net::ReliableMessage& _msg);
+
     // --- state ---
     Neuron::Net::UdpSocket& m_socket;
     Neuron::ECS::Registry m_world;
