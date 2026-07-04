@@ -60,6 +60,7 @@ set(NEURONCORE_HEADERS
     Messages/Defs/GalaxyChunks.h
     Messages/Defs/TimeSync.h
     Messages/Defs/Strategic.h
+    Messages/Defs/UnitOrder.h
     LatencyEstimate.h
     Quantization.h
     SnapshotDelta.h

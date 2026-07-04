@@ -39,6 +39,7 @@
 #include "EquipmentSystem.h"
 #include "CombatMessages.h"
 #include "StrategicView.h"   // E3: per-system strategic rollup (SummarizeStrategic)
+#include "OrderSystem.h"     // I1: ActiveOrder + StepOrders (order -> intent execution)
 
 namespace Neuron::GameLogic
 {

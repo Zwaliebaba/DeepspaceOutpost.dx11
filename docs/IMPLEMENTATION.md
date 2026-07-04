@@ -1303,7 +1303,7 @@ Sequencing: **I1 first and urgent** (the game has no movement verb without
 it); I2 parallel; I3/I4 on I1+I2; I5/I6 then; I7 last. F1 consumes I1's
 protocol and I2/I3's UX unchanged.
 
-### I1 — `UnitOrder` protocol + server `OrderSystem` — **M** — URGENT
+### I1 — `UnitOrder` protocol + server `OrderSystem` — **M** — ✅ **done 2026-07-04** (server + wire + tests; client command UX is I2–I3)
 
 The wire and server halves; playable with a temporary debug binding even
 before I3's UX.
@@ -1348,6 +1348,42 @@ bit-identical); Attack on a protected victim publishes `Crime{owner}`; Dock
 order docks from any approach without the nose heuristic; ability requests
 route to the same handlers the flags reached, with G2's missile validation;
 the heartbeat keeps the delta stream acked across the re-cut.
+
+*As built (2026-07-04):* new NeuronCore wire messages `UnitOrder` (`0x1010`),
+`UnitOrderAck` (`0x1011`), `AbilityRequest` (`0x1014`), all on the reliable
+Gameplay lane (round-trip + golden-layout + governance tested,
+`UnitOrderTests.cpp`). `GameLogic/OrderSystem.h` holds the pure core:
+`ActiveOrder{order, target, targetPos, complete}` (a serializable component),
+`PlanUnitOrder(world, playerId, req, maxMoveDist)` (the anti-cheat validator —
+ownership via `Owner`, docked gating, per-kind target-type gate, Move
+`ClampToChebyshev` clamp — returning the status to ack), and `StepOrders(world)`
+which each tick translates every `ActiveOrder` into a `FlightIntent` through the
+shared `Detail::SteerToward` + an arrival-aware throttle (a `MIN_CREEP` floor so
+the ease-to-zero doesn't asymptote short of the arrival radius), and returns the
+Attack units that are aligned + in range as "wants to fire". `GameServer` decodes
+`UnitOrder` → `PlanUnitOrder` → (crime-at-order-time via `FlagIfCrime`) → record +
+`UnitOrderAck`; runs `StepOrders` before `StepAi` and publishes `FireWeapon{Laser}`
+for the returned units (so ordered fire reuses the E1 lag-compensated,
+crime-attributing player-fire path, heat-gated); `AbilityRequest` publishes the
+same `FireWeapon` commands the input flags did; `CompleteDockOrders` auto-docks a
+Dock-ordered ship at dock range through the tested station path. A player death
+clears any standing order. `ReplicationClient` gained `SendUnitOrder`/`SendAbility`;
+the BotClient idle bot became an **order bot** (zero-axis heartbeat + periodic
+`UnitOrder{Move}` orbit), so the D5 smoke exercises the whole order path over real
+UDP. Unit-tested headlessly in `OrderSystemTests.cpp` (the rejection matrix,
+Move-arrive-and-stop, Attack fire gating, dead-target hold, determinism).
+
+**Two deviations from the sketch, by design, to fit the no-runtime sandbox
+(CI-only oracle):** (a) the `InputCommand`→`{sequence, ackSnapshotTick}` heartbeat
+re-cut + `PROTOCOL_VERSION` bump is **deferred** to a mechanical follow-up — the
+flight axes are already always-zero, so orders are purely additive and movement is
+restored without touching the un-CI-testable client flight path or the framing ABI;
+the server still honours the (dormant) input fire flags, so the existing client is
+unbroken until I4 moves abilities onto `AbilityRequest`. (b) The **client command
+UX** (temporary debug binding → real selection/gizmo) is I2–I3; for I1 the order
+path is driven end-to-end by the BotClient, which is the CI-verifiable proof.
+Crime is attributed to the ordered unit (== the owner's own ship pre-F1); F1 routes
+true owner attribution.
 
 ### I2 — Selection & picking — **S–M** (parallel with I1)
 

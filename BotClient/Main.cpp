@@ -31,9 +31,12 @@
 #include <string>
 #include <vector>
 
+#include <cmath>
+
 #include "NetLib.h"
 #include "ReplicationClient.h"
-#include "Messages/Framing.h"   // Msg::PROTOCOL_VERSION
+#include "Messages/Framing.h"       // Msg::PROTOCOL_VERSION
+#include "Messages/Defs/UnitOrder.h"   // Msg::UnitOrder (the order bot, I1)
 
 using namespace Neuron;
 
@@ -74,6 +77,7 @@ namespace
     uint32_t inputSeq = 0;
     int connectFrame = -1;   // frame the HelloAck landed (-1 = not yet)
     bool sawSnapshot = false;
+    int lastOrderFrame = -1000;  // I1: throttle how often the order bot re-orders
   };
 
   // Run the bot fleet against `server` for the configured duration. Returns true
@@ -116,14 +120,32 @@ namespace
         if (b.rc.LatestTick() > 0)
           b.sawSnapshot = true;
 
-        // Deterministic orbit intent: gentle throttle, roll flips on a per-bot
-        // phase so the fleet doesn't fly as one blob. Latest-wins server-side.
+        // Heartbeat only: the flight axes are camera-only now (like the real
+        // client), so movement comes from orders. InputCommand still carries the
+        // sequence + the E2b snapshot ack, and feeds the server's safe-park silence
+        // detection, so keep sending it every frame with zero intent.
         Msg::InputCommand in;
         in.sequence = ++b.inputSeq;
-        in.throttle = 0.4f;
-        in.rollAxis = (((frame + static_cast<int>(i) * 7) / 30) % 2 == 0) ? 0.6f : -0.6f;
-        in.pitchAxis = 0.15f;
         b.rc.SendInput(in);
+
+        // Order bot (I1): drive movement by UnitOrder{Move}, re-issued periodically to
+        // a point that walks around a circle so the fleet perpetually flies and each
+        // ship exercises the arrive-and-re-order loop through the real order path.
+        // unitId is our own primary entity (LocalPlayer); the point stays well within
+        // the server's Move clamp of the spawn region.
+        if (frame - b.lastOrderFrame >= 90)   // ~every 1.35s at Sleep(15)
+        {
+          b.lastOrderFrame = frame;
+          const double ang = (static_cast<double>(frame) / 90.0 + static_cast<double>(i))
+                           * 1.0471975512;   // 60deg per re-order, phase-offset per bot
+          Msg::UnitOrder ord;
+          ord.unitId = b.rc.LocalPlayer();
+          ord.order = Msg::OrderKind::Move;
+          ord.targetX = static_cast<int64_t>(std::cos(ang) * 40000.0);
+          ord.targetY = static_cast<int64_t>(std::sin(ang) * 40000.0);
+          ord.targetZ = 0;
+          b.rc.SendUnitOrder(ord);
+        }
 
         // Drain app events so the reliable queues never back up.
         Net::ReliableMessage msg;
