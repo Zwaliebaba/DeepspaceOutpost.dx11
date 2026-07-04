@@ -530,7 +530,7 @@ CREATE TABLE dbo.players (            -- one avatar row today; N owned units lat
   credits        INT NOT NULL,        -- tenths of a credit (Wallet.credits)
   fuel_tenths    SMALLINT NOT NULL,   -- Fuel.tenths (max stays code-owned)
   wanted_level   SMALLINT NOT NULL,   -- Wanted.level
-  score          INT NOT NULL,        -- PlayerRecord.score
+  score          INT NOT NULL,        -- session score (per-player record, C2)
   hold_capacity  SMALLINT NOT NULL,   -- CargoHold.capacity
   missiles       SMALLINT NOT NULL,   -- Equipment.missiles
   equip_flags    INT NOT NULL,        -- bitmask, see PersistEquipFlags below
@@ -588,10 +588,11 @@ than it knows.
 New pieces, all in NeuronServer (its chartered role):
 
 - **`PlayerPersistState`** — a plain snapshot struct mirroring the durable
-  components (`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `PlayerRecord`,
-  `Equipment`, witchspace flag, last system), with `FromComponents(world,
-  entity)` / `ApplyToComponents(world, entity)` converters. Copying it is
-  ~120 bytes — cheap enough to snapshot every player at cadence.
+  components (`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `Equipment`,
+  witchspace flag, last system) plus the session's per-player name/score
+  records (C2: passed to the converter explicitly), with `FromComponents(world,
+  entity, tick, name, score)` / `ApplyToComponents(world, entity)` converters.
+  Copying it is ~120 bytes — cheap enough to snapshot every player at cadence.
 - **`IPersistenceStore`** — the seam: `UpsertPlayer(state)`,
   `LoadPlayer(name) -> optional<state>`, `AppendCommands(batch)`,
   `UpsertMarketRows(batch)`, `ReadMeta/WriteMeta`. Two implementations:
@@ -690,7 +691,7 @@ nothing changes at all.
 
 ---
 
-## 5. Track C — Identity layer (#5) — **M**
+## 5. Track C — Identity layer (#5) — **M** — ✅ **done 2026-07-04**
 
 §12 locks "Account → Empire → owns N entities"; the as-built protocol
 re-concretized single-avatar. Do this before any F-track feature.
@@ -720,6 +721,38 @@ re-concretized single-avatar. Do this before any F-track feature.
 an integration test gives one player a second owned entity and asserts
 roster, status routing, and the ownership index all behave; no gameplay
 regression in the existing 218 tests.
+
+*As built (C1 + C2, 2026-07-04):*
+
+- **C1 — identity plumbing + wire.** `ServerSessions` allocates a
+  monotonically increasing `playerId` per accepted hello (stable across a
+  B3 resume). `SimComponents.h` gains `Owner{playerId}`, stamped by
+  `SpawnPlayer` and indexed in `ECS::OwnershipIndex` (NeuronCore:
+  add/remove/forget, swap-remove, generation-safe, unit-tested including
+  slot-recycle). Reap destroys *every* owned entity via the index (plus a
+  safety-net destroy of the primary). `GrantOwnership()` is the public seam
+  a future second hull uses. **Wire deviation from the sketch above, by
+  design:** since nobody plays yet (pre-launch, no back-compat), `HelloAck`
+  was extended **in place** to `{sessionToken u64, playerId u32, entityId
+  u32, protocolVersion u16}` and `PlayerInfo` to `{playerId, entityId,
+  name, wantedLevel}` under `PROTOCOL_VERSION = 3` — no `AssignControl
+  0x0005`, no successor id `0x0304`. Post-launch such layout changes take
+  new ids per the permanent-ABI rule (noted at the definitions).
+  `ReplicationClient` exposes `PlayerId()`; the BotClient smoke asserts a
+  nonzero playerId end-to-end.
+- **C2 — records off the hull.** The `PlayerRecord` component (name/score)
+  is deleted; the commander name and score are per-player records on the
+  session (the `players` row via B4). `CreditKill` now pays the wallet in
+  place and returns `KillCredit{bounty, score}`; `GameServer` routes the
+  score delta to `ServerSessions::AddScore`. The persistence converters
+  take name/score as explicit parameters; on load the server stamps
+  `session.score` from the snapshot. Rosters and the scoreboard publish
+  straight from the session records.
+- **Scope note — the wallet stays ship-borne.** `Wallet` remains a hull
+  component: every trading/bounty/equipment path (`BuyCommodity`,
+  `ProcessStationRequest`, `ApplyKill`) operates on it in place and is
+  heavily unit-tested. It becomes an empire-level record only when several
+  hulls can trade concurrently (F-track), where the move is forced anyway.
 
 ---
 
@@ -1115,9 +1148,9 @@ Three items are genuinely open and block only their own bullets:
    literally true; protocol hygiene done; docs match code.
 2. **M2 "Durable world"** ✅ — B1–B4 complete. Secure token sessions, reconnect
    grace + resume, SQL persistence (ODBC soak-validated). Restart-safe commanders.
-3. **M3 "Empire-ready core"** — C + D1–D5. D1–D5 ✅ complete (grid, arena,
-   accumulator, metrics, BotClient smoke in CI); Track C (identity layer) is the
-   one piece left before this milestone is done.
+3. **M3 "Empire-ready core"** ✅ — C + D1–D5 complete. Identity layer
+   (playerId + Owner/OwnershipIndex + session records, wallet deferred to F)
+   plus grid, arena, accumulator, metrics, BotClient smoke in CI.
 4. **M4 "Fair & scalable netcode"** — E1–E3 (validated by the 100-bot
    soak) + G1–G3.
 5. **M5 "The 4X turn"** — F1–F5, G4, with H landing in parallel.

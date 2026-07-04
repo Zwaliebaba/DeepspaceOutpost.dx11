@@ -86,7 +86,8 @@ namespace DSOServer
     if (m_persist)
       for (auto& kv : m_sessions.All())
         if (m_world.IsValid(kv.second.entity))
-          m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(m_world, kv.second.entity, m_tick));
+          m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(
+              m_world, kv.second.entity, m_tick, kv.second.name, kv.second.score));
   }
 
   std::unique_ptr<Neuron::Persist::PersistenceService> GameServer::MakePersistenceService()
@@ -344,11 +345,20 @@ namespace DSOServer
     if (!m_world.IsValid(e))
       return;   // not (or no longer) a loading session
 
+    // SpawnLoaded just spawned for this endpoint, so its session must exist; the
+    // per-player record (name/score, C2) lives on it.
+    auto sit = m_sessions.All().find(GameLogic::EndpointKey(_ep));
+    if (sit == m_sessions.All().end())
+      return;   // unreachable in practice
+    GameLogic::Session& session = sit->second;
+
     if (_state.has_value())
     {
-      // Returning commander: restore durable state and wake them docked at their
-      // last system (or the nearest station / home if that system has none).
+      // Returning commander: restore durable state (hull components + the
+      // session's score record) and wake them docked at their last system (or
+      // the nearest station / home if that system has none).
       GameLogic::PlayerStateApplyToComponents(m_world, e, *_state);
+      session.score = _state->score;
       GameLogic::DockAtSystemOrNearest(m_world, e, _state->lastSystemId);
       printf("Client connected (loaded \"%s\"): entity %u\n", _state->commanderName.c_str(), e.index);
     }
@@ -356,7 +366,8 @@ namespace DSOServer
     {
       // Unknown commander: the fresh spawn's defaults ARE the new account - persist
       // it now so the row exists to reload next time.
-      m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(m_world, e, m_tick));
+      m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(
+          m_world, e, m_tick, session.name, session.score));
       printf("Client connected (new account): entity %u\n", e.index);
     }
 
@@ -373,7 +384,7 @@ namespace DSOServer
       return;
     Neuron::Persist::CommandLogEntry e;
     e.worldTick = m_tick;
-    e.playerId = static_cast<int32_t>(_s.entity.index);   // Track C replaces this with PlayerId
+    e.playerId = static_cast<int32_t>(_s.playerId);   // the real player identity (C)
     e.messageId = static_cast<int32_t>(_msg.type);
     e.payload = _msg.payload;   // the message's generic-codec encoding (no re-encode)
     m_persist->QueueCommand(e);
@@ -391,7 +402,8 @@ namespace DSOServer
     {
       if (!m_world.IsValid(s.entity))
         continue;
-      Neuron::Persist::PlayerPersistState st = GameLogic::PlayerStateFromComponents(m_world, s.entity, m_tick);
+      Neuron::Persist::PlayerPersistState st = GameLogic::PlayerStateFromComponents(
+          m_world, s.entity, m_tick, s.name, s.score);
       if (m_lastPersist.Changed(key, st))
         m_persist->QueuePlayerSnapshot(st);
     }
@@ -559,7 +571,7 @@ namespace DSOServer
         if (const auto* eq = m_world.TryGet<GameLogic::Equipment>(s.entity)) ps.missiles = eq->missiles;
         if (const auto* h = m_world.TryGet<GameLogic::CargoHold>(s.entity)) ps.cargoUsed = GameLogic::TotalTonnage(*h);
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
-        if (const auto* pr = m_world.TryGet<GameLogic::PlayerRecord>(s.entity)) ps.score = pr->score;
+        ps.score = s.score;   // the session's per-player record (C2)
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
         if (m_lastStatus.Changed(key, ps))
           s.events.Send(ps);
@@ -656,8 +668,11 @@ namespace DSOServer
 
       // Pay the killer a wanted-derived bounty (if the victim was a fugitive)
       // BEFORE the record is wiped by the respawn below; a clean-player kill
-      // pays nothing but still bumps the killer's score.
-      GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      // pays nothing but still scores. The score delta routes to the killer's
+      // session record (C2: score lives on the player, not the hull).
+      const GameLogic::KillCredit credit = GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      if (credit.score != 0)
+        m_sessions.AddScore(_k.killer, credit.score);
 
       if (GameLogic::Combatant* c = m_world.TryGet<GameLogic::Combatant>(_k.victim))
       {
@@ -722,7 +737,9 @@ namespace DSOServer
     // counts as a score, nor sheds loot.
     if (m_world.Has<GameLogic::Combatant>(_k.victim))
     {
-      GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      const GameLogic::KillCredit credit = GameLogic::CreditKill(m_world, _k.killer, _k.victim);
+      if (credit.score != 0)
+        m_sessions.AddScore(_k.killer, credit.score);   // score is a player record (C2)
       GameLogic::DropLoot(m_world, _k.victim, m_lootRng);   // legacy launch_loot: alloy + cargo canisters
     }
 

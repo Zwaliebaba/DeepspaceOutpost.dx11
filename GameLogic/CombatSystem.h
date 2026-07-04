@@ -128,14 +128,11 @@ namespace Neuron::GameLogic
     int aft = MAX_SHIELD;
   };
 
-  // A connected player's identity/record: chosen display name + kill score. The
-  // name is client-supplied at connect (ClientHello), sanitized/de-duplicated
-  // server-side (ServerSessions). Session-scoped for now; Phase F will persist it.
-  struct PlayerRecord
-  {
-    std::string name;
-    int score = 0;
-  };
+  // NOTE (C2): the old PlayerRecord component (display name + kill score) is gone
+  // from the hull. Those are PLAYER-level facts, not ship-level ones - they live
+  // on the session's per-player record (ServerSessions: Session.name / .score,
+  // keyed by PlayerId) and are persisted by B4. The hull keeps only gameplay
+  // components; the Wallet stays ship-borne for now (see IMPLEMENTATION.md C).
 
   // Cool a player's wanted record down by one level (min 0), once per call; the
   // caller gates the cadence (e.g. every N ticks). Returns the entity indices whose

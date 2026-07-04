@@ -582,8 +582,11 @@ Every ~33 ms, in this order:
   disconnected ship stops rather than flies away. A hello on a live session is a
   **resume** (`HelloResult::Resumed`): keep the entity + token, re-queue `HelloAck`.
 - Latest-sequence-wins input application.
-- Owns the commander-name pipeline: sanitize → cap (20) → de-dupe → mirror to
-  the authoritative `PlayerRecord` → roster broadcast.
+- Owns the commander-name pipeline: sanitize → cap (20) → de-dupe → stored as
+  the authoritative per-player record on the session (C2) → roster broadcast.
+- Owns the per-player **identity + records** (C): each session gets a
+  `playerId`, the `OwnershipIndex` maps it to every entity it owns, and the
+  name/score records live here — off the hull.
 - `Broadcast(msg)` queues a catalog message to every session's proper lane.
 
 ### 5.3 A player entity (as spawned)
@@ -593,7 +596,9 @@ pitch, 100 u/t max speed), `Wallet` (1000 = 100.0 Cr), `CargoHold` (20 t),
 `DockState`, `Equipment` (3 missiles), `Fuel` (70/70 tenths), `PlayerTag`,
 `Combatant` (Team Player, 255 energy, laser 10, range 6000, autoEngage
 **false**, 150 ticks spawn grace), `Shields` (255/255), `Wanted` (0),
-`PlayerRecord` (name, score), `NetType` (Viper hull for now).
+`Owner` (the session's playerId, C1), `NetType` (Viper hull for now). The
+commander name and score are **not** components: they are per-player session
+records (C2).
 
 ---
 
@@ -811,9 +816,10 @@ sun entities exist yet — see §14).
 
 Bounty sources: explicit `Bounty` component (pirate 50 = 5.0 Cr, Thargoid 100)
 or wanted-derived for fugitive players (20/level). `CreditKill` pays the
-killer's wallet and bumps `PlayerRecord.score` — only a player killer with a
-wallet earns; missiles' own detonations credit their owner; witchspace
-withholds the money but not the score.
+killer's wallet in place and returns the earned `KillCredit{bounty, score}`;
+the server routes the score to the killer's session record (C2) — only a
+player killer with a wallet earns; missiles' own detonations credit their
+owner; witchspace withholds the money but not the score.
 
 ### 6.12 Equipment (G8)
 
@@ -1012,8 +1018,9 @@ strategic tier, delta/quantization, prediction, chat outstanding) · F/H/I 🔴.
 Missions are deferred until after F. The **persistence-readiness rule** from
 the Phase G plan is promoted to a standing invariant here: *every
 durable-in-spirit piece of state lives in a plain serializable component*
-(`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `PlayerRecord`, `Equipment`, …) so
-Phase F serializes components without refactoring gameplay.
+(`Wallet`, `CargoHold`, `Fuel`, `Wanted`, `Equipment`, …) or a plain
+per-player session record (name/score, C2) so Phase F serializes state
+without refactoring gameplay.
 
 ---
 
@@ -1227,16 +1234,15 @@ This engine is unusually pre-adapted because *NPCs already fly by writing
 `FlightIntent` through the same pipeline as players* (§6.1). Every feature
 below exploits that seam; none touches the lore or the flight feel.
 
-1. **The identity layer (player ≠ avatar) — do this first.** §12 locks
-   "Account → Empire → owns N entities", yet the as-built protocol
-   re-concretized the single avatar: `HelloAck{entityId}` is singular,
-   `PlayerRecord` lives *on the hull*, sessions map 1:1 to a ship. Introduce
-   `PlayerId` (session owns it; name/score/wallet key off it),
-   `Owner{playerId}` as a component with a **relational index** ("all my
-   units" as a cheap query, per §12), and grow `HelloAck` into
-   `AssignControl{playerId, primaryEntityId}` (new id per ABI rules).
-   Short-term behavior identical; every month of delay makes this retrofit
-   more expensive. It unblocks every item below.
+1. **The identity layer (player ≠ avatar) — do this first.** ✅ **Done (C1 +
+   C2).** Each session owns a `PlayerId`; name/score are per-player session
+   records off the hull; `Owner{playerId}` is a component with the
+   `OwnershipIndex` relational index ("all my units" as a cheap query, per
+   §12); `HelloAck` carries `{token, playerId, primaryEntityId, version}`
+   (extended in place pre-launch instead of a successor `AssignControl` id).
+   `Wallet` deliberately stays ship-borne until multiple hulls trade
+   concurrently (F). Short-term behavior identical; it unblocks every item
+   below.
 2. **Ordered units — the Darwinia move.** A player-owned escort/drone is an
    NPC hull with `Owner{you}` whose `AiSystem` target/waypoint comes from a
    validated `UnitOrder{unitId, order: Escort|Attack|Patrol|Dock|Route,
@@ -1380,7 +1386,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 2 | `ClientHello`-first handshake ✅ (done 2026-07-03) | S1 | Simplify | S | 3, 4 |
 | 3 | Session token; endpoint ≠ identity; rate limits ✅ (done 2026-07-04) | §13.2.2 | Infra | S | 4, security |
 | 4 | Reconnect grace + resume ✅ (done 2026-07-04) | §13.2.2 | Infra | S | player retention |
-| 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
+| 5 | `PlayerId`/`Owner` identity layer + relational index ✅ (done 2026-07-04; wallet stays ship-borne until F) | §13.2.3-1 | Arch | M | 12–17 |
 | 6 | Spatial grid into combat/collision/scoop/ECM loops ✅ (done 2026-07-04; per-event ECM/fire/bomb scans stay linear by design — see IMPLEMENTATION.md D1) | E1 | Perf | M | fleet scale |
 | 7 | Frame arena / scratch-buffer reuse ✅ (done 2026-07-04) | E2 | Perf | S | flat tick budget |
 | 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |

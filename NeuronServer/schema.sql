@@ -32,7 +32,7 @@ CREATE TABLE dbo.players (             -- one avatar row today; N owned units la
   credits        INT NOT NULL,         -- tenths of a credit (Wallet.credits)
   fuel_tenths    SMALLINT NOT NULL,    -- Fuel.tenths (max stays code-owned)
   wanted_level   SMALLINT NOT NULL,    -- Wanted.level
-  score          INT NOT NULL,         -- PlayerRecord.score
+  score          INT NOT NULL,         -- session score (per-player record, C2)
   hold_capacity  SMALLINT NOT NULL,    -- CargoHold.capacity
   missiles       SMALLINT NOT NULL,    -- Equipment.missiles
   equip_flags    INT NOT NULL,         -- PersistEquipFlags bitmask (PlayerPersistState.h)

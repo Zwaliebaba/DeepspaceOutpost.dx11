@@ -169,11 +169,10 @@ TEST(Hyperspace, AnOnwardJumpClearsWitchspace)
 TEST(Hyperspace, KillsInWitchspacePayNoBounty)
 {
   ECS::Registry w;
-  // A killer player with a wallet + record, stranded in witchspace.
+  // A killer player with a wallet, stranded in witchspace.
   const ECS::EntityId killer = w.Create();
   w.Add<WorldTransform>(killer, WorldTransform{ { 0, 0, 0 } });
   w.Add<Wallet>(killer, Wallet{ 1000 });
-  w.Add<PlayerRecord>(killer, PlayerRecord{});
   w.Add<PlayerTag>(killer, PlayerTag{});
   w.Add<Witchspace>(killer, Witchspace{});
   // A bountied Thargoid victim.
@@ -181,11 +180,11 @@ TEST(Hyperspace, KillsInWitchspacePayNoBounty)
   w.Add<Combatant>(thargoid, Combatant{ Team::Pirate, 1, 4, 5000, true });
   w.Add<Bounty>(thargoid, Bounty{ THARGOID_BOUNTY });
 
-  const int paid = CreditKill(w, killer.index, thargoid);
+  const KillCredit credit = CreditKill(w, killer.index, thargoid);
 
-  EXPECT_EQ(paid, 0);                                   // bounty withheld in witchspace
+  EXPECT_EQ(credit.bounty, 0);                          // bounty withheld in witchspace
   EXPECT_EQ(w.Get<Wallet>(killer).credits, 1000);       // wallet untouched
-  EXPECT_EQ(w.Get<PlayerRecord>(killer).score, 1);      // but the kill still scores
+  EXPECT_EQ(credit.score, 1);                           // but the kill still scores
 }
 
 // --- In-system jump ---------------------------------------------------------

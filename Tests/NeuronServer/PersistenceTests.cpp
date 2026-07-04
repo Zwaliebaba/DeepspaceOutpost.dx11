@@ -49,7 +49,6 @@ TEST(Persistence, ComponentRoundTripPreservesDurableState)
   world.Get<GameLogic::Wallet>(e).credits = 73210;
   world.Get<GameLogic::Fuel>(e).tenths = 55;
   world.Get<GameLogic::Wanted>(e).level = 3;
-  world.Get<GameLogic::PlayerRecord>(e).score = 4096;
   world.Get<GameLogic::CargoHold>(e).capacity = 35;
   world.Get<GameLogic::CargoHold>(e).units[2] = 11;
   world.Get<GameLogic::CargoHold>(e).units[7] = 4;
@@ -58,7 +57,10 @@ TEST(Persistence, ComponentRoundTripPreservesDurableState)
   world.Get<GameLogic::Equipment>(e).fuelScoop = true;
   world.Add<GameLogic::Witchspace>(e, GameLogic::Witchspace{});
 
-  const Persist::PlayerPersistState s = GameLogic::PlayerStateFromComponents(world, e, /*tick*/ 42);
+  // Name and score are player-level records on the session (C2): the caller
+  // passes them in; the converter packs only what the hull carries.
+  const Persist::PlayerPersistState s =
+      GameLogic::PlayerStateFromComponents(world, e, /*tick*/ 42, "Jameson", /*score*/ 4096);
   EXPECT_EQ(s.commanderName, "Jameson");
   EXPECT_EQ(s.credits, 73210);
   EXPECT_EQ(s.fuelTenths, 55);
@@ -98,7 +100,7 @@ TEST(Persistence, DockedLastSystemIsCapturedAndUndockedIsHome)
   ECS::EntityId e = SpawnPlayer(world, sessions, 5002, "Docker");
 
   // Undocked (fresh spawn) -> home (-1).
-  EXPECT_EQ(GameLogic::PlayerStateFromComponents(world, e, 1).lastSystemId, -1);
+  EXPECT_EQ(GameLogic::PlayerStateFromComponents(world, e, 1, "Docker", 0).lastSystemId, -1);
 
   // Dock at a station belonging to system 5.
   const ECS::EntityId station = world.Create();
@@ -106,7 +108,7 @@ TEST(Persistence, DockedLastSystemIsCapturedAndUndockedIsHome)
   world.Get<GameLogic::DockState>(e).docked = true;
   world.Get<GameLogic::DockState>(e).stationId = station.index;
 
-  EXPECT_EQ(GameLogic::PlayerStateFromComponents(world, e, 1).lastSystemId, 5);
+  EXPECT_EQ(GameLogic::PlayerStateFromComponents(world, e, 1, "Docker", 0).lastSystemId, 5);
 }
 
 // --- the service (deterministic: no thread, manual FlushPendingOnce) ----------
@@ -185,11 +187,11 @@ TEST(Persistence, RestartRebuildsCommanderFromTheStore)
     world.Get<GameLogic::Wallet>(e).credits = 250000;
     world.Get<GameLogic::Fuel>(e).tenths = 12;
     world.Get<GameLogic::Wanted>(e).level = 6;
-    world.Get<GameLogic::PlayerRecord>(e).score = 9001;
     world.Get<GameLogic::CargoHold>(e).units[4] = 9;
     world.Get<GameLogic::Equipment>(e).missiles = 4;
     world.Get<GameLogic::Equipment>(e).ecm = true;
-    store.UpsertPlayer(GameLogic::PlayerStateFromComponents(world, e, /*tick*/ 500));
+    // Score is a session record (C2): the server passes it alongside the name.
+    store.UpsertPlayer(GameLogic::PlayerStateFromComponents(world, e, /*tick*/ 500, "Elite", /*score*/ 9001));
   }
 
   // Session 2 ("server restart"): a fresh world + fresh spawn, restored from store.
@@ -207,7 +209,7 @@ TEST(Persistence, RestartRebuildsCommanderFromTheStore)
     EXPECT_EQ(world.Get<GameLogic::Wallet>(e).credits, 250000);
     EXPECT_EQ(world.Get<GameLogic::Fuel>(e).tenths, 12);
     EXPECT_EQ(world.Get<GameLogic::Wanted>(e).level, 6);
-    EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).score, 9001);
+    EXPECT_EQ(loaded->score, 9001);   // score rides the snapshot; the server stamps the session
     EXPECT_EQ(world.Get<GameLogic::CargoHold>(e).units[4], 9);
     EXPECT_EQ(world.Get<GameLogic::Equipment>(e).missiles, 4);
     EXPECT_TRUE(world.Get<GameLogic::Equipment>(e).ecm);

@@ -42,7 +42,7 @@ namespace Neuron::Persist
     int32_t  credits = 0;         // Wallet.credits (tenths of a credit)
     int32_t  fuelTenths = 0;      // Fuel.tenths (max stays code-owned)
     int32_t  wantedLevel = 0;     // Wanted.level
-    int32_t  score = 0;           // PlayerRecord.score
+    int32_t  score = 0;           // session score (per-player record, C2)
     int32_t  holdCapacity = 0;    // CargoHold.capacity
     int32_t  missiles = 0;        // Equipment.missiles
     uint32_t equipFlags = 0;      // PersistEquipFlags bitmask

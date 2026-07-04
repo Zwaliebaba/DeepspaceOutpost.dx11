@@ -10,11 +10,12 @@
 // cadence and ApplyToComponents after a load completes.
 
 #include <cstdint>
+#include <string>
 
 #include "ECS.h"
 #include "Economy.h"            // COMMODITY_COUNT
 #include "StationServices.h"    // Wallet, CargoHold, DockState, Equipment, Fuel, ServerStation, FindStationBySystem
-#include "CombatSystem.h"       // Wanted, PlayerRecord, Witchspace
+#include "CombatSystem.h"       // Wanted, Witchspace
 
 #include "PlayerPersistState.h" // Neuron::Persist::PlayerPersistState (NeuronServer, header-only)
 
@@ -27,17 +28,19 @@ namespace Neuron::GameLogic
   // the world tick. `lastSystemId` is the system of the station the player is
   // docked at (so a reconnect wakes there); -1 (home) when not docked, since §12
   // forbids persisting the free-flight position.
+  //
+  // The commander name and score are PLAYER-level records (C2: they live on the
+  // session, not the hull), so the caller passes them in explicitly - this
+  // converter handles only what the hull carries.
   [[nodiscard]] inline Persist::PlayerPersistState PlayerStateFromComponents(
-      ECS::Registry& _world, ECS::EntityId _entity, uint64_t _worldTick)
+      ECS::Registry& _world, ECS::EntityId _entity, uint64_t _worldTick,
+      const std::string& _commanderName, int _score)
   {
     Persist::PlayerPersistState s;
     s.updatedTick = _worldTick;
+    s.commanderName = _commanderName;
+    s.score = _score;
 
-    if (const PlayerRecord* pr = _world.TryGet<PlayerRecord>(_entity))
-    {
-      s.commanderName = pr->name;
-      s.score = pr->score;
-    }
     if (const Wallet* w = _world.TryGet<Wallet>(_entity))
       s.credits = w->credits;
     if (const Fuel* f = _world.TryGet<Fuel>(_entity))
@@ -72,8 +75,9 @@ namespace Neuron::GameLogic
 
   // Restore the durable component VALUES onto a freshly-spawned player entity. Does
   // NOT touch position/dock/health - the caller docks the player at `lastSystemId`
-  // and the fresh spawn provides the rest. The commander name is owned by the
-  // account/session, so it is NOT overwritten here.
+  // and the fresh spawn provides the rest. The commander name and score are
+  // PLAYER-level records owned by the session (C2), so they are NOT applied here -
+  // the caller stamps the session (GameServer sets session.score from _s.score).
   inline void PlayerStateApplyToComponents(ECS::Registry& _world, ECS::EntityId _entity,
                                            const Persist::PlayerPersistState& _s)
   {
@@ -83,8 +87,6 @@ namespace Neuron::GameLogic
       f->tenths = _s.fuelTenths;
     if (Wanted* wn = _world.TryGet<Wanted>(_entity))
       wn->level = _s.wantedLevel;
-    if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(_entity))
-      pr->score = _s.score;
     if (CargoHold* h = _world.TryGet<CargoHold>(_entity))
     {
       h->capacity = _s.holdCapacity;

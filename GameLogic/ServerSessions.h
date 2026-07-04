@@ -91,6 +91,8 @@ namespace Neuron::GameLogic
     ECS::EntityId entity;               // INVALID until a valid ClientHello spawns it (pending shell)
     Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
     std::string name;                  // display name (from ClientHello; placeholder if blank)
+    int score = 0;                     // kill score (C2: a PLAYER-level record, off the hull;
+                                       //   fed by CreditKill via AddScore, persisted by B4)
     uint64_t token = 0;                // session token (B2 identity); 0 while a pending shell
     uint32_t playerId = 0;             // player identity (C); 0 while a pending/loading shell.
                                        //   Stable across B3 reconnects; every owned entity's
@@ -254,9 +256,7 @@ namespace Neuron::GameLogic
       s.entity = SpawnPlayer(_world, s.playerId);
       const std::string clean = SanitizeName(_hello.commanderName);
       s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
-                             : UniqueName(clean, key);
-      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
-        pr->name = s.name;
+                             : UniqueName(clean, key);   // the per-player record (C2): no hull mirror
 
       // Mint the session token (B2 identity) and index it to this endpoint; every
       // subsequent client datagram must carry it. The endpoint's outgoing datagrams
@@ -288,9 +288,7 @@ namespace Neuron::GameLogic
       s.entity = SpawnPlayer(_world, s.playerId);
       const std::string clean = s.name;   // the sanitized (pre-dedup) name parked by OnHello
       s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
-                             : UniqueName(clean, key);
-      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
-        pr->name = s.name;
+                             : UniqueName(clean, key);   // the per-player record (C2): no hull mirror
       s.token = NextToken();
       m_byToken[s.token] = key;
       s.events.Send(Msg::HelloAck{ s.token, s.playerId, s.entity.index,
@@ -377,10 +375,11 @@ namespace Neuron::GameLogic
         entry.second.events.Send(_m);
     }
 
-    // Apply a client's ClientHello name to its session + authoritative PlayerRecord:
-    // sanitize, cap, de-duplicate against the other sessions. Returns true when the
-    // stored name actually changed (so the caller broadcasts an updated PlayerInfo).
-    // A blank/all-control name, or an unknown endpoint, keeps the assigned default.
+    // Apply a client's ClientHello name to its session (the authoritative per-
+    // player record): sanitize, cap, de-duplicate against the other sessions.
+    // Returns true when the stored name actually changed (so the caller broadcasts
+    // an updated PlayerInfo). A blank/all-control name, or an unknown endpoint,
+    // keeps the assigned default.
     bool ApplyName(ECS::Registry& _world, const Net::Endpoint& _ep, const std::string& _raw)
     {
       const uint64_t key = EndpointKey(_ep);
@@ -388,6 +387,21 @@ namespace Neuron::GameLogic
       if (it == m_sessions.end())
         return false;
       return ApplyNameTo(_world, it->second, key, _raw);
+    }
+
+    // Route a kill's score delta to the player whose PRIMARY entity is
+    // `_entityIndex` (C2: score is a per-player record on the session, fed by
+    // KillRewards::CreditKill through the server's kill handler). Returns false
+    // when no live session owns that entity (an NPC or departed killer).
+    bool AddScore(uint32_t _entityIndex, int _delta)
+    {
+      for (auto& e : m_sessions)
+        if (e.second.entity.index == _entityIndex)
+        {
+          e.second.score += _delta;
+          return true;
+        }
+      return false;
     }
 
     // The full roster (one PlayerInfo per live session) to replay to a joiner and
@@ -553,11 +567,14 @@ namespace Neuron::GameLogic
       return DEFAULT_TOKEN_BASE + (++m_tokenCounter);
     }
 
-    // Sanitize/de-dupe `_raw` and mirror it onto the session + PlayerRecord.
-    // Returns true if the stored name actually changed. Shared by ApplyName (live
-    // rename) and OnHello (a rename on an already-connected session).
+    // Sanitize/de-dupe `_raw` onto the session's per-player record (the ONE home
+    // of a player's name since C2 - no hull mirror). Returns true if the stored
+    // name actually changed. Shared by ApplyName (live rename) and OnHello (a
+    // rename on an already-connected session). `_world` is kept for signature
+    // stability of the public ApplyName (and future record side-effects).
     bool ApplyNameTo(ECS::Registry& _world, Session& _s, uint64_t _key, const std::string& _raw)
     {
+      (void)_world;
       std::string clean = SanitizeName(_raw);
       if (clean.empty())
         return false;
@@ -566,8 +583,6 @@ namespace Neuron::GameLogic
         return false;
 
       _s.name = clean;
-      if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(_s.entity))
-        pr->name = clean;
       return true;
     }
 
@@ -599,7 +614,7 @@ namespace Neuron::GameLogic
       _world.Add<Shields>(e, Shields{});   // full directional shields (player-only feature)
       _world.Add<ShipGear>(e, ShipGear{}); // laser temperature + ECM recharge (G8)
       _world.Add<Wanted>(e, Wanted{});
-      _world.Add<PlayerRecord>(e, PlayerRecord{});   // name filled in by the caller
+      // (C2: no PlayerRecord - name/score are the session's per-player record.)
       _world.Add<NetType>(e, NetType{ ShipType::Viper });
       return e;
     }

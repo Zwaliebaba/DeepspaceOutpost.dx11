@@ -233,7 +233,6 @@ TEST(Session, HelloOnALiveSessionResumesAndReAcks)
   EXPECT_TRUE(out.nameChanged);
   EXPECT_EQ(TokenOf(sessions, a), token);                        // same identity
   EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).name, "Raxxla");
-  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Raxxla");
   EXPECT_TRUE(sessions.All().at(GameLogic::EndpointKey(a)).events.PendingOutgoing() == 2);  // 1st + resume HelloAck
 }
 
@@ -354,21 +353,22 @@ TEST(Session, SafeParkZeroesTheIntentOfASilentShip)
   EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0f);
 }
 
-TEST(Session, NewSessionGetsADefaultNameAndPlayerRecord)
+TEST(Session, NewSessionGetsADefaultName)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
 
   const Net::Endpoint a{ 0x7F000001, 3000 };
   ECS::EntityId e = Connect(world, sessions, a);   // blank hello name -> placeholder
+  ASSERT_TRUE(world.IsValid(e));
 
+  // The commander name is a PLAYER-level record on the session (C2), not a
+  // component mirrored onto the hull.
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
   EXPECT_FALSE(s.name.empty());                                   // a placeholder was assigned
-  ASSERT_TRUE(world.Has<GameLogic::PlayerRecord>(e));
-  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, s.name);  // mirrored onto the record
 }
 
-TEST(Session, HelloNameIsSanitizedAndMirroredToTheRecord)
+TEST(Session, HelloNameIsSanitizedOntoTheSession)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -376,10 +376,10 @@ TEST(Session, HelloNameIsSanitizedAndMirroredToTheRecord)
   const Net::Endpoint a{ 0x7F000001, 3001 };
   // Control chars are dropped; the printable remainder is kept.
   ECS::EntityId e = Connect(world, sessions, a, std::string("Ja\x01me\x7Fson"));
+  ASSERT_TRUE(world.IsValid(e));
 
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
   EXPECT_EQ(s.name, "Jameson");
-  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Jameson");
 }
 
 TEST(Session, ApplyNameKeepsDefaultForABlankName)
@@ -584,7 +584,7 @@ TEST(Session, SpawnLoadedCompletesTheDeferredHandshake)
   EXPECT_TRUE(s.entity == e);
   EXPECT_NE(s.token, 0u);                             // token minted on spawn
   EXPECT_TRUE(s.events.PendingOutgoing() == 1);       // HelloAck queued
-  EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Jameson");
+  EXPECT_EQ(s.name, "Jameson");                       // name lives on the session (C2)
 
   // A second SpawnLoaded is a no-op (the session is no longer loading).
   EXPECT_FALSE(world.IsValid(sessions.SpawnLoaded(world, a, 3)));
