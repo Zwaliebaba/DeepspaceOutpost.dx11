@@ -453,6 +453,101 @@ TEST(Session, PendingShellIsExcludedFromTheRoster)
   EXPECT_TRUE(sessions.Roster(world).empty());     // ...but is not a roster member
 }
 
+TEST(Session, PlayersGetDistinctNonzeroPlayerIds)
+{
+  // C: each accepted session is a PLAYER with its own identity, and the spawned
+  // hull carries Owner{playerId} + an ownership-index entry.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 9001 };
+  const Net::Endpoint b{ 0x7F000001, 9002 };
+  ECS::EntityId ea = Connect(world, sessions, a);
+  ECS::EntityId eb = Connect(world, sessions, b);
+
+  const uint32_t pa = sessions.All().at(GameLogic::EndpointKey(a)).playerId;
+  const uint32_t pb = sessions.All().at(GameLogic::EndpointKey(b)).playerId;
+  EXPECT_NE(pa, 0u);
+  EXPECT_NE(pb, 0u);
+  EXPECT_NE(pa, pb);
+
+  ASSERT_TRUE(world.Has<GameLogic::Owner>(ea));
+  EXPECT_EQ(world.Get<GameLogic::Owner>(ea).playerId, pa);
+  EXPECT_EQ(world.Get<GameLogic::Owner>(eb).playerId, pb);
+  EXPECT_EQ(sessions.Ownership().OwnedCount(pa), 1u);
+  EXPECT_EQ(sessions.Ownership().OwnedCount(pb), 1u);
+}
+
+TEST(Session, PlayerIdIsStableAcrossAResume)
+{
+  // C acceptance: the identity survives a B3 reconnect (the entity is kept, so
+  // trivially also a kill/respawn, which relocates rather than swaps the hull).
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 9003 };
+  Connect(world, sessions, a, "Jameson");
+  const uint32_t before = sessions.All().at(GameLogic::EndpointKey(a)).playerId;
+
+  GameLogic::HelloOutcome out = sessions.OnHello(world, a, Hello("Jameson"), /*tick*/ 50);
+  EXPECT_TRUE(out.result == GameLogic::HelloResult::Resumed);
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).playerId, before);
+}
+
+TEST(Session, HelloAckCarriesPlayerIdTokenAndPrimaryEntity)
+{
+  // Decode the actual handshake reply off the session's Control lane and check
+  // the client would learn the full identity triple.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 9004 };
+  ECS::EntityId e = Connect(world, sessions, a);
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
+
+  Msg::MessageEndpoint client;
+  for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
+    client.OnDatagram(dg.data(), dg.size());
+
+  Net::ReliableMessage m;
+  ASSERT_TRUE(client.Receive(m));
+  Msg::HelloAck ack;
+  ASSERT_TRUE(Msg::TryDecode(m, ack));
+  EXPECT_EQ(ack.playerId, s.playerId);
+  EXPECT_EQ(ack.sessionToken, s.token);
+  EXPECT_EQ(ack.entityId, e.index);
+  EXPECT_EQ(ack.protocolVersion, Msg::PROTOCOL_VERSION);
+}
+
+TEST(Session, GrantedEntitiesDespawnWithTheirOwnerOnReap)
+{
+  // C acceptance: one player owning a SECOND entity - the ownership index tracks
+  // it, the roster stays one entry per PLAYER (not per hull), and reaping the
+  // session destroys everything it owns.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 9005 };
+  ECS::EntityId ship = Connect(world, sessions, a, "Admiral");
+  const uint32_t playerId = sessions.All().at(GameLogic::EndpointKey(a)).playerId;
+
+  // Grant a second owned unit (the F-track's drone/outpost seam).
+  ECS::EntityId drone = world.Create();
+  world.Add<GameLogic::WorldTransform>(drone, GameLogic::WorldTransform{ { 5000, 0, 0 } });
+  sessions.GrantOwnership(world, playerId, drone);
+
+  EXPECT_EQ(sessions.Ownership().OwnedCount(playerId), 2u);
+  EXPECT_EQ(world.Get<GameLogic::Owner>(drone).playerId, playerId);
+  EXPECT_EQ(sessions.Roster(world).size(), 1u);   // roster is per player, not per hull
+
+  // Reap the idle session: BOTH owned entities despawn and are reported.
+  std::vector<uint32_t> gone = sessions.Reap(world, /*tick*/ 5000, /*shell*/ 5, /*grace*/ 5);
+  EXPECT_EQ(gone.size(), 2u);
+  EXPECT_FALSE(world.IsValid(ship));
+  EXPECT_FALSE(world.IsValid(drone));
+  EXPECT_EQ(sessions.Ownership().OwnerCount(), 0u);   // index fully pruned
+}
+
 TEST(Session, DeferredHelloParksWithoutSpawning)
 {
   // B4: with deferred spawn, a valid hello parks the session (records the name,

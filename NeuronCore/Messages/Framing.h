@@ -32,7 +32,8 @@
 namespace Neuron::Msg
 {
   inline constexpr uint32_t MESSAGE_MAGIC = 0x4E4D5347;   // 'NMSG'
-  inline constexpr uint16_t PROTOCOL_VERSION = 2;   // 2: session token added after the lane byte (B2)
+  inline constexpr uint16_t PROTOCOL_VERSION = 3;   // 2: session token after the lane byte (B2)
+                                                    // 3: playerId in HelloAck/PlayerInfo (C)
 
   // Read the leading magic of a datagram without consuming it (route by protocol).
   [[nodiscard]] inline uint32_t PeekMessageMagic(const uint8_t* _data, std::size_t _size)

@@ -57,11 +57,19 @@ namespace Neuron::Msg
     ProtocolMismatch = 1,   // the client's PROTOCOL_VERSION is not the server's
   };
 
-  // server -> client: the handshake was ACCEPTED. "You control entity N"; the
-  // sessionToken is the session's identity (B2) - a CSPRNG token the client stamps
-  // on every subsequent datagram, so the server authenticates by token, not by
-  // source address. Subsumes and retires AssignPlayer (0x0001, reserved), folding
-  // the protocol-version echo and the token into the one handshake reply.
+  // server -> client: the handshake was ACCEPTED. "You are player P, controlling
+  // entity N"; the sessionToken is the session's identity (B2) - a CSPRNG token
+  // the client stamps on every subsequent datagram, so the server authenticates
+  // by token, not by source address. Subsumes and retires AssignPlayer (0x0001,
+  // reserved), folding the protocol-version echo and the token into the one
+  // handshake reply.
+  //
+  // The playerId (C) is the §12 identity - Account → Empire → owns N entities:
+  // player, not hull. entityId is the PRIMARY controlled entity (further owned
+  // units arrive with the F-track). Layout note: this message was extended in
+  // place (with a PROTOCOL_VERSION bump) rather than via a successor id, under
+  // the owner-approved pre-launch no-back-compat rule; once anything is deployed,
+  // layout changes take a NEW id per the §4.3 permanent-ABI discipline.
   struct HelloAck
   {
     static constexpr MessageId    Id    = static_cast<MessageId>(0x0003);   // core/session
@@ -71,10 +79,11 @@ namespace Neuron::Msg
     static constexpr Direction    Dir   = Direction::ServerToClient;
 
     uint64_t sessionToken = 0;   // the session's CSPRNG identity token (B2)
-    uint32_t entityId = 0;       // the entity this session controls
+    uint32_t playerId = 0;       // the player identity (C); stable across reconnects
+    uint32_t entityId = 0;       // the PRIMARY entity this player controls
     uint16_t protocolVersion = 0;// the server's PROTOCOL_VERSION (echo)
-    auto Fields()       { return std::tie(sessionToken, entityId, protocolVersion); }
-    auto Fields() const { return std::tie(sessionToken, entityId, protocolVersion); }
+    auto Fields()       { return std::tie(sessionToken, playerId, entityId, protocolVersion); }
+    auto Fields() const { return std::tie(sessionToken, playerId, entityId, protocolVersion); }
   };
 
   // server -> client: the handshake was REFUSED (no session provisioned). Today the
@@ -93,7 +102,11 @@ namespace Neuron::Msg
   };
 
   // server -> client: one player's roster entry (name + legal status), broadcast to
-  // every session on join, on a name change, and on a wanted-level change.
+  // every session on join, on a name change, and on a wanted-level change. Since C
+  // the roster is keyed by PLAYER (playerId), not hull - required the moment one
+  // player owns two hulls; entityId is their primary ship (what nameplates attach
+  // to today). Extended in place under the pre-launch no-back-compat rule (see the
+  // HelloAck layout note).
   struct PlayerInfo
   {
     static constexpr MessageId    Id    = static_cast<MessageId>(0x0301);   // player identity
@@ -102,11 +115,12 @@ namespace Neuron::Msg
     static constexpr MessageLane  Lane  = MessageLane::Gameplay;
     static constexpr Direction    Dir   = Direction::ServerToClient;
 
-    uint32_t entityId = 0;
+    uint32_t playerId = 0;   // the roster's identity key (C)
+    uint32_t entityId = 0;   // the player's PRIMARY hull (nameplate anchor)
     std::string name;
     int32_t wantedLevel = 0;
-    auto Fields()       { return std::tie(entityId, name, wantedLevel); }
-    auto Fields() const { return std::tie(entityId, name, wantedLevel); }
+    auto Fields()       { return std::tie(playerId, entityId, name, wantedLevel); }
+    auto Fields() const { return std::tie(playerId, entityId, name, wantedLevel); }
   };
 
   // server -> client (owning session only): the local player's vitals for the HUD.

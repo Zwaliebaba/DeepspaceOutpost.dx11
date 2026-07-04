@@ -19,6 +19,7 @@ set(NEURONCORE_HEADERS
     NeuronCore.h
     EventManager.h
     ECS.h
+    OwnershipIndex.h
     Vector3i64.h
     Vector3d.h
     SpatialGrid.h

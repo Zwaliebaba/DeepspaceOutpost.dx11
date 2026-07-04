@@ -114,6 +114,12 @@ namespace Neuron::Client
     // outbound datagram (B2) so the server authenticates us by token, not address.
     [[nodiscard]] uint64_t SessionToken() const { return m_sessionToken; }
 
+    // Our player identity from HelloAck (C: the §12 Account → Empire → owns N
+    // entities layer - player, not hull). 0 until connected. LocalPlayer() stays
+    // the PRIMARY controlled entity; rosters and future multi-unit ownership key
+    // off this id.
+    [[nodiscard]] uint32_t PlayerId() const { return m_playerId; }
+
     // True once the server refused our ClientHello (e.g. a protocol-version
     // mismatch): the client shows a connect error instead of a world.
     [[nodiscard]] bool HelloRejected() const { return m_helloRejected; }
@@ -145,6 +151,7 @@ namespace Neuron::Client
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (handshake/chunks filtered out)
     uint64_t m_sessionToken = 0;                   // from HelloAck; stamped on every outbound datagram (B2)
+    uint32_t m_playerId = 0;                       // from HelloAck; our player identity (C)
     bool m_helloRejected = false;                  // server refused the handshake
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
     uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk

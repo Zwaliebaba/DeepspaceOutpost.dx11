@@ -139,12 +139,14 @@ namespace
       Bot& b = bots[i];
       const bool connected = b.connectFrame >= 0;
       const bool chart = b.rc.GalaxyComplete();
-      printf("bot %zu: connected=%s (frame %d) snapshots=%s entities=%zu chart=%s token=%s\n",
+      printf("bot %zu: connected=%s (frame %d) snapshots=%s entities=%zu chart=%s token=%s playerId=%u\n",
              i, connected ? "yes" : "NO", b.connectFrame,
              b.sawSnapshot ? "yes" : "NO", b.rc.Count(),
              chart ? "complete" : "INCOMPLETE",
-             b.rc.SessionToken() != 0 ? "yes" : "NO");
-      ok = ok && connected && b.sawSnapshot && chart && b.rc.SessionToken() != 0;
+             b.rc.SessionToken() != 0 ? "yes" : "NO",
+             b.rc.PlayerId());
+      ok = ok && connected && b.sawSnapshot && chart && b.rc.SessionToken() != 0
+              && b.rc.PlayerId() != 0;   // the C identity layer arrived end-to-end
       b.rc.Close();
     }
     return ok;

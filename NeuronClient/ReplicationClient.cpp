@@ -115,11 +115,13 @@ namespace Neuron::Client
       Msg::GalaxyChunk chunk;
       if (Msg::TryDecode(msg, ack))
       {
-        // The handshake reply: our controlled entity + the session token (B2). From
-        // here on every outbound datagram carries the token so the server can
-        // authenticate us by identity, not by source address - stamp it on the
-        // reliable endpoint (SendInput stamps the unreliable lane directly).
+        // The handshake reply: our player identity (C) + primary entity + the
+        // session token (B2). From here on every outbound datagram carries the
+        // token so the server can authenticate us by identity, not by source
+        // address - stamp it on the reliable endpoint (SendInput stamps the
+        // unreliable lane directly).
         m_localPlayer = ack.entityId;
+        m_playerId = ack.playerId;
         m_sessionToken = ack.sessionToken;
         m_events.SetToken(ack.sessionToken);
       }

@@ -248,15 +248,19 @@ the protocol version + the commander name the player chose. The server sanitizes
 | `commanderName` | string | requested display name (raw; server sanitizes) |
 
 **`HelloAck`** — `0x0003` · Control scope · Event · Control lane · S→C.
-The handshake was accepted: "you control entity N." Subsumes and retires
-`AssignPlayer`, adding the protocol-version echo and the session token. Sent once,
-on the first valid `ClientHello`. The client stamps the token on every subsequent
-datagram (B2); the server authenticates by it.
+The handshake was accepted: "you are player P, controlling entity N." Subsumes
+and retires `AssignPlayer`, adding the protocol-version echo, the session token,
+and (C) the player identity. Sent once, on the first valid `ClientHello`. The
+client stamps the token on every subsequent datagram (B2); the server
+authenticates by it. *(Layout extended in place for C under the pre-launch
+no-back-compat rule, with a `PROTOCOL_VERSION` bump to 3; post-launch layout
+changes take a successor id per §4.3.)*
 
 | Field | Type | Meaning |
 |---|---|---|
 | `sessionToken` | u64 | the session's identity — a CSPRNG token stamped on every later client datagram |
-| `entityId` | u32 | the entity index this session controls |
+| `playerId` | u32 | the player identity (C: §12 "Account → Empire → owns N entities"); stable across reconnects |
+| `entityId` | u32 | the PRIMARY entity this player controls |
 | `protocolVersion` | u16 | the server's `PROTOCOL_VERSION` (echo) |
 
 **`HelloReject`** — `0x0004` · Control scope · Event · Control lane · S→C.
@@ -270,11 +274,14 @@ world.
 
 **`PlayerInfo`** — `0x0301` · Wire · Event · Gameplay · S→C.
 One roster entry, broadcast to everyone on join, name change, or wanted-level
-change (crime, decay, death, hyperspace cooling).
+change (crime, decay, death, hyperspace cooling). Since C the roster is keyed by
+**player**, not hull — required the moment one player owns two ships. *(Layout
+extended in place; see the `HelloAck` note.)*
 
 | Field | Type | Meaning |
 |---|---|---|
-| `entityId` | u32 | which ship this describes |
+| `playerId` | u32 | the roster's identity key (C) |
+| `entityId` | u32 | the player's PRIMARY ship (nameplate anchor) |
 | `name` | string | display name (sanitized, unique) |
 | `wantedLevel` | i32 | legal status (0 = clean) |
 

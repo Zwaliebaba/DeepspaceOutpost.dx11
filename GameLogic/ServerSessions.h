@@ -20,6 +20,13 @@
 // (pre-handshake) datagrams are rate-limited per endpoint so a spoofed-source flood
 // can't provision unbounded shells.
 //
+// Since C a connected player is a PLAYER, not a hull: each accepted session is
+// allocated a PlayerId (the §12 "Account → Empire → owns N entities" identity;
+// stable across B3 reconnects, carried in HelloAck/PlayerInfo). Every entity the
+// player owns - today exactly the one ship, later the F-track's drones/outposts -
+// carries Owner{playerId} and is registered in the ECS::OwnershipIndex, so "all my
+// units" is O(mine). Reaping a session destroys everything it owns.
+//
 // Pure apart from the world it mutates (spawns/destroys entities) - no sockets -
 // so connection handling, input application and reaping are all unit-tested
 // headlessly; the server loop wires the socket I/O around it.
@@ -33,6 +40,7 @@
 #include <vector>
 
 #include "ECS.h"
+#include "OwnershipIndex.h"    // ECS::OwnershipIndex (PlayerId -> owned entities, C)
 #include "NetLib.h"            // Net::Endpoint (winsock-free)
 #include "Messages/Defs/InputCommand.h"
 #include "ReliableChannel.h"
@@ -84,6 +92,9 @@ namespace Neuron::GameLogic
     Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
     std::string name;                  // display name (from ClientHello; placeholder if blank)
     uint64_t token = 0;                // session token (B2 identity); 0 while a pending shell
+    uint32_t playerId = 0;             // player identity (C); 0 while a pending/loading shell.
+                                       //   Stable across B3 reconnects; every owned entity's
+                                       //   Owner component carries it (see OwnershipIndex).
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
     uint32_t inputWindowTick = 0;      // D4: tick the input-cadence window opened
@@ -223,7 +234,7 @@ namespace Neuron::GameLogic
         // re-confirms its entity + token; the caller resends the rest of the state.
         HelloOutcome out{ HelloResult::Resumed, s.entity, false };
         out.nameChanged = ApplyNameTo(_world, s, key, _hello.commanderName);
-        s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
+        s.events.Send(Msg::HelloAck{ s.token, s.playerId, s.entity.index,
                                      static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
         return out;
       }
@@ -237,8 +248,10 @@ namespace Neuron::GameLogic
         return HelloOutcome{ HelloResult::Loading, {}, false };
       }
 
-      // First valid hello: spawn the controllable entity and adopt the name.
-      s.entity = SpawnPlayer(_world);
+      // First valid hello: allocate the player identity (C), spawn the primary
+      // entity owned by it, and adopt the name.
+      s.playerId = m_nextPlayerId++;
+      s.entity = SpawnPlayer(_world, s.playerId);
       const std::string clean = SanitizeName(_hello.commanderName);
       s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
                              : UniqueName(clean, key);
@@ -250,7 +263,7 @@ namespace Neuron::GameLogic
       // stay token-0 (the client authenticates the server by address, not token).
       s.token = NextToken();
       m_byToken[s.token] = key;
-      s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
+      s.events.Send(Msg::HelloAck{ s.token, s.playerId, s.entity.index,
                                    static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
       return HelloOutcome{ HelloResult::Accepted, s.entity, true };
     }
@@ -271,7 +284,8 @@ namespace Neuron::GameLogic
       Session& s = it->second;
       s.loading = false;
       s.lastSeenTick = _tick;
-      s.entity = SpawnPlayer(_world);
+      s.playerId = m_nextPlayerId++;
+      s.entity = SpawnPlayer(_world, s.playerId);
       const std::string clean = s.name;   // the sanitized (pre-dedup) name parked by OnHello
       s.name = clean.empty() ? ("Commander-" + std::to_string(s.entity.index))
                              : UniqueName(clean, key);
@@ -279,7 +293,7 @@ namespace Neuron::GameLogic
         pr->name = s.name;
       s.token = NextToken();
       m_byToken[s.token] = key;
-      s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
+      s.events.Send(Msg::HelloAck{ s.token, s.playerId, s.entity.index,
                                    static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
       return s.entity;
     }
@@ -299,7 +313,19 @@ namespace Neuron::GameLogic
         const uint32_t timeout = (it->second.Live() || it->second.loading) ? _graceTicks : _shellTicks;
         if (_tick - it->second.lastSeenTick > timeout)
         {
-          if (_world.IsValid(it->second.entity))
+          // Destroy EVERYTHING the player owns (C) - the primary ship plus any
+          // granted units - and drop the ownership entries with the session.
+          if (it->second.playerId != 0)
+          {
+            for (const ECS::EntityId owned : m_ownership.Owned(it->second.playerId))
+              if (_world.IsValid(owned))
+              {
+                gone.push_back(owned.index);
+                _world.Destroy(owned);
+              }
+            m_ownership.Forget(it->second.playerId);
+          }
+          if (_world.IsValid(it->second.entity))   // safety net: primary should be indexed
           {
             gone.push_back(it->second.entity.index);
             _world.Destroy(it->second.entity);
@@ -434,6 +460,21 @@ namespace Neuron::GameLogic
       return m_sessions.find(EndpointKey(_ep)) != m_sessions.end();
     }
 
+    // Register an ADDITIONAL entity as owned by `_playerId` (C): stamps the Owner
+    // component and indexes it, so it despawns with the session on reap and counts
+    // in "all my units". This is the F-track's grant point (drones, outposts);
+    // today only tests exercise a second entity. No-op for playerId 0.
+    void GrantOwnership(ECS::Registry& _world, uint32_t _playerId, ECS::EntityId _entity)
+    {
+      if (_playerId == 0 || !_world.IsValid(_entity))
+        return;
+      _world.Add<Owner>(_entity, Owner{ _playerId });
+      m_ownership.Add(_playerId, _entity);
+    }
+
+    // The PlayerId -> owned-entities relation ("all my units" is O(mine), §12).
+    [[nodiscard]] const ECS::OwnershipIndex& Ownership() const { return m_ownership; }
+
   private:
     // Resolve an authenticated (tokened) datagram to its session, re-binding the
     // endpoint if the token arrived from a new address (NAT rebind). Returns null
@@ -530,11 +571,14 @@ namespace Neuron::GameLogic
       return true;
     }
 
-    // Spawn a controllable player entity, spread out so clients don't overlap.
-    ECS::EntityId SpawnPlayer(ECS::Registry& _world)
+    // Spawn a controllable player entity owned by `_playerId` (stamped with Owner
+    // and registered in the ownership index), spread out so clients don't overlap.
+    ECS::EntityId SpawnPlayer(ECS::Registry& _world, uint32_t _playerId)
     {
       const int64_t offset = static_cast<int64_t>(m_spawnCount++) * 2000;
       const ECS::EntityId e = _world.Create();
+      _world.Add<Owner>(e, Owner{ _playerId });   // the identity layer (C)
+      m_ownership.Add(_playerId, e);
       _world.Add<WorldTransform>(e, WorldTransform{ { offset, 0, 0 } });
       _world.Add<Flight>(e, Flight{});
       _world.Add<FlightIntent>(e, FlightIntent{});
@@ -560,12 +604,13 @@ namespace Neuron::GameLogic
       return e;
     }
 
-    // Fill `_out` with a session's roster entry (entity + name + legal status).
-    // Returns false when the session's entity is no longer valid.
+    // Fill `_out` with a session's roster entry (player + primary entity + name +
+    // legal status). Returns false when the session's entity is no longer valid.
     [[nodiscard]] static bool BuildPlayerInfo(ECS::Registry& _world, const Session& _s, Msg::PlayerInfo& _out)
     {
       if (!_world.IsValid(_s.entity))
         return false;
+      _out.playerId = _s.playerId;   // the roster's identity key (C): player, not hull
       _out.entityId = _s.entity.index;
       _out.name = _s.name;
       const Wanted* w = _world.TryGet<Wanted>(_s.entity);
@@ -627,9 +672,11 @@ namespace Neuron::GameLogic
     std::unordered_map<uint64_t, Session> m_sessions;   // keyed by CURRENT endpoint key
     std::unordered_map<uint64_t, uint64_t> m_byToken;   // session token -> its endpoint key
     std::unordered_map<uint64_t, RateInfo> m_rate;      // endpoint key -> token-less budget
+    ECS::OwnershipIndex m_ownership;                    // PlayerId -> owned entities (C)
     std::function<uint64_t()> m_tokenSource;            // CSPRNG on the server; unset in tests
     std::vector<Net::GalaxySystemInfo> m_manifest;      // galaxy chart data for new clients
     uint32_t m_spawnCount = 0;
+    uint32_t m_nextPlayerId = 1;   // player identity allocator (C); 0 = "no player"
     uint64_t m_tokenCounter = 0;   // fallback-token sequence (tests)
   };
 }
