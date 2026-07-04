@@ -151,6 +151,7 @@ namespace DSOServer
     Neuron::Server::TickMetrics m_metrics;
     uint64_t m_bytesThisTick = 0;
     uint64_t m_candidatePairsThisTick = 0;
+    uint64_t m_droppedThisTick = 0;   // E2c: entities shed by the send budget this tick
     double m_metricsWindowStartMs = 0.0;
 
     // D2: persistent per-tick working storage for the GameLogic systems (see

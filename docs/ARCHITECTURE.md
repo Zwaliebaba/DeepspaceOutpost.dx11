@@ -500,7 +500,12 @@ still-acked older baseline) and reordering is safe (a delta resolves its baselin
 by tick). Change detection compares **absolute** positions (stable under the
 moving reference origin) at their **quantized** resolution. Codecs:
 `SnapshotDelta.h` (diff/apply) and `SnapshotStream.h` (encoder/decoder).
-**Still pending (E2c):** per-lane byte budgets with distance-sorted drop.
+
+**Send budget (E2c).** Each viewer's per-tick state is capped
+(`SNAPSHOT_SEND_BUDGET_BYTES`): an overloaded AOI keeps the entities **closest**
+to the viewer and sheds the farthest, sorted by distance then id so the trim is
+identical on every client. Applied before delta-encoding; the shed count feeds
+the `[metrics]` line (`dropped=`). See `SnapshotBudget.h`.
 
 ### 4.5 Server-internal messages (never on the wire)
 
@@ -1434,7 +1439,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 7 | Frame arena / scratch-buffer reuse ✅ (done 2026-07-04) | E2 | Perf | S | flat tick budget |
 | 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |
 | 9 | Time sync (ping/offset) → lag-compensated fire ✅ (done 2026-07-04; laser rewound, missile/travel cone-rewind deferred; client-reported RTT clamped to a 15-tick window) | §13.2.2 | Infra | M | PvP fairness |
-| 10 | Snapshot quantization + delta + budgets 🟡 (quantization done 2026-07-04: v2 format, 58→32 B/entity, int32 offset from an int64 reference origin so the world stays unbounded; delta + per-lane budgets pending) | E4 | Perf | M–L | bandwidth wall |
+| 10 | Snapshot quantization + delta + budgets ✅ (done 2026-07-04: v2 format 58→32 B/entity with an int64 reference origin so the world stays unbounded; per-session delta vs an acked baseline + keyframes; distance-sorted send budget. Fleet-density delta-fragment reassembly is a noted follow-up) | E4 | Perf | M–L | bandwidth wall |
 | 11 | Strategic AOI summary tier | §13.2.2 | Feature | M | empire visibility |
 | 12 | First ordered unit (`UnitOrder` escort) | §13.2.3-2 | Feature | M | the Darwinia loop |
 | 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |

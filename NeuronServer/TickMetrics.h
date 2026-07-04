@@ -21,6 +21,7 @@ namespace Neuron::Server
     uint32_t sessionCount = 0;    // connected sessions
     uint64_t candidatePairs = 0;  // broadphase pairs considered this tick (0 before D1)
     uint64_t bytesSent = 0;       // datagram bytes sent this tick
+    uint64_t droppedEntities = 0; // entities shed by the per-session send budget (E2c)
   };
 
   struct TickSummary
@@ -33,6 +34,7 @@ namespace Neuron::Server
     uint32_t sessions = 0;
     uint64_t avgCandidatePairs = 0;
     uint64_t bytesPerSecond = 0;
+    uint64_t droppedEntities = 0;   // total entities shed by the send budget this window (E2c)
   };
 
   class TickMetrics
@@ -48,6 +50,7 @@ namespace Neuron::Server
       m_lastSessions = _s.sessionCount;
       m_sumPairs += _s.candidatePairs;
       m_sumBytes += _s.bytesSent;
+      m_sumDropped += _s.droppedEntities;
     }
 
     void NoteOverrun() { ++m_overruns; }
@@ -66,6 +69,7 @@ namespace Neuron::Server
       out.avgCandidatePairs = m_ticks != 0 ? m_sumPairs / m_ticks : 0;
       out.bytesPerSecond = _windowSeconds > 0.0
         ? static_cast<uint64_t>(static_cast<double>(m_sumBytes) / _windowSeconds) : 0;
+      out.droppedEntities = m_sumDropped;
       return out;
     }
 
@@ -78,6 +82,7 @@ namespace Neuron::Server
       m_maxMs = 0.0;
       m_sumPairs = 0;
       m_sumBytes = 0;
+      m_sumDropped = 0;
       // m_lastEntities / m_lastSessions carry forward (they are levels, not sums).
     }
 
@@ -92,5 +97,6 @@ namespace Neuron::Server
     uint32_t m_lastSessions = 0;
     uint64_t m_sumPairs = 0;
     uint64_t m_sumBytes = 0;
+    uint64_t m_sumDropped = 0;
   };
 }

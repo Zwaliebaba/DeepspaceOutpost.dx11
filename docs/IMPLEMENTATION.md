@@ -1051,8 +1051,25 @@ and that a multi-datagram full is rendered but not acked. **Scope note:** delta
 fires when the current tick's changes fit one datagram (the common case, incl. the
 12-NPC acceptance target); a persistently *crowded* AOI (multi-datagram fulls)
 never forms a single-datagram baseline and stays on full snapshots - fragment
-reassembly for delta at extreme fleet density is a further step. **Still pending:
-E2c** (per-lane byte budgets with distance-sorted drop).
+reassembly for delta at extreme fleet density is a further step.
+
+*As built — E2c (send budget + distance-sorted drop), 2026-07-04:*
+`NeuronCore/SnapshotBudget.h` caps a viewer's per-tick state: `SnapshotEntityBudget`
+turns the byte budget (`SNAPSHOT_SEND_BUDGET_BYTES`, ~4 MTU) into a max entity
+count, and `TrimSnapshotToBudget` keeps the entities CLOSEST to the viewer and
+sheds the farthest, sorted by squared distance then id so the trim is
+DETERMINISTIC (identical on every client and in a replay). `GameServer::PublishState`
+trims the AOI snapshot BEFORE delta-encoding (so baseline and current agree on the
+kept set - a shed entity just updates on a later tick or when the viewer nears it),
+and accumulates the drop count into the D3 tick metrics
+(`TickSample::droppedEntities` → the `[metrics] … dropped=N` summary line, which
+the BotClient harness token-parses safely). `SnapshotBudgetTests.cpp` covers the
+budget arithmetic, the under-budget no-op, closest-kept/farthest-dropped, the
+deterministic id tie-break, and 3-axis distance. **Track E2 is complete**
+(quantization + delta + budgets); the ≥60 % bandwidth target is met by
+quantization+delta for ordinary AOIs, with the budget bounding the overloaded
+tail. The 100-bot bandwidth soak (D5) is a manual before/after run of the same
+binary.
 
 ### E3 — Strategic AOI tier (#11) — **M**
 

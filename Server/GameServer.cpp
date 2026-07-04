@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "SnapshotPacketizer.h"
+#include "SnapshotBudget.h"   // per-session send budget + distance-sorted drop (E2c)
 #include "Messages/Defs/InputCommand.h"
 #include "StationProtocol.h"
 #include "Messages/Framing.h"
@@ -123,6 +124,7 @@ namespace DSOServer
       m_metricsWindowStartMs = tickStartMs;
     m_bytesThisTick = 0;
     m_candidatePairsThisTick = 0;   // fed by D1's grid queries
+    m_droppedThisTick = 0;          // fed by E2c's per-session send budget
 
     // 1. Receive client input and acks. Input from an endpoint that hasn't
     //    completed the ClientHello handshake is ignored (the hello is the front
@@ -175,6 +177,7 @@ namespace DSOServer
     sample.sessionCount = static_cast<uint32_t>(m_sessions.Count());
     sample.candidatePairs = m_candidatePairsThisTick;
     sample.bytesSent = m_bytesThisTick;
+    sample.droppedEntities = m_droppedThisTick;
     m_metrics.Record(sample);
 
     if (m_metrics.WindowTicks() >= Cfg::METRICS_WINDOW_TICKS)
@@ -182,11 +185,12 @@ namespace DSOServer
       const double nowMs = QpcMs();
       const double windowSec = (nowMs - m_metricsWindowStartMs) / 1000.0;
       const Server::TickSummary s = m_metrics.Snapshot(windowSec > 0.0 ? windowSec : 1.0);
-      printf("[metrics] ticks=%llu avg=%.2fms max=%.2fms overruns=%llu entities=%u sessions=%u pairs=%llu bytes/s=%llu\n",
+      printf("[metrics] ticks=%llu avg=%.2fms max=%.2fms overruns=%llu entities=%u sessions=%u pairs=%llu bytes/s=%llu dropped=%llu\n",
              static_cast<unsigned long long>(s.ticks), s.avgMs, s.maxMs,
              static_cast<unsigned long long>(s.overruns), s.entities, s.sessions,
              static_cast<unsigned long long>(s.avgCandidatePairs),
-             static_cast<unsigned long long>(s.bytesPerSecond));
+             static_cast<unsigned long long>(s.bytesPerSecond),
+             static_cast<unsigned long long>(s.droppedEntities));
       fflush(stdout);   // the D5 harness parses this line from a redirected pipe
       m_metrics.Reset();
       m_metricsWindowStartMs = nowMs;
@@ -576,6 +580,11 @@ namespace DSOServer
         snap.refX = viewerPos.x;
         snap.refY = viewerPos.y;
         snap.refZ = viewerPos.z;
+        // Cap this viewer's per-tick state (E2c): if the AOI is overloaded, keep the
+        // entities closest to the viewer and shed the farthest (they update on a
+        // later tick). Trimmed BEFORE delta-encoding so baseline and current agree.
+        m_droppedThisTick += Net::TrimSnapshotToBudget(
+            snap.entities, viewerPos.x, viewerPos.y, viewerPos.z, Net::SnapshotEntityBudget());
         // Delta-encode against the baseline the client last acknowledged (E2b): a
         // small delta most ticks, a full keyframe periodically or when no baseline
         // is held. Falls back to a full for a crowded (multi-datagram) AOI.

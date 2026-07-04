@@ -32,6 +32,7 @@ add_executable(NeuronCore.Tests
     QuantizationTests.cpp
     SnapshotDeltaTests.cpp
     SnapshotStreamTests.cpp
+    SnapshotBudgetTests.cpp
 )
 
 target_compile_features(NeuronCore.Tests PRIVATE cxx_std_23)

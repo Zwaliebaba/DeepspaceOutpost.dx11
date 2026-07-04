@@ -63,6 +63,7 @@ set(NEURONCORE_HEADERS
     Quantization.h
     SnapshotDelta.h
     SnapshotStream.h
+    SnapshotBudget.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})
