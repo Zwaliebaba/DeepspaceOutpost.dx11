@@ -570,6 +570,12 @@ namespace DSOServer
         // Keep the local system's planet/station visible across the whole system,
         // not just the +/-1 ship cell, so the body you fly toward never pops out.
         AppendLandmarks(m_world, snap, viewerPos, m_landmarks, m_landmarkPresentScratch);
+        // Send positions as int32 offsets from the viewer (E2): every entity is
+        // within the AOI, so the offset always fits int32 while absolute positions
+        // stay unbounded int64.
+        snap.refX = viewerPos.x;
+        snap.refY = viewerPos.y;
+        snap.refZ = viewerPos.z;
         for (const std::vector<uint8_t>& datagram : Net::PacketizeSnapshot(snap))
         {
           m_socket.SendTo(s.endpoint, datagram.data(), datagram.size());

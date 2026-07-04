@@ -984,22 +984,27 @@ real negotiated version). `NeuronCore/Quantization.h` holds the pure fixed-point
 codecs: a unit-vector component → `int16` (×32767, a ~3e-5 grid; 0 and ±1 are
 EXACT, so an unrotated basis is lossless) and a speed → `uint16` at 1/256-unit
 resolution. In `Replication.h` an entity is now **32 bytes** (was 58): `id(4)` +
-absolute-`int32` position `(12)` + `int16` nose/roof `(12)` + `uint16` speed `(2)`
-+ `int16` type `(2)`. **Position note:** the galaxy spans only ±~2.2e8 units
-(±1e8 systems + 2e7 witchspace), well inside `int32`'s ±2.1e9, so absolute int32
-is EXACT with ~10× headroom - I chose it over the spec's per-packet reference cell
-because it halves the position cost with zero header/plumbing change; the encode
-path saturates (never wraps) and the bound is documented, so the reference cell is
-a clean follow-up only if the world ever grows past int32. The decoded in-memory
-`EntitySnapshot` is unchanged (int64 pos + float basis), so the interpolator and
-render path are untouched. All rounding is deterministic integer math (/fp:strict
-safe), so every client decodes bit-identically - the "server-side rounding" the
-delta stage will rely on. Golden tests: `QuantizationTests.cpp` (primitive
-round-trips incl. exactness/clamp, and full v2 wire round-trips - exact positions
-across the galaxy edge, lossless unrotated basis, within-grid rotated basis, wire
-size). ~45 % raw reduction now; delta (E2b) crosses the ≥60 % soak bar at fleet
-scale. **E2b (per-session delta + keyframes) and E2c (per-lane byte budgets) still
-pending.**
+`int32` position OFFSET `(12)` + `int16` nose/roof `(12)` + `uint16` speed `(2)` +
+`int16` type `(2)`. **Position (reference-origin, per the spec):** the packet
+header carries a reference origin as a full `int64` (the server sets it to the
+viewer's position); each entity's position is an `int32` offset from it. The
+ABSOLUTE world stays **unbounded int64** - only the offset is int32, and every
+entity in a snapshot is within the viewer's area of interest (a few million units
+at most), so the offset always fits int32 no matter how large the galaxy grows.
+Exact (integer subtraction, no float loss); `OffsetToI32` saturates rather than
+wraps if an out-of-AOI entity is ever handed in (a bug, not the send path). Header
+grows +24 bytes (the int64 reference), amortized over every entity in the packet;
+`PacketizeSnapshot` repeats the reference in each split datagram so each decodes
+independently. The decoded in-memory `EntitySnapshot` is unchanged (int64 pos +
+float basis), so the interpolator and render path are untouched. All rounding is
+deterministic integer math (/fp:strict safe), so every client decodes
+bit-identically - the "server-side rounding" the delta stage will rely on. Golden
+tests: `QuantizationTests.cpp` (primitive round-trips incl. exactness/clamp; full
+v2 wire round-trips - exact positions with a zero reference, **absolute positions
+beyond int32 reconstructed exactly via a large int64 reference**, lossless
+unrotated basis, within-grid rotated basis, wire size). ~45 % raw reduction now;
+delta (E2b) crosses the ≥60 % soak bar at fleet scale. **E2b (per-session delta +
+keyframes) and E2c (per-lane byte budgets) still pending.**
 
 ### E3 — Strategic AOI tier (#11) — **M**
 

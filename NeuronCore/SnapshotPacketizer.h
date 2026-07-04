@@ -52,6 +52,9 @@ namespace Neuron::Net
     {
       WorldSnapshot keepAlive;
       keepAlive.tick = _snap.tick;
+      keepAlive.refX = _snap.refX;   // carry the reference origin (E2) even on a keep-alive
+      keepAlive.refY = _snap.refY;
+      keepAlive.refZ = _snap.refZ;
       DataWriter w;
       WriteSnapshot(w, keepAlive);
       datagrams.push_back(w.Bytes());
@@ -64,6 +67,9 @@ namespace Neuron::Net
 
       WorldSnapshot part;
       part.tick = _snap.tick;
+      part.refX = _snap.refX;   // every datagram repeats the reference so each decodes independently
+      part.refY = _snap.refY;
+      part.refZ = _snap.refZ;
       part.entities.assign(_snap.entities.begin() + static_cast<std::ptrdiff_t>(i),
                            _snap.entities.begin() + static_cast<std::ptrdiff_t>(end));
 

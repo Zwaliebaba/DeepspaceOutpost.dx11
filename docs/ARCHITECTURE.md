@@ -451,24 +451,42 @@ manifest — one serialization path.)*
 
 #### Snapshot stream (not a catalog message)
 
-`'NSNP'` datagrams, unreliable, per-viewer. Header:
-`magic u32 | version u16 (=1) | tick u32 | viewerId u32 | count u16` (16 bytes),
-then `count ×` `EntitySnapshot` (58 bytes):
+`'NSNP'` datagrams, unreliable, per-viewer. Since **E2** the format is **version
+2**, a compact quantized encoding (32 bytes/entity, down from v1's 58) that
+replaces v1 outright (pre-launch, no dual-format negotiation). Header:
+`magic u32 | version u16 (=2) | tick u32 | viewerId u32 | refX,Y,Z i64 ×3 |
+count u16` (40 bytes), then `count ×` `EntitySnapshot` (32 bytes):
 
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | u32 | entity index |
-| `x, y, z` | i64 ×3 | absolute world position |
-| `noseX..Z` | f32 ×3 | forward direction |
-| `roofX..Z` | f32 ×3 | up direction (side = nose × roof) |
-| `speed` | f32 | units/tick along nose (dead-reckoning) |
+| `x, y, z` | **i32 ×3** | position as an **offset from the header's `ref` origin** — see below |
+| `noseX..Z` | **i16 ×3** | forward direction, quantized (×32767; 0/±1 exact) |
+| `roofX..Z` | **i16 ×3** | up direction (side = nose × roof), quantized |
+| `speed` | **u16** | units/tick along nose, 1/256-unit fixed-point (dead-reckoning) |
 | `type` | i16 | renderable ship type (legacy `SHIP_*`; see §6.10) |
+
+**Reference origin (keeps the world unbounded int64).** The header carries a
+full `int64` reference (`ref`, set to the viewer's position); each entity's
+position is a compact `int32` *offset* from it. The absolute world stays
+**unbounded int64** — only the offset is int32, and every entity in a snapshot
+is within the viewer's area of interest (a few million units), so the offset
+always fits int32 however large the galaxy grows. Position is **exact** (integer
+subtraction, no float loss); the offset saturates rather than wraps if an
+out-of-AOI entity is ever handed in. Orientation/speed quantization is
+deterministic integer math (identical on every client — the "server-side
+rounding" the E2b delta stage relies on); the decoded in-memory `EntitySnapshot`
+is unchanged (int64 pos + float basis), so the interpolator and render path are
+untouched. Codecs live in `NeuronCore/Quantization.h`.
 
 Snapshots are **area-of-interest filtered** per viewer: entities within ±1 cell
 of a 100 000-unit grid around the viewer, **plus** the local system's
 landmarks (planet + station) out to 2 000 000 units so celestial bodies never
-pop out mid-approach. Packetized to whole entities ≤ 1200 bytes. Later
+pop out mid-approach. Packetized to whole entities ≤ 1200 bytes (the reference
+origin is repeated in each split datagram so each decodes independently). Later
 snapshots supersede earlier ones; loss is never repaired, only outrun.
+**Still pending (E2b/E2c):** per-session delta vs a last-acked baseline with
+keyframes, and per-lane byte budgets with distance-sorted drop.
 
 ### 4.5 Server-internal messages (never on the wire)
 
@@ -1188,16 +1206,21 @@ In dependency order; the first three block everything else being "real".
   and status. (Reliable-lane sequence continuity assumes the client keeps its
   transport across the blip, which the current client does; a full channel-reset
   resume is post-C.)
-- **Time synchronization, then lag compensation.** Snapshots carry a `tick`
-  but no shared-clock contract: interpolation delay is a guess and there is
-  no RTT estimate to compensate against. Add a Control-lane ping/offset
-  pair; then give `ResolvePlayerFire` a short transform ring buffer (~15
-  frames) and test the aim cone against the world at `now − RTT −
-  interpDelay`. Dogfighting at 100+ ms RTT currently punishes exactly the
-  players an MMO must keep. Determinism is unaffected (derived state).
-- **Replication depth (Phase D debt): quantization, delta, budgets.** The
-  58-byte `EntitySnapshot` re-sends full `int64` positions and two full
-  float basis vectors every tick to every viewer. Bandwidth — not CPU — is
+- **Time synchronization, then lag compensation.** ✅ **Done (E1, 2026-07-04).**
+  Control-lane `Ping`/`Pong` (0x0006/0x0007) at ~1 Hz give a smoothed RTT;
+  `ResolvePlayerFire` rewinds targets through a 15-tick transform ring at
+  `now − RTT/2 − interpDelay` (favour-the-shooter, clamped to the ring).
+  Determinism unaffected (derived state). Original note retained below for
+  context. Snapshots carried a `tick` but no shared-clock contract:
+  interpolation delay was a guess and there was no RTT estimate to compensate
+  against. Dogfighting at 100+ ms RTT punished exactly the players an MMO must
+  keep.
+- **Replication depth (Phase D debt): quantization, delta, budgets.**
+  🟡 **Quantization done (E2a, 2026-07-04); delta + budgets pending (E2b/E2c).**
+  The v1 58-byte `EntitySnapshot` re-sent full `int64` positions and two full
+  float basis vectors every tick to every viewer; v2 is 32 bytes (int32
+  position offset from a per-packet int64 reference origin, int16 basis, u16
+  speed). Bandwidth — not CPU — is
   the 4X scaling wall (units ≫ players). See §13.3-E4 for the concrete
   re-cut; the *architectural* requirements are: per-session delta against a
   last-acked baseline, per-lane byte budgets, and a documented snapshot send
@@ -1327,17 +1350,20 @@ shows up in profiles, split the hot replicated fields (position, basis,
 speed, type) into a dedicated pool iterated linearly, so the packetizer
 streams from dense memory instead of probing four pools per entity.
 
-**E4 — Re-cut the snapshot for bandwidth (the real scaling wall).** 58
-bytes/entity, unquantized, full-resend, per-viewer. Target ~20 bytes before
-delta: header carries a reference cell per packet; positions become 3×i32
-cell-relative offsets (12 B, exact — no float loss); orientation becomes a
-smallest-three quantized quaternion or oct-encoded nose + roll byte (4–5 B,
-replacing 24 B of redundant orthonormal basis — derive the frame client-side);
-speed as u16 fixed-point. Then per-session **delta compression** against the
+**E4 — Re-cut the snapshot for bandwidth (the real scaling wall).**
+🟡 **Quantization done (E2a, 2026-07-04); delta pending (E2b).** As built: the
+v2 format is **32 B/entity** (was 58). The header carries a full **int64
+reference origin** (the viewer's position); positions are **3×i32 offsets** from
+it (12 B, exact — no float loss — and the absolute world stays unbounded int64,
+since only the small AOI-bounded offset is int32). Orientation is kept as the
+**nose+roof basis quantized to i16 components** (12 B; 0/±1 exact) rather than a
+smallest-three quaternion — chosen for robustness under blind CI over the ~2 B it
+would have saved; speed is **u16 fixed-point** (1/256 unit). Original target and
+the still-pending pieces below. Per-session **delta compression** against the
 last-acked baseline with a periodic keyframe (the ack plumbing already exists
 in the reliable layer; snapshots stay unreliable with baseline acks
-piggybacked). Quantization must round on the *server* so all clients see
-identical values — never quantize client-side.
+piggybacked). Quantization rounds on the *server* (deterministic integer math)
+so all clients see identical values — never quantize client-side.
 
 **E5 — SIMD, but determinism first.** The sim's cross-run determinism is a
 hard asset (golden tests, future replays). Rules: pin `/fp:strict` on
@@ -1394,7 +1420,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 7 | Frame arena / scratch-buffer reuse ✅ (done 2026-07-04) | E2 | Perf | S | flat tick budget |
 | 8 | Accumulator fixed timestep + tick metrics ✅ (done 2026-07-04) | S5, E8 | Simplify | S | honest profiling |
 | 9 | Time sync (ping/offset) → lag-compensated fire ✅ (done 2026-07-04; laser rewound, missile/travel cone-rewind deferred; client-reported RTT clamped to a 15-tick window) | §13.2.2 | Infra | M | PvP fairness |
-| 10 | Snapshot quantization + delta + budgets | E4 | Perf | M–L | bandwidth wall |
+| 10 | Snapshot quantization + delta + budgets 🟡 (quantization done 2026-07-04: v2 format, 58→32 B/entity, int32 offset from an int64 reference origin so the world stays unbounded; delta + per-lane budgets pending) | E4 | Perf | M–L | bandwidth wall |
 | 11 | Strategic AOI summary tier | §13.2.2 | Feature | M | empire visibility |
 | 12 | First ordered unit (`UnitOrder` escort) | §13.2.3-2 | Feature | M | the Darwinia loop |
 | 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |

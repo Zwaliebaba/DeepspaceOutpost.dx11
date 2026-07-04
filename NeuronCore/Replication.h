@@ -11,10 +11,17 @@
 // The in-memory EntitySnapshot still carries the absolute int64 position and a
 // float orientation (nose = forward, roof = up; side is recovered as their cross
 // product) so the interpolator and render path are unchanged. The WIRE encoding
-// (version 2, E2) is compact: position as absolute int32 (the galaxy spans only
-// +/-~2.2e8 units - well inside int32's +/-2.1e9, so this is exact, no float loss),
-// the basis quantized to int16 components, and speed to uint16 fixed-point (see
-// Quantization.h). ~32 bytes/entity, down from 58. Encoding is hand-rolled little-
+// (version 2, E2) is compact:
+//   * the packet HEADER carries a reference origin as a full int64 (the viewer's
+//     position); each entity then stores its position as an int32 OFFSET from that
+//     origin. The absolute world stays UNBOUNDED int64 - only the offset is int32,
+//     and every entity in a snapshot is within the viewer's area of interest (a few
+//     million units at most), so the offset always fits int32 no matter how large
+//     the galaxy grows. Exact (integer subtraction, no float loss).
+//   * the basis is quantized to int16 components and speed to uint16 fixed-point
+//     (see Quantization.h).
+// ~32 bytes/entity, down from 58 (plus 24 bytes of reference in the header, once
+// per packet, amortized over every entity in it). Encoding is hand-rolled little-
 // endian binary via DataWriter/DataReader, prefixed with a magic + version so a
 // stale or foreign packet is rejected rather than misread.
 //
@@ -48,9 +55,10 @@ namespace Neuron::Net
   // Exact serialized sizes, so a packetizer can split a snapshot into datagrams
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.
-  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + 2;   // magic+version+tick+viewerId+count
+  inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + (8 * 3) + 2;
+      // magic(4)+version(2)+tick(4)+viewerId(4)+refOrigin i64x3(24)+count(2) = 40 (E2)
   inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (4 * 3) + (2 * 6) + 2 + 2;
-      // id(4) + i32 pos(12) + i16 nose/roof(12) + u16 speed(2) + i16 type(2) = 32 (E2)
+      // id(4) + i32 pos OFFSET(12) + i16 nose/roof(12) + u16 speed(2) + i16 type(2) = 32 (E2)
 
   // A conservative UDP payload that avoids IP fragmentation across the public
   // internet (well under the 1500-byte Ethernet MTU minus IP+UDP headers, and at
@@ -89,8 +97,27 @@ namespace Neuron::Net
   {
     uint32_t tick = 0;
     uint32_t viewerId = 0xFFFFFFFFu;
+
+    // Reference origin for the compact wire encoding (E2): entity positions are
+    // sent as int32 offsets from this int64 point. The server sets it to the
+    // viewer's position so offsets stay small (AOI-bounded); it defaults to 0, so
+    // an in-memory snapshot with modest absolute positions round-trips unchanged.
+    int64_t refX = 0;
+    int64_t refY = 0;
+    int64_t refZ = 0;
+
     std::vector<EntitySnapshot> entities;
   };
+
+  // Narrow an AOI-bounded position offset to int32, saturating (never wrapping) if
+  // it somehow exceeds the range - so a caller bug degrades to a clamped position
+  // rather than an entity teleported by integer wraparound.
+  [[nodiscard]] inline int32_t OffsetToI32(int64_t _v)
+  {
+    constexpr int64_t lo = -2147483647 - 1;   // INT32_MIN
+    constexpr int64_t hi = 2147483647;        // INT32_MAX
+    return static_cast<int32_t>(_v < lo ? lo : (_v > hi ? hi : _v));
+  }
 
   inline void WriteSnapshot(DataWriter& _w, const WorldSnapshot& _snap)
   {
@@ -98,17 +125,22 @@ namespace Neuron::Net
     _w.WriteU16(SNAPSHOT_VERSION);
     _w.WriteU32(_snap.tick);
     _w.WriteU32(_snap.viewerId);
+    _w.WriteI64(_snap.refX);   // reference origin: positions below are int32 offsets from it
+    _w.WriteI64(_snap.refY);
+    _w.WriteI64(_snap.refZ);
     _w.WriteU16(static_cast<uint16_t>(_snap.entities.size()));
 
     for (const EntitySnapshot& e : _snap.entities)
     {
       _w.WriteU32(e.id);
-      // Position as absolute int32 - exact within the galaxy's +/-~2.2e8 extent
-      // (see the file header). A far outlier (never produced by the AOI/landmark
-      // send path) would saturate rather than wrap; it stays in bounds today.
-      _w.WriteI32(static_cast<int32_t>(e.x));
-      _w.WriteI32(static_cast<int32_t>(e.y));
-      _w.WriteI32(static_cast<int32_t>(e.z));
+      // Position as an int32 OFFSET from the reference origin (see the file
+      // header). The offset is AOI-bounded (a few million units), so it always
+      // fits int32 however large the absolute int64 world grows. Clamped, not
+      // wrapped, if a caller ever hands us an out-of-AOI entity (a bug, not the
+      // send path) - a bounded position beats a teleport.
+      _w.WriteI32(OffsetToI32(e.x - _snap.refX));
+      _w.WriteI32(OffsetToI32(e.y - _snap.refY));
+      _w.WriteI32(OffsetToI32(e.z - _snap.refZ));
       _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseX)));
       _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseY)));
       _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseZ)));
@@ -131,6 +163,9 @@ namespace Neuron::Net
 
     _out.tick = _r.ReadU32();
     _out.viewerId = _r.ReadU32();
+    _out.refX = _r.ReadI64();
+    _out.refY = _r.ReadI64();
+    _out.refZ = _r.ReadI64();
     const uint16_t count = _r.ReadU16();
 
     _out.entities.clear();
@@ -139,9 +174,10 @@ namespace Neuron::Net
     {
       EntitySnapshot e;
       e.id = _r.ReadU32();
-      e.x = static_cast<int64_t>(_r.ReadI32());   // sign-extend back to the int64 world
-      e.y = static_cast<int64_t>(_r.ReadI32());
-      e.z = static_cast<int64_t>(_r.ReadI32());
+      // Reconstruct the absolute int64 position: reference origin + int32 offset.
+      e.x = _out.refX + static_cast<int64_t>(_r.ReadI32());
+      e.y = _out.refY + static_cast<int64_t>(_r.ReadI32());
+      e.z = _out.refZ + static_cast<int64_t>(_r.ReadI32());
       e.noseX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
       e.noseY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
       e.noseZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));

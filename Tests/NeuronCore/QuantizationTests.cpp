@@ -52,16 +52,16 @@ TEST(Quantization, FractionalSpeedRoundTripsWithinAQuantum)
 
 // --- the v2 snapshot wire format ----------------------------------------------
 
-TEST(SnapshotV2, PositionsRoundTripExactlyAcrossTheGalaxyExtent)
+TEST(SnapshotV2, PositionsRoundTripExactlyWithADefaultZeroReference)
 {
   Net::WorldSnapshot in;
   in.tick = 12345;
   in.viewerId = 7;
   Net::EntitySnapshot e;
   e.id = 99;
-  e.x = 200'000'000;    // near the +/-~2.2e8 galaxy edge - still exact in int32
+  e.x = 200'000'000;    // an AOI-bounded offset from the default (0) reference
   e.y = -150'000'000;
-  e.z = 20'000'000;     // a witchspace-displacement-scale coordinate
+  e.z = 20'000'000;
   e.type = -1;          // a negative ship type (Planet) must survive the u16 round trip
   in.entities.push_back(e);
 
@@ -76,10 +76,40 @@ TEST(SnapshotV2, PositionsRoundTripExactlyAcrossTheGalaxyExtent)
   EXPECT_EQ(out.tick, 12345u);
   EXPECT_EQ(out.viewerId, 7u);
   EXPECT_EQ(d.id, 99u);
-  EXPECT_EQ(d.x, 200'000'000);   // exact - the whole point of int32 over quantized floats
+  EXPECT_EQ(d.x, 200'000'000);   // exact - integer offset, no float loss
   EXPECT_EQ(d.y, -150'000'000);
   EXPECT_EQ(d.z, 20'000'000);
   EXPECT_EQ(d.type, -1);
+}
+
+TEST(SnapshotV2, AbsolutePositionsBeyondInt32RoundTripExactlyViaTheReferenceOrigin)
+{
+  // The whole point of the reference origin: the ABSOLUTE world is unbounded int64.
+  // Here the entity sits far past int32's +/-2.1e9 range, but within its viewer's
+  // area of interest, so the int32 OFFSET is tiny and the absolute value is exact.
+  Net::WorldSnapshot in;
+  in.refX = 9'000'000'000'000;    // 9e12 - hopelessly beyond int32
+  in.refY = -5'000'000'000'000;
+  in.refZ = 3'000'000'000'000;
+  Net::EntitySnapshot e;
+  e.id = 1;
+  e.x = in.refX + 12'345;         // a few-unit AOI offset from the reference
+  e.y = in.refY - 6'789;
+  e.z = in.refZ + 100'000;
+  in.entities.push_back(e);
+
+  Net::DataWriter w;
+  Net::WriteSnapshot(w, in);
+  Net::DataReader r(w.Bytes().data(), w.Size());
+  Net::WorldSnapshot out;
+  ASSERT_TRUE(Net::ReadSnapshot(r, out));
+
+  ASSERT_EQ(out.entities.size(), 1u);
+  const Net::EntitySnapshot& d = out.entities[0];
+  EXPECT_EQ(out.refX, 9'000'000'000'000);   // the reference survives as full int64
+  EXPECT_EQ(d.x, 9'000'000'000'000 + 12'345);   // absolute position reconstructed exactly
+  EXPECT_EQ(d.y, -5'000'000'000'000 - 6'789);
+  EXPECT_EQ(d.z, 3'000'000'000'000 + 100'000);
 }
 
 TEST(SnapshotV2, AnUnrotatedBasisAndIntegerSpeedAreLossless)
