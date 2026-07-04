@@ -13,6 +13,7 @@
 // destroys canisters, fills holds), so every rule is unit-tested headlessly; the
 // server loop calls DropLoot on a kill and ScoopSystem/StepLoot each tick.
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "Economy.h"           // COMMODITY_COUNT
 #include "StationServices.h"   // CargoHold, Equipment, DockState, CountsAsTonnage, TotalTonnage
 #include "CombatSystem.h"      // PlayerTag
+#include "Broadphase.h"        // BROADPHASE_CELL + the sorted-candidates discipline (D1)
 
 namespace Neuron::GameLogic
 {
@@ -194,6 +196,15 @@ namespace Neuron::GameLogic
     if (cans.empty())
       return {};
 
+    // D1 broadphase: bucket the canisters by their cans-vector index; each player
+    // walks only its +/-1-cell neighbourhood (cell >= the scoop range), sorted -
+    // the same canister order (minus out-of-range ones) as the old full sweep, so
+    // first-player-claims outcomes are bit-identical.
+    Spatial::Grid grid(BROADPHASE_CELL);
+    for (std::size_t i = 0; i < cans.size(); ++i)
+      grid.Insert(i, cans[i].pos);
+    std::vector<uint64_t> near;
+
     std::vector<uint32_t> changed;
     std::vector<ECS::EntityId> consumed;
 
@@ -209,8 +220,10 @@ namespace Neuron::GameLogic
       const bool hasScoop = (eq != nullptr && eq->fuelScoop);
 
       bool scooped = false;
-      for (Can& can : cans)
+      QuerySortedNeighbours(grid, _pt.position, 1, near);
+      for (const uint64_t ci : near)
       {
+        Can& can = cans[static_cast<std::size_t>(ci)];
         if (can.loot == nullptr)
           continue;   // already claimed by an earlier player this tick
 

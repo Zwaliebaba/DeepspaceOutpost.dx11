@@ -725,7 +725,7 @@ regression in the existing 218 tests.
 
 ## 6. Track D — Performance & the load harness
 
-### D1 — Spatial grid into every pairwise loop (#6 / E1) — **M**
+### D1 — Spatial grid into every pairwise loop (#6 / E1) — **M** — ✅ **done 2026-07-04**
 
 Convert one system at a time, golden-testing before/after (same seed, same
 world ⇒ identical outcomes — the conversions must be behaviour-preserving):
@@ -739,6 +739,24 @@ world ⇒ identical outcomes — the conversions must be behaviour-preserving):
    (16 384): all become grid queries.
 4. Keep iteration order deterministic: gather candidates, sort by entity
    index, then apply — never let hash-map order leak into outcomes.
+
+*As built:* `GameLogic/Broadphase.h` (`BROADPHASE_CELL = 16 384` +
+`QuerySortedNeighbours`/`CellsForRange`) converts the three real per-tick
+pairwise loops — `StepCollisions` (i<j sweep), `StepCombat` (per-shooter
+nearest-enemy scan), `ScoopSystem` (players × canisters). Exactness is by
+construction, stronger than sort-by-entity-index: grid entries are keyed by the
+system's own **dense-array index**, so the sorted candidates are a strict
+subsequence of the original scan order — every outcome including distance
+tie-breaks is bit-identical, proven by `BroadphaseEquivalenceTests.cpp` (seeded
+worlds spanning negative coordinates and multiple cells; the pre-D1 brute-force
+algorithms are kept verbatim in the test as oracles; kills/energies/shields/
+fire-timers/holds compared exhaustively). `StepCollisions`/`StepCombat` feed the
+D3 `candidatePairs` metric. **Scope note:** the per-event, single-subject scans
+(`ResolvePlayerFire`, `ActivateEcm`, `DetonateEnergyBomb`) are deliberately NOT
+converted — they are O(n) per rare event and a fresh grid build is itself O(n),
+so conversion is pure overhead until a *persistent* per-tick grid exists; that
+needs a staleness story across tick phases and rides fleet-scale work (E-track).
+The ship↔planet check stays linear over the handful of planet landmarks.
 
 ### D2 — Frame arena / scratch reuse (#7 / E2) — **S**
 

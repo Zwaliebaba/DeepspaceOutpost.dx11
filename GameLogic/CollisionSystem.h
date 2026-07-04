@@ -33,6 +33,7 @@
 // Pure apart from the world it mutates; returns the kills for the caller's death
 // pipeline. Unit-tested headlessly.
 
+#include <cstddef>
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
@@ -43,6 +44,7 @@
 #include "SimComponents.h"     // WorldTransform, NetType, ShipType
 #include "CombatSystem.h"      // Combatant, Team, Kill, ApplyDamage
 #include "StationServices.h"   // DockState
+#include "Broadphase.h"        // BROADPHASE_CELL + the sorted-candidates discipline (D1)
 
 namespace Neuron::GameLogic
 {
@@ -71,7 +73,10 @@ namespace Neuron::GameLogic
   // Advance collision resolution one tick: grind overlapping hulls, crash ships
   // against station hulls, and kill anything inside a planet. Returns the kills
   // (each victim reported once); the caller feeds them to the death pipeline.
-  [[nodiscard]] inline std::vector<Kill> StepCollisions(ECS::Registry& _world)
+  // `_candidatePairs` (optional) accumulates how many narrowed pairs the exact
+  // test actually ran on - the D3 metrics counter that validates the D1 grid.
+  [[nodiscard]] inline std::vector<Kill> StepCollisions(ECS::Registry& _world,
+                                                        uint64_t* _candidatePairs = nullptr)
   {
     struct Unit
     {
@@ -107,10 +112,26 @@ namespace Neuron::GameLogic
         kills.push_back(Kill{ _victim, _killer });
     };
 
-    // Ship <-> ship and ship <-> station, over all pairs (fleet sizes are small).
+    // Ship <-> ship and ship <-> station. The grid narrows each unit's partners to
+    // its +/-1-cell neighbourhood (cell >= both contact ranges, so nothing in range
+    // is ever missed); iterating the sorted j > i candidates reproduces the exact
+    // pair order of the old full i<j sweep, so outcomes are bit-identical.
+    Spatial::Grid grid(BROADPHASE_CELL);
     for (std::size_t i = 0; i < units.size(); ++i)
-      for (std::size_t j = i + 1; j < units.size(); ++j)
+      grid.Insert(i, units[i].pos);
+
+    std::vector<uint64_t> near;
+    for (std::size_t i = 0; i < units.size(); ++i)
+    {
+      QuerySortedNeighbours(grid, units[i].pos, 1, near);
+      for (const uint64_t jj : near)
       {
+        if (jj <= i)
+          continue;   // each pair once, in ascending (i, j) order
+        const std::size_t j = static_cast<std::size_t>(jj);
+        if (_candidatePairs != nullptr)
+          ++*_candidatePairs;
+
         Unit& a = units[i];
         Unit& b = units[j];
         if (a.station && b.station)
@@ -142,8 +163,10 @@ namespace Neuron::GameLogic
           if (ApplyDamage(_world, b.id, SHIP_RAM_DAMAGE, a.pos))
             report(b.id, a.id.index);
       }
+    }
 
-    // Ship <-> planet: no damage model, just death (legacy altitude-zero rule).
+    // Ship <-> planet: linear over the planets (a handful of landmarks per
+    // system), not gridded - O(units x planets) with a tiny planet count.
     std::vector<Unit> planets;
     _world.Each<WorldTransform, NetType>([&planets](ECS::EntityId _id, WorldTransform& _t, NetType& _nt)
     {

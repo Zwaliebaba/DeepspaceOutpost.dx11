@@ -13,6 +13,7 @@ set(GAMELOGIC_SOURCES
 set(GAMELOGIC_HEADERS
     GameLogic.h
     SimComponents.h
+    Broadphase.h
     MotionSystem.h
     FlightInput.h
     FlightSystem.h

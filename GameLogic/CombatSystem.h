@@ -10,6 +10,7 @@
 // reliable death events and despawn the wreck - the system itself stays pure (it
 // only mutates energy), so it is unit-tested headlessly.
 
+#include <cstddef>
 #include <cstdint>
 #include <cmath>
 #include <string>
@@ -22,6 +23,7 @@
 
 #include "SimComponents.h"
 #include "Combat.h"
+#include "Broadphase.h"   // BROADPHASE_CELL + the sorted-candidates discipline (D1)
 
 namespace Neuron::GameLogic
 {
@@ -235,8 +237,11 @@ namespace Neuron::GameLogic
   }
 
   // Advance combat one tick. Returns the kills; the caller destroys the victims
-  // and broadcasts death events.
-  [[nodiscard]] inline std::vector<Kill> StepCombat(ECS::Registry& _world)
+  // and broadcasts death events. `_candidatePairs` (optional) accumulates the
+  // number of narrowed shooter->target candidates the exact tests ran on (D3
+  // metrics, validating the D1 grid).
+  [[nodiscard]] inline std::vector<Kill> StepCombat(ECS::Registry& _world,
+                                                    uint64_t* _candidatePairs = nullptr)
   {
     struct Unit
     {
@@ -250,6 +255,15 @@ namespace Neuron::GameLogic
     {
       units.push_back(Unit{ _id, _t.position, &_c });
     });
+
+    // D1 broadphase: bucket every potential target by its units-vector index. Each
+    // shooter's nearest-enemy scan then walks only its neighbourhood, sorted - a
+    // strict subsequence of the old full scan, so the chosen target (including
+    // distance ties, broken by scan order) is bit-identical.
+    Spatial::Grid grid(BROADPHASE_CELL);
+    for (std::size_t i = 0; i < units.size(); ++i)
+      grid.Insert(i, units[i].pos);
+    std::vector<uint64_t> near;
 
     // Accumulate this tick's damage and the attacker that dealt it, so resolution
     // is simultaneous (firing order doesn't matter). The attacker's position is
@@ -300,10 +314,18 @@ namespace Neuron::GameLogic
           }
 
       if (best == nullptr)
-        for (const Unit& b : units)
+      {
+        // Nearest enemy via the grid: candidates within the cells covering this
+        // shooter's range (every range today fits +/-1 cell), in ascending units
+        // order - the same order (minus out-of-range entries) as the old full scan.
+        QuerySortedNeighbours(grid, a.pos, CellsForRange(a.c->range), near);
+        for (const uint64_t bi : near)
         {
+          const Unit& b = units[static_cast<std::size_t>(bi)];
+          if (_candidatePairs != nullptr)
+            ++*_candidatePairs;
           if (b.c->team == a.c->team)
-            continue;   // never target allies
+            continue;   // never target allies (and never yourself)
           if (a.c->team == Team::Police && !PoliceMayEngage(_world, b.id, b.c->team))
             continue;   // the law spares traders and the innocent
           if (!inRange(b))
@@ -319,6 +341,7 @@ namespace Neuron::GameLogic
             bestDist2 = dist2;
           }
         }
+      }
 
       if (best != nullptr)
       {

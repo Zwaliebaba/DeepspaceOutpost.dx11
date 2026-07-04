@@ -484,9 +484,9 @@ namespace DSOServer
     std::vector<GameLogic::Kill> kills = GameLogic::StepMissiles(m_world, m_aiRng, ecmPulses);
     for (uint32_t defender : ecmPulses)
       m_sessions.Broadcast(Msg::EcmPulse{ defender });
-    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world))
+    for (const GameLogic::Kill& k : GameLogic::StepCombat(m_world, &m_candidatePairsThisTick))
       kills.push_back(k);
-    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world))
+    for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick))
       kills.push_back(k);
     for (const GameLogic::Kill& kill : kills)
       m_bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
