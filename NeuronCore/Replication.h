@@ -8,23 +8,31 @@
 // them into its presentation layer to interpolate and dead-reckon. Neither side
 // shares the other's logic - only this layout.
 //
-// The snapshot carries the absolute int64 position (exact across the huge world),
-// a compact float orientation (nose = forward, roof = up; side is recovered as
-// their cross product), and the current speed so the client can dead-reckon
-// between snapshots. Encoding is hand-rolled little-endian binary via
-// DataWriter/DataReader, prefixed with a magic + version so a stale or foreign
-// packet is rejected rather than misread.
+// The in-memory EntitySnapshot still carries the absolute int64 position and a
+// float orientation (nose = forward, roof = up; side is recovered as their cross
+// product) so the interpolator and render path are unchanged. The WIRE encoding
+// (version 2, E2) is compact: position as absolute int32 (the galaxy spans only
+// +/-~2.2e8 units - well inside int32's +/-2.1e9, so this is exact, no float loss),
+// the basis quantized to int16 components, and speed to uint16 fixed-point (see
+// Quantization.h). ~32 bytes/entity, down from 58. Encoding is hand-rolled little-
+// endian binary via DataWriter/DataReader, prefixed with a magic + version so a
+// stale or foreign packet is rejected rather than misread.
+//
+// No-back-compat (pre-launch): version 2 REPLACES version 1 outright - client and
+// server are always the same build, so there is no dual-format negotiation. Once
+// anything ships, a wire-layout change takes a new version with a real negotiation.
 
 #include <cstdint>
 #include <vector>
 
 #include "DataWriter.h"
 #include "DataReader.h"
+#include "Quantization.h"
 
 namespace Neuron::Net
 {
   inline constexpr uint32_t SNAPSHOT_MAGIC = 0x4E534E50;   // 'NSNP'
-  inline constexpr uint16_t SNAPSHOT_VERSION = 1;
+  inline constexpr uint16_t SNAPSHOT_VERSION = 2;   // 2 (E2): int32 pos + quantized basis/speed
 
   // Read the leading little-endian u32 (the packet magic) without consuming a
   // reader, so a receiver can route a datagram to the right channel (snapshot vs
@@ -41,7 +49,8 @@ namespace Neuron::Net
   // that hold only WHOLE entities and never exceed a target MTU. Must stay in
   // lock-step with WriteSnapshot/ReadSnapshot below.
   inline constexpr std::size_t SNAPSHOT_HEADER_SIZE = 4 + 2 + 4 + 4 + 2;   // magic+version+tick+viewerId+count
-  inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (8 * 3) + (4 * 7) + 2;   // id + i64 pos + f32 orient/speed + i16 type
+  inline constexpr std::size_t SNAPSHOT_ENTITY_SIZE = 4 + (4 * 3) + (2 * 6) + 2 + 2;
+      // id(4) + i32 pos(12) + i16 nose/roof(12) + u16 speed(2) + i16 type(2) = 32 (E2)
 
   // A conservative UDP payload that avoids IP fragmentation across the public
   // internet (well under the 1500-byte Ethernet MTU minus IP+UDP headers, and at
@@ -94,16 +103,19 @@ namespace Neuron::Net
     for (const EntitySnapshot& e : _snap.entities)
     {
       _w.WriteU32(e.id);
-      _w.WriteI64(e.x);
-      _w.WriteI64(e.y);
-      _w.WriteI64(e.z);
-      _w.WriteF32(e.noseX);
-      _w.WriteF32(e.noseY);
-      _w.WriteF32(e.noseZ);
-      _w.WriteF32(e.roofX);
-      _w.WriteF32(e.roofY);
-      _w.WriteF32(e.roofZ);
-      _w.WriteF32(e.speed);
+      // Position as absolute int32 - exact within the galaxy's +/-~2.2e8 extent
+      // (see the file header). A far outlier (never produced by the AOI/landmark
+      // send path) would saturate rather than wrap; it stays in bounds today.
+      _w.WriteI32(static_cast<int32_t>(e.x));
+      _w.WriteI32(static_cast<int32_t>(e.y));
+      _w.WriteI32(static_cast<int32_t>(e.z));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseX)));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseY)));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseZ)));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofX)));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofY)));
+      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofZ)));
+      _w.WriteU16(QuantizeSpeed(e.speed));
       _w.WriteU16(static_cast<uint16_t>(e.type));
     }
   }
@@ -127,16 +139,16 @@ namespace Neuron::Net
     {
       EntitySnapshot e;
       e.id = _r.ReadU32();
-      e.x = _r.ReadI64();
-      e.y = _r.ReadI64();
-      e.z = _r.ReadI64();
-      e.noseX = _r.ReadF32();
-      e.noseY = _r.ReadF32();
-      e.noseZ = _r.ReadF32();
-      e.roofX = _r.ReadF32();
-      e.roofY = _r.ReadF32();
-      e.roofZ = _r.ReadF32();
-      e.speed = _r.ReadF32();
+      e.x = static_cast<int64_t>(_r.ReadI32());   // sign-extend back to the int64 world
+      e.y = static_cast<int64_t>(_r.ReadI32());
+      e.z = static_cast<int64_t>(_r.ReadI32());
+      e.noseX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.noseY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.noseZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.roofX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.roofY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.roofZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+      e.speed = DequantizeSpeed(_r.ReadU16());
       e.type = static_cast<int16_t>(_r.ReadU16());
       _out.entities.push_back(e);
     }

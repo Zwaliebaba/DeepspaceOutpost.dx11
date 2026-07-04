@@ -38,8 +38,8 @@ namespace
 
 TEST(Transport, EntitiesPerDatagramFitsTheMtu)
 {
-  // (1200 - 12 header) / 58 per-entity = 20 whole entities.
-  EXPECT_TRUE(Net::EntitiesPerDatagram(1200) == 20);
+  // (1200 - 16 header) / 32 per-entity = 37 whole entities (E2 compact format).
+  EXPECT_TRUE(Net::EntitiesPerDatagram(1200) == 37);
   // Never returns zero, even for a payload smaller than one entity/header.
   EXPECT_TRUE(Net::EntitiesPerDatagram(10) == 1);
   EXPECT_TRUE(Net::EntitiesPerDatagram(Net::SNAPSHOT_HEADER_SIZE + Net::SNAPSHOT_ENTITY_SIZE) == 1);
@@ -49,8 +49,8 @@ TEST(Transport, DatagramsStayWithinMtuAndHoldWholeEntities)
 {
   std::vector<std::vector<uint8_t>> packets = Net::PacketizeSnapshot(MakeSnapshot(1, 50), 1200);
 
-  // 50 entities at 21 per datagram -> 3 datagrams (21 + 21 + 8).
-  EXPECT_TRUE(packets.size() == 3);
+  // 50 entities at 37 per datagram -> 2 datagrams (37 + 13).
+  EXPECT_TRUE(packets.size() == 2);
 
   std::size_t totalEntities = 0;
   for (const std::vector<uint8_t>& p : packets)

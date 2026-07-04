@@ -60,6 +60,7 @@ set(NEURONCORE_HEADERS
     Messages/Defs/GalaxyChunks.h
     Messages/Defs/TimeSync.h
     LatencyEstimate.h
+    Quantization.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})
