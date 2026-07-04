@@ -482,9 +482,8 @@ namespace
 
   // ----- Equip Ship ---------------------------------------------------------
 
-  // A row in the equip list: clicking buys the item, or expands a laser sub-menu
-  // (handled render-free by equip_do). The window rebuilds its rows when the visible
-  // set changes (i.e. after a sub-menu expand).
+  // A row in the equip list: clicking buys the item (handled render-free by
+  // equip_do). The window rebuilds its rows when the visible set changes.
   class EquipButton : public GuiButton
   {
     public:
@@ -498,9 +497,9 @@ namespace
       int m_index;
   };
 
-  // Equip Ship: the dynamic buy-list (tech-level filtered, with laser sub-menus). Rows
-  // are rebuilt only when the visible set changes; otherwise captions/enabled state
-  // refresh from live state each frame.
+  // Equip Ship: the dynamic buy-list (tech-level filtered). Rows are rebuilt only
+  // when the visible set changes; otherwise captions/enabled state refresh from
+  // live state each frame.
   class EquipWindow : public GuiWindow
   {
     public:
@@ -509,7 +508,7 @@ namespace
       {
         SetTitle("Equip Ship");
         Centre(this, 360, 460);
-        equip_reset(); // start at the top-level list
+        equip_reset();
       }
 
       void Create() override

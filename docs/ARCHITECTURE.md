@@ -894,6 +894,20 @@ The client is deliberately dumb. It keeps:
 - **Rendering:** DX11, legacy wireframe meshes, camera-relative floating
   origin. Replicated entities are drawn from interpolated snapshots
   (`SnapshotInterpolator` + dead-reckoning on `speed`).
+- **A single fixed forward view.** The cockpit renders one view: straight
+  ahead along the ship's nose. The legacy rear/left/right cockpit views were
+  removed (2026-07-04) — F2/F3 no longer switch views (F4 keeps only its
+  docked Equip-window role), the per-view starfields, star flipping, camera
+  axis-flips and skybox re-orientation are gone, and the ship has a single
+  (front) laser mount, so the equip list's per-mount laser sub-menus collapsed
+  to one row per laser type. The camera (`Camera.cpp`) always looks along the
+  nose; the only view freedom left is the F12 cockpit ↔ chase eye offset. The
+  intro and game-over scenes render through the same forward view. The
+  client's screen state (`current_screen`) still distinguishes the
+  non-cockpit screens (charts, commander status, planet data, intro,
+  game-over, break pattern), but its only flight view is `SCR_FRONT_VIEW`.
+  (Server rules are untouched: shields still resolve front/aft by attack
+  direction — that never depended on the client's view.)
 - **HUD mirrors:** shields/energy/fuel/credits/missiles/cargo/wanted/score from
   `PlayerStatus` + `CargoManifest`; the roster (`PlayerInfo`) for ship labels;
   the market/chart from `StationResponse`/the pulled galaxy chunks. There is

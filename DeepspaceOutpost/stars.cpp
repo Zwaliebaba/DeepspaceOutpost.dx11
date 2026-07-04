@@ -148,173 +148,13 @@ void front_starfield(void)
   warp_stars = 0;
 }
 
-void rear_starfield(void)
-{
-  int sx, sy;
-  int ex, ey;
-
-  int nstars = witchspace ? 3 : 12;
-
-  double delta = warp_stars ? 50 : PlayerFlight().speed;
-  double alpha = -PlayerFlight().roll;
-  double beta = -PlayerFlight().climb;
-
-  alpha /= 256.0;
-  delta /= 2.0;
-
-  for (int i = 0; i < nstars; i++)
-  {
-    /* Plot the stars in their current locations... */
-
-    double zz = stars[i].z;
-    star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
-
-    /* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
-       scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
-    if ((!warp_stars) && star_on_screen(sx, sy))
-      push_dust(sx, sy, zz);
-
-    /* Move the stars to their new locations...*/
-
-    double Q = delta / stars[i].z;
-
-    stars[i].z += delta;
-    double yy = stars[i].y - (stars[i].y * Q);
-    double xx = stars[i].x - (stars[i].x * Q);
-    zz = stars[i].z;
-
-    yy = yy + (xx * alpha);
-    xx = xx - (yy * alpha);
-
-    /*
-        tx = yy * beta;
-        xx = xx + (tx * tx * 2);
-    */
-    yy = yy + beta;
-
-    if (warp_stars)
-    {
-      star_to_screen(xx, yy, &ex, &ey);
-
-      if (star_on_screen(sx, sy) && star_on_screen(ex, ey))
-        gfx_draw_line(sx, sy, ex, ey);
-    }
-
-    stars[i].y = yy;
-    stars[i].x = xx;
-
-    if ((zz >= 300) || (abs(static_cast<int>(yy)) >= 110))
-    {
-      stars[i].z = (rand255() & 127) + 51;
-
-      if (rand255() & 1)
-      {
-        stars[i].x = rand255() - 128;
-        stars[i].y = (rand255() & 1) ? -115 : 115;
-      }
-      else
-      {
-        stars[i].x = (rand255() & 1) ? -126 : 126;
-        stars[i].y = rand255() - 128;
-      }
-    }
-  }
-
-  warp_stars = 0;
-}
-
-void side_starfield(void)
-{
-  int sx;
-  int sy;
-
-  int nstars = witchspace ? 3 : 12;
-
-  double delta = warp_stars ? 50 : PlayerFlight().speed;
-  double alpha = PlayerFlight().roll;
-  double beta = PlayerFlight().climb;
-
-  if (current_screen == SCR_LEFT_VIEW)
-  {
-    delta = -delta;
-    alpha = -alpha;
-    beta = -beta;
-  }
-
-  for (int i = 0; i < nstars; i++)
-  {
-    double zz = stars[i].z;
-    star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
-
-    /* Each on-screen star becomes a small 3D "dust" quad drawn over the skybox in the
-       scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
-    if ((!warp_stars) && star_on_screen(sx, sy))
-      push_dust(sx, sy, zz);
-
-    double yy = stars[i].y;
-    double xx = stars[i].x;
-    zz = stars[i].z;
-
-    double delt8 = delta / (zz / 32);
-    xx = xx + delt8;
-
-    xx += (yy * (beta / 256));
-    yy -= (xx * (beta / 256));
-
-    xx += ((yy / 256) * (alpha / 256)) * (-xx);
-    yy += ((yy / 256) * (alpha / 256)) * (yy);
-
-    yy += alpha;
-
-    stars[i].y = yy;
-    stars[i].x = xx;
-
-    if (warp_stars)
-    {
-      int ex, ey;
-      star_to_screen(xx, yy, &ex, &ey);
-      gfx_draw_line(sx, sy, ex, ey);
-    }
-
-    if (abs(static_cast<int>(stars[i].x)) >= 116)
-    {
-      stars[i].y = rand255() - 128;
-      stars[i].x = (current_screen == SCR_LEFT_VIEW) ? 115 : -115;
-      stars[i].z = rand255() | 8;
-    }
-    else if (abs(static_cast<int>(stars[i].y)) >= 116)
-    {
-      stars[i].x = rand255() - 128;
-      stars[i].y = (alpha > 0) ? -110 : 110;
-      stars[i].z = rand255() | 8;
-    }
-  }
-
-  warp_stars = 0;
-}
-
-/*
- * When we change view, flip the stars over so they look like other stars.
- */
-
-void flip_stars(void)
-{
-  int nstars = witchspace ? 3 : 12;
-  for (int i = 0; i < nstars; i++)
-  {
-    int sy = stars[i].y;
-    int sx = stars[i].x;
-    stars[i].x = sy;
-    stars[i].y = sx;
-  }
-}
-
 /* Skybox camera->world orientation. The cube skybox is sampled by view direction, so it
    needs the camera's orientation in the world. We track the ship's orientation as a 3x3 that
    maps view-space (x right, y up, z forward) to the world the cubemap art is authored in,
    integrating the player's roll (about forward/z) and climb (about right/x) each frame; the
-   per-view look direction (rear/left/right) is composed on top. Rotation rates are tuned for
-   feel - the sky is a distant backdrop, and the cubemap can be re-oriented to match. */
+   camera always looks along the ship's nose (the single forward view). Rotation rates are
+   tuned for feel - the sky is a distant backdrop, and the cubemap can be re-oriented to
+   match. */
 static float s_shipRot[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // view->world, accumulated
 
 /* Per-frame integration gains (radians per unit of roll/climb). */
@@ -382,31 +222,8 @@ static void accumulate_skybox_orientation(void)
   mat3_mul(s_shipRot, rx, s_shipRot);
   mat3_orthonormalise(s_shipRot);
 
-  /* Per-view look direction (about the up axis y): front = identity, rear = 180,
-     left/right = -/+90 degrees. */
-  float view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-  if (current_screen == SCR_REAR_VIEW || current_screen == SCR_GAME_OVER)
-  {
-    constexpr float v[9] = {-1, 0, 0, 0, 1, 0, 0, 0, -1}; // yaw 180
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-  else if (current_screen == SCR_LEFT_VIEW)
-  {
-    constexpr float v[9] = {0, 0, -1, 0, 1, 0, 1, 0, 0}; // yaw -90
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-  else if (current_screen == SCR_RIGHT_VIEW)
-  {
-    constexpr float v[9] = {0, 0, 1, 0, 1, 0, -1, 0, 0}; // yaw +90
-    for (int i = 0; i < 9; i++)
-      view[i] = v[i];
-  }
-
-  float cam[9];
-  mat3_mul(s_shipRot, view, cam); // camera->world = ship * viewLook
-  Graphics::Scene3D::SetSkyboxOrientation(cam);
+  /* The camera always looks forward, so camera->world is the ship orientation. */
+  Graphics::Scene3D::SetSkyboxOrientation(s_shipRot);
 }
 
 void update_starfield(void)
@@ -421,17 +238,8 @@ void update_starfield(void)
   case SCR_INTRO_ONE:
   case SCR_INTRO_TWO:
   case SCR_ESCAPE_POD:
-    front_starfield();
-    break;
-
-  case SCR_REAR_VIEW:
   case SCR_GAME_OVER:
-    rear_starfield();
-    break;
-
-  case SCR_LEFT_VIEW:
-  case SCR_RIGHT_VIEW:
-    side_starfield();
+    front_starfield();
     break;
   }
 

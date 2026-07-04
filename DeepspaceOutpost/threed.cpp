@@ -437,8 +437,7 @@ void draw_explosion (struct local_object *obj)
 void draw_ship (struct local_object *ship)
 {
 
-	if ((current_screen != SCR_FRONT_VIEW) && (current_screen != SCR_REAR_VIEW) && 
-		(current_screen != SCR_LEFT_VIEW) && (current_screen != SCR_RIGHT_VIEW) &&
+	if ((current_screen != SCR_FRONT_VIEW) &&
 		(current_screen != SCR_INTRO_ONE) && (current_screen != SCR_INTRO_TWO) &&
 		(current_screen != SCR_GAME_OVER) && (current_screen != SCR_ESCAPE_POD))
 		return;

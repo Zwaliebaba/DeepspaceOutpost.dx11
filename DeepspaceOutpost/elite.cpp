@@ -56,9 +56,6 @@ struct commander saved_cmdr =
 	0,
 	0,											/* Galaxy - 1		*/
 	PULSE_LASER,								/* Front Laser		*/
-	0,											/* Rear Laser		*/
-	0,											/* Left Laser		*/
-	0,											/* Right Laser		*/
 	0, 0,
 	20,											/* Cargo Capacity	*/
 	{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},		/* Current Cargo	*/

@@ -1118,43 +1118,7 @@ void display_commander_status (void)
 
 	if (cmdr.front_laser)
 	{
-		sprintf (str, "Front %s Laser", laser_type(cmdr.front_laser));
-		gfx_display_text (x, y, str);
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-	
-	if (cmdr.rear_laser)
-	{
-		sprintf (str, "Rear %s Laser", laser_type(cmdr.rear_laser));
-		gfx_display_text (x, y, str);
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-
-	if (cmdr.left_laser)
-	{
-		sprintf (str, "Left %s Laser", laser_type(cmdr.left_laser));
-		gfx_display_text (x, y, str);
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-
-	if (cmdr.right_laser)
-	{
-		sprintf (str, "Right %s Laser", laser_type(cmdr.right_laser));
+		sprintf (str, "%s Laser", laser_type(cmdr.front_laser));
 		gfx_display_text (x, y, str);
 	}
 }
@@ -1353,10 +1317,7 @@ void build_cmdr_status (void)
 	if (cmdr.energy_unit)          info_add (s_cmdrLines, "  %s", cmdr.energy_unit == 1 ? "Extra Energy Unit" : "Naval Energy Unit");
 	if (cmdr.docking_computer)     info_add (s_cmdrLines, "  Docking Computers");
 	if (cmdr.galactic_hyperdrive)  info_add (s_cmdrLines, "  Galactic Hyperspace");
-	if (cmdr.front_laser)          info_add (s_cmdrLines, "  Front %s Laser", laser_type (cmdr.front_laser));
-	if (cmdr.rear_laser)           info_add (s_cmdrLines, "  Rear %s Laser", laser_type (cmdr.rear_laser));
-	if (cmdr.left_laser)           info_add (s_cmdrLines, "  Left %s Laser", laser_type (cmdr.left_laser));
-	if (cmdr.right_laser)          info_add (s_cmdrLines, "  Right %s Laser", laser_type (cmdr.right_laser));
+	if (cmdr.front_laser)          info_add (s_cmdrLines, "  %s Laser", laser_type (cmdr.front_laser));
 }
 
 void build_inventory (void)
@@ -1431,21 +1392,19 @@ void planet_data_title (char *buf, int buflen)
 
 /***********************************************************************************/
 
+// The lasers are single items now: the ship has one (front) mount, so the
+// legacy per-mount sub-menus (front/rear/left/right) are gone.
 enum equip_types
 {
 	EQ_FUEL, EQ_MISSILE, EQ_CARGO_BAY, EQ_ECM, EQ_FUEL_SCOOPS,
 	EQ_ESCAPE_POD, EQ_ENERGY_BOMB, EQ_ENERGY_UNIT, EQ_DOCK_COMP,
-	EQ_GAL_DRIVE, EQ_PULSE_LASER, EQ_FRONT_PULSE, EQ_REAR_PULSE,
-	EQ_LEFT_PULSE, EQ_RIGHT_PULSE, EQ_BEAM_LASER, EQ_FRONT_BEAM,
-	EQ_REAR_BEAM, EQ_LEFT_BEAM, EQ_RIGHT_BEAM, EQ_MINING_LASER,
-	EQ_FRONT_MINING, EQ_REAR_MINING, EQ_LEFT_MINING, EQ_RIGHT_MINING,
-	EQ_MILITARY_LASER, EQ_FRONT_MILITARY, EQ_REAR_MILITARY,
-	EQ_LEFT_MILITARY, EQ_RIGHT_MILITARY
+	EQ_GAL_DRIVE, EQ_PULSE_LASER, EQ_BEAM_LASER, EQ_MINING_LASER,
+	EQ_MILITARY_LASER
 };
-	
-		
 
-#define NO_OF_EQUIP_ITEMS	34
+
+
+#define NO_OF_EQUIP_ITEMS	14
 
 struct equip_item
 {
@@ -1470,30 +1429,10 @@ struct equip_item equip_stock[NO_OF_EQUIP_ITEMS] =
 	{0, 0, 1, 8, 15000, " Extra Energy Unit",		EQ_ENERGY_UNIT},
 	{0, 0, 1, 9, 15000, " Docking Computers",		EQ_DOCK_COMP},
 	{0, 0, 1,10, 50000, " Galactic Hyperdrive",		EQ_GAL_DRIVE},
-	{0, 0, 0, 3,  4000, "+Pulse Laser",				EQ_PULSE_LASER},
-	{0, 0, 1, 3,     0, "-Pulse Laser",				EQ_PULSE_LASER},
-	{0, 0, 1, 3,  4000, ">Front",					EQ_FRONT_PULSE},
-	{0, 0, 1, 3,  4000, ">Rear",					EQ_REAR_PULSE},
-	{0, 0, 1, 3,  4000, ">Left",					EQ_LEFT_PULSE},
-	{0, 0, 1, 3,  4000, ">Right",					EQ_RIGHT_PULSE},
-	{0, 0, 1, 4, 10000, "+Beam Laser",				EQ_BEAM_LASER},
-	{0, 0, 0, 4,     0, "-Beam Laser",				EQ_BEAM_LASER},
-	{0, 0, 0, 4, 10000, ">Front",					EQ_FRONT_BEAM},
-	{0, 0, 0, 4, 10000, ">Rear",					EQ_REAR_BEAM},
-	{0, 0, 0, 4, 10000, ">Left",					EQ_LEFT_BEAM},
-	{0, 0, 0, 4, 10000, ">Right",					EQ_RIGHT_BEAM},
-	{0, 0, 1,10,  8000, "+Mining Laser",			EQ_MINING_LASER},
-	{0, 0, 0,10,     0, "-Mining Laser",			EQ_MINING_LASER},
-	{0, 0, 0,10,  8000, ">Front",					EQ_FRONT_MINING},
-	{0, 0, 0,10,  8000, ">Rear",					EQ_REAR_MINING},
-	{0, 0, 0,10,  8000, ">Left",					EQ_LEFT_MINING},
-	{0, 0, 0,10,  8000, ">Right",					EQ_RIGHT_MINING},
-	{0, 0, 1,10, 60000, "+Military Laser",			EQ_MILITARY_LASER},
-	{0, 0, 0,10,     0, "-Military Laser",			EQ_MILITARY_LASER},
-	{0, 0, 0,10, 60000, ">Front",					EQ_FRONT_MILITARY},
-	{0, 0, 0,10, 60000, ">Rear",					EQ_REAR_MILITARY},
-	{0, 0, 0,10, 60000, ">Left",					EQ_LEFT_MILITARY},
-	{0, 0, 0,10, 60000, ">Right",					EQ_RIGHT_MILITARY}
+	{0, 0, 1, 3,  4000, " Pulse Laser",				EQ_PULSE_LASER},
+	{0, 0, 1, 4, 10000, " Beam Laser",				EQ_BEAM_LASER},
+	{0, 0, 1,10,  8000, " Mining Laser",			EQ_MINING_LASER},
+	{0, 0, 1,10, 60000, " Military Laser",			EQ_MILITARY_LASER}
 };
 
 
@@ -1530,71 +1469,21 @@ int equip_present (int type)
 			
 		case EQ_GAL_DRIVE:
 			return cmdr.galactic_hyperdrive;
-			
-		case EQ_FRONT_PULSE:
+
+		case EQ_PULSE_LASER:
 			return (cmdr.front_laser == PULSE_LASER);
-		
-		case EQ_REAR_PULSE:
-			return (cmdr.rear_laser == PULSE_LASER);
 
-		case EQ_LEFT_PULSE:
-			return (cmdr.left_laser == PULSE_LASER);
-
-		case EQ_RIGHT_PULSE:
-			return (cmdr.right_laser == PULSE_LASER);
-
-		case EQ_FRONT_BEAM:
+		case EQ_BEAM_LASER:
 			return (cmdr.front_laser == BEAM_LASER);
 
-		case EQ_REAR_BEAM:
-			return (cmdr.rear_laser == BEAM_LASER);
-
-		case EQ_LEFT_BEAM:
-			return (cmdr.left_laser == BEAM_LASER);
-
-		case EQ_RIGHT_BEAM:
-			return (cmdr.right_laser == BEAM_LASER);
-
-		case EQ_FRONT_MINING:
+		case EQ_MINING_LASER:
 			return (cmdr.front_laser == MINING_LASER);
 
-		case EQ_REAR_MINING:
-			return (cmdr.rear_laser == MINING_LASER);
-
-		case EQ_LEFT_MINING:
-			return (cmdr.left_laser == MINING_LASER);
-
-		case EQ_RIGHT_MINING:
-			return (cmdr.right_laser == MINING_LASER);
-
-		case EQ_FRONT_MILITARY:
+		case EQ_MILITARY_LASER:
 			return (cmdr.front_laser == MILITARY_LASER);
-
-		case EQ_REAR_MILITARY:
-			return (cmdr.rear_laser == MILITARY_LASER);
-
-		case EQ_LEFT_MILITARY:
-			return (cmdr.left_laser == MILITARY_LASER);
-
-		case EQ_RIGHT_MILITARY:
-			return (cmdr.right_laser == MILITARY_LASER);
 	}
 
 	return 0;
-}
-
-
-
-void collapse_equip_list (void)
-{
-	int i;
-	int ch;
-	
-	for (i = 0; i < NO_OF_EQUIP_ITEMS; i++)
-	{
-		ch = *(equip_stock[i].name);
-		equip_stock[i].show = ((ch == ' ') || (ch == '+'));
-	}
 }
 
 
@@ -1620,23 +1509,12 @@ static bool server_equip_item (int _type, Neuron::Net::EquipItem& _item)
 }
 
 
-// Render-free equip action for a given stock index: expand a laser sub-menu (name
-// beginning '+'), or buy the item. Equipment and fuel are server-authoritative:
-// the purchase is a station request and cmdr state changes only when the
-// StationResponse/PlayerStatus reply arrives. Returns 1 if it acted.
+// Render-free equip action for a given stock index: buy the item. Equipment and
+// fuel are server-authoritative: the purchase is a station request and cmdr
+// state changes only when the StationResponse/PlayerStatus reply arrives.
+// Returns 1 if it acted.
 int equip_do (int index)
 {
-	int i;
-
-	if (equip_stock[index].name[0] == '+')
-	{
-		collapse_equip_list();
-		equip_stock[index].show = 0;
-		for (i = 1; i <= 5; i++)
-			equip_stock[index + i].show = 1;
-		return 1;
-	}
-
 	Neuron::Net::StationRequest req;
 	if (equip_stock[index].type == EQ_FUEL)
 	{
@@ -1657,12 +1535,11 @@ int equip_do (int index)
 
 
 /* ---- Render-free equip accessors for the GUI equip window. The visible set =
- * items with show && tech-level >= level (the same filter list_equip_prices uses);
- * it changes when a laser sub-menu is expanded, so the GUI rebuilds its rows then. */
+ * items with show && tech-level >= level (the same filter list_equip_prices uses). */
 static int s_equipVisible[NO_OF_EQUIP_ITEMS];
 static int s_equipVisibleCount = 0;
 
-void equip_reset (void) { collapse_equip_list(); }   // back to the top-level list
+void equip_reset (void) {}   // the list is flat now (no laser sub-menus to collapse)
 
 int equip_visible_count (void)
 {
@@ -1687,11 +1564,11 @@ int equip_visible_index (int i) { return (i >= 0 && i < s_equipVisibleCount) ? s
 
 void equip_row_text (int index, char *buf, int buflen)
 {
-	const char *name = &equip_stock[index].name[1];   // strip the ' '/'+'/'-'/'>' prefix
+	const char *name = &equip_stock[index].name[1];   // strip the ' ' prefix
 	if (equip_stock[index].price != 0)
 		snprintf (buf, buflen, "%-22s %d.%d", name, equip_stock[index].price / 10, equip_stock[index].price % 10);
 	else
 		snprintf (buf, buflen, "%s", name);
 }
 
-int equip_buyable (int index) { return (equip_stock[index].name[0] == '+') || equip_stock[index].canbuy; }
+int equip_buyable (int index) { return equip_stock[index].canbuy; }

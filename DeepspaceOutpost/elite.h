@@ -12,9 +12,8 @@
 #define	SCR_PLANET_DATA		5
 #define SCR_CMDR_STATUS		7
 #define SCR_FRONT_VIEW		8
-#define SCR_REAR_VIEW		9
-#define SCR_LEFT_VIEW		10
-#define SCR_RIGHT_VIEW		11
+// (SCR_REAR_VIEW 9, SCR_LEFT_VIEW 10, SCR_RIGHT_VIEW 11 retired: the cockpit
+//  has a single fixed forward view now; F2-F4 no longer switch views.)
 #define SCR_BREAK_PATTERN	12
 #define SCR_INVENTORY		13
 #define SCR_LOAD_CMDR		16
@@ -61,10 +60,7 @@ struct commander
 	int fuel;
 	int unused1;
 	int	galaxy_number;
-	int front_laser;
-	int rear_laser;
-	int left_laser;
-	int right_laser;
+	int front_laser;	/* the ship's one laser mount (front view only) */
 	int unused2;
 	int unused3;
 	int cargo_capacity;

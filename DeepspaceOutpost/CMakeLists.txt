@@ -24,7 +24,7 @@ set(GAME_SOURCES
 )
 
 # ---- Game-specific client glue (kept here; coupled to legacy game state) ----
-# Camera.cpp adapts the legacy local_object render struct + current_screen, and
+# Camera.cpp adapts the legacy local_object render struct, and
 # GameUniverse is this game's ECS world. WinMain.cpp is the exe entry point (a
 # static library's entry point would not be pulled in by the linker), which boots
 # the NeuronClient platform layer and calls game_main().

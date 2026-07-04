@@ -31,8 +31,8 @@ void planet_data_line (int i, char *buf, int buflen);
 void planet_data_title (char *buf, int buflen);
 
 /* Render-free equip-screen access for the GUI equip window. */
-int  equip_do (int index);          /* expand a laser sub-menu, or buy the item */
-void equip_reset (void);            /* collapse to the top-level list */
+int  equip_do (int index);          /* buy the item */
+void equip_reset (void);            /* no-op (the list is flat; kept for the GUI) */
 int  equip_visible_count (void);    /* rebuilds the visible set + canbuy flags */
 int  equip_visible_index (int i);   /* equip_stock index of the i-th visible row */
 void equip_row_text (int index, char *buf, int buflen);

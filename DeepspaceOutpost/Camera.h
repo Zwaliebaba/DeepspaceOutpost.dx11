@@ -3,17 +3,16 @@
 // Camera - the explicit viewpoint the scene is rendered from (client seam, A4).
 //
 // In the legacy engine the camera is fused with the player ship at the world
-// origin: every object's `location` is stored relative to the ship, and the only
-// view freedom is the four fixed directions (front/rear/left/right), applied by
-// the old switch_to_view(). This promotes that viewpoint to a first-class, named
-// object so a later detached or third-person view can offset the eye from the
-// ship WITHOUT touching game logic - the ship's position and the camera's
-// position become independent.
+// origin: every object's `location` is stored relative to the ship. This
+// promotes that viewpoint to a first-class, named object so a later detached or
+// third-person view can offset the eye from the ship WITHOUT touching game
+// logic - the ship's position and the camera's position become independent.
 //
-// Behaviour is unchanged today: CurrentCamera() puts the eye exactly on the ship
-// (zero offset) with the direction taken from the active screen, so ApplyCamera()
-// reproduces switch_to_view() bit for bit. The `position` field is the seam: set
-// it non-zero and the world is rendered from a point offset from the ship.
+// The camera always looks along the ship's nose: the cockpit has a single fixed
+// forward view (the legacy rear/left/right views were removed). CurrentCamera()
+// puts the eye exactly on the ship (zero offset); the `position` field is the
+// seam: set it non-zero and the world is rendered from a point offset from the
+// ship.
 
 #include "vector.h"
 
@@ -23,15 +22,6 @@ struct local_object;
 
 namespace Neuron::Client
 {
-  // The four fixed view directions of the cockpit (front/rear/left/right).
-  enum class ViewDirection
-  {
-    Front,
-    Rear,
-    Left,
-    Right,
-  };
-
   // Where the eye sits relative to the followed ship. Cockpit is the legacy
   // fused view (eye on the ship); Chase floats the eye behind/above it via a
   // ViewOffset. Default is Cockpit, so behaviour is unchanged until toggled.
@@ -50,15 +40,13 @@ namespace Neuron::Client
   struct Camera
   {
     Vector position{ 0.0, 0.0, 0.0 };           // eye offset from the ship (0 = cockpit)
-    ViewDirection direction = ViewDirection::Front;
   };
 
-  // The camera for the current frame, derived from the active screen/view. Today
-  // the eye is always on the ship; only the direction varies.
+  // The camera for the current frame. The eye is on the ship (Cockpit) or floats
+  // behind it (Chase); the look direction is always the ship's nose.
   [[nodiscard]] Camera CurrentCamera();
 
   // Transform `_obj` from ship-space into `_cam`'s view-space: translate by the
-  // (currently zero) eye offset, then apply the fixed view rotation. This is the
-  // behaviour formerly hard-coded in switch_to_view().
+  // eye offset. Ship-space already is forward-view space.
   void ApplyCamera(const Camera& _cam, local_object* _obj);
 }

@@ -365,12 +365,12 @@ void update_altitude (void)
 
 
 /*
- * Transform an object from ship-space into the current view's camera-space.
+ * Transform an object from ship-space into camera-space.
  *
- * The camera is now an explicit object (Neuron::Client::Camera) instead of the
- * implicit "eye fused to the ship at the origin". This still reproduces the old
- * four fixed views bit for bit - the eye sits on the ship - but the seam now
- * exists for a detached / third-person camera (a non-zero Camera::position).
+ * The camera is an explicit object (Neuron::Client::Camera) instead of the
+ * implicit "eye fused to the ship at the origin". It always looks along the
+ * ship's nose (the single forward view); the seam exists for a detached /
+ * third-person camera (a non-zero Camera::position).
  */
 
 void switch_to_view (struct local_object *flip)
@@ -1120,27 +1120,7 @@ int fire_laser (void)
 {
 	if ((laser_counter == 0) && (PlayerDefense().laserHeat < 242))
 	{
-		switch (current_screen)
-		{
-			case SCR_FRONT_VIEW:
-				laser = cmdr.front_laser;
-				break;
-
-			case SCR_REAR_VIEW:
-				laser = cmdr.rear_laser;
-				break;
-
-			case SCR_RIGHT_VIEW:
-				laser = cmdr.right_laser;
-				break;
-
-			case SCR_LEFT_VIEW:
-				laser = cmdr.left_laser;
-				break;
-
-			default:
-				laser = 0;
-		}
+		laser = (current_screen == SCR_FRONT_VIEW) ? cmdr.front_laser : 0;
 
 		if (laser != 0)
 		{

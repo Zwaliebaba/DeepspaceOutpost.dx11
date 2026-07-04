@@ -257,28 +257,8 @@ void draw_laser_sights(void)
   int laser = 0;
   int x1, y1, x2, y2;
 
-  switch (current_screen)
-  {
-  case SCR_FRONT_VIEW:
-    gfx_display_centre_text(32, "Front View", 120, GFX_COL_WHITE);
+  if (current_screen == SCR_FRONT_VIEW)
     laser = cmdr.front_laser;
-    break;
-
-  case SCR_REAR_VIEW:
-    gfx_display_centre_text(32, "Rear View", 120, GFX_COL_WHITE);
-    laser = cmdr.rear_laser;
-    break;
-
-  case SCR_LEFT_VIEW:
-    gfx_display_centre_text(32, "Left View", 120, GFX_COL_WHITE);
-    laser = cmdr.left_laser;
-    break;
-
-  case SCR_RIGHT_VIEW:
-    gfx_display_centre_text(32, "Right View", 120, GFX_COL_WHITE);
-    laser = cmdr.right_laser;
-    break;
-  }
 
   if (laser)
   {
@@ -333,9 +313,6 @@ void arrow_right(void)
     break;
 
   case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
     if (PlayerFlight().roll > 0)
       PlayerFlight().roll = 0;
     else
@@ -357,9 +334,6 @@ void arrow_left(void)
     break;
 
   case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
     if (PlayerFlight().roll < 0)
       PlayerFlight().roll = 0;
     else
@@ -381,9 +355,6 @@ void arrow_up(void)
     break;
 
   case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
     if (PlayerFlight().climb > 0)
       PlayerFlight().climb = 0;
     else
@@ -403,9 +374,6 @@ void arrow_down(void)
     break;
 
   case SCR_FRONT_VIEW:
-  case SCR_REAR_VIEW:
-  case SCR_RIGHT_VIEW:
-  case SCR_LEFT_VIEW:
     if (PlayerFlight().climb < 0)
       PlayerFlight().climb = 0;
     else
@@ -545,41 +513,7 @@ void handle_flight_keys(void)
     if (docked)
       launch_player();
     else
-    {
-      if (current_screen != SCR_FRONT_VIEW)
-      {
-        current_screen = SCR_FRONT_VIEW;
-        flip_stars();
-      }
-    }
-  }
-
-  if (kbd_F2_pressed)
-  {
-    find_input = 0;
-
-    if (!docked)
-    {
-      if (current_screen != SCR_REAR_VIEW)
-      {
-        current_screen = SCR_REAR_VIEW;
-        flip_stars();
-      }
-    }
-  }
-
-  if (kbd_F3_pressed)
-  {
-    find_input = 0;
-
-    if (!docked)
-    {
-      if (current_screen != SCR_LEFT_VIEW)
-      {
-        current_screen = SCR_LEFT_VIEW;
-        flip_stars();
-      }
-    }
+      current_screen = SCR_FRONT_VIEW;   // back to the cockpit (e.g. from a chart)
   }
 
   if (kbd_F4_pressed)
@@ -588,14 +522,6 @@ void handle_flight_keys(void)
 
     if (docked)
       OpenEquipWindow();
-    else
-    {
-      if (current_screen != SCR_RIGHT_VIEW)
-      {
-        current_screen = SCR_RIGHT_VIEW;
-        flip_stars();
-      }
-    }
   }
 
   if (kbd_F5_pressed)
@@ -872,6 +798,10 @@ static void enter_flight(void)
 }
 
 // Enter the game-over animation: a dead Cobra tumbling through wreckage for 100 frames.
+// The scene renders through the (single) forward view, so the wreck spawns well
+// ahead at +z and the camera drifts toward it; the retired rear view used to
+// flip a -z spawn in front of the camera instead. +1000 with speed 6 keeps the
+// wreck in front of the eye for the whole 100-frame animation.
 static void enter_game_over(void)
 {
   current_screen = SCR_GAME_OVER;
@@ -885,13 +815,13 @@ static void enter_game_over(void)
   Matrix rotmat;
   set_init_matrix(rotmat);
 
-  int newship = add_new_ship(SHIP_COBRA3, 0, 0, -400, rotmat, 0, 0);
+  int newship = add_new_ship(SHIP_COBRA3, 0, 0, 1000, rotmat, 0, 0);
   local_objects[newship].flags |= FLG_DEAD;
 
   for (int i = 0; i < 5; i++)
   {
     const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
-    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, -400, rotmat, 0, 0);
+    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, 1000, rotmat, 0, 0);
     local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
     local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
     local_objects[newship].velocity = rand255() & 15;
@@ -1247,12 +1177,12 @@ static void process_server_events(void)
   g_clientBus.Dispatch();
 }
 
-// The four in-flight cockpit views render the 3D scene full-window; every other
-// screen (charts, station, intro, game-over, save/load) stays on the retro
-// letterboxed canvas.
+// The in-flight cockpit view (the single, fixed forward view) renders the 3D
+// scene full-window; every other screen (charts, station, intro, game-over,
+// save/load) stays on the retro letterboxed canvas.
 static int is_flight_view(int scr)
 {
-  return (scr == SCR_FRONT_VIEW) || (scr == SCR_REAR_VIEW) || (scr == SCR_LEFT_VIEW) || (scr == SCR_RIGHT_VIEW);
+  return scr == SCR_FRONT_VIEW;
 }
 
 // Gather the player's flight intent and send it to the server. Driven from the
@@ -1434,8 +1364,8 @@ static void game_render_flight(void)
       return;
     }
 
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-      == SCR_RIGHT_VIEW) || (current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
+        (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
     {
       gfx_clear_display();
       update_starfield();
@@ -1450,8 +1380,7 @@ static void game_render_flight(void)
       return;
     }
 
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) || (current_screen == SCR_LEFT_VIEW) || (current_screen
-      == SCR_RIGHT_VIEW))
+    if (current_screen == SCR_FRONT_VIEW)
     {
       if (draw_lasers)
       {
