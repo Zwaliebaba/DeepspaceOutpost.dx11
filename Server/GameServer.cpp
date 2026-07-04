@@ -149,8 +149,9 @@ namespace DSOServer
       while (s.events.Receive(msg))
       {
         // The ClientHello is the front door (Control lane, drained first): a valid
-        // one connects a pending client (spawns its entity, queues HelloAck) or
-        // renames a live one. A version mismatch is rejected inside OnHello.
+        // one connects a pending client (spawns its entity, queues HelloAck), or
+        // resumes a live one that reconnected (B3). A version mismatch is rejected
+        // inside OnHello.
         Msg::ClientHello hello;
         if (Msg::TryDecode(msg, hello))
         {
@@ -163,9 +164,19 @@ namespace DSOServer
             for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
               m_sessions.Broadcast(pi);
           }
-          else if (out.result == GameLogic::HelloResult::NameChanged && out.nameChanged)
+          else if (out.result == GameLogic::HelloResult::Resumed)
           {
-            BroadcastPlayerInfo(out.entity.index);
+            // Reconnect (B3): OnHello already re-queued HelloAck. Re-sync this one
+            // client - replay the full roster to it, resend its cargo, and force a
+            // PlayerStatus resend (evict the change-cache) - and, if the reconnect
+            // also renamed, tell everyone.
+            printf("Client resumed: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
+            for (const Msg::PlayerInfo& pi : m_sessions.Roster(m_world))
+              s.events.Send(pi);
+            SendCargoTo(out.entity.index);
+            m_lastStatus.Forget(GameLogic::EndpointKey(s.endpoint));
+            if (out.nameChanged)
+              BroadcastPlayerInfo(out.entity.index);
           }
           continue;
         }
@@ -229,6 +240,12 @@ namespace DSOServer
 
   void GameServer::AdvanceSimulation()
   {
+    // Safe-park (B3): a live client that has gone silent (disconnect / reconnect
+    // gap) has its flight intent zeroed so its ship stops coasting on stale input
+    // instead of flying off during the grace window. A resumed client's next input
+    // overrides this immediately.
+    m_sessions.SafeParkSilent(m_world, m_tick, Cfg::SESSION_PARK_TICKS);
+
     // NPC tactics decide their flight intents (pursue/break-off/flee + panic
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
@@ -295,7 +312,7 @@ namespace DSOServer
   {
     // Reap idle clients, then broadcast every despawn (reaped players + props)
     // as a reliable event to all remaining clients.
-    m_sessions.Reap(m_world, m_tick, Cfg::SESSION_TIMEOUT_TICKS);
+    m_sessions.Reap(m_world, m_tick, Cfg::SESSION_TIMEOUT_TICKS, Cfg::SESSION_GRACE_TICKS);
     for (uint32_t goneId : m_despawns.Update(CurrentIds(m_world)))
       m_sessions.Broadcast(Msg::EntityDespawn{ goneId });
   }

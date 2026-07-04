@@ -568,7 +568,13 @@ Every ~33 ms, in this order:
 - Token-less (pre-handshake) datagrams are **rate-limited** per endpoint
   (`RATE_MAX_UNAUTH` per `RATE_WINDOW_TICKS`, muted `RATE_MUTE_TICKS` on breach)
   so a spoofed-source flood can't provision unbounded shells.
-- Latest-sequence-wins input application; idle reaping after 300 ticks.
+- **Reconnect grace (B3):** a pending shell reaps after `SESSION_TIMEOUT_TICKS`
+  (300 ≈ 10 s), but an authenticated session survives `SESSION_GRACE_TICKS`
+  (1800 ≈ 60 s) of silence so it can reconnect. `SafeParkSilent` zeros the flight
+  intent of a live session silent past `SESSION_PARK_TICKS` (~1.5 s) so a
+  disconnected ship stops rather than flies away. A hello on a live session is a
+  **resume** (`HelloResult::Resumed`): keep the entity + token, re-queue `HelloAck`.
+- Latest-sequence-wins input application.
 - Owns the commander-name pipeline: sanitize → cap (20) → de-dupe → mirror to
   the authoritative `PlayerRecord` → roster broadcast.
 - `Broadcast(msg)` queues a catalog message to every session's proper lane.
@@ -1150,11 +1156,15 @@ In dependency order; the first three block everything else being "real".
   address re-binds the session (NAT rebind heals). Token-less datagrams are
   rate-limited per endpoint. Endpoint-as-identity is gone; accounts still arrive
   with F.
-- **Reconnect & resume.** 300-tick reaping plus endpoint identity means a
-  Wi-Fi blip is character death. With the token, resume is nearly free: a
-  hello carrying a known token re-binds the session to the new endpoint;
-  add a 30–60 s grace window before the reap is final. Highest
-  perceived-quality-per-line item in this review.
+- **Reconnect & resume.** ✅ *Done 2026-07-04 (B3):* an authenticated session now
+  gets a 60 s (1800-tick) grace window instead of the 10 s shell reap, and a
+  silent ship is **safe-parked** (its flight intent zeroed after ~1.5 s) so it
+  stops coasting on stale input during the gap. A token-bearing reconnect re-binds
+  the session to the new address (B2) and a hello on the live session **resumes**
+  it — the server re-queues `HelloAck` and re-sends that client its roster, cargo,
+  and status. (Reliable-lane sequence continuity assumes the client keeps its
+  transport across the blip, which the current client does; a full channel-reset
+  resume is post-C.)
 - **Time synchronization, then lag compensation.** Snapshots carry a `tick`
   but no shared-clock contract: interpolation delay is a guess and there is
   no RTT estimate to compensate against. Add a Control-lane ping/offset
@@ -1356,7 +1366,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 1 | Persistence (SQL Server) + world-state rows + command log | §13.2.2 | Infra | L | everything durable |
 | 2 | `ClientHello`-first handshake ✅ (done 2026-07-03) | S1 | Simplify | S | 3, 4 |
 | 3 | Session token; endpoint ≠ identity; rate limits ✅ (done 2026-07-04) | §13.2.2 | Infra | S | 4, security |
-| 4 | Reconnect grace + resume | §13.2.2 | Infra | S | player retention |
+| 4 | Reconnect grace + resume ✅ (done 2026-07-04) | §13.2.2 | Infra | S | player retention |
 | 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
 | 6 | Spatial grid into combat/collision/scoop/ECM loops | E1 | Perf | M | fleet scale |
 | 7 | Frame arena / scratch-buffer reuse | E2 | Perf | S | flat tick budget |

@@ -400,7 +400,7 @@ provisioning a session, reaped tokens forgotten) + framing-level (token
 round-trips and is peekable; truncated-token datagrams rejected); existing
 hand-built-packet tests updated for the new header.
 
-### B3 — Reconnect grace & resume (#4) — **S**
+### B3 — Reconnect grace & resume (#4) — **S** — ✅ **done 2026-07-04**
 
 On session silence, keep the entity alive but **safe-parked** (intent
 zeroed, autoEngage protections unchanged) for a grace window (60 s ≈ 1800
@@ -412,6 +412,22 @@ reap proceeds as today.
 
 *Acceptance:* kill the client socket, reconnect within grace from a new
 port → same ship, same cargo; after grace → normal despawn.
+
+*As built:* `Reap` now takes a shell timeout (`SESSION_TIMEOUT_TICKS` 300) and a
+longer grace timeout (`SESSION_GRACE_TICKS` 1800) — a live session survives the
+grace window, a pending shell still reaps short. `ServerSessions::SafeParkSilent`
+zeros a live session's `FlightIntent` after `SESSION_PARK_TICKS` (~45) of silence
+(GameServer calls it at the top of `AdvanceSimulation`). A hello on a live session
+is `HelloResult::Resumed` (was `NameChanged`): OnHello keeps the entity + token
+and re-queues `HelloAck`; GameServer replays the roster to just that client,
+resends its `CargoManifest`, and evicts its `PlayerStatus` change-cache entry
+(`OnChangeCache::Forget`) to force a HUD resend. The B2 token migration already
+re-binds the endpoint, so a token-bearing reconnect from a new address lands on
+the same session. Tests: grace-vs-shell reaping, safe-park zeroing, resume re-acks
+and keeps the entity, and a new-endpoint reconnect resumes the same ship. (Scope
+note: reliable-lane sequence continuity assumes the client keeps its transport
+across the blip — true of the current client; a full channel-reset resume is
+deferred.)
 
 ### B4 — Persistence on SQL Server (#1) — **L** — 📐 **design complete 2026-07-03; implementation pending**
 

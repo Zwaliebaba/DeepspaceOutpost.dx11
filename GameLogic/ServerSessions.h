@@ -89,16 +89,17 @@ namespace Neuron::GameLogic
   // What OnHello did with a ClientHello.
   enum class HelloResult : uint8_t
   {
-    Rejected,     // version mismatch: a HelloReject was queued, no entity spawned
-    Accepted,     // the front door: spawned the entity, queued HelloAck
-    NameChanged,  // a hello on an already-live session: just a rename
+    Rejected,   // version mismatch: a HelloReject was queued, no entity spawned
+    Accepted,   // the front door: spawned the entity, queued HelloAck
+    Resumed,    // a hello on an already-live session = a reconnect (B3): the entity
+                // is kept, a fresh HelloAck queued, and (maybe) the name changed.
   };
 
   struct HelloOutcome
   {
     HelloResult result = HelloResult::Rejected;
     ECS::EntityId entity{};
-    bool nameChanged = false;
+    bool nameChanged = false;   // Resumed only: the reconnect also renamed
   };
 
   class ServerSessions
@@ -169,7 +170,8 @@ namespace Neuron::GameLogic
     // absent (so tests can call this directly). Version-checks: on mismatch a
     // HelloReject is queued and the (entity-less) session is left to reap. On a
     // first valid hello the player entity is spawned, the name adopted, and a
-    // HelloAck queued. A hello on an already-live session is a rename.
+    // HelloAck queued. A hello on an already-live session is a RECONNECT (B3):
+    // the entity is kept and a fresh HelloAck queued (the caller resends the rest).
     HelloOutcome OnHello(ECS::Registry& _world, const Net::Endpoint& _ep,
                          const Msg::ClientHello& _hello, uint32_t _tick)
     {
@@ -186,8 +188,15 @@ namespace Neuron::GameLogic
 
       if (s.Live())
       {
-        HelloOutcome out{ HelloResult::NameChanged, s.entity, false };
+        // A hello on an already-live session is a RECONNECT (B3): the client sends
+        // its hello exactly once per connection, so a second one means it came back
+        // (its token re-bound the session to the new endpoint in OnReliable). Keep
+        // the entity, adopt any new name, and re-queue HelloAck so the client
+        // re-confirms its entity + token; the caller resends the rest of the state.
+        HelloOutcome out{ HelloResult::Resumed, s.entity, false };
         out.nameChanged = ApplyNameTo(_world, s, key, _hello.commanderName);
+        s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
+                                     static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
         return out;
       }
 
@@ -209,14 +218,18 @@ namespace Neuron::GameLogic
       return HelloOutcome{ HelloResult::Accepted, s.entity, true };
     }
 
-    // Drop sessions idle for more than `_timeoutTicks`, destroying their entities.
+    // Drop idle sessions, destroying their entities. An authenticated (LIVE)
+    // session gets the longer `_graceTicks` window (B3: it can reconnect and
+    // resume within it); a pending pre-hello shell gets the short `_shellTicks`.
     // Returns the destroyed entity indices (so the caller can broadcast despawns).
-    std::vector<uint32_t> Reap(ECS::Registry& _world, uint32_t _tick, uint32_t _timeoutTicks)
+    std::vector<uint32_t> Reap(ECS::Registry& _world, uint32_t _tick,
+                               uint32_t _shellTicks, uint32_t _graceTicks)
     {
       std::vector<uint32_t> gone;
       for (auto it = m_sessions.begin(); it != m_sessions.end();)
       {
-        if (_tick - it->second.lastSeenTick > _timeoutTicks)
+        const uint32_t timeout = it->second.Live() ? _graceTicks : _shellTicks;
+        if (_tick - it->second.lastSeenTick > timeout)
         {
           if (_world.IsValid(it->second.entity))
           {
@@ -236,12 +249,29 @@ namespace Neuron::GameLogic
       // can't grow without bound over a long uptime.
       for (auto it = m_rate.begin(); it != m_rate.end();)
       {
-        if (_tick >= it->second.mutedUntil && _tick - it->second.windowStart > _timeoutTicks)
+        if (_tick >= it->second.mutedUntil && _tick - it->second.windowStart > _shellTicks)
           it = m_rate.erase(it);
         else
           ++it;
       }
       return gone;
+    }
+
+    // Safe-park (B3): zero the flight intent of any LIVE session that has been
+    // silent for `_parkAfterTicks`, so a disconnected ship coasts to a controlled
+    // state instead of flying away on its last input during the reconnect-grace
+    // window. Idempotent (re-zeroing a parked ship is a no-op); a resumed client's
+    // next input overrides it immediately.
+    void SafeParkSilent(ECS::Registry& _world, uint32_t _tick, uint32_t _parkAfterTicks)
+    {
+      for (auto& entry : m_sessions)
+      {
+        Session& s = entry.second;
+        if (!s.Live() || _tick - s.lastSeenTick < _parkAfterTicks)
+          continue;
+        if (FlightIntent* fi = _world.TryGet<FlightIntent>(s.entity))
+          *fi = FlightIntent{};   // neutral: no roll/pitch, zero throttle
+      }
     }
 
     // Queue a catalog message onto every session's lanes (e.g. a despawn or death

@@ -191,21 +191,65 @@ TEST(Session, WrongTokenReliableDatagramIsDropped)
   EXPECT_FALSE(sessions.All().at(GameLogic::EndpointKey(a)).events.Receive(m));   // nothing delivered
 }
 
-TEST(Session, HelloOnALiveSessionRenamesInsteadOfRespawning)
+TEST(Session, HelloOnALiveSessionResumesAndReAcks)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
 
   const Net::Endpoint a{ 0x7F000001, 1001 };
   ECS::EntityId e = Connect(world, sessions, a, "Jameson");
+  const uint64_t token = TokenOf(sessions, a);
 
-  // A second hello on the same (live) endpoint keeps the entity and just renames.
+  // A second hello on the same (live) session is a RECONNECT (B3): the entity and
+  // token are kept, any rename applied, and a fresh HelloAck queued so the client
+  // re-confirms its identity.
   GameLogic::HelloOutcome out = sessions.OnHello(world, a, Hello("Raxxla"), /*tick*/ 2);
-  EXPECT_TRUE(out.result == GameLogic::HelloResult::NameChanged);
+  EXPECT_TRUE(out.result == GameLogic::HelloResult::Resumed);
   EXPECT_TRUE(out.entity == e);
   EXPECT_TRUE(out.nameChanged);
+  EXPECT_EQ(TokenOf(sessions, a), token);                        // same identity
   EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).name, "Raxxla");
   EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Raxxla");
+  EXPECT_TRUE(sessions.All().at(GameLogic::EndpointKey(a)).events.PendingOutgoing() == 2);  // 1st + resume HelloAck
+}
+
+TEST(Session, ReconnectFromANewEndpointResumesTheSameShip)
+{
+  // The full B3 path: a token-bearing reconnect from a new address re-binds the
+  // session (B2) and resumes it (a fresh HelloAck), keeping the entity + token.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 1001 };
+  const Net::Endpoint b{ 0x7F000001, 4444 };   // new address after a reconnect
+  ECS::EntityId e = Connect(world, sessions, a, "Jameson");
+  const uint64_t token = TokenOf(sessions, a);
+
+  // A tokened datagram (here, the reconnect hello's transport) migrates the
+  // endpoint; the hello then resumes the live session at its new address.
+  Msg::MessageEndpoint client;
+  client.SetToken(token);
+  client.Send(Hello("Jameson"));   // Control lane
+  for (const std::vector<uint8_t>& dg : client.WriteDatagrams())
+    sessions.OnReliable(b, dg.data(), dg.size(), /*tick*/ 50);
+
+  // Drain the migrated session's reliable channel and drive OnHello (as the server
+  // loop does), from the session's CURRENT endpoint.
+  GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(b));
+  Net::ReliableMessage m;
+  bool resumed = false;
+  while (s.events.Receive(m))
+  {
+    Msg::ClientHello h;
+    if (Msg::TryDecode(m, h))
+      resumed = sessions.OnHello(world, s.endpoint, h, 50).result == GameLogic::HelloResult::Resumed;
+  }
+
+  EXPECT_TRUE(resumed);
+  EXPECT_TRUE(sessions.Has(b));
+  EXPECT_FALSE(sessions.Has(a));
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(b)).entity, e);   // same ship
+  EXPECT_EQ(TokenOf(sessions, b), token);                             // same identity
 }
 
 TEST(Session, IdleSessionsAreReapedAndTokensForgotten)
@@ -218,7 +262,7 @@ TEST(Session, IdleSessionsAreReapedAndTokensForgotten)
   ECS::EntityId e2 = Connect(world, sessions, Net::Endpoint{ 0x7F000001, 1002 });
   const uint64_t token = TokenOf(sessions, a);
 
-  std::vector<uint32_t> gone = sessions.Reap(world, /*tick*/ 100, /*timeout*/ 5);
+  std::vector<uint32_t> gone = sessions.Reap(world, /*tick*/ 100, /*shell*/ 5, /*grace*/ 5);
 
   EXPECT_TRUE(sessions.Count() == 0);
   EXPECT_TRUE(gone.size() == 2);
@@ -238,9 +282,52 @@ TEST(Session, RecentSessionsSurviveReaping)
 
   const Net::Endpoint a{ 0x7F000001, 1001 };
   Connect(world, sessions, a, "", /*tick*/ 98);
-  // tick 100, timeout 5: 100 - 98 = 2 <= 5, so it stays.
-  sessions.Reap(world, 100, 5);
+  // tick 100, grace 5: 100 - 98 = 2 <= 5, so it stays.
+  sessions.Reap(world, 100, /*shell*/ 5, /*grace*/ 5);
   EXPECT_TRUE(sessions.Count() == 1);
+}
+
+TEST(Session, LiveSessionSurvivesTheShellTimeoutWithinItsGraceWindow)
+{
+  // B3: an authenticated (live) session gets the long grace window, while a
+  // pending pre-hello shell still reaps on the short shell timeout.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint live{ 0x7F000001, 1001 };
+  Connect(world, sessions, live, "", /*tick*/ 1);   // authenticated
+
+  const Net::Endpoint shell{ 0x7F000001, 1002 };    // pending: bad-version hello
+  Msg::ClientHello bad = Hello();
+  bad.protocolVersion = Msg::PROTOCOL_VERSION + 1u;
+  sessions.OnHello(world, shell, bad, /*tick*/ 1);
+
+  // At tick 200 the shell (idle 199 > shell 100) reaps; the live session (idle
+  // 199 <= grace 1800) survives.
+  sessions.Reap(world, /*tick*/ 200, /*shell*/ 100, /*grace*/ 1800);
+  EXPECT_TRUE(sessions.Has(live));
+  EXPECT_FALSE(sessions.Has(shell));
+  EXPECT_TRUE(sessions.Count() == 1);
+}
+
+TEST(Session, SafeParkZeroesTheIntentOfASilentShip)
+{
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 1001 };
+  ECS::EntityId e = Connect(world, sessions, a);
+  const uint64_t token = TokenOf(sessions, a);
+  sessions.OnInput(world, a, token, Input(1, 1.0f), /*tick*/ 2);   // full throttle
+  ASSERT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0f);
+
+  // Not silent long enough yet (2 < parkAfter 45): intent stays.
+  sessions.SafeParkSilent(world, /*tick*/ 40, /*parkAfter*/ 45);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0f);
+
+  // Silent past the park threshold (tick 100, last seen tick 2): intent zeroed.
+  sessions.SafeParkSilent(world, /*tick*/ 100, /*parkAfter*/ 45);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0f);
 }
 
 TEST(Session, NewSessionGetsADefaultNameAndPlayerRecord)
