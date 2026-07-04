@@ -61,6 +61,7 @@ set(NEURONCORE_HEADERS
     Messages/Defs/TimeSync.h
     LatencyEstimate.h
     Quantization.h
+    SnapshotDelta.h
 )
 
 add_library(NeuronCore STATIC ${NEURONCORE_SOURCES} ${NEURONCORE_HEADERS})

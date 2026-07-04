@@ -1003,8 +1003,30 @@ tests: `QuantizationTests.cpp` (primitive round-trips incl. exactness/clamp; ful
 v2 wire round-trips - exact positions with a zero reference, **absolute positions
 beyond int32 reconstructed exactly via a large int64 reference**, lossless
 unrotated basis, within-grid rotated basis, wire size). ~45 % raw reduction now;
-delta (E2b) crosses the ≥60 % soak bar at fleet scale. **E2b (per-session delta +
-keyframes) and E2c (per-lane byte budgets) still pending.**
+delta (E2b) crosses the ≥60 % soak bar at fleet scale.
+
+*As built — E2b-1 (delta codec + differ, pure), 2026-07-04:* `NeuronCore/
+SnapshotDelta.h` is the headless-testable core of delta compression, split from
+the server/client wiring to contain blind-CI risk. A `DeltaSnapshot` carries only
+the **changed** entities (new or wire-different, full 32-byte records) and the
+**removed** ids, against a baseline the receiver already holds; everything else is
+implied unchanged and omitted. `SnapshotDiff(baseline, current)` computes it and
+`ApplyDelta(baseline, delta)` reconstructs the current snapshot. **The key
+subtlety:** the reference origin tracks the MOVING viewer, so a stationary
+entity's *offset* changes every tick - the change test (`SameOnWire`) therefore
+compares **absolute** positions (stable int64) and the **quantized** basis/speed
+(so a sub-quantum wobble is not a change - the server-side-rounding rule), never
+the raw offset. The delta wire format shares the `'NSNP'` magic with a distinct
+version byte (3), reuses the exact E2a entity record (`WriteEntityRecord`/
+`ReadEntityRecord`, extracted so the layout lives in one place), and appends the
+removed-id list; `PeekSnapshotVersion` lets a receiver route full vs delta.
+`SnapshotDeltaTests.cpp` covers empty/new/changed/removed diffs, sub-quantum
+suppression, diff→apply reconstruction, the **stationary-entity-survives-a-moving-
+reference** case, full and delta wire round-trips (incl. a 9e11 reference), and
+version peeking. **Still pending: E2b-2** (wire it into the server/client -
+per-session baselines, sequence/ack plumbing on the reliable lane, keyframe
+cadence, MTU fallback) **and E2c** (per-lane byte budgets with distance-sorted
+drop).
 
 ### E3 — Strategic AOI tier (#11) — **M**
 

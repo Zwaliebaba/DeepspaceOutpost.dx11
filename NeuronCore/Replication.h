@@ -119,6 +119,49 @@ namespace Neuron::Net
     return static_cast<int32_t>(_v < lo ? lo : (_v > hi ? hi : _v));
   }
 
+  // Encode one entity record (32 bytes): its position as an int32 OFFSET from the
+  // reference origin (see the file header) - AOI-bounded, so it always fits int32
+  // however large the absolute int64 world grows, and clamped (never wrapped) on an
+  // out-of-AOI bug - plus its quantized basis/speed and type. Shared by the full
+  // snapshot and the delta snapshot (E2b) so the entity layout lives in ONE place.
+  inline void WriteEntityRecord(DataWriter& _w, const EntitySnapshot& _e,
+                                int64_t _refX, int64_t _refY, int64_t _refZ)
+  {
+    _w.WriteU32(_e.id);
+    _w.WriteI32(OffsetToI32(_e.x - _refX));
+    _w.WriteI32(OffsetToI32(_e.y - _refY));
+    _w.WriteI32(OffsetToI32(_e.z - _refZ));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.noseX)));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.noseY)));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.noseZ)));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.roofX)));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.roofY)));
+    _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(_e.roofZ)));
+    _w.WriteU16(QuantizeSpeed(_e.speed));
+    _w.WriteU16(static_cast<uint16_t>(_e.type));
+  }
+
+  // Decode one entity record, reconstructing the absolute int64 position from the
+  // reference origin + int32 offset. The caller checks the reader's Ok() afterward.
+  [[nodiscard]] inline EntitySnapshot ReadEntityRecord(DataReader& _r,
+                                                       int64_t _refX, int64_t _refY, int64_t _refZ)
+  {
+    EntitySnapshot e;
+    e.id = _r.ReadU32();
+    e.x = _refX + static_cast<int64_t>(_r.ReadI32());
+    e.y = _refY + static_cast<int64_t>(_r.ReadI32());
+    e.z = _refZ + static_cast<int64_t>(_r.ReadI32());
+    e.noseX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.noseY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.noseZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.roofX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.roofY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.roofZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
+    e.speed = DequantizeSpeed(_r.ReadU16());
+    e.type = static_cast<int16_t>(_r.ReadU16());
+    return e;
+  }
+
   inline void WriteSnapshot(DataWriter& _w, const WorldSnapshot& _snap)
   {
     _w.WriteU32(SNAPSHOT_MAGIC);
@@ -131,25 +174,7 @@ namespace Neuron::Net
     _w.WriteU16(static_cast<uint16_t>(_snap.entities.size()));
 
     for (const EntitySnapshot& e : _snap.entities)
-    {
-      _w.WriteU32(e.id);
-      // Position as an int32 OFFSET from the reference origin (see the file
-      // header). The offset is AOI-bounded (a few million units), so it always
-      // fits int32 however large the absolute int64 world grows. Clamped, not
-      // wrapped, if a caller ever hands us an out-of-AOI entity (a bug, not the
-      // send path) - a bounded position beats a teleport.
-      _w.WriteI32(OffsetToI32(e.x - _snap.refX));
-      _w.WriteI32(OffsetToI32(e.y - _snap.refY));
-      _w.WriteI32(OffsetToI32(e.z - _snap.refZ));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseX)));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseY)));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.noseZ)));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofX)));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofY)));
-      _w.WriteU16(static_cast<uint16_t>(QuantizeUnit(e.roofZ)));
-      _w.WriteU16(QuantizeSpeed(e.speed));
-      _w.WriteU16(static_cast<uint16_t>(e.type));
-    }
+      WriteEntityRecord(_w, e, _snap.refX, _snap.refY, _snap.refZ);
   }
 
   // Decode a snapshot. Returns false (and leaves `_out` unspecified) if the magic
@@ -171,23 +196,7 @@ namespace Neuron::Net
     _out.entities.clear();
     _out.entities.reserve(count);
     for (uint16_t i = 0; i < count; ++i)
-    {
-      EntitySnapshot e;
-      e.id = _r.ReadU32();
-      // Reconstruct the absolute int64 position: reference origin + int32 offset.
-      e.x = _out.refX + static_cast<int64_t>(_r.ReadI32());
-      e.y = _out.refY + static_cast<int64_t>(_r.ReadI32());
-      e.z = _out.refZ + static_cast<int64_t>(_r.ReadI32());
-      e.noseX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.noseY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.noseZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.roofX = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.roofY = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.roofZ = DequantizeUnit(static_cast<int16_t>(_r.ReadU16()));
-      e.speed = DequantizeSpeed(_r.ReadU16());
-      e.type = static_cast<int16_t>(_r.ReadU16());
-      _out.entities.push_back(e);
-    }
+      _out.entities.push_back(ReadEntityRecord(_r, _out.refX, _out.refY, _out.refZ));
 
     return _r.Ok();
   }
