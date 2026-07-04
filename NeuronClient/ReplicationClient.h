@@ -110,8 +110,8 @@ namespace Neuron::Client
     // the galaxy chunks are consumed internally.)
     bool PollEvent(Net::ReliableMessage& _out);
 
-    // The session token from HelloAck (0 until connected / until B2 makes it a
-    // real per-session token). B2 stamps it on every outbound datagram.
+    // The session token from HelloAck (0 until connected). Stamped on every
+    // outbound datagram (B2) so the server authenticates us by token, not address.
     [[nodiscard]] uint64_t SessionToken() const { return m_sessionToken; }
 
     // True once the server refused our ClientHello (e.g. a protocol-version
@@ -144,7 +144,7 @@ namespace Neuron::Client
     Net::SnapshotInterpolator m_interp;            // unreliable bulk state
     Msg::MessageEndpoint m_events;                 // reliable lanes (Control/Gameplay/Bulk)
     std::deque<Net::ReliableMessage> m_appEvents;  // events for the app (handshake/chunks filtered out)
-    uint64_t m_sessionToken = 0;                   // from HelloAck (B2 makes it load-bearing)
+    uint64_t m_sessionToken = 0;                   // from HelloAck; stamped on every outbound datagram (B2)
     bool m_helloRejected = false;                  // server refused the handshake
     std::vector<Net::GalaxySystemInfo> m_galaxy;   // the galaxy chart, pulled chunk by chunk
     uint32_t m_galaxyTotal = 0;                    // the galaxy's size, learned from the first chunk

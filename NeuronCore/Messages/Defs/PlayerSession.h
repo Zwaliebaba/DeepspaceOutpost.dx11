@@ -58,10 +58,10 @@ namespace Neuron::Msg
   };
 
   // server -> client: the handshake was ACCEPTED. "You control entity N"; the
-  // sessionToken is the session's identity for subsequent datagrams (B2 makes it
-  // load-bearing - it is 0 until then). Subsumes and retires AssignPlayer (0x0001,
-  // reserved), folding the protocol-version echo and the future token into the
-  // one handshake reply.
+  // sessionToken is the session's identity (B2) - a CSPRNG token the client stamps
+  // on every subsequent datagram, so the server authenticates by token, not by
+  // source address. Subsumes and retires AssignPlayer (0x0001, reserved), folding
+  // the protocol-version echo and the token into the one handshake reply.
   struct HelloAck
   {
     static constexpr MessageId    Id    = static_cast<MessageId>(0x0003);   // core/session
@@ -70,7 +70,7 @@ namespace Neuron::Msg
     static constexpr MessageLane  Lane  = MessageLane::Control;
     static constexpr Direction    Dir   = Direction::ServerToClient;
 
-    uint64_t sessionToken = 0;   // B2: a random per-session token; 0 until then
+    uint64_t sessionToken = 0;   // the session's CSPRNG identity token (B2)
     uint32_t entityId = 0;       // the entity this session controls
     uint16_t protocolVersion = 0;// the server's PROTOCOL_VERSION (echo)
     auto Fields()       { return std::tie(sessionToken, entityId, protocolVersion); }

@@ -17,6 +17,7 @@
 #include "ServerConfig.h"
 #include "SnapshotHelpers.h"
 #include "WorldBuilder.h"
+#include "SecureRandom.h"   // OS CSPRNG for session tokens (B2)
 
 using namespace Neuron;
 
@@ -35,6 +36,10 @@ namespace DSOServer
     WorldSetup setup = BuildWorld(m_world);
     m_landmarks = std::move(setup.landmarks);
     m_sessions.SetManifest(std::move(setup.manifest));
+
+    // Session tokens (B2) come from the OS CSPRNG, not a gameplay RNG stream: a
+    // token must be unguessable, and determinism rules stop at the GameLogic edge.
+    m_sessions.SetTokenSource(&SecureRandom64);
 
     // Datagram routing: 'NMSG' packets carry the unreliable InputCommand lane;
     // 'NRLB' datagrams feed each session's reliable lanes (and provision a pending
@@ -114,7 +119,7 @@ namespace DSOServer
       if (!Msg::DecodeRecord(rec, in))
         continue;
 
-      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, in, m_tick);
+      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
 
       // Player weapon/equipment intent becomes FireWeapon commands on the bus;
       // the combat subscriber resolves them to facts after the receive loop.

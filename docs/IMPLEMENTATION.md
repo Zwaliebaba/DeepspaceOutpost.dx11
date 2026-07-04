@@ -360,7 +360,7 @@ still registered); `HelloAck 0x0003` / `HelloReject 0x0004` added. Session tests
 rewritten to the hello handshake (unknown-input-ignored, bad-version-rejected,
 hello-renames-a-live-session, pending-shell-excluded-from-roster).
 
-### B2 — Session token: endpoint ≠ identity (#3) — **S**
+### B2 — Session token: endpoint ≠ identity (#3) — **S** — ✅ **done 2026-07-04**
 
 - `HelloAck.sessionToken` is a random 64-bit token from an OS CSPRNG
   (`BCryptGenRandom` — *not* a gameplay LCG stream; this is security, not
@@ -379,6 +379,26 @@ hello-renames-a-live-session, pending-shell-excluded-from-roster).
 *Acceptance:* spoofed-endpoint `StationRequest` with a wrong token does
 nothing; endpoint change mid-session keeps the entity; fuzz tests cover
 truncated/garbage token fields.
+
+*As built:* the framing (`Framing.h` `'NMSG'` + `MessageEndpoint.h` `'NRLB'`)
+carries a `token u64` after the lane byte, `PROTOCOL_VERSION` bumped to 2 (no
+back-compat window — nobody is on the wire yet, so the old framing is simply
+retired rather than dual-decoded). Tokens come from the OS CSPRNG in
+`Server/SecureRandom.h` (`BCryptGenRandom`, auto-linked via `#pragma comment(lib,
+"bcrypt.lib")` — no CMake/vcxproj change), injected into the pure `ServerSessions`
+through `SetTokenSource` (a deterministic fallback serves headless tests).
+`ServerSessions` keys sessions by endpoint but authenticates by token: a
+`token → endpoint` index (`Authenticate`) drops wrong/no-token datagrams before
+decode and re-keys the session on a NAT rebind; `OnInput`/`OnReliable` take the
+token (peeked via `PeekReliableToken`); token-less pre-handshake datagrams are
+rate-limited per endpoint (`RATE_MAX_UNAUTH`/`RATE_WINDOW_TICKS`/`RATE_MUTE_TICKS`),
+and a token-less datagram is never routed to a live session. The client stamps the
+token (`ReplicationClient`: `m_events.SetToken` + `PacketWriter(..., token)`) once
+`HelloAck` arrives. Tests: session-level (wrong-token input ignored, token-less
+input ignored, NAT-rebind keeps the entity, wrong-token reliable dropped without
+provisioning a session, reaped tokens forgotten) + framing-level (token
+round-trips and is peekable; truncated-token datagrams rejected); existing
+hand-built-packet tests updated for the new header.
 
 ### B3 — Reconnect grace & resume (#4) — **S**
 

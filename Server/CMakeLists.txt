@@ -9,6 +9,7 @@ set(SERVER_SOURCES
     Main.cpp
     GameServer.cpp
     WorldBuilder.cpp
+    SecureRandom.cpp
     pch.cpp
 )
 
@@ -17,6 +18,7 @@ set(SERVER_HEADERS
     WorldBuilder.h
     ServerConfig.h
     SnapshotHelpers.h
+    SecureRandom.h
     pch.h
 )
 

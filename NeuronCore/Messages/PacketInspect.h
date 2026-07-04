@@ -73,12 +73,13 @@ namespace Neuron::Msg
       return out;
     }
 
-    // 'NRLB' - reliable lane: [magic][lane] then an inner ReliableChannel packet.
+    // 'NRLB' - reliable lane: [magic][lane][token] then an inner ReliableChannel packet.
     if (magic == RELIABLE_MAGIC)
     {
       Net::DataReader r(_data, _size);
       (void)r.ReadU32();                       // RELIABLE_MAGIC
       const uint8_t lane = r.ReadU8();
+      (void)r.ReadU64();                       // session token (B2)
       if (!r.Ok() || lane >= RELIABLE_LANE_COUNT)
         return out;
       if (r.ReadU32() != Net::EVENT_MAGIC)     // inner packet self-identifies

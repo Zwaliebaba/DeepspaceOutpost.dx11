@@ -136,8 +136,8 @@ magic:
 | Magic | Stream | Contents |
 |---|---|---|
 | `'NSNP'` | **Snapshot** (unreliable, server→client) | AOI world-state snapshots; superseded by the next one, never retransmitted. |
-| `'NRLB'` | **Reliable lanes** (both directions) | `[magic][lane u8]` + one `ReliableChannel` packet (`'NEVT'` seq/ack framing inside). |
-| `'NMSG'` | **Message packet** (unreliable lane) | The framed record stream — today this carries `InputCommand` client→server. |
+| `'NRLB'` | **Reliable lanes** (both directions) | `[magic][lane u8][token u64]` + one `ReliableChannel` packet (`'NEVT'` seq/ack framing inside). |
+| `'NMSG'` | **Message packet** (unreliable lane) | `[magic][version][lane][token u64]` + the framed record stream — today this carries `InputCommand` client→server. |
 
 **Reliable lanes** (`Msg::MessageEndpoint`): one `ReliableChannel` per lane —
 `Control(0)`, `Gameplay(1)`, `Bulk(2)` — each with its own sequence/ack space,
@@ -147,10 +147,23 @@ Bulk. Idle lanes are silent. `ReliableChannel` is TCP-like at message level
 (ordered, deduplicated, resent until acked) but stays on UDP.
 
 **Framing** (`Messages/Framing.h`): an `'NMSG'` packet is
-`magic u32 | PROTOCOL_VERSION u16 (=1) | lane u8` followed by zero or more
-records, each `MessageId u16 | length u16 | payload`. The mandatory per-record
-length bounds every decoder to exactly its own bytes — a malformed message
-cannot run the reader into the next record.
+`magic u32 | PROTOCOL_VERSION u16 (=2) | lane u8 | token u64` followed by zero or
+more records, each `MessageId u16 | length u16 | payload`. The mandatory
+per-record length bounds every decoder to exactly its own bytes — a malformed
+message cannot run the reader into the next record.
+
+**Session token** (B2): both client→server framings (`'NMSG'` and `'NRLB'`)
+carry a `token u64` right after the lane byte. It is the session's identity: the
+server keys sessions by token, not by source address, and drops any client
+datagram whose token doesn't match a live session *before decoding it* (`OnInput`
+/ `ServerSessions::OnReliable`, via `PeekReliableToken`). So a spoofed source
+address is useless without the token, and a NAT rebind that changes the address
+heals silently (the token re-binds the session to the new address). The token is
+`0` (unauthenticated) on the opening `ClientHello` and on server→client packets
+(the client trusts the server by address). Token-less datagrams are rate-limited
+per endpoint so a spoofed-source flood can't provision unbounded sessions. Tokens
+come from the OS CSPRNG (`Server/SecureRandom.h` → `BCryptGenRandom`), never a
+gameplay RNG.
 
 **MTU discipline:** all state datagrams are kept at or below
 `SAFE_UDP_PAYLOAD = 1200` bytes. The snapshot packetizer splits a world
@@ -236,12 +249,13 @@ the protocol version + the commander name the player chose. The server sanitizes
 
 **`HelloAck`** — `0x0003` · Control scope · Event · Control lane · S→C.
 The handshake was accepted: "you control entity N." Subsumes and retires
-`AssignPlayer`, adding the protocol-version echo and the session token (0 until
-B2 makes it load-bearing). Sent once, on the first valid `ClientHello`.
+`AssignPlayer`, adding the protocol-version echo and the session token. Sent once,
+on the first valid `ClientHello`. The client stamps the token on every subsequent
+datagram (B2); the server authenticates by it.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `sessionToken` | u64 | per-session token (0 until B2) |
+| `sessionToken` | u64 | the session's identity — a CSPRNG token stamped on every later client datagram |
 | `entityId` | u32 | the entity index this session controls |
 | `protocolVersion` | u16 | the server's `PROTOCOL_VERSION` (echo) |
 
@@ -465,14 +479,16 @@ The server's own combat pipeline is decoupled through an in-process
 
 ### 4.6 Canonical sequences
 
-**Connect:** client sends `ClientHello{version, name}` (Control) → server
-version-checks it (mismatch ⇒ `HelloReject`, no session), else spawns the player
-entity, sanitizes/dedupes the name, and replies `HelloAck{token, entityId,
-version}` (Control) → server broadcasts the full `PlayerInfo` roster → snapshots +
-`PlayerStatus`/`CargoManifest` begin flowing. Input from an endpoint that has not
-completed this handshake is ignored (no spawn-on-first-input). Once connected the
-client **pulls** the galaxy chart in bounded ranges (`GalaxyChunkRequest` →
-`GalaxyChunk`, Bulk) until it holds all systems.
+**Connect:** client sends `ClientHello{version, name}` (Control, token 0) →
+server version-checks it (mismatch ⇒ `HelloReject`, no session), else spawns the
+player entity, sanitizes/dedupes the name, mints a CSPRNG session token, and
+replies `HelloAck{token, entityId, version}` (Control) → the client stamps that
+token on every subsequent datagram (B2) → server broadcasts the full `PlayerInfo`
+roster → snapshots + `PlayerStatus`/`CargoManifest` begin flowing. Input from an
+endpoint that has not completed this handshake — or that carries the wrong/no
+token — is ignored (no spawn-on-first-input). Once connected the client **pulls**
+the galaxy chart in bounded ranges (`GalaxyChunkRequest` → `GalaxyChunk`, Bulk)
+until it holds all systems.
 
 **Fire → kill → respawn:** `InputCommand.fire` → server publishes `FireWeapon`
 → `ResolveFireWeapon` applies damage, may publish `Crime` (wanted +1, police
@@ -536,14 +552,22 @@ Every ~33 ms, in this order:
 
 ### 5.2 Sessions (`ServerSessions`)
 
-- Keyed by UDP endpoint (`addr<<16 | port`). A valid, version-checked
-  `ClientHello` (`OnHello`) spawns the player entity (see component list below)
-  and queues `HelloAck`; a reliable datagram from an unknown endpoint first gets
-  a pending, entity-less **shell** (`OnReliable`) so that hello can be received.
-  Input (`OnInput`) applies only to a live session — an unknown endpoint is
-  ignored, so there is no spawn-on-first-input. `Session::Live()` (entity valid)
-  distinguishes a connected player from a pending shell; pending shells are
-  excluded from the roster and reaped on the idle timeout like any session.
+- Keyed by the client's **current endpoint** (`addr<<16 | port`), but the
+  IDENTITY is the **session token** (B2): a second index maps token → endpoint.
+  A valid, version-checked `ClientHello` (`OnHello`) spawns the player entity (see
+  component list below), mints a CSPRNG token, and queues `HelloAck`; a token-less
+  reliable datagram from an unknown endpoint first gets a pending, entity-less
+  **shell** (`OnReliable`) so that hello can be received. Every later client
+  datagram is authenticated by token *before* it touches a session: a wrong/no
+  token is dropped (`Authenticate`); a correct token from a new address re-binds
+  the session there (NAT rebind heals). Input (`OnInput`) applies only to a live,
+  correctly-tokened session — so there is no spawn-on-first-input and no
+  endpoint-spoofing. `Session::Live()` (entity valid) distinguishes a connected
+  player from a pending shell; pending shells are excluded from the roster and
+  reaped on the idle timeout like any session, and their token index is pruned.
+- Token-less (pre-handshake) datagrams are **rate-limited** per endpoint
+  (`RATE_MAX_UNAUTH` per `RATE_WINDOW_TICKS`, muted `RATE_MUTE_TICKS` on breach)
+  so a spoofed-source flood can't provision unbounded shells.
 - Latest-sequence-wins input application; idle reaping after 300 ticks.
 - Owns the commander-name pipeline: sanitize → cap (20) → de-dupe → mirror to
   the authoritative `PlayerRecord` → roster broadcast.
@@ -860,9 +884,14 @@ station screen into flight; position updates always come from snapshots.
   `LiveEntity` (generation check) before use.
 - Names are sanitized (printable ASCII, length-capped, de-duplicated)
   server-side.
-- Not yet addressed (future): rate limiting, encryption/authentication,
-  server-side sanity on input *cadence* (a client can send at > 30 Hz; only
-  the latest wins, so the damage is bounded).
+- Datagrams are authenticated by the session token (B2): the server keys
+  sessions by a CSPRNG token, not by source address, and drops a wrong/no-token
+  client datagram before decoding it. Token-less (pre-handshake) datagrams are
+  rate-limited per endpoint.
+- Not yet addressed (future): encryption (tokens travel in cleartext — a
+  same-path attacker can still read them; TLS/DTLS or a challenge exchange is
+  post-F), server-side sanity on input *cadence* (a client can send at > 30 Hz;
+  only the latest wins, so the damage is bounded).
 
 ---
 
@@ -1114,12 +1143,13 @@ In dependency order; the first three block everything else being "real".
   (§13.2.3) they stop being pure seed functions and need rows; add a command
   log table for audit/replay while the table count is still small.
 - **Session security: the UDP endpoint must stop being the identity.**
-  Sessions are keyed `addr<<16 | port` (§5.2): spoofable (anyone who can
-  guess an endpoint can sell your cargo) and fragile (NAT rebind = new
-  player). Fix rides S1: `ClientHello` returns a random 64-bit session
-  token; every subsequent datagram carries it after the lane byte;
-  mismatches drop. Add per-endpoint rate limiting at the same choke point.
-  Accounts arrive with F; the token is a weekend and closes the worst hole.
+  ✅ *Done 2026-07-04 (B2):* `HelloAck` hands the client a CSPRNG 64-bit token;
+  every subsequent `'NMSG'`/`'NRLB'` datagram carries it after the lane byte, and
+  the server authenticates by token before any decode (`Authenticate`) — a spoofed
+  source address with the wrong/no token is dropped, and a correct token from a new
+  address re-binds the session (NAT rebind heals). Token-less datagrams are
+  rate-limited per endpoint. Endpoint-as-identity is gone; accounts still arrive
+  with F.
 - **Reconnect & resume.** 300-tick reaping plus endpoint identity means a
   Wi-Fi blip is character death. With the token, resume is nearly free: a
   hello carrying a known token re-binds the session to the new endpoint;
@@ -1325,7 +1355,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 |---|---|---|---|---|---|
 | 1 | Persistence (SQL Server) + world-state rows + command log | §13.2.2 | Infra | L | everything durable |
 | 2 | `ClientHello`-first handshake ✅ (done 2026-07-03) | S1 | Simplify | S | 3, 4 |
-| 3 | Session token; endpoint ≠ identity; rate limits | §13.2.2 | Infra | S | 4, security |
+| 3 | Session token; endpoint ≠ identity; rate limits ✅ (done 2026-07-04) | §13.2.2 | Infra | S | 4, security |
 | 4 | Reconnect grace + resume | §13.2.2 | Infra | S | player retention |
 | 5 | `PlayerId`/`Owner` identity layer + relational index | §13.2.3-1 | Arch | M | 12–17 |
 | 6 | Spatial grid into combat/collision/scoop/ECM loops | E1 | Perf | M | fleet scale |

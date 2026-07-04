@@ -11,14 +11,25 @@
 // pending (entity-less) shell so its hello can be received. Idle clients (and
 // shells that never hello) are reaped.
 //
+// Since B2 the identity is the SESSION TOKEN, not the endpoint. HelloAck hands the
+// client a random token (from an injected CSPRNG source); every subsequent client
+// datagram carries it, and the server authenticates by token before touching a
+// session - a spoofed source address with the wrong/no token is dropped. The
+// endpoint is just the current return address: a correctly-tokened datagram from a
+// new address re-binds the session there (a NAT rebind heals silently). Token-less
+// (pre-handshake) datagrams are rate-limited per endpoint so a spoofed-source flood
+// can't provision unbounded shells.
+//
 // Pure apart from the world it mutates (spawns/destroys entities) - no sockets -
 // so connection handling, input application and reaping are all unit-tested
 // headlessly; the server loop wires the socket I/O around it.
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ECS.h"
@@ -49,12 +60,24 @@ namespace Neuron::GameLogic
   // sanitized to this before de-duplication).
   inline constexpr std::size_t MAX_NAME_LEN = 20;
 
+  // Per-endpoint rate limit on token-less (pre-handshake) datagrams. Over the cap in
+  // a window, the endpoint is muted for a cooldown - a spoofed-source flood can't
+  // provision unbounded shells or reply traffic. (Authenticated traffic is not rate
+  // limited here; it is already bound to a real session.) The cap is generous: a
+  // legitimate client resends its unacked hello once per client frame until HelloAck
+  // arrives (~one round trip), which stays well under the cap even at a high frame
+  // rate, while a genuine flood is orders of magnitude more.
+  inline constexpr uint32_t RATE_WINDOW_TICKS = 30;    // ~1 s at 30 Hz
+  inline constexpr uint16_t RATE_MAX_UNAUTH   = 120;   // token-less datagrams / window / endpoint
+  inline constexpr uint32_t RATE_MUTE_TICKS   = 300;   // ~10 s mute once the cap is exceeded
+
   struct Session
   {
-    Net::Endpoint endpoint;
+    Net::Endpoint endpoint;            // current return address (B2: updated on a tokened rebind)
     ECS::EntityId entity;               // INVALID until a valid ClientHello spawns it (pending shell)
     Msg::MessageEndpoint events;       // reliable lanes (Control/Gameplay/Bulk) to THIS client
     std::string name;                  // display name (from ClientHello; placeholder if blank)
+    uint64_t token = 0;                // session token (B2 identity); 0 while a pending shell
     uint32_t lastInputSeq = 0;         // newest input applied (drops stale)
     uint32_t lastSeenTick = 0;         // for idle reaping
 
@@ -81,44 +104,66 @@ namespace Neuron::GameLogic
   class ServerSessions
   {
   public:
-    // Handle an input datagram from `_ep`. Since B1 input NEVER connects a client:
-    // an unknown endpoint is ignored (the ClientHello is the front door - see
-    // OnHello). For a live session the latest intent is applied. Returns the
-    // session's entity, or an INVALID id for an unknown/pending endpoint.
-    ECS::EntityId OnInput(ECS::Registry& _world, const Net::Endpoint& _ep,
+    // Handle an input datagram carrying session `_token` from `_ep`. Input is
+    // authenticated (B2): a token-less (0) or wrong/unknown token is ignored - only
+    // a live, correctly-tokened session applies intent. The endpoint re-binds to
+    // `_ep` if the token arrived from a new address. Returns the session's entity,
+    // or an INVALID id when unauthenticated / not yet live.
+    ECS::EntityId OnInput(ECS::Registry& _world, const Net::Endpoint& _ep, uint64_t _token,
                           const Msg::InputCommand& _in, uint32_t _tick)
     {
-      auto it = m_sessions.find(EndpointKey(_ep));
-      if (it == m_sessions.end())
-        return ECS::EntityId{};   // ignore unknown endpoints (no spawn-on-input)
+      Session* session = Authenticate(_ep, _token, _tick);
+      if (session == nullptr || !_world.IsValid(session->entity))
+        return ECS::EntityId{};   // unauthenticated / unknown token / not yet live
 
-      Session& session = it->second;
-      session.lastSeenTick = _tick;
-      if (_in.sequence > session.lastInputSeq && _world.IsValid(session.entity))
+      if (_in.sequence > session->lastInputSeq)
       {
-        session.lastInputSeq = _in.sequence;
-        FlightIntent& fi = _world.Get<FlightIntent>(session.entity);
+        session->lastInputSeq = _in.sequence;
+        FlightIntent& fi = _world.Get<FlightIntent>(session->entity);
         fi.rollAxis = _in.rollAxis;
         fi.pitchAxis = _in.pitchAxis;
         fi.throttle = _in.throttle;
       }
-      return session.entity;
+      return session->entity;
     }
 
-    // Route an inbound reliable datagram (a client ack, or a ClientHello from a
-    // brand-new endpoint) to its session. An unknown endpoint gets a PENDING shell
-    // (a reliable receive endpoint, no entity) so its hello can be received and
-    // version-checked; the entity spawns only on a valid hello (OnHello). A shell
-    // that never sends one is reaped on the idle timeout. (A reliable datagram is
-    // still a cheap allocation for an unauthenticated peer; per-endpoint rate
-    // limiting lands with the session token in B2.)
+    // Route an inbound reliable datagram to its session, authenticated by the token
+    // in its header (B2 - peeked here, before any decode):
+    //  * token == 0 (pre-handshake): the ClientHello front door only. Rate-limited
+    //    per endpoint; provisions a PENDING shell (reliable receive endpoint, no
+    //    entity) so the hello can be received and version-checked (OnHello spawns
+    //    the entity). A token-less datagram is NEVER routed to a live session - a
+    //    live client must present its token.
+    //  * token != 0: authenticated. Routed to the owning session (re-binding its
+    //    endpoint on a NAT rebind); an unknown/spoofed token is dropped.
     void OnReliable(const Net::Endpoint& _ep, const uint8_t* _data, std::size_t _size, uint32_t _tick)
     {
-      Session& s = m_sessions.try_emplace(EndpointKey(_ep)).first->second;
-      s.endpoint = _ep;
-      s.lastSeenTick = _tick;
-      s.events.OnDatagram(_data, _size);
+      const uint64_t token = Msg::PeekReliableToken(_data, _size);
+      if (token == 0)
+      {
+        if (RateLimited(_ep, _tick))
+          return;   // muted: spoofed-source flood control
+        auto it = m_sessions.find(EndpointKey(_ep));
+        if (it != m_sessions.end() && it->second.Live())
+          return;   // a live session must present its token; ignore token-less traffic
+        Session& s = m_sessions.try_emplace(EndpointKey(_ep)).first->second;
+        s.endpoint = _ep;
+        s.lastSeenTick = _tick;
+        s.events.OnDatagram(_data, _size);
+        return;
+      }
+
+      Session* s = Authenticate(_ep, token, _tick);
+      if (s == nullptr)
+        return;   // unknown/spoofed token: drop before any decode
+      s->events.OnDatagram(_data, _size);
     }
+
+    // Install the source of session tokens (B2). The dedicated server injects an OS
+    // CSPRNG (BCryptGenRandom); left unset, a deterministic nonzero fallback is used
+    // (headless tests only - a predictable token is safe only where there's no
+    // adversary). A source that returns 0 falls back too (tokens must be nonzero).
+    void SetTokenSource(std::function<uint64_t()> _src) { m_tokenSource = std::move(_src); }
 
     // Handle a decoded ClientHello - the front door. Provisions the shell if
     // absent (so tests can call this directly). Version-checks: on mismatch a
@@ -153,7 +198,13 @@ namespace Neuron::GameLogic
                              : UniqueName(clean, key);
       if (PlayerRecord* pr = _world.TryGet<PlayerRecord>(s.entity))
         pr->name = s.name;
-      s.events.Send(Msg::HelloAck{ /*sessionToken*/ 0, s.entity.index,
+
+      // Mint the session token (B2 identity) and index it to this endpoint; every
+      // subsequent client datagram must carry it. The endpoint's outgoing datagrams
+      // stay token-0 (the client authenticates the server by address, not token).
+      s.token = NextToken();
+      m_byToken[s.token] = key;
+      s.events.Send(Msg::HelloAck{ s.token, s.entity.index,
                                    static_cast<uint16_t>(Msg::PROTOCOL_VERSION) });   // Control lane
       return HelloOutcome{ HelloResult::Accepted, s.entity, true };
     }
@@ -172,12 +223,23 @@ namespace Neuron::GameLogic
             gone.push_back(it->second.entity.index);
             _world.Destroy(it->second.entity);
           }
+          if (it->second.token != 0)
+            m_byToken.erase(it->second.token);   // drop the token index with the session
           it = m_sessions.erase(it);
         }
         else
         {
           ++it;
         }
+      }
+      // Drop stale rate-limit records (no longer muted and long idle) so the map
+      // can't grow without bound over a long uptime.
+      for (auto it = m_rate.begin(); it != m_rate.end();)
+      {
+        if (_tick >= it->second.mutedUntil && _tick - it->second.windowStart > _timeoutTicks)
+          it = m_rate.erase(it);
+        else
+          ++it;
       }
       return gone;
     }
@@ -275,6 +337,83 @@ namespace Neuron::GameLogic
     }
 
   private:
+    // Resolve an authenticated (tokened) datagram to its session, re-binding the
+    // endpoint if the token arrived from a new address (NAT rebind). Returns null
+    // for a zero/unknown/spoofed token. Updates lastSeenTick on success.
+    Session* Authenticate(const Net::Endpoint& _ep, uint64_t _token, uint32_t _tick)
+    {
+      if (_token == 0)
+        return nullptr;
+      auto ti = m_byToken.find(_token);
+      if (ti == m_byToken.end())
+        return nullptr;   // unknown token: spoofed or already reaped
+
+      const uint64_t newKey = EndpointKey(_ep);
+      if (ti->second != newKey)
+      {
+        // Authenticated client talking from a new address: migrate the session to
+        // the new endpoint key. Skip if another session already holds that key (a
+        // fresh peer reusing the exact addr:port - astronomically unlikely; drop
+        // rather than clobber the incumbent).
+        if (m_sessions.count(newKey) != 0)
+          return nullptr;
+        auto node = m_sessions.extract(ti->second);
+        if (node.empty())
+        {
+          m_byToken.erase(ti);   // index/desync guard
+          return nullptr;
+        }
+        node.key() = newKey;
+        Session& moved = m_sessions.insert(std::move(node)).position->second;
+        moved.endpoint = _ep;
+        moved.lastSeenTick = _tick;
+        ti->second = newKey;
+        return &moved;
+      }
+
+      auto si = m_sessions.find(newKey);
+      if (si == m_sessions.end())
+      {
+        m_byToken.erase(ti);   // index points at nothing: heal
+        return nullptr;
+      }
+      si->second.lastSeenTick = _tick;
+      return &si->second;
+    }
+
+    // Charge one token-less datagram against `_ep`'s budget; return true (drop) when
+    // the endpoint is muted or has just exceeded the window cap.
+    bool RateLimited(const Net::Endpoint& _ep, uint32_t _tick)
+    {
+      RateInfo& ri = m_rate[EndpointKey(_ep)];
+      if (_tick < ri.mutedUntil)
+        return true;   // still cooling down
+      if (_tick - ri.windowStart >= RATE_WINDOW_TICKS)
+      {
+        ri.windowStart = _tick;   // new window
+        ri.count = 0;
+      }
+      if (++ri.count > RATE_MAX_UNAUTH)
+      {
+        ri.mutedUntil = _tick + RATE_MUTE_TICKS;
+        return true;
+      }
+      return false;
+    }
+
+    // Mint a fresh, nonzero session token from the injected source (a CSPRNG on the
+    // real server), or a deterministic fallback for headless tests.
+    uint64_t NextToken()
+    {
+      if (m_tokenSource)
+      {
+        const uint64_t t = m_tokenSource();
+        if (t != 0)
+          return t;
+      }
+      return DEFAULT_TOKEN_BASE + (++m_tokenCounter);
+    }
+
     // Sanitize/de-dupe `_raw` and mirror it onto the session + PlayerRecord.
     // Returns true if the stored name actually changed. Shared by ApplyName (live
     // rename) and OnHello (a rename on an already-connected session).
@@ -375,8 +514,24 @@ namespace Neuron::GameLogic
       return _base;   // astronomically unlikely; give up rather than loop forever
     }
 
-    std::unordered_map<uint64_t, Session> m_sessions;
-    std::vector<Net::GalaxySystemInfo> m_manifest;   // galaxy chart data for new clients
+    // Per-endpoint token-less datagram budget (see RateLimited).
+    struct RateInfo
+    {
+      uint32_t windowStart = 0;   // tick the current window opened
+      uint16_t count = 0;         // token-less datagrams seen this window
+      uint32_t mutedUntil = 0;    // muted through this tick (0 = not muted)
+    };
+
+    // Deterministic fallback token base (headless tests only; the server injects a
+    // CSPRNG). High bits set so a fallback token never looks like an endpoint key.
+    static constexpr uint64_t DEFAULT_TOKEN_BASE = 0xA5A5A5A500000000ULL;
+
+    std::unordered_map<uint64_t, Session> m_sessions;   // keyed by CURRENT endpoint key
+    std::unordered_map<uint64_t, uint64_t> m_byToken;   // session token -> its endpoint key
+    std::unordered_map<uint64_t, RateInfo> m_rate;      // endpoint key -> token-less budget
+    std::function<uint64_t()> m_tokenSource;            // CSPRNG on the server; unset in tests
+    std::vector<Net::GalaxySystemInfo> m_manifest;      // galaxy chart data for new clients
     uint32_t m_spawnCount = 0;
+    uint64_t m_tokenCounter = 0;   // fallback-token sequence (tests)
   };
 }

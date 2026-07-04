@@ -115,10 +115,13 @@ namespace Neuron::Client
       Msg::GalaxyChunk chunk;
       if (Msg::TryDecode(msg, ack))
       {
-        // The handshake reply (B1): our controlled entity + the session token
-        // (B2 will carry the token on every outbound datagram; 0 until then).
+        // The handshake reply: our controlled entity + the session token (B2). From
+        // here on every outbound datagram carries the token so the server can
+        // authenticate us by identity, not by source address - stamp it on the
+        // reliable endpoint (SendInput stamps the unreliable lane directly).
         m_localPlayer = ack.entityId;
         m_sessionToken = ack.sessionToken;
+        m_events.SetToken(ack.sessionToken);
       }
       else if (Msg::TryDecode(msg, reject))
       {
@@ -172,8 +175,10 @@ namespace Neuron::Client
       return;
 
     // The intent rides the unified 'NMSG' unreliable lane as one InputCommand
-    // record (replacing the old bespoke 'NCMD' packet).
-    Msg::PacketWriter writer(Msg::MessageLane::Unreliable);
+    // record (replacing the old bespoke 'NCMD' packet), stamped with our session
+    // token (B2) so the server accepts it as ours. Before HelloAck the token is 0
+    // and input is ignored server-side anyway (we aren't connected yet).
+    Msg::PacketWriter writer(Msg::MessageLane::Unreliable, m_sessionToken);
     writer.Add(_input);
     m_socket.SendTo(m_server, writer.Bytes().data(), writer.Size());
   }

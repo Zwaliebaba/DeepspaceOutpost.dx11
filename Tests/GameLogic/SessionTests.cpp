@@ -34,6 +34,13 @@ namespace
   {
     return _sessions.OnHello(_world, _ep, Hello(_name), _tick).entity;
   }
+
+  // The session token minted for `_ep` on accept (B2). The client learns this from
+  // HelloAck and stamps it on every subsequent datagram.
+  uint64_t TokenOf(GameLogic::ServerSessions& _sessions, const Net::Endpoint& _ep)
+  {
+    return _sessions.All().at(GameLogic::EndpointKey(_ep)).token;
+  }
 }
 
 TEST(Session, HelloConnectsAndSpawns)
@@ -48,10 +55,12 @@ TEST(Session, HelloConnectsAndSpawns)
   EXPECT_TRUE(sessions.Count() == 1);
   EXPECT_TRUE(world.IsValid(out.entity));
 
-  // The accepted session has a HelloAck queued on its Control lane.
+  // The accepted session has a HelloAck queued on its Control lane, and a nonzero
+  // session token (the client's identity from here on).
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
   EXPECT_TRUE(s.Live());
   EXPECT_TRUE(s.events.PendingOutgoing() == 1);
+  EXPECT_NE(s.token, 0u);
 }
 
 TEST(Session, InputFromUnknownEndpointIsIgnored)
@@ -59,11 +68,11 @@ TEST(Session, InputFromUnknownEndpointIsIgnored)
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
 
-  // No hello yet: input from an unknown endpoint neither spawns nor connects.
+  // No hello yet: input from an unknown endpoint neither spawns nor connects,
+  // whether it is token-less or carries a bogus token.
   const Net::Endpoint a{ 0x7F000001, 1001 };
-  ECS::EntityId e = sessions.OnInput(world, a, Input(1, 0.5f), /*tick*/ 1);
-
-  EXPECT_FALSE(world.IsValid(e));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(1, 0.5f), 1)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0xDEADBEEFu, Input(2, 0.5f), 1)));
   EXPECT_TRUE(sessions.Count() == 0);
 }
 
@@ -80,13 +89,14 @@ TEST(Session, HelloWithBadVersionIsRejectedWithoutSpawning)
   EXPECT_TRUE(out.result == GameLogic::HelloResult::Rejected);
   EXPECT_FALSE(world.IsValid(out.entity));
 
-  // A pending (entity-less) shell exists only to carry the HelloReject back.
+  // A pending (entity-less, token-less) shell exists only to carry the HelloReject.
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
   EXPECT_FALSE(s.Live());
+  EXPECT_EQ(s.token, 0u);
   EXPECT_TRUE(s.events.PendingOutgoing() == 1);   // HelloReject queued
 }
 
-TEST(Session, InputAppliesToALiveSessionOnly)
+TEST(Session, InputAppliesOnlyWithTheRightToken)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
@@ -94,10 +104,16 @@ TEST(Session, InputAppliesToALiveSessionOnly)
   const Net::Endpoint a{ 0x7F000001, 1001 };
   ECS::EntityId e = Connect(world, sessions, a);
   ASSERT_TRUE(world.IsValid(e));
+  const uint64_t token = TokenOf(sessions, a);
 
-  ECS::EntityId back = sessions.OnInput(world, a, Input(1, 0.5f), /*tick*/ 2);
-  EXPECT_TRUE(back == e);
+  // Right token from the session's endpoint: applied.
+  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(1, 0.5f), 2) == e);
   EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
+
+  // Wrong token (spoofed source with a bad token) and token-less input: ignored.
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token ^ 0x1u, Input(2, 0.9f), 3)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(3, 0.9f), 4)));
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);   // unchanged
 }
 
 TEST(Session, DistinctEndpointsGetDistinctEntities)
@@ -119,13 +135,60 @@ TEST(Session, SameEndpointReusesSessionAndAppliesLatestInput)
 
   const Net::Endpoint a{ 0x7F000001, 1001 };
   ECS::EntityId e = Connect(world, sessions, a);
+  const uint64_t token = TokenOf(sessions, a);
 
-  sessions.OnInput(world, a, Input(5, 0.9f), 2);    // newer -> applied
+  sessions.OnInput(world, a, token, Input(5, 0.9f), 2);    // newer -> applied
   EXPECT_TRUE(sessions.Count() == 1);
   EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
 
-  sessions.OnInput(world, a, Input(3, 0.1f), 3);    // stale seq -> ignored
+  sessions.OnInput(world, a, token, Input(3, 0.1f), 3);    // stale seq -> ignored
   EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
+}
+
+TEST(Session, AuthenticatedEndpointChangeKeepsTheSession)
+{
+  // A NAT rebind moves the client to a new source address; a correctly-tokened
+  // datagram from that address re-binds the (same) session and keeps the entity.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 1001 };
+  const Net::Endpoint b{ 0x7F000001, 2222 };   // same client, new address
+  ECS::EntityId e = Connect(world, sessions, a);
+  const uint64_t token = TokenOf(sessions, a);
+
+  // Input arrives from the new endpoint with the same token: same entity, migrated.
+  EXPECT_TRUE(sessions.OnInput(world, b, token, Input(1, 0.7f), 2) == e);
+  EXPECT_TRUE(sessions.Count() == 1);
+  EXPECT_TRUE(sessions.Has(b));
+  EXPECT_FALSE(sessions.Has(a));                       // old key vacated
+  EXPECT_EQ(TokenOf(sessions, b), token);             // token index followed the move
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.7f);
+}
+
+TEST(Session, WrongTokenReliableDatagramIsDropped)
+{
+  // A spoofed reliable datagram carrying the wrong token is dropped before decode:
+  // it neither reaches the real session nor provisions a new one.
+  ECS::Registry world;
+  GameLogic::ServerSessions sessions;
+
+  const Net::Endpoint a{ 0x7F000001, 1001 };
+  Connect(world, sessions, a);
+  const uint64_t token = TokenOf(sessions, a);
+
+  Msg::MessageEndpoint spoof;
+  spoof.SetToken(token ^ 0xABCDu);                    // NOT this (or any) session's token
+  spoof.SendRaw(Msg::MessageLane::Gameplay, 0x0400, { 1, 2, 3 });   // any reliable payload
+
+  const Net::Endpoint attacker{ 0x0A000001, 5000 };
+  for (const std::vector<uint8_t>& dg : spoof.WriteDatagrams())
+    sessions.OnReliable(attacker, dg.data(), dg.size(), /*tick*/ 2);
+
+  EXPECT_TRUE(sessions.Count() == 1);                 // no session provisioned for the attacker
+  EXPECT_FALSE(sessions.Has(attacker));
+  Net::ReliableMessage m;
+  EXPECT_FALSE(sessions.All().at(GameLogic::EndpointKey(a)).events.Receive(m));   // nothing delivered
 }
 
 TEST(Session, HelloOnALiveSessionRenamesInsteadOfRespawning)
@@ -145,13 +208,15 @@ TEST(Session, HelloOnALiveSessionRenamesInsteadOfRespawning)
   EXPECT_EQ(world.Get<GameLogic::PlayerRecord>(e).name, "Raxxla");
 }
 
-TEST(Session, IdleSessionsAreReapedAndEntitiesDestroyed)
+TEST(Session, IdleSessionsAreReapedAndTokensForgotten)
 {
   ECS::Registry world;
   GameLogic::ServerSessions sessions;
 
-  ECS::EntityId e1 = Connect(world, sessions, Net::Endpoint{ 0x7F000001, 1001 });
+  const Net::Endpoint a{ 0x7F000001, 1001 };
+  ECS::EntityId e1 = Connect(world, sessions, a);
   ECS::EntityId e2 = Connect(world, sessions, Net::Endpoint{ 0x7F000001, 1002 });
+  const uint64_t token = TokenOf(sessions, a);
 
   std::vector<uint32_t> gone = sessions.Reap(world, /*tick*/ 100, /*timeout*/ 5);
 
@@ -159,6 +224,11 @@ TEST(Session, IdleSessionsAreReapedAndEntitiesDestroyed)
   EXPECT_TRUE(gone.size() == 2);
   EXPECT_TRUE(!world.IsValid(e1));
   EXPECT_TRUE(!world.IsValid(e2));
+
+  // The token index was pruned with the session: the stale token authenticates
+  // nothing (and doesn't resurrect a session).
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(1, 0.5f), 101)));
+  EXPECT_TRUE(sessions.Count() == 0);
 }
 
 TEST(Session, RecentSessionsSurviveReaping)
@@ -283,8 +353,10 @@ TEST(Session, ClientAckClearsTheReliableQueue)
   GameLogic::Session& s = sessions.All().at(GameLogic::EndpointKey(a));
   EXPECT_TRUE(s.events.PendingOutgoing() == 1);   // HelloAck pending (Control lane)
 
-  // Client receives the handshake datagram(s) and acks them back.
+  // Client receives the handshake datagram(s), adopts the token from HelloAck, and
+  // acks back - its acks now carry the token so the server routes them to us.
   Msg::MessageEndpoint client;
+  client.SetToken(s.token);
   for (const std::vector<uint8_t>& dg : s.events.WriteDatagrams())
     client.OnDatagram(dg.data(), dg.size());
   for (const std::vector<uint8_t>& dg : client.WriteDatagrams())
