@@ -25,6 +25,7 @@ namespace
     _w.Add<Combatant>(e, Combatant{ Team::Player, 255, 50, 6000, false });
     _w.Add<PlayerTag>(e, PlayerTag{});
     _w.Add<Wanted>(e, Wanted{});
+    _w.Add<Equipment>(e, Equipment{});   // G2: a missile rack (default 3) to launch from
     return e;
   }
 
