@@ -32,6 +32,8 @@ set(GAME_CLIENT_SOURCES
     GameApp.h
     GameWindows.h
     GameWindows.cpp
+    HudRender.h
+    HudRender.cpp
     SceneMeshes.h
     SceneMeshes.cpp
     CameraRig.h

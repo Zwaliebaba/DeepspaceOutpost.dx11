@@ -17,6 +17,7 @@
 #include "GuiOverlay.h"
 #include "Renderer.h"
 #include "gfx2d.h" // gfx2d_flush - the game's 2D batch replay
+#include "HudRender.h" // RenderGameHud - the native Render2D HUD pass (replacing gfx2d)
 
 class GameApp : public Neuron::GameMain
 {
@@ -51,7 +52,8 @@ class GameApp : public Neuron::GameMain
     void RenderCanvas() override
     {
       GuiOverlay::Update();
-      gfx2d_flush();
+      gfx2d_flush();       // the legacy 2D batch (shrinking as the HUD moves to RenderGameHud)
+      RenderGameHud();     // the native Render2D HUD pass, on top of the batch
       if (Renderer* r = platform_renderer())
         GuiOverlay::Render(r->clientWidth(), r->clientHeight());
     }

@@ -1203,6 +1203,10 @@ static void game_update_flight(void)
     message_count--;
 }
 
+// Render-free accessor for the native HUD pass (HudRender.cpp, a winrt TU that stays off
+// the legacy game headers): is the replication socket up?
+bool game_client_connected(void) { return Client::ReplicationClientInstance().IsOpen(); }
+
 // Per-frame draw for the in-flight/docked state: the 3D scene, HUD and overlays the old
 // loop body emitted (with the simulation-and-draw steps that are still fused).
 static void game_render_flight(void)
@@ -1212,15 +1216,10 @@ static void game_render_flight(void)
   // -status branch here; system data lives in the chart window's panel.
 
   // No offline mode: without a connection there is no world to render (docked or in
-  // flight). ensure_connection keeps retrying; show the connection-lost state meanwhile.
+  // flight). ensure_connection keeps retrying; the native HUD pass (RenderGameHud) draws
+  // the "connection lost" banner meanwhile.
   if (!Client::ReplicationClientInstance().IsOpen())
-  {
-    gfx_clear_display();
-    int ch;
-    gfx_canvas_size(nullptr, &ch);
-    gfx_display_centre_text(ch / 2 - 10, "CONNECTION LOST - RECONNECTING", 140, GFX_COL_GOLD);
     return;
-  }
 
   // The camera-space 3D scene renders in BOTH docked and flight: docked shows the station
   // in view with the StationMenuWindow floating over it (current_screen stays the front
