@@ -1352,6 +1352,20 @@ the ARCHITECTURE.md change-control rule.
 
 ## 10. Track H — Rendering (#13) — **M**, parallel any time
 
+*Status 2026-07-05: **H1 ✅** and **H3 (LOD decision) ✅ core** done — the two
+pieces with a headless-testable core. `DeepspaceOutpost/RenderTable.h` is the
+`NetType → {kind, glyphId, paletteRow}` table (`RenderFor`), consumed by
+`draw_ship` in place of the type if-chain, plus the iconic-LOD range decision
+(`ShouldDrawAsGlyph`); both unit-tested in `Tests/NeuronClient/RenderTableTests.cpp`.
+A distant hull now draws as a contact glyph (a deferred blip; a 2-6-line vector
+glyph is the refinement). **H2 (batched instanced pipeline) and H4 (emissive post
+chain + GPU debris) are deferred**: they are large DX11/HLSL architecture rewrites
+(persistent per-hull line buffers + `DrawIndexedInstanced`; render targets + blur +
+`SV_VertexID` expansion) with **no CI oracle at all** — the sandbox can't compile or
+run the DX11 client, and these are new pipelines, not wiring over proven primitives.
+They should be built in an in-app session where each pass can be iterated visually.
+The H1 table + descriptor is the seam they plug into when that happens.*
+
 Per §13.2.1, in order:
 
 1. **NetType indirection table** first (it is the seam everything else
