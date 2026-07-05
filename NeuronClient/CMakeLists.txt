@@ -85,6 +85,12 @@ set(NEURONCLIENT_HEADERS
     sound.h
     keyboard.h
 
+    # Device-neutral pointer/gesture + order-command cores (Track I; header-only,
+    # pure C++ - the CI-testable half of the touch/command UX).
+    input/GestureRecognizer.h
+    input/OrderMenu.h
+    input/MoveGizmo.h
+
     # Platform backend headers.
     platform/Renderer.h
     platform/GameScene.h
