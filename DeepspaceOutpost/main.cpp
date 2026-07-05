@@ -35,6 +35,7 @@
 #include "Messages/Defs/UnitOrder.h"         // UnitOrder / UnitOrderAck (I1/I3 command protocol)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
+#include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
 #include "Scene3D.h"
 #include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
 #include "input_win.h"                        // input_mouse_state (I3 pointer commands)
@@ -700,78 +701,10 @@ void handle_ability_bar(void)
   s_prevLmb = lmb;
 }
 
-// ---- I6 pointer charts (interaction.md 3.8): click a system, click to jump -------
-//
-// The charts become pick surfaces. A click in the chart map parks the crosshair on
-// the clicked point (the nearest system is what chart_nearest_to_cursor selects, and
-// the existing readout / draw_cross show it); a HYPERSPACE button issues the jump
-// (teleport_to_cursor -> TravelRequest). Window pixels are mapped to the chart's
-// letterboxed 512x514 canvas via gfx_window_to_canvas. The arrow-key crosshair and
-// the hyperspace key still work as accelerators (their formal retirement is I7).
-//
-// Deferred (documented): drag-pan / wheel-zoom of the chart and find-by-name as a
-// pointer search field - the galactic and short-range charts are already separate
-// zoom presets, and the F-key name search still works.
-
-namespace
-{
-  constexpr int CHART_HYP_X = 344;   // canvas coords: the on-chart HYPERSPACE button
-  constexpr int CHART_HYP_Y = 356;
-  constexpr int CHART_HYP_W = 160;
-  constexpr int CHART_HYP_H = 18;
-
-  bool chart_on_hyperspace_button(int _cx, int _cy)
-  {
-    return _cx >= CHART_HYP_X && _cx < CHART_HYP_X + CHART_HYP_W
-        && _cy >= CHART_HYP_Y && _cy < CHART_HYP_Y + CHART_HYP_H;
-  }
-}
-
-// Draw the on-chart HYPERSPACE button (called from the chart render pass).
-static void draw_chart_hyperspace_button(void)
-{
-  if (current_screen != SCR_GALACTIC_CHART && current_screen != SCR_SHORT_RANGE)
-    return;
-  gfx_draw_rectangle(CHART_HYP_X, CHART_HYP_Y, CHART_HYP_X + CHART_HYP_W, CHART_HYP_Y + CHART_HYP_H, GFX_COL_GOLD);
-  gfx_display_colour_text(CHART_HYP_X + 10, CHART_HYP_Y + 5, "HYPERSPACE", GFX_COL_GOLD);
-}
-
-// Per-frame chart pointer input: a click parks the crosshair (selecting the nearest
-// system) or, on the HYPERSPACE button, jumps. No-op off the chart screens.
-static void handle_chart_pointer(void)
-{
-  if (GuiOverlay::IsShown())
-    return;
-  if (current_screen != SCR_GALACTIC_CHART && current_screen != SCR_SHORT_RANGE)
-    return;
-
-  int mx = 0, my = 0;
-  bool lmb = false, rmb = false;
-  input_mouse_state(mx, my, lmb, rmb);
-  int cx = 0, cy = 0;
-  gfx_window_to_canvas(mx, my, &cx, &cy);
-
-  static bool s_prevLmb = false;
-  static bool s_downOnHyp = false;
-  if (lmb && !s_prevLmb)
-  {
-    s_downOnHyp = chart_on_hyperspace_button(cx, cy);
-  }
-  else if (!lmb && s_prevLmb)
-  {
-    if (s_downOnHyp && chart_on_hyperspace_button(cx, cy))
-    {
-      teleport_to_cursor();   // jump to the system nearest the crosshair
-    }
-    else if (!chart_on_hyperspace_button(cx, cy) && cx >= 1 && cx <= 510 && cy >= 37 && cy <= 320)
-    {
-      cross_x = cx;   // click selects: park the crosshair; the readout shows the system
-      cross_y = cy;
-    }
-    s_downOnHyp = false;
-  }
-  s_prevLmb = lmb;
-}
+// The charts moved to a native GUI overlay window (ChartWindow, GameWindows.cpp):
+// F5/F6/F7 open it, a click on its map selects the nearest system, and its own
+// HYPERSPACE button jumps. The old on-canvas pointer handler and the letterboxed
+// draw pass are gone - the overlay draws itself over the flight view.
 
 void handle_flight_keys(void)
 {
@@ -800,20 +733,20 @@ void handle_flight_keys(void)
   if (kbd_F5_pressed)
   {
     find_input = 0;
-    display_galactic_chart();
+    OpenChartWindow(ChartData::GALACTIC);      // native chart overlay (click to select, HYPERSPACE to jump)
   }
 
   if (kbd_F6_pressed)
   {
     find_input = 0;
-    display_short_range_chart();
+    OpenChartWindow(ChartData::SHORT_RANGE);
   }
 
   if (kbd_F7_pressed)
   {
     find_input = 0;
-    // The legacy screen shows server-replicated system data + chart cursor selection.
-    display_data_on_planet();
+    // System data now lives in the chart window's side panel (updates with the selection).
+    OpenChartWindow(ChartData::GALACTIC);
   }
 
   if (kbd_F8_pressed && (!witchspace))
@@ -1491,7 +1424,6 @@ static void game_update_flight(void)
   // handler so a fresh missile lock orbits from the next frame.
   handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
                                //     click is consumed instead of selecting behind it)
-  handle_chart_pointer();      // I6: chart click-select + on-chart hyperspace jump
 
   camera_rig_update();
 
@@ -1512,38 +1444,18 @@ static void game_update_flight(void)
 // loop body emitted (with the simulation-and-draw steps that are still fused).
 static void game_render_flight(void)
 {
-  // Charts (galactic / short range): redraw the chart, the live selected-system readout
-  // and the crosshair every frame. The replicated chart functions are idempotent (they
-  // only re-park the cursor when it is off-screen), so a per-frame redraw suits the
-  // clear-and-redraw back buffer and the crosshair sprite moves cleanly without the old
-  // XOR erase. Handles the chart whether opened docked or in flight.
-  if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
-  {
-    if (current_screen == SCR_GALACTIC_CHART)
-      display_galactic_chart();
-    else
-      display_short_range_chart();
-    show_distance_to_planet();
-    draw_cross(cross_x, cross_y);
-    draw_chart_hyperspace_button();   // I6: on-chart pointer jump
-    return;
-  }
+  // The charts are a native GUI overlay window now (ChartWindow) - it draws itself over
+  // the flight/docked view, so there is no chart branch here. System data lives in that
+  // window's panel too, so the old SCR_PLANET_DATA screen is gone as well.
 
-  // Docked legacy screens (commander status, planet data) redraw every frame, like the charts
-  // above, so there is no empty frame to skip now that the idle-frame present gate is gone.
-  // Both are idempotent (they just re-render from current state). Skipped while a GUI overlay
-  // window is up: it draws + presents on top, so the legacy screen underneath would only be
-  // occluded. (Charts are handled above; the break pattern is handled at the end.)
+  // Docked commander status still redraws every frame (idempotent). Skipped while a GUI
+  // overlay window is up: it draws + presents on top, so the legacy screen underneath
+  // would only be occluded. (The break pattern is handled at the end.)
   if (docked && !GuiOverlay::IsShown())
   {
     if (current_screen == SCR_CMDR_STATUS)
     {
       display_commander_status();
-      return;
-    }
-    if (current_screen == SCR_PLANET_DATA)
-    {
-      display_data_on_planet();
       return;
     }
   }
