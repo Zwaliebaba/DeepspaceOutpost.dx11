@@ -470,6 +470,22 @@ void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap)
 	s_explosions.push_back (ex);
 }
 
+// G1: start a world-anchored explosion at an absolute point, from an ExplosionAt
+// broadcast (a player kill the killer/bystanders should see, decoupled from the
+// respawned victim entity). Uses a fighter hull for the debris mesh; the server's
+// `scale` is a size hint the legacy animation doesn't parameterise, so it is unused
+// for now beyond gating a sane minimum.
+void spawn_explosion_at (const Neuron::Math::Vector3i64& world_pos, int /*scale*/)
+{
+	ReplicatedExplosion ex;
+	ex.worldPos = world_pos;
+	memset (&ex.obj, 0, sizeof (ex.obj));
+	ex.obj.type = SHIP_VIPER;          // player hulls are Vipers; a fighter-sized pop
+	ex.obj.flags = FLG_DEAD;
+	set_init_matrix (ex.obj.rotmat);
+	s_explosions.push_back (ex);
+}
+
 void render_replicated_objects (void)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();

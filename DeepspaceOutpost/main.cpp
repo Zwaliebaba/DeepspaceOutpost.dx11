@@ -34,6 +34,7 @@
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
 #include "Messages/Defs/UnitOrder.h"         // UnitOrder / UnitOrderAck (I1/I3 command protocol)
+#include "Messages/Defs/ExplosionAt.h"       // ExplosionAt (G1 kill VFX)
 #include "input/OrderMenu.h"                  // contextual orders + radial-menu legality (I3 core)
 #include "input/MoveGizmo.h"                  // move-gizmo geometry (I3 core)
 #include "GuiOverlay.h"
@@ -1304,6 +1305,15 @@ static void register_client_event_handlers(void)
     snd_play_sample(SND_EXPLODE);
   });
 
+  // G1: a world-anchored kill VFX (a player death the killer/bystanders should see;
+  // the victim itself got a private EntityDeath and respawned elsewhere). Play the
+  // debris burst at the broadcast point.
+  g_clientBus.Subscribe<Neuron::Msg::ExplosionAt>([](const Neuron::Msg::ExplosionAt& _boom)
+  {
+    spawn_explosion_at(Neuron::Math::Vector3i64{ _boom.x, _boom.y, _boom.z }, _boom.scale);
+    snd_play_sample(SND_EXPLODE);
+  });
+
   // Despawn: drop the entity from the view and clear a missile lock on it.
   g_clientBus.Subscribe<Neuron::Msg::EntityDespawn>([](const Neuron::Msg::EntityDespawn& _ds)
   {
@@ -1444,11 +1454,14 @@ static void process_server_events(void)
     Neuron::Msg::EcmPulse ecm;
     Neuron::Msg::EscapePodUsed pod;
     Neuron::Msg::UnitOrderAck oack;
+    Neuron::Msg::ExplosionAt boom;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
     else if (Neuron::Msg::TryDecode(msg, oack))
       g_clientBus.Publish(oack);
+    else if (Neuron::Msg::TryDecode(msg, boom))
+      g_clientBus.Publish(boom);
     else if (Neuron::Msg::TryDecode(msg, travel))
       g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))

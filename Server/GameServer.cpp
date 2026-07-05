@@ -1001,7 +1001,14 @@ namespace DSOServer
       // respawn. If no station is reachable, RespawnAtNearestStation falls back
       // to leaving them put.
       if (const GameLogic::WorldTransform* pt = m_world.TryGet<GameLogic::WorldTransform>(_k.victim))
+      {
+        // G1: broadcast the kill VFX at the death spot BEFORE the respawn teleports
+        // the hull away. The victim only got a private EntityDeath (so nobody drops
+        // its respawned ship); this world-anchored pop is how the KILLER and
+        // bystanders finally see the kill.
+        m_sessions.Broadcast(Msg::ExplosionAt{ pt->position.x, pt->position.y, pt->position.z, /*scale*/ 2 });
         GameLogic::DropPlayerCargo(m_world, _k.victim, pt->position, m_lootRng);
+      }
       GameLogic::RespawnAtNearestStation(m_world, _k.victim);
       m_world.Remove<GameLogic::ActiveOrder>(_k.victim);   // I1: respawn clean of any standing order
 

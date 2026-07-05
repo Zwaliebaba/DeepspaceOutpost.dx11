@@ -31,6 +31,7 @@
 #include "Messages/Defs/UnitOrder.h"      // UnitOrder / UnitOrderAck / AbilityRequest (I1)
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
+#include "Messages/Defs/ExplosionAt.h"    // ExplosionAt (G1 kill VFX broadcast)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)

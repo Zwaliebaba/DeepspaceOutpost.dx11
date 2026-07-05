@@ -188,5 +188,6 @@ void engage_docking_computer (void);
 // snapshot. Defined in space.cpp; called by the EntityDeath handler (main.cpp).
 namespace Neuron::Net { struct EntitySnapshot; }
 void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap);
+void spawn_explosion_at (const Neuron::Math::Vector3i64& world_pos, int scale);   // G1: world-anchored kill VFX
 
 #endif

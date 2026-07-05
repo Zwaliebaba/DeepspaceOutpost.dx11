@@ -4,9 +4,22 @@
 
 #include "Messages/Serialize.h"
 #include "MessageTestMessages.h"
+#include "Messages/Defs/ExplosionAt.h"   // G1 kill VFX broadcast
 
 using namespace Neuron::Msg;
 using namespace MsgTest;
+
+TEST(MessageCodec, ExplosionAtRoundTrips)
+{
+  ExplosionAt e;
+  e.x = -5000000000ll; e.y = 12345; e.z = 9000000000ll; e.scale = 3;
+  ExplosionAt out;
+  ASSERT_TRUE(Decode(Encode(e), out));
+  EXPECT_EQ(out.x, e.x);
+  EXPECT_EQ(out.y, e.y);
+  EXPECT_EQ(out.z, e.z);
+  EXPECT_EQ(out.scale, e.scale);
+}
 
 TEST(MessageCodec, EveryFieldTypeRoundTrips)
 {
