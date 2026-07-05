@@ -1400,6 +1400,29 @@ the missile target IS the selected enemy. Double-click focuses the camera.
 survives snapshots/despawn correctly (clears on death/despawn like the old
 lock); orbit follows selection; no hover-dependent behaviour.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+selection is unified onto the existing target field `g_missile_lock_target` (which
+already drives the orbit-camera subject, the on-hull reticle, the missile launch,
+and the clear-on-death/despawn sweep) — realizing the plan's "the missile target IS
+the selected enemy" without a risky rename. New `pick_entity_at_screen(mx,my)`
+(`space.cpp`) projects every replicated entity through the SAME optics the reticle
+uses (`camera_view_point` → `CameraSpaceToPixels` over `gfx_scene_size`) and returns
+the one nearest the cursor within a viewport-scaled hit radius — so what you click
+is what you see, and ANY entity is selectable (stations/planets/canisters included,
+for I3's orders), except your own hull and in-flight missiles. `CameraRig` tracks
+the LMB press so a release inside a 6-px slop is a CLICK → select (empty space
+clears); a drag is left to the camera. A compact info card (`display_selection_info`)
+shows the selection's kind + range top-left of the view, and vanishes the frame the
+entity leaves the AOI. **Deviations (low-risk, no-runtime sandbox):** (a) orbit stays
+on RMB-drag (LMB was free) rather than moving to LMB-drag — the plan's LMB-drag-orbit
+/ free-RMB rebind belongs with I3's RMB command grammar, so it lands there; (b) the
+T/U centre-cone lock keys are KEPT as keyboard fallbacks (both now set the same
+selection) — retiring keys is I7; (c) double-click camera-focus is deferred (the
+orbit already follows the selection, which is the focus behaviour); (d) the info
+card shows kind+range, not name/legal-status yet (needs the roster join — I3/I4).
+Behaviour needs an in-app run to verify pixel-accuracy of picking and card
+placement (CI compiles it but cannot exercise the DX11 client).
+
 ### I3 — Command UX: contextual orders, move gizmo, radial menu — **M**
 
 - RMB click = contextual default order per `docs/interaction.md` §3.3

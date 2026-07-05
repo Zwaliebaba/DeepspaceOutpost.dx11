@@ -32,6 +32,16 @@ namespace
 	int s_prevMouseY = 0;
 	bool s_prevRmb = false;
 
+	/* I2 pointer selection: an LMB press-then-release that stayed within the slop
+	 * is a CLICK (select the entity under the cursor); a drag beyond it is not (it
+	 * is reserved for the camera - RMB orbits today, so LMB-drag is simply ignored).
+	 */
+	bool s_prevLmb = false;
+	int  s_lmbDownX = 0;
+	int  s_lmbDownY = 0;
+	bool s_lmbMoved = false;
+	constexpr int kClickSlop = 6;   // pixels of travel that still counts as a click
+
 	/* Starfield motion cue state: the previous look angles + eye, so the dust can
 	 * stream/pan with the camera the way it used to with the ship. */
 	float s_prevYaw = 0.0f;
@@ -212,6 +222,30 @@ void camera_rig_update(void)
 		in.moveUp = KeyAxis(VK_PRIOR, VK_NEXT);
 		in.boost = input_key_down(VK_SHIFT);
 	}
+	/* I2 pointer selection: track the LMB press so a release inside the slop is a
+	 * click. On the flight screen with no UI in front, a click selects the entity
+	 * under the cursor (empty space clears) - the reticle, orbit subject and missile
+	 * target all follow g_missile_lock_target. A drag beyond the slop is left to the
+	 * camera. */
+	if (lmb && !s_prevLmb)
+	{
+		s_lmbDownX = mx;
+		s_lmbDownY = my;
+		s_lmbMoved = false;
+	}
+	else if (lmb)
+	{
+		int ddx = mx - s_lmbDownX; if (ddx < 0) ddx = -ddx;
+		int ddy = my - s_lmbDownY; if (ddy < 0) ddy = -ddy;
+		if (ddx > kClickSlop || ddy > kClickSlop)
+			s_lmbMoved = true;
+	}
+	else if (s_prevLmb && !s_lmbMoved && !uiOwns)
+	{
+		g_missile_lock_target = pick_entity_at_screen(mx, my);
+	}
+	s_prevLmb = lmb;
+
 	s_prevMouseX = mx;
 	s_prevMouseY = my;
 	s_prevRmb = rmb;

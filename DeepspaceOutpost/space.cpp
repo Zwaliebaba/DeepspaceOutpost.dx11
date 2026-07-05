@@ -707,6 +707,65 @@ unsigned int find_lock_target (void)
 }
 
 
+// I2 (interaction.md): pick the replicated entity nearest the SCREEN CURSOR
+// (mx,my in the same full-window pixel space input_mouse_state reports). Projects
+// every entity through the SAME optics the target reticle uses (camera_view_point
+// -> CameraSpaceToPixels over gfx_scene_size), so what you click is what you see.
+// Unlike find_lock_target's centre-cone lock, ANY entity is selectable (stations,
+// planets and canisters too - I3's orders act on them) except your own hull and
+// in-flight missiles. Returns 0xFFFFFFFF when nothing is within the hit radius.
+unsigned int pick_entity_at_screen (int mx, int my)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !camera_rig_ready())
+		return 0xFFFFFFFFu;
+
+	int vw = 0, vh = 0;
+	gfx_scene_size (&vw, &vh);
+	Neuron::Client::Camera& camera = Neuron::Client::MainCamera();
+
+	const long long* org = camera_rig_origin();
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords (ents, org[0], org[1], org[2]);
+
+	// A generous, roughly screen-constant hit radius (pixels), scaled to the
+	// viewport so selection feels the same at any window size.
+	const double hitRadius = (double) vh * 0.06 + 24.0;
+
+	unsigned int best = 0xFFFFFFFFu;
+	double bestPixDist = 1.0e18;
+
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		if (rec.type == SHIP_MISSILE)      // don't target in-flight missiles
+			continue;
+		if (rec.id == rc.LocalPlayer())    // never your own hull
+			continue;
+
+		struct vector camPos = rec.location;
+		camera_view_point (&camPos);
+		if (camPos.z <= 0.0)               // behind the eye
+			continue;
+
+		double sx = 0.0, sy = 0.0;
+		if (!Neuron::Client::CameraSpaceToPixels (camera, camPos.x, camPos.y, camPos.z, vw, vh, sx, sy))
+			continue;
+
+		const double dpx = sx - (double) mx;
+		const double dpy = sy - (double) my;
+		const double pd = sqrt (dpx * dpx + dpy * dpy);
+		if (pd <= hitRadius && pd < bestPixDist)
+		{
+			bestPixDist = pd;
+			best = rec.id;             // nearest to the cursor wins
+		}
+	}
+
+	return best;
+}
+
+
 
 
 /*
@@ -988,6 +1047,41 @@ void display_missiles (void)
 }
 
 
+// I2 info card: a compact readout for the currently SELECTED entity
+// (g_missile_lock_target) - its kind and range - drawn top-left of the flight
+// view. Nothing shows when nothing is selected or the selection is off-screen
+// (out of the AOI); it clears automatically the frame the entity despawns because
+// Sample() then fails. (A richer card - name/legal status - rides I3/I4.)
+static void display_selection_info (void)
+{
+	if (g_missile_lock_target == 0xFFFFFFFFu)
+		return;
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	Neuron::Net::EntitySnapshot ts{};
+	if (!rc.IsOpen() || !rc.Sample (g_missile_lock_target, 1.0, ts))
+		return;   // not currently replicated: no card (and no stale one)
+
+	const long long* org = camera_rig_origin();
+	const double dx = (double) ts.x - (double) org[0];
+	const double dy = (double) ts.y - (double) org[1];
+	const double dz = (double) ts.z - (double) org[2];
+	const long dist = (long) sqrt (dx * dx + dy * dy + dz * dz);
+
+	const char* kind;
+	if (ts.type == SHIP_PLANET)                             kind = "PLANET";
+	else if (ts.type == SHIP_CORIOLIS || ts.type == SHIP_DODEC) kind = "STATION";
+	else if (ts.type == SHIP_CARGO)                         kind = "CARGO";
+	else if (ts.type < 0)                                   kind = "OBJECT";   // sun etc.
+	else                                                    kind = "SHIP";
+
+	char line[64];
+	snprintf (line, sizeof (line), "TARGET %s  %ld", kind, dist);
+	gfx_set_draw_origin (0, 0);
+	gfx_display_colour_text (16, 16, line, GFX_COL_YELLOW_2);
+}
+
+
 void update_console (void)
 {
 	// Float the classic 512x514 dashboard to the bottom-centre of the window when
@@ -1026,6 +1120,10 @@ void update_console (void)
 
 	if (ecm_active)
 		gfx_draw_sprite (IMG_BIG_E, 115, 490);
+
+	// I2 selected-entity readout LAST: it resets the draw origin to (0,0) for its
+	// own top-of-view placement, so it must run after the dashboard-anchored draws.
+	display_selection_info();
 
 	gfx_set_draw_origin (0, 0);
 }

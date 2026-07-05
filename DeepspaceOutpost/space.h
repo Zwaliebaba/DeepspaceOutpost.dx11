@@ -70,10 +70,13 @@ void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
 unsigned int find_lock_target (void);
+unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
 
-// Entity index of the missile-locked ship (0xFFFFFFFF = none). Set by the missile
-// lock keys in main.cpp; read by render_replicated_objects to draw the target
-// reticle on the locked ship.
+// Entity index of the SELECTED / targeted entity (0xFFFFFFFF = none). Set by a
+// pointer click (pick_entity_at_screen) or the centre-cone lock key; read by
+// render_replicated_objects to draw the target reticle, by the camera rig as the
+// orbit subject, and by the missile launch as its target - "the missile target IS
+// the selected enemy" (interaction.md I2). Cleared when the entity dies/despawns.
 extern unsigned int g_missile_lock_target;
 
 /* Weapon / HUD presentation state (the server owns the authoritative state). */
