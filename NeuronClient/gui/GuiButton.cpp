@@ -60,7 +60,9 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
     if (m_disabled)
       g_editorFont.SetColor(128, 128, 128, 255);
     else
-      g_editorFont.SetColor(255, 255, 255, 255);   // white selected-label text (reference scheme)
+      // Selected buttons have the LIGHT blue gradient fill, so the label is dark navy
+      // (the frame colour) - white washes out on it, same reason the window title is navy.
+      g_editorFont.SetColor(42, 56, 82, 255);
 
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
@@ -153,7 +155,7 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
                              top, bottom, bottom);
 
     g_editorFont.SetRenderShadow(true);
-    g_editorFont.SetColor(255, 255, 255, 255);   // white selected-label text (reference scheme)
+    g_editorFont.SetColor(42, 56, 82, 255);   // dark navy on the light blue selected gradient
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
     else
