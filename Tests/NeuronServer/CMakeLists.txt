@@ -19,6 +19,10 @@ target_compile_features(NeuronServer.Tests PRIVATE cxx_std_23)
 # (PlayerPersistence.h) and the ECS world the persistence round-trip test drives.
 target_link_libraries(NeuronServer.Tests PRIVATE NeuronServer GameLogic GTest::gtest_main)
 
+# Server/ (header-only) for GalaxyRows.h - the seed<->row<->manifest conversions
+# the v2 galaxy-persistence tests exercise.
+target_include_directories(NeuronServer.Tests PRIVATE ${CMAKE_SOURCE_DIR}/Server)
+
 if(MSVC)
     target_compile_options(NeuronServer.Tests PRIVATE /W4)
 endif()

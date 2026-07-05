@@ -27,8 +27,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <optional>
 #include <string>
 #include <thread>
@@ -70,6 +72,21 @@ namespace Neuron::Persist
     // Append one command-log row (rings; drops-oldest past the cap, counted).
     void QueueCommand(const CommandLogEntry& _entry);
 
+    // Queue drifted market rows. Coalesced per (system,commodity): re-snapshotting
+    // an unchanged market every cadence stays free and memory is bounded by the
+    // number of distinct rows, not the cadence.
+    void QueueMarketRows(const std::vector<MarketRow>& _rows);
+
+    // --- called ONCE at boot, on the sim thread, BEFORE any queue is fed -------
+    // Synchronous bulk reads used to lay out the world. Safe to call directly on
+    // the store here because no snapshot/command/load has been queued yet, so the
+    // writer thread is idle-waiting and cannot be inside a flush.
+
+    // Every system (location) row. Empty ⇒ the DB has not been seeded yet.
+    [[nodiscard]] std::vector<SystemRow> LoadSystems();
+    // Every persisted market row, to restore drifted trade state at boot.
+    [[nodiscard]] std::vector<MarketRow> LoadMarkets();
+
     // Request an async load for `_commanderName`; the result arrives via DrainLoads.
     void RequestLoad(const std::string& _commanderName);
 
@@ -96,6 +113,7 @@ namespace Neuron::Persist
     std::condition_variable m_cv;
     std::unordered_map<std::string, PlayerPersistState> m_pendingPlayers;   // coalesced
     std::deque<CommandLogEntry> m_pendingCommands;                          // ring
+    std::map<std::pair<int32_t, int32_t>, MarketRow> m_pendingMarkets;      // coalesced by (system,commodity)
     std::vector<std::string> m_pendingLoads;
     std::vector<PlayerLoadResult> m_completedLoads;
     std::atomic<uint64_t> m_droppedCommands{ 0 };

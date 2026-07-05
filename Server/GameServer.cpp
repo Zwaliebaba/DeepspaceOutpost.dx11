@@ -50,19 +50,36 @@ namespace DSOServer
     , m_aiRng(Cfg::AI_SEED)
     , m_hyperRng(Cfg::HYPER_SEED)
   {
-    // The authoritative world: home system + procedural galaxy; every client
-    // gets the chart manifest on connect.
-    WorldSetup setup = BuildWorld(m_world);
+    // Persistence (B4): null unless DSO_DB is set (then the connect flow defers the
+    // spawn until the commander's durable state loads). Built BEFORE the world so
+    // the galaxy layout can be loaded from the store (v2).
+    m_persist = MakePersistenceService();
+
+    // The authoritative world: laid out from the persisted system rows (the
+    // initial-loading mechanism) when the DB is seeded, else generated from the
+    // seed. Drifted markets are restored on top. Every client gets the chart
+    // manifest on connect.
+    std::vector<Neuron::Persist::SystemRow> systems;
+    std::vector<Neuron::Persist::MarketRow> markets;
+    if (m_persist)
+    {
+      systems = m_persist->LoadSystems();   // boot-only synchronous read (writer idle)
+      markets = m_persist->LoadMarkets();
+      if (systems.empty())
+        std::fprintf(stderr,
+            "[persist] DSO_DB is set but dbo.systems is empty - run tools/dbseed to seed the galaxy. "
+            "Falling back to seed-generated locations; market drift will NOT be persisted this run.\n");
+      else
+        m_marketsPersisted = true;   // the FK targets exist, so drift can be written back
+    }
+
+    WorldSetup setup = BuildWorld(m_world, systems, markets);
     m_landmarks = std::move(setup.landmarks);
     m_sessions.SetManifest(std::move(setup.manifest));
 
     // Session tokens (B2) come from the OS CSPRNG, not a gameplay RNG stream: a
     // token must be unguessable, and determinism rules stop at the GameLogic edge.
     m_sessions.SetTokenSource(&SecureRandom64);
-
-    // Persistence (B4): null unless DSO_DB is set (then the connect flow defers the
-    // spawn until the commander's durable state loads).
-    m_persist = MakePersistenceService();
 
     // Datagram routing: 'NMSG' packets carry the unreliable InputCommand lane;
     // 'NRLB' datagrams feed each session's reliable lanes (and provision a pending
@@ -169,6 +186,11 @@ namespace DSOServer
     // 5. Persist changed players on a slow cadence (B4). No-op when disabled.
     if (m_persist && m_tick % Cfg::PERSIST_INTERVAL == 0)
       SavePlayers();
+
+    // 5b. Persist drifted station markets on a slower cadence (v2). Only when the
+    //     galaxy was loaded from seeded rows (else the FK targets don't exist).
+    if (m_persist && m_marketsPersisted && m_tick % Cfg::MARKET_PERSIST_INTERVAL == 0)
+      SaveMarkets();
 
     // 6. Record this tick's metrics (D3) and emit a rolling summary line.
     Server::TickSample sample;
@@ -434,6 +456,34 @@ namespace DSOServer
         m_persist->RequestLoad(kv.second.name);
 
     m_lastPersist.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
+  }
+
+  void GameServer::SaveMarkets()
+  {
+    if (!m_persist)
+      return;
+
+    // Snapshot each station's market; enqueue a system's rows only when its
+    // stock/prices actually drifted since the last save (trades are rare relative
+    // to the tick rate, so most cadences enqueue nothing).
+    m_world.Each<GameLogic::ServerStation>([this](ECS::EntityId, GameLogic::ServerStation& _st)
+    {
+      MarketDigest digest;
+      for (int c = 0; c < GameLogic::COMMODITY_COUNT; ++c)
+      {
+        digest.price[c] = _st.market[c].price;
+        digest.stock[c] = _st.market[c].quantity;
+      }
+      if (!m_lastMarket.Changed(_st.systemId, digest))
+        return;
+
+      std::vector<Neuron::Persist::MarketRow> rows;
+      rows.reserve(GameLogic::COMMODITY_COUNT);
+      for (int c = 0; c < GameLogic::COMMODITY_COUNT; ++c)
+        rows.push_back(Neuron::Persist::MarketRow{ _st.systemId, c,
+                                                   _st.market[c].quantity, _st.market[c].price, m_tick });
+      m_persist->QueueMarketRows(rows);
+    });
   }
 
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)

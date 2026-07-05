@@ -1,4 +1,4 @@
--- DeepspaceOutpost persistence schema v1 (Microsoft SQL Server).
+-- DeepspaceOutpost persistence schema v2 (Microsoft SQL Server).
 --
 -- Shipped with the server; apply once against the `dso` database before starting
 -- with DSO_DB pointed at it. Idempotent: every object is guarded with IF NOT
@@ -9,6 +9,15 @@
 -- Design invariants (ARCHITECTURE.md §12): durable state only - never per-tick
 -- positions. `empires` exists from day one so the Track C identity layer adds
 -- columns/rows, not a rekeying migration.
+--
+-- v2 (galaxy locations): the universe is no longer regenerated from a seed alone
+-- when the server starts. `systems` holds every planet/station LOCATION as a
+-- durable row (loaded at boot, seeded once by tools/dbseed), so system ids are
+-- stable across server upgrades and generator changes, and `station_markets` can
+-- key against them. The seed is retained only as provenance (world_meta
+-- 'galaxy_seed'). Planet positions are STATIC, so persisting them honors §12's
+-- "never per-tick positions" rule (that rule is about moving entities, not the
+-- fixed layout of the world).
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'accounts')
 CREATE TABLE dbo.accounts (
@@ -51,7 +60,7 @@ CREATE TABLE dbo.player_cargo (        -- non-zero stacks only
 );
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'station_markets')
-CREATE TABLE dbo.station_markets (     -- lazily materialized; authoritative from F4
+CREATE TABLE dbo.station_markets (     -- authoritative once seeded; drift persisted on a slow cadence
   system_id    INT NOT NULL,
   commodity    TINYINT NOT NULL,
   stock        SMALLINT NOT NULL,
@@ -79,3 +88,45 @@ CREATE TABLE dbo.command_log (         -- audit/replay; order = log_id
 -- Seed the schema version (the server checks this and refuses a newer schema).
 IF NOT EXISTS (SELECT * FROM dbo.world_meta WHERE meta_key = 'schema_version')
 INSERT INTO dbo.world_meta (meta_key, meta_value) VALUES ('schema_version', '1');
+
+-- ===========================================================================
+-- v2: durable galaxy layout.
+--
+-- `systems` is the initial-loading mechanism for the universe: one row per
+-- planet/station, positioned in the absolute int64 world. The server loads these
+-- at boot instead of regenerating from a seed, so the layout is stable, editable,
+-- and referable. tools/dbseed populates it once (it can regenerate from the seed
+-- to fill an empty table, or the rows can be authored/edited directly).
+-- system_id is NOT an identity column: it is the stable galaxy id (the procedural
+-- index, or -1 for the hand-placed home system), assigned by the seeder.
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'systems')
+CREATE TABLE dbo.systems (
+  system_id    INT PRIMARY KEY,       -- stable galaxy id (-1 = home); assigned, not IDENTITY
+  name         NVARCHAR(32) NOT NULL,
+  planet_x     BIGINT NOT NULL,       -- absolute int64 world position of the planet
+  planet_y     BIGINT NOT NULL,
+  planet_z     BIGINT NOT NULL,
+  station_x    BIGINT NOT NULL,       -- absolute int64 world position of the station
+  station_y    BIGINT NOT NULL,
+  station_z    BIGINT NOT NULL,
+  economy      TINYINT NOT NULL,      -- 0..7 (drives the market baseline)
+  government   TINYINT NOT NULL,      -- 0..7
+  tech_level   TINYINT NOT NULL,
+  population   INT NOT NULL,
+  productivity INT NOT NULL,
+  radius       INT NOT NULL,
+  market_seed  INT NOT NULL           -- per-system seed fed to GenerateMarket()
+);
+
+-- Tie every market row to a real system now that one exists. Guarded on the
+-- constraint name so re-running is safe; both tables are created earlier in this
+-- same (GO-less) batch, so the reference resolves.
+IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_station_markets_systems')
+ALTER TABLE dbo.station_markets
+  ADD CONSTRAINT FK_station_markets_systems
+  FOREIGN KEY (system_id) REFERENCES dbo.systems(system_id);
+
+-- Bump the version now that v2's objects exist (append-only: never edit the v1
+-- insert above). Idempotent - only advances a v1 row.
+IF EXISTS (SELECT * FROM dbo.world_meta WHERE meta_key = 'schema_version' AND meta_value = '1')
+UPDATE dbo.world_meta SET meta_value = '2' WHERE meta_key = 'schema_version';

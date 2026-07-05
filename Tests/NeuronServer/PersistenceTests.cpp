@@ -7,6 +7,8 @@
 #include "PlayerPersistence.h"      // FromComponents / ApplyToComponents converters
 #include "StationProtocol.h"        // Net::StationRequest / StationRequestKind (replay test)
 #include "Messages/Serialize.h"     // Msg::Encode / Msg::Decode / Msg::Raw
+#include "GalaxyGen.h"              // GenerateSystem / ToManifestEntry (v2 parity)
+#include "GalaxyRows.h"             // BuildSystemRows / BaselineMarketRows / ManifestEntryFrom (Server-side, header-only)
 
 #include "PlayerPersistState.h"
 #include "PersistenceStore.h"
@@ -285,4 +287,113 @@ TEST(Persistence, CommandLogReplayReproducesWalletOutcomes)
   }
 
   EXPECT_EQ(creditsB, creditsA);
+}
+
+// --- v2: durable galaxy layout + persistent markets ---------------------------
+
+TEST(GalaxyPersistence, BuildSystemRowsCoversTheWholeGalaxyPlusHome)
+{
+  constexpr GameLogic::GalaxyConfig cfg{};
+  const std::vector<Persist::SystemRow> rows = DSOServer::BuildSystemRows(cfg);
+
+  // Every procedural system plus the hand-placed home (id -1) at the last index.
+  ASSERT_EQ(rows.size(), static_cast<std::size_t>(cfg.planetCount) + 1);
+  const Persist::SystemRow& home = rows.back();
+  EXPECT_EQ(home.systemId, -1);
+  EXPECT_EQ(home.name, "HOME");
+  EXPECT_EQ(home.planetX, 0);
+  EXPECT_EQ(home.planetZ, 65536);
+  EXPECT_EQ(home.stationZ, -3000);
+}
+
+TEST(GalaxyPersistence, RowsMatchTheGeneratorSoTheUnseededFallbackIsUnchanged)
+{
+  // The seeded rows must equal what the old direct generator/manifest produced,
+  // so a server with no DB (which regenerates) lays out the identical world.
+  constexpr GameLogic::GalaxyConfig cfg{};
+  const std::vector<Persist::SystemRow> rows = DSOServer::BuildSystemRows(cfg);
+
+  for (uint32_t i = 0; i < 16; ++i)
+  {
+    const GameLogic::GalaxySystem s = GameLogic::GenerateSystem(cfg, i);
+    const Persist::SystemRow& r = rows[i];
+    EXPECT_EQ(r.systemId, static_cast<int32_t>(s.id));
+    EXPECT_EQ(r.planetX, s.planetPos.x);
+    EXPECT_EQ(r.planetY, s.planetPos.y);
+    EXPECT_EQ(r.planetZ, s.planetPos.z);
+    EXPECT_EQ(r.stationX, s.stationPos.x);
+    EXPECT_EQ(r.economy, s.planet.economy);
+    EXPECT_EQ(r.marketSeed, s.marketSeed);
+    EXPECT_EQ(r.name, s.name);
+
+    const Net::GalaxySystemInfo want = GameLogic::ToManifestEntry(s);
+    const Net::GalaxySystemInfo got = DSOServer::ManifestEntryFrom(r);
+    EXPECT_EQ(got.id, want.id);
+    EXPECT_EQ(got.x, want.x);
+    EXPECT_EQ(got.z, want.z);
+    EXPECT_EQ(got.economy, want.economy);
+    EXPECT_EQ(got.population, want.population);
+    EXPECT_EQ(std::string(got.name), std::string(want.name));
+  }
+}
+
+TEST(GalaxyPersistence, SystemRowsAndBaselineMarketsRoundTripThroughTheStore)
+{
+  constexpr GameLogic::GalaxyConfig cfg{};
+  const std::vector<Persist::SystemRow> rows = DSOServer::BuildSystemRows(cfg);
+
+  Persist::InMemoryStore store;
+  store.UpsertSystems(rows);
+
+  std::vector<Persist::MarketRow> baseline;
+  for (const Persist::SystemRow& s : rows)
+  {
+    const auto m = DSOServer::BaselineMarketRows(s, /*tick*/ 0);
+    baseline.insert(baseline.end(), m.begin(), m.end());
+  }
+  store.UpsertMarketRows(baseline);
+
+  EXPECT_EQ(store.SystemCount(), rows.size());
+  EXPECT_EQ(store.MarketRowCount(), rows.size() * GameLogic::COMMODITY_COUNT);
+  EXPECT_EQ(store.LoadSystems().size(), rows.size());
+
+  // Alien Items (index 16) is never stocked in a baseline market.
+  for (const Persist::MarketRow& mr : store.LoadMarketRows())
+    if (mr.commodity == GameLogic::ALIEN_ITEMS_INDEX)
+      EXPECT_EQ(mr.stock, 0);
+
+  // Idempotent: re-seeding the same rows doesn't multiply them.
+  store.UpsertSystems(rows);
+  EXPECT_EQ(store.SystemCount(), rows.size());
+}
+
+TEST(GalaxyPersistence, ServiceBootLoadsSystemsAndDrainsMarketDrift)
+{
+  constexpr GameLogic::GalaxyConfig cfg{};
+  const std::vector<Persist::SystemRow> rows = DSOServer::BuildSystemRows(cfg);
+
+  auto store = std::make_unique<Persist::InMemoryStore>();
+  store->UpsertSystems(rows);
+  Persist::InMemoryStore* raw = store.get();
+  Persist::PersistenceService svc(std::move(store), /*startThread*/ false);
+
+  // Boot-time bulk reads.
+  EXPECT_EQ(svc.LoadSystems().size(), rows.size());
+  EXPECT_TRUE(svc.LoadMarkets().empty());
+
+  // Drifted markets coalesce per (system,commodity), latest wins, one write.
+  svc.QueueMarketRows({
+    { 0, 1, 42, 1000, 900 },
+    { 0, 1, 43, 1004, 950 },   // same key -> coalesced
+    { 5, 2, 10,  500, 900 },
+  });
+  svc.FlushPendingOnce();
+
+  EXPECT_EQ(raw->MarketRowCount(), 2u);   // (0,1) coalesced + (5,2)
+  for (const Persist::MarketRow& mr : raw->LoadMarketRows())
+    if (mr.systemId == 0 && mr.commodity == 1)
+    {
+      EXPECT_EQ(mr.stock, 43);            // latest value survived
+      EXPECT_EQ(mr.price, 1004);
+    }
 }

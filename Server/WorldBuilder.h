@@ -2,16 +2,20 @@
 
 // WorldBuilder - bootstrap the authoritative world (Server).
 //
-// Fills a fresh registry with the hand-placed home system (planet, station with
-// its market, one opt-in pirate) and the procedural galaxy (a planet + market-
-// carrying station per generated system), and builds the chart manifest shipped
-// to every client on connect. Pure world-construction - no sockets, no loop
-// state - so the server main stays orchestration only.
+// Lays out the universe from durable SYSTEM ROWS (planet + market-carrying
+// station per system, home included) and builds the chart manifest shipped to
+// every client on connect. The rows come from the persistence store when the DB
+// is seeded (the initial-loading mechanism, so ids/positions are stable); with no
+// store the same rows are generated from the galaxy seed as a fallback, so the
+// no-persistence server is byte-for-byte the old world. Each station's market
+// starts at the generated baseline and is overlaid with any persisted drift.
+// Pure world-construction - no sockets, no loop state.
 
 #include <vector>
 
 #include "ECS.h"
 #include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo
+#include "PersistenceStore.h"             // Neuron::Persist::SystemRow / MarketRow
 
 namespace DSOServer
 {
@@ -22,12 +26,16 @@ namespace DSOServer
     // destroyed, so the ids stay valid for the process lifetime.
     std::vector<Neuron::ECS::EntityId> landmarks;
 
-    // The chart manifest: the procedural systems plus the hand-placed home
-    // system (id -1) so players can always teleport back.
+    // The chart manifest: every system, home (id -1) included, so players can
+    // always teleport back.
     std::vector<Neuron::Net::GalaxySystemInfo> manifest;
   };
 
-  // Build the world into `_world`; returns the landmarks + manifest the send
-  // path and sessions need.
-  [[nodiscard]] WorldSetup BuildWorld(Neuron::ECS::Registry& _world);
+  // Build the world into `_world` from the given system rows (empty ⇒ generate the
+  // default galaxy from the seed), overlaying `_marketDrift` onto each station's
+  // baseline market. Returns the landmarks + manifest the send path and sessions
+  // need.
+  [[nodiscard]] WorldSetup BuildWorld(Neuron::ECS::Registry& _world,
+                                      const std::vector<Neuron::Persist::SystemRow>& _systems,
+                                      const std::vector<Neuron::Persist::MarketRow>& _marketDrift);
 }

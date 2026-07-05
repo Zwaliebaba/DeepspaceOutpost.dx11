@@ -15,6 +15,7 @@
 // startup + the loop; world construction lives in WorldBuilder; tuning knobs in
 // ServerConfig.h.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -68,6 +69,16 @@ namespace DSOServer
       }
     };
 
+    // One station's market as a flat digest, so the on-change cache can persist a
+    // system's rows only when its stock/prices actually drift (a trade), not every
+    // cadence. Equal ⇔ every commodity's price and quantity match.
+    struct MarketDigest
+    {
+      std::array<int32_t, Neuron::GameLogic::COMMODITY_COUNT> price{};
+      std::array<int32_t, Neuron::GameLogic::COMMODITY_COUNT> stock{};
+      bool operator==(const MarketDigest&) const = default;
+    };
+
     // Two durable snapshots are "the same" if every persisted field matches - the
     // world tick differs every save, so it is excluded (else nothing is ever equal).
     struct PersistStateEqual
@@ -96,6 +107,7 @@ namespace DSOServer
     void PublishState();
     void PublishStrategicFor(Neuron::GameLogic::Session& _s);   // E3: per-system rollup to one viewer
     void SavePlayers();           // B4: cadence snapshot of live players (on change)
+    void SaveMarkets();           // v2: cadence snapshot of drifted station markets (on change)
 
     // --- handlers & helpers ---
     void RegisterSubscribers();
@@ -146,6 +158,13 @@ namespace DSOServer
     // server behaves exactly as before). The change-cache skips unchanged saves.
     std::unique_ptr<Neuron::Persist::PersistenceService> m_persist;
     Neuron::Server::OnChangeCache<uint64_t, Neuron::Persist::PlayerPersistState, PersistStateEqual> m_lastPersist;
+
+    // v2 galaxy persistence: true once the world was laid out from seeded system
+    // rows (only then may market drift be written back - the FK needs the systems
+    // row to exist). Last-persisted market per system id, so a cadence save writes
+    // only the systems whose stock/prices actually changed.
+    bool m_marketsPersisted = false;
+    Neuron::Server::OnChangeCache<int32_t, MarketDigest> m_lastMarket;
 
     // D3 tick metrics: per-tick timing/counters, summarized periodically. The byte
     // counter is summed across this tick's sends; the candidate-pair counter is

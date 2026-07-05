@@ -78,6 +78,16 @@ add_subdirectory ("Server")
 # real UDP stack; its --smoke mode (server + 8 bots on loopback) is a CTest test.
 add_subdirectory ("BotClient")
 
+# Galaxy seeding tool (v2): populates dbo.systems + baseline markets so the server
+# loads the universe from the DB. Windows/ODBC only, same gate as the server's
+# persistence backend, so a default (CI) configure skips it entirely. (Server's
+# own CMakeLists declares the same option; re-declaring it here is a no-op that
+# just makes the flag visible at this scope.)
+option(DSO_ENABLE_ODBC "Build the SQL Server (ODBC) persistence backend" OFF)
+if(DSO_ENABLE_ODBC)
+    add_subdirectory ("tools/dbseed")
+endif()
+
 # Per-library GoogleTest projects (run by CTest in CI). Migrated from the former
 # hand-rolled Tests/ executable; see Tests/ for the per-module breakdown. Guarded
 # by BUILD_TESTING so a tests-off configure skips them (and the GoogleTest fetch).
