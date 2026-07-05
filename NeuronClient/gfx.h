@@ -1,29 +1,9 @@
 #ifndef GFX_H
 #define GFX_H
 
-#ifdef RES_800_600
-
-/*
- * The DX11 port renders into a fixed 512x514 logical canvas and the present
- * step centres/letterboxes it in the window. The only retro metrics still used
- * are the drawing scale and the chart centre; the historical Allegro pixel
- * offsets (X/Y_OFFSET) and view-rect bounds (VIEW_*) are gone - every
- * coordinate is canvas-local now.
- */
-#define GFX_SCALE		(2)
-#define GFX_X_CENTRE	(256)
-#define GFX_Y_CENTRE	(192)
-
-#endif
-
-#ifndef GFX_SCALE
-
-#define GFX_SCALE		(1)
-#define GFX_X_CENTRE	(128)
-#define GFX_Y_CENTRE	(96)
-
-#endif
-
+// The retro canvas metrics (GFX_SCALE / GFX_X_CENTRE / GFX_Y_CENTRE) moved to native
+// ChartData constants (ChartData.h) - the only thing that still used them - and the
+// letterbox that needed the 512x514 canvas is retired, so they are gone from here.
 
 #define GFX_COL_BLACK		0
 #define GFX_COL_DARK_RED	28
@@ -83,7 +63,6 @@ void gfx_display_colour_text (int x, int y, const char *txt, int col);
 void gfx_display_centre_text (int y, const char *str, int psize, int col);
 void gfx_clear_display (void);
 void gfx_clear_text_area (void);
-void gfx_display_pretty_text (int tx, int ty, int bx, int by, const char *txt);
 void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
 void gfx_draw_sprite (int sprite_no, int x, int y);

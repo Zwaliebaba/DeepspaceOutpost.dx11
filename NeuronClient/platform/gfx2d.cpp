@@ -129,10 +129,10 @@ std::map<std::string, Texture> g_textures;
  * verd2/verd4 grabber-font atlas (platform/Font). */
 std::shared_ptr<Neuron::Graphics::Texture> g_font_sheet;
 
-/* Monospaced cell metrics in canvas pixels. The body advance (~8px) matches the
- * layout the game already assumes (e.g. gfx_display_pretty_text wraps at width/8),
- * and the ~0.6 w:h ratio matches TextRenderer so the sheet looks the same here and
- * in the menus. The title size is the larger heading font (psize 140). */
+/* Monospaced cell metrics in canvas pixels. The ~8px body advance matches the layout
+ * the game assumes (text wraps at width/8), and the ~0.6 w:h ratio matches TextRenderer
+ * so the sheet looks the same here and in the menus. The title size is the larger heading
+ * font (psize 140). */
 struct FontSize { float charW, charH; };
 constexpr FontSize BODY_FONT  { 8.0f, 13.0f };
 constexpr FontSize TITLE_FONT { 12.0f, 20.0f };
@@ -450,36 +450,6 @@ void gfx_display_centre_text(int y, const char* str, int psize, int col)
 	drawString(fs, mid - w / 2, y, str, col_rgba(col));
 }
 
-void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt)
-{
-	/* 'by' (bottom bound) is unused: the original wraps by width only. */
-	char strbuf[100];
-	const char* str = txt;
-	int   len = (int)std::strlen(txt);
-	int   maxlen = (bx - tx) / 8;
-	if (maxlen <= 0) maxlen = 1;
-	/* A line copies pos+1 chars plus a NUL into strbuf, and pos can reach maxlen, so
-	 * clamp maxlen to the buffer to keep a wide (bx-tx) from overflowing it. */
-	if (maxlen > static_cast<int>(sizeof(strbuf)) - 2) maxlen = static_cast<int>(sizeof(strbuf)) - 2;
-
-	while (len > 0)
-	{
-		int pos = maxlen;
-		if (pos > len) pos = len;
-		while (pos > 0 && str[pos] != ' ' && str[pos] != ',' && str[pos] != '.' && str[pos] != '\0')
-			pos--;
-		if (pos <= 0) pos = (len < maxlen) ? len : maxlen;
-
-		len = len - pos - 1;
-		char* bp = strbuf;
-		for (int i = 0; i <= pos; i++)
-			*bp++ = *str++;
-		*bp = '\0';
-
-		drawString(BODY_FONT, tx, ty, strbuf, col_rgba(GFX_COL_WHITE));
-		ty += 8 * GFX_SCALE;
-	}
-}
 
 /* ---- sprites / HUD ---- */
 void gfx_draw_sprite(int sprite_no, int x, int y)

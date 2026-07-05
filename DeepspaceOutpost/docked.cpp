@@ -230,8 +230,8 @@ static void chart_project_short_range (const std::vector<Neuron::Net::GalaxySyst
 	{
 		double lyx = (double)(_g[i].x - ox) / (double)SR_UNITS_PER_LY;
 		double lyz = (double)(_g[i].z - oz) / (double)SR_UNITS_PER_LY;
-		_px[i] = GFX_X_CENTRE + (int)lround (lyx * SR_PX_PER_LY);
-		_py[i] = GFX_Y_CENTRE + (int)lround (lyz * SR_PX_PER_LY);
+		_px[i] = ChartData::PLOT_W / 2 + (int)lround (lyx * SR_PX_PER_LY);
+		_py[i] = ChartData::PLOT_H / 2 + (int)lround (lyz * SR_PX_PER_LY);
 	}
 }
 
@@ -323,10 +323,10 @@ void ChartData::Name (int _i, char* _buf, int _buflen)
 int ChartData::Blob (int _i)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return GFX_SCALE * 2;
+	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return ChartData::SCALE * 2;
 	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[_i];
 	const int blob = ((s.economy ^ s.techLevel) & 1) + (s.government & 1) + 2;   // 2..4, echoing the legacy blobs
-	return blob * GFX_SCALE;
+	return blob * ChartData::SCALE;
 }
 
 int ChartData::CurrentIndex (void) { return chart_current_system(); }
@@ -337,9 +337,9 @@ bool ChartData::FuelCircle (int _kind, int* _cx, int* _cy, int* _r)
 	if (_kind != ChartData::SHORT_RANGE) return false;   // the galactic chart draws no fuel ring
 	// Short-range is centred on the current system, so the fuel ring sits at the chart
 	// centre; radius is the fuel range in chart px (cmdr.fuel is tenths of a light year).
-	if (_cx) *_cx = GFX_X_CENTRE;
-	if (_cy) *_cy = GFX_Y_CENTRE;
-	if (_r)  *_r  = cmdr.fuel * GFX_SCALE;
+	if (_cx) *_cx = ChartData::PLOT_W / 2;
+	if (_cy) *_cy = ChartData::PLOT_H / 2;
+	if (_r)  *_r  = cmdr.fuel * ChartData::SCALE;
 	return true;
 }
 

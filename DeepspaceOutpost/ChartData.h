@@ -24,9 +24,12 @@ namespace ChartData
   };
 
   // The fixed chart-canvas the coordinates below are authored in (the legacy 512x384
-  // play-area optics; the window scales it to fit).
+  // play-area optics; the window scales it to fit). The chart centre is PLOT_W/2, PLOT_H/2,
+  // and SCALE is the retro focal "2x" baked into the blob sizes and fuel-ring radius.
+  // (These replace the old GFX_X_CENTRE / GFX_Y_CENTRE / GFX_SCALE gfx.h macros.)
   inline constexpr int PLOT_W = 512;
   inline constexpr int PLOT_H = 384;
+  inline constexpr int SCALE = 2;
 
   bool Ready();               // is the replicated galaxy manifest present?
   int  Count();               // number of systems in the manifest
