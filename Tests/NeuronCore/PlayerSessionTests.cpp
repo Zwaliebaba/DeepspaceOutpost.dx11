@@ -65,10 +65,12 @@ TEST(PlayerSession, PlayerStatusRoundTripsAllFields)
   in.wantedLevel = 8;
   in.score = 512;
   in.laserTemp = 90;
+  in.cabinTemp = 175;   // G4
 
   PlayerStatus out;
   ASSERT_TRUE(Decode(Encode(in), out));
   EXPECT_TRUE(in.Fields() == out.Fields());   // every field preserved
+  EXPECT_EQ(out.cabinTemp, 175);
 }
 
 TEST(PlayerSession, CargoManifestRoundTripsTheWholeHold)

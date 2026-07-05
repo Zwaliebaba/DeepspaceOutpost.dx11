@@ -41,6 +41,7 @@
 #include "StrategicView.h"   // E3: per-system strategic rollup (SummarizeStrategic)
 #include "OrderSystem.h"     // I1: ActiveOrder + StepOrders (order -> intent execution)
 #include "EscortSpawn.h"     // F1: player-owned escort NPC (SpawnEscort)
+#include "CabinHeatSystem.h" // G4: suns + cabin heat + fuel scooping (StepCabinHeat)
 
 namespace Neuron::GameLogic
 {

@@ -746,6 +746,10 @@ namespace DSOServer
       kills.push_back(k);
     for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
+    // G4: sun-proximity cabin heat cooks a hull held at the maximum; a scoop-fitted
+    // ship skimming the band tops its fuel instead. Deaths join the same pipeline.
+    for (const GameLogic::Kill& k : GameLogic::StepCabinHeat(m_world))
+      kills.push_back(k);
     for (const GameLogic::Kill& kill : kills)
       m_bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     m_bus.Dispatch();
@@ -831,6 +835,7 @@ namespace DSOServer
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
         ps.score = s.score;   // the session's per-player record (C2)
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
+        if (const auto* ch = m_world.TryGet<GameLogic::CabinHeat>(s.entity)) ps.cabinTemp = ch->temp;   // G4
         if (m_lastStatus.Changed(key, ps))
           s.events.Send(ps);
 

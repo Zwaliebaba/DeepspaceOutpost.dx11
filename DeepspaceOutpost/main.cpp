@@ -1341,6 +1341,7 @@ static void register_client_event_handlers(void)
     PlayerDefense().aftShield = _ps.aftShield;
     PlayerDefense().energy = _ps.energy;
     PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
+    PlayerCaps().cabTemp = _ps.cabinTemp;        // cabin-temp dial (G4): sun-proximity heat
   });
 
   // I3 order outcome: the server accepted or refused a UnitOrder. An accept keeps the

@@ -53,6 +53,16 @@ namespace DSOServer
       }
       _world.Add<GameLogic::ServerStation>(station, ss);
 
+      // G4: a star for the system - a NetType::Sun body offset from the planet, far
+      // enough to be a destination (sun-skim for fuel) yet within reach. Ships that
+      // loiter in its heat band cook (StepCabinHeat).
+      const ECS::EntityId sun = _world.Create();
+      _world.Add<GameLogic::WorldTransform>(sun,
+          GameLogic::WorldTransform{ { _sys.planetX, _sys.planetY + GameLogic::SUN_SYSTEM_OFFSET, _sys.planetZ } });
+      _world.Add<GameLogic::NetType>(sun, GameLogic::NetType{ GameLogic::ShipType::Sun });
+      _world.Add<GameLogic::Sun>(sun, GameLogic::Sun{});
+      _setup.landmarks.push_back(sun);
+
       _setup.manifest.push_back(ManifestEntryFrom(_sys));
     }
   }
