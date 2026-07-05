@@ -4,6 +4,7 @@
 #include <DirectXMath.h>
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
 
 // Offline-compiled (fxc) byte arrays for the built-in programs. Each shaders/*.hlsl is
@@ -322,6 +323,62 @@ namespace Neuron::Graphics
                          float u1, float v1, uint32_t rgba)
   {
     TexQuadColored(srv, x0, y0, x1, y1, u0, v0, u1, v1, rgba, rgba, rgba, rgba);
+  }
+
+  namespace
+  {
+    // Segment count for a circle of the given radius: ~2 per pixel of radius, clamped to
+    // [12, 96] so small dots stay cheap and big rings stay smooth. (Matches the cadence the
+    // legacy 2D layer used, so charts look the same after the migration.)
+    int CircleSegments(float radius)
+    {
+      int seg = static_cast<int>(radius * 2.0f);
+      if (seg < 12)
+        seg = 12;
+      if (seg > 96)
+        seg = 96;
+      return seg;
+    }
+  } // namespace
+
+  void Render2D::DrawCircle(float cx, float cy, float radius, uint32_t rgba)
+  {
+    if (radius < 1.0f)
+    {
+      PlotPoint(cx, cy, rgba);
+      return;
+    }
+    const int seg = CircleSegments(radius);
+    float px = cx + radius, py = cy;
+    for (int i = 1; i <= seg; ++i)
+    {
+      const float a = 6.28318530718f * static_cast<float>(i) / static_cast<float>(seg);
+      const float nx = cx + std::cos(a) * radius;
+      const float ny = cy + std::sin(a) * radius;
+      DrawLine(px, py, nx, ny, rgba);
+      px = nx;
+      py = ny;
+    }
+  }
+
+  void Render2D::FillCircle(float cx, float cy, float radius, uint32_t rgba)
+  {
+    if (radius < 1.0f)
+    {
+      PlotPoint(cx, cy, rgba);
+      return;
+    }
+    const int seg = CircleSegments(radius);
+    float px = cx + radius, py = cy;
+    for (int i = 1; i <= seg; ++i)
+    {
+      const float a = 6.28318530718f * static_cast<float>(i) / static_cast<float>(seg);
+      const float nx = cx + std::cos(a) * radius;
+      const float ny = cy + std::sin(a) * radius;
+      DrawTriangle(cx, cy, px, py, nx, ny, rgba);
+      px = nx;
+      py = ny;
+    }
   }
 
   void Render2D::TexQuadColored(ID3D11ShaderResourceView* srv, float x0, float y0, float x1, float y1, float u0,

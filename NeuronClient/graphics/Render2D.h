@@ -73,6 +73,12 @@ namespace Neuron::Graphics
       static void DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgba);
       static void PlotPoint(float x, float y, uint32_t rgba);
 
+      // Circle outline / filled disc centred at (cx,cy). Segment count scales with the
+      // radius (clamped) and the disc is a triangle fan about the centre. Sub-pixel radii
+      // collapse to a single point. Native primitives (no dependence on the legacy gfx layer).
+      static void DrawCircle(float cx, float cy, float radius, uint32_t rgba);
+      static void FillCircle(float cx, float cy, float radius, uint32_t rgba);
+
       // Textured quad: the atlas sub-rect (u0,v0)-(u1,v1) stretched to the screen
       // rect (x0,y0)-(x1,y1), tinted by rgba. Used for glyphs and sprites.
       static void TexQuad(ID3D11ShaderResourceView* srv, float x0, float y0, float x1, float y1, float u0, float v0,
