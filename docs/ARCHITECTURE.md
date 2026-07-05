@@ -1,8 +1,11 @@
 # DeepspaceOutpost — Architecture & Game Design
 
 **Status:** as-built (Phase G complete: G0-G8; chat deferred) + architectural
-review, 2026-07-03. This is the **single canonical design document** for the
-game: the client/server architecture, the authoritative simulation, the
+review, 2026-07-03; client presentation layer (§7) updated 2026-07-05 — the
+pointer-first interaction model (Track I) is in, and the legacy `gfx2d`/`gfx.h`
+2D layer is fully retired (all client 2D is native `Render2D`; see the §7
+"Native 2D stack" bullet). This is the **single canonical design document** for
+the game: the client/server architecture, the authoritative simulation, the
 complete game rules, the network protocol with every message type, the locked
 design decisions (§12), the standing **architectural review** (§13), and the
 consolidated roadmap (§14).
@@ -68,8 +71,8 @@ endpoint spawns a player entity and provisions a session (see §5.2).
 | `NeuronCore/` | Header-only shared **engine + protocol**: ECS, int64 math, message system, serialization, reliability, snapshot schema, station protocol, galaxy manifest. **Data and mechanism only — no game rules.** | — |
 | `GameLogic/` | **Server-only** authoritative simulation: flight, combat, AI, economy, stations, loot, collisions, hyperspace, sessions, spawning, AOI. Headless. | NeuronCore |
 | `Server/` | The dedicated host: UDP socket loop, fixed tick, session I/O, world bootstrap (home system + procedural galaxy). | GameLogic, NeuronCore |
-| `NeuronClient/` | Client-side engine: DX11 device/render, replication client (socket + interpolation), sound, fonts. | NeuronCore |
-| `DeepspaceOutpost/` | The game client: legacy-derived presentation (cockpit, charts, station screens), input → intent, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
+| `NeuronClient/` | Client-side engine: DX11 device (`GraphicsCore`), 3D scene pass (`Scene3D`), native 2D (`Render2D` + `TextRenderer` + the `GuiWindow`/overlay framework), replication client (socket + interpolation), sound. | NeuronCore |
+| `DeepspaceOutpost/` | The game client: legacy-derived presentation (flight HUD via `RenderGameHud`, native GUI windows for charts/market/station), input → orders/intent, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
 | `Tests/GameLogic/`, `Tests/NeuronCore/`, `Tests/NeuronClient/`, `Tests/NeuronServer/` | GoogleTest suites (headless). | respective libs |
 | `GameData/Models/` | Ship meshes (JSON), converted from the legacy tables. | — |
 
@@ -974,8 +977,27 @@ The client is deliberately dumb. It keeps:
 - **No letterbox (2026-07-05):** every screen is a native GUI window or the
   full-window camera-space scene, so the fixed 512×514 retro canvas and its
   centering/scaling present path (`canvasPlacement`, `g_scene_full`, the
-  `gfx_*` scene-anchor API) are **decommissioned** — the 2D batch and the 3D
-  scene fill the client window 1:1. `gfx.h` is legacy and shrinking toward removal.
+  `gfx_*` scene-anchor API) are **decommissioned** — the 2D and the 3D scene
+  fill the client window 1:1.
+- **Native 2D stack — the legacy `gfx2d`/`gfx.h` layer is fully retired
+  (2026-07-05):** all client 2D draws through `Neuron::Graphics::Render2D`.
+  Per frame: `RenderScene` runs the game's world draw (models →
+  `Scene3D::SubmitModel`, then `gfx_render_3d_scene()` renders the depth-tested
+  pass over the dust); `RenderCanvas` then opens the native HUD pass
+  **`RenderGameHud`** (`HudRender.cpp`) — the deferred scene overlays queued
+  during the world draw (ship-death debris pixels, the target reticle, the
+  intro title sprite), the self-gated flight dashboard (`update_console`:
+  scanner console, dials, compass, missiles, plus the I2/I3/I4 overlays and the
+  ability bar), and the centred overlay text (intro prompts / info message /
+  GAME OVER) — and the GUI overlay (windows) renders on top. Text everywhere is
+  the shared bitmap-font sheet via `TextRenderer` (`g_gameFont`) with its
+  shader outline. The old deferred command batch, its sprite/font plumbing and
+  `gfx2d_flush` are **deleted**; what survives is a thin engine seam —
+  `platform/GameScene.h/.cpp` (the 3D scene pass + the live scene/viewport size
+  and projection; the platform lifecycle stays in `platform_win.cpp`) and
+  `GamePalette.h` (the `GFX_COL_*` palette indices the ship face tables and the
+  HUD colour helper key off, plus the `IMG_*` sprite ids). **`gfx.h`,
+  `gfx2d.h` and `gfx2d.cpp` no longer exist.**
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep).
