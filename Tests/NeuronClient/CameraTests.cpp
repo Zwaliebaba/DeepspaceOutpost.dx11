@@ -96,7 +96,7 @@ TEST(Camera, ProjectionReproducesTheLegacyOptics)
   // point must land on the legacy focal-512 mapping sx = x*512/z + 256,
   // sy = -y*512/z + 192.
   Client::Camera cam;
-  cam.SetProjParams(Client::kLegacySceneFovY, 512.0f / 384.0f, Client::kSceneNearZ, Client::kSceneFarZ);
+  cam.SetProjParams(Client::LEGACY_SCENE_FOV_Y, 512.0f / 384.0f, Client::SCENE_NEAR_Z, Client::SCENE_FAR_Z);
 
   const double pts[][3] = {
     {0.0, 0.0, 100.0},
@@ -120,7 +120,7 @@ TEST(Camera, ProjectionReproducesTheLegacyOptics)
 TEST(Camera, HelpersDeriveFromTheProjection)
 {
   Client::Camera cam;
-  cam.SetProjParams(Client::kLegacySceneFovY, 512.0f / 384.0f, Client::kSceneNearZ, Client::kSceneFarZ);
+  cam.SetProjParams(Client::LEGACY_SCENE_FOV_Y, 512.0f / 384.0f, Client::SCENE_NEAR_Z, Client::SCENE_FAR_Z);
 
   // Legacy focal: 512 px at a 384-high canvas (tan(fovY/2) = 192/512).
   EXPECT_NEAR(Client::CameraFocalPixels(cam, 384.0f), 512.0f, 0.05f);
