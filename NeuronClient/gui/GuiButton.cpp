@@ -58,9 +58,9 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
 
     g_editorFont.SetRenderShadow(true);
     if (m_disabled)
-      g_editorFont.SetColor(128, 128, 75, 255);
+      g_editorFont.SetColor(128, 128, 128, 255);
     else
-      g_editorFont.SetColor(255, 255, 150, 255);
+      g_editorFont.SetColor(255, 255, 255, 255);   // white selected-label text (reference scheme)
 
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
@@ -153,7 +153,7 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
                              top, bottom, bottom);
 
     g_editorFont.SetRenderShadow(true);
-    g_editorFont.SetColor(255, 255, 150, 255);
+    g_editorFont.SetColor(255, 255, 255, 255);   // white selected-label text (reference scheme)
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
     else
