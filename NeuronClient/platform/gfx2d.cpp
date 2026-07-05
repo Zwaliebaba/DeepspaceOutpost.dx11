@@ -78,24 +78,22 @@ std::vector<Cmd>         g_cmds;
  * still shows the stars). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::CANVAS_WIDTH, Renderer::CANVAS_HEIGHT };
 
-/* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
- * is set for the frame and (g_scene_w, g_scene_h) is the live client size; the
- * HUD is floated by adding (g_origin_x,g_origin_y) to every emitted coordinate
- * and to the clip rect. In retro mode all three are inert (origin 0, 512x384
- * scene canvas). The projection itself lives on the main Camera - see
- * gfx_set_scene_fullwindow. */
+/* Scene state. The 2D layer always fills the client window now (the letterbox is
+ * retired - canvasPlacement is identity), so the HUD floats by adding
+ * (g_origin_x,g_origin_y) to every emitted coordinate and clip rect, and
+ * (g_scene_w,g_scene_h) is the live client size the CPU-projected HUD bits
+ * (stars/threed/space) project against. The projection lives on the main Camera -
+ * see gfx_set_scene_fullwindow. */
 int                        g_origin_x  = 0;
 int                        g_origin_y  = 0;
-bool                       g_scene_full = false;
 int                        g_scene_w = 512;
 int                        g_scene_h = 384;
 
-/* The virtual coordinate space the 2D batch is authored in: the retro 512x514 canvas,
- * or the live client area when the in-flight 3D fills the window. (Formerly the size of
- * an off-screen canvas texture; now just the projection space that gfx2d_flush
- * letterboxes straight onto the back buffer.) */
-int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::CANVAS_WIDTH;  }
-int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::CANVAS_HEIGHT; }
+/* The 2D authoring space is the live client area: the letterbox is retired, so the 2D
+ * batch and the 3D scene pass always fill the window 1:1 (canvasPlacement is identity).
+ * Falls back to the fixed canvas size only before the Renderer is up. */
+int canvasW() { Renderer* r = platform_renderer(); return r ? r->clientWidth()  : Renderer::CANVAS_WIDTH;  }
+int canvasH() { Renderer* r = platform_renderer(); return r ? r->clientHeight() : Renderer::CANVAS_HEIGHT; }
 
 /* Placement of the authored 2D canvas onto the back buffer: the single source of the
  * virtual size + destination offset + scale that both the 2D replay and the 3D scene
@@ -338,13 +336,10 @@ void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, 
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
 {
-	/* gfx2d_flush already clears the whole back buffer to black each frame, and in full-window
-	 * flight the 3D scene pass (the dust starfield) fills it. Since the 2D layer now composites *on top of*
-	 * the 3D (Phase 2 Step 3), a full-window 2D black rect here would paint over the scene - so
-	 * skip it in full-window mode. Retro mode (2D-only screens, no 3D pass) still clears just
-	 * the legacy play area so the persistent dashboard strip is untouched. */
-	if (!g_scene_full)
-		addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK));
+	/* No-op: ClientEngine::Frame clears the whole back buffer each frame (before the 3D
+	 * scene hook), and the 2D layer composites on top of the full-window 3D scene, so a 2D
+	 * black rect here would only paint over it. Kept as a call site for the legacy screens
+	 * that still invoke it. (Was the retro-canvas play-area clear before the letterbox retired.) */
 }
 void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
 
@@ -398,19 +393,14 @@ void gfx_set_clip_region(int tx, int ty, int bx, int by)
 // aspect ratio - so it is safe to call every frame.
 void gfx_set_scene_fullwindow(int on)
 {
+	// The letterbox is retired: the scene always fills the client window. `on` is kept
+	// for the callers' signature but no longer selects a retro mode. Update the scene size
+	// to the live client area and re-issue the main Camera's projection for that viewport
+	// (the legacy vertical FOV at the current aspect) - safe to call every frame.
+	(void) on;
 	Renderer* r = platform_renderer();
-	if (on && r)
-	{
-		g_scene_full = true;
-		g_scene_w = r->clientWidth();
-		g_scene_h = r->clientHeight();
-	}
-	else
-	{
-		g_scene_full = false;
-		g_scene_w = 512;   // legacy play-area optics
-		g_scene_h = 384;
-	}
+	g_scene_w = r ? r->clientWidth()  : 512;
+	g_scene_h = r ? r->clientHeight() : 384;
 
 	const float aspect = (g_scene_h > 0) ? static_cast<float>(g_scene_w) / static_cast<float>(g_scene_h) : 4.0f / 3.0f;
 	Neuron::Client::MainCamera().SetProjParams(Neuron::Client::LEGACY_SCENE_FOV_Y, aspect,
@@ -429,72 +419,20 @@ void gfx_scene_size(int* w, int* h)
 // float the HUD; pass (0,0) to draw in the canvas's own space again.
 void gfx_set_draw_origin(int x, int y) { g_origin_x = x; g_origin_y = y; }
 
-// Compute the draw origin that anchors a w x h layout block within the current canvas
-// rect (see gfx.h). The block is authored in its own 0..w / 0..h space; the caller sets
-// this origin, draws, then resets to (0,0).
-void gfx_anchor(gfx_anchor_point where, int w, int h, int dx, int dy, int* ox, int* oy)
-{
-	const int cw = canvasW();
-	const int ch = canvasH();
-
-	int x = 0, y = 0;
-	switch (where)
-	{
-	case GFX_ANCHOR_TOP_LEFT:  case GFX_ANCHOR_LEFT:   case GFX_ANCHOR_BOTTOM_LEFT:  x = 0;              break;
-	case GFX_ANCHOR_TOP:       case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_BOTTOM:       x = (cw - w) / 2;   break;
-	case GFX_ANCHOR_TOP_RIGHT: case GFX_ANCHOR_RIGHT:  case GFX_ANCHOR_BOTTOM_RIGHT: x = cw - w;         break;
-	}
-	switch (where)
-	{
-	case GFX_ANCHOR_TOP_LEFT:    case GFX_ANCHOR_TOP:    case GFX_ANCHOR_TOP_RIGHT:    y = 0;             break;
-	case GFX_ANCHOR_LEFT:        case GFX_ANCHOR_CENTRE: case GFX_ANCHOR_RIGHT:        y = (ch - h) / 2;  break;
-	case GFX_ANCHOR_BOTTOM_LEFT: case GFX_ANCHOR_BOTTOM: case GFX_ANCHOR_BOTTOM_RIGHT: y = ch - h;        break;
-	}
-
-	x += dx;
-	y += dy;
-	if (x < 0) x = 0;
-	if (y < 0) y = 0;
-	if (ox) *ox = x;
-	if (oy) *oy = y;
-}
-
-// Where the legacy 512x514 HUD layout is anchored this frame: bottom-centre of the
-// canvas. In full-window flight the canvas is the client area, so the dashboard floats
-// over the 3D; in retro the canvas is exactly 512x514, so this yields (0,0). The
-// bottom-centre special case of gfx_anchor.
-void gfx_hud_anchor(int* ox, int* oy)
-{
-	gfx_anchor(GFX_ANCHOR_BOTTOM, 512, 514, 0, 0, ox, oy);
-}
-
-// The current 2D authoring canvas size in pixels: the client area in
-// full-window/client-space mode, the fixed 512x514 canvas in retro. Screens migrating
-// to client-space use this (with gfx_anchor) to place elements relative to the window.
+// The current 2D authoring canvas size in pixels = the live client area (the letterbox
+// is retired). Screens read this to place content relative to the window edges.
 void gfx_canvas_size(int* w, int* h)
 {
 	if (w) *w = canvasW();
 	if (h) *h = canvasH();
 }
 
-void gfx_window_to_canvas(int wx, int wy, int* cx, int* cy)
-{
-	// Invert canvasPlacement(): the canvas is drawn at (dstX,dstY) scaled by `scale`,
-	// so a window point maps back by subtracting the offset and dividing by the scale.
-	const CanvasPlacement p = canvasPlacement();
-	const float s = (p.scale > 0.0f) ? p.scale : 1.0f;
-	if (cx) *cx = static_cast<int>((static_cast<float>(wx) - static_cast<float>(p.dstX)) / s);
-	if (cy) *cy = static_cast<int>((static_cast<float>(wy) - static_cast<float>(p.dstY)) / s);
-}
-
 // Set the clip rect to the 3D play area for the current mode: the whole canvas
 // in full-window flight, or the legacy 1,1..510,383 rectangle in retro.
 void gfx_set_scene_clip(void)
 {
-	if (g_scene_full)
-		gfx_set_clip_region(0, 0, canvasW() - 1, canvasH() - 1);
-	else
-		gfx_set_clip_region(1, 1, 510, 383);
+	// Always full-window now (the letterbox is retired): clip to the whole client area.
+	gfx_set_clip_region(0, 0, canvasW() - 1, canvasH() - 1);
 }
 
 /* ---- text ---- */
@@ -508,9 +446,8 @@ void gfx_display_colour_text(int x, int y, const char* txt, int col)
 }
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
-	/* Centre on the live canvas: 256 in retro, the window middle in full-window
-	 * flight (so in-flight messages stay centred when the 3D fills the screen). */
-	const int mid = g_scene_full ? canvasW() / 2 : 256;
+	/* Centre on the live client window (the 3D fills the screen; the letterbox is retired). */
+	const int mid = canvasW() / 2;
 	/* psize 140 selects the larger heading font; both are the one .dds sheet now
 	 * (the old ELITE_2 multicolour title sheet is gone), tinted by the caller's
 	 * colour. Monospaced, so the width is simply chars * cell width. */

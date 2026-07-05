@@ -104,49 +104,23 @@ void gfx_render_3d_scene (void);
 /*
  * Full-window 3D scene + floating HUD (client modernization).
  *
- * gfx_set_scene_fullwindow() picks, per frame, whether the in-flight 3D fills
- * the whole window or the legacy letterboxed 512x514 canvas is used
- * (menus/charts/station), and sets the main Camera's projection for that
- * viewport (the legacy vertical field of view at the live aspect ratio).
- * gfx_scene_size() returns the scene canvas size in (logical) pixels - the
- * space the CPU-projected HUD bits draw in. gfx_set_scene_clip() sets the
- * play-area clip for the current mode. gfx_hud_anchor()/gfx_set_draw_origin()
- * float the legacy HUD layout to the bottom-centre of the window when
- * full-window.
+ * The letterbox is retired: the 2D batch and the 3D scene always fill the client window
+ * 1:1 (see gfx2d.cpp canvasPlacement). gfx_set_scene_fullwindow() now just refreshes the
+ * scene size to the live client area and re-issues the main Camera's projection for that
+ * viewport (the legacy vertical field of view at the live aspect ratio) - safe to call
+ * every frame; the `on` argument is vestigial. gfx_scene_size() returns that client size -
+ * the space the CPU-projected HUD bits draw in. gfx_set_scene_clip() clips to the whole
+ * window. gfx_set_draw_origin() floats a layout block by offsetting every emitted
+ * coordinate (the flight HUD dashboard uses it to sit bottom-centre).
  */
 void gfx_set_scene_fullwindow (int on);
 void gfx_scene_size (int *w, int *h);
 void gfx_set_draw_origin (int x, int y);
-void gfx_hud_anchor (int *ox, int *oy);
 void gfx_set_scene_clip (void);
 
-/*
- * General layout anchor (client-space UI migration, Phase 1). Computes the draw
- * origin (top-left, in current-canvas pixels) that places a w x h layout block at
- * `where` within the current canvas rect - the client area in full-window/client-space
- * mode, the 512x514 canvas in retro - plus a (dx,dy) nudge in canvas pixels (+x right,
- * +y down). The block is authored in its own 0..w / 0..h local space: call
- * gfx_set_draw_origin(*ox,*oy), draw it, then gfx_set_draw_origin(0,0). Origins are
- * clamped to >= 0 so an oversized block stays pinned to the top-left. gfx_hud_anchor is
- * the bottom-centre 512x514 case of this.
- */
-enum gfx_anchor_point
-{
-	GFX_ANCHOR_TOP_LEFT,    GFX_ANCHOR_TOP,     GFX_ANCHOR_TOP_RIGHT,
-	GFX_ANCHOR_LEFT,        GFX_ANCHOR_CENTRE,  GFX_ANCHOR_RIGHT,
-	GFX_ANCHOR_BOTTOM_LEFT, GFX_ANCHOR_BOTTOM,  GFX_ANCHOR_BOTTOM_RIGHT
-};
-void gfx_anchor (gfx_anchor_point where, int w, int h, int dx, int dy, int *ox, int *oy);
-
-/* Current 2D authoring canvas size in pixels: the client area in full-window/client-space
- * mode, the fixed 512x514 canvas in retro. Screens migrating to client-space read this to
- * anchor content to the window edges. Either pointer may be null. */
+/* Current 2D authoring canvas size in pixels = the live client area (the letterbox is
+ * retired). Screens read this to anchor content to the window edges. Either pointer may
+ * be null. */
 void gfx_canvas_size (int *w, int *h);
-
-/* Map a WINDOW client-pixel point (as the mouse reports) to the current 2D authoring
- * canvas coordinates, inverting the letterbox placement (offset + downscale) the 2D
- * batch presents with. Lets pointer input on the retro/letterboxed screens (e.g. the
- * charts, drawn in the 512x514 canvas) hit-test against canvas-space geometry. */
-void gfx_window_to_canvas (int wx, int wy, int *cx, int *cy);
 
 #endif
