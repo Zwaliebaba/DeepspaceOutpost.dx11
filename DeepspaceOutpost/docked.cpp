@@ -315,6 +315,36 @@ int ChartData::Blob (int _i)
 int ChartData::CurrentIndex (void) { return chart_current_system(); }
 int ChartData::SelectedIndex (void) { return g_chart_selected; }
 
+// I6 info card: distance (current -> selected) in tenths of a light year, matching
+// the short-range projection's world-units-per-LY. -1 when nothing distinct is
+// selected. Uses the manifest x/z world coords (the same the chart plots from).
+int ChartData::SelectedDistanceTenthsLy (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy()) return -1;
+	const int cur = chart_current_system();
+	const int sel = g_chart_selected;
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+	if (cur < 0 || sel < 0 || cur >= (int)g.size() || sel >= (int)g.size())
+		return -1;
+	if (sel == cur)
+		return 0;   // the current system: reachable, zero distance
+
+	const double dx = (double)(g[sel].x - g[cur].x);
+	const double dz = (double)(g[sel].z - g[cur].z);
+	const double distWorld = sqrt (dx * dx + dz * dz);
+	// tenths of a LY = worldUnits / unitsPerLY * 10.
+	return (int)(distWorld / (double)SR_UNITS_PER_LY * 10.0 + 0.5);
+}
+
+int ChartData::FuelTenths (void) { return cmdr.fuel; }
+
+bool ChartData::SelectedInRange (void)
+{
+	const int d = SelectedDistanceTenthsLy();
+	return d >= 0 && d <= cmdr.fuel;
+}
+
 bool ChartData::FuelCircle (int _kind, int* _cx, int* _cy, int* _r)
 {
 	if (_kind != ChartData::SHORT_RANGE) return false;   // the galactic chart draws no fuel ring

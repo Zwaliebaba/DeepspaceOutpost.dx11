@@ -201,13 +201,16 @@ void camera_rig_update(void)
 	int mx = 0, my = 0;
 	bool lmb = false, rmb = false;
 	input_mouse_state(mx, my, lmb, rmb);
-	const float wheel = input_take_mouse_wheel();
 
 	/* The camera also goes quiet while a radial command menu is open (I3/I5): the
 	 * finger driving the menu highlight must not orbit or select underneath it. */
 	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW) || g_radial_open;
 	if (!uiOwns)
 	{
+		/* Consume the wheel only when the camera owns input; when a GUI window is up
+		 * (e.g. the chart) it leaves the wheel for that window to zoom with (I6). */
+		in.wheelSteps = input_take_mouse_wheel();
+
 		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
 		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
 		 * once the press has crossed the slop, so a click never nudges the view. A
@@ -221,7 +224,6 @@ void camera_rig_update(void)
 			in.lookDY = static_cast<float>(my - s_prevMouseY);
 		}
 		in.looking = lmbDrag;
-		in.wheelSteps = wheel;
 
 		/* Camera movement keys: the arrows + PgUp/PgDn, freed by the piloting
 		 * removal (WASD stays with the combat bindings: A fires, D is chart
