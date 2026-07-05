@@ -41,8 +41,6 @@
 
 using winrt::com_ptr;
 
-extern char scanner_filename[256];
-
 namespace {
 
 struct ColorVertex { float x, y;          uint32_t rgba; };
@@ -79,13 +77,12 @@ std::vector<Cmd>         g_cmds;
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::CANVAS_WIDTH, Renderer::CANVAS_HEIGHT };
 
 /* Scene state. The 2D layer always fills the client window now (the letterbox is
- * retired - canvasPlacement is identity), so the HUD floats by adding
- * (g_origin_x,g_origin_y) to every emitted coordinate and clip rect, and
- * (g_scene_w,g_scene_h) is the live client size the CPU-projected HUD bits
- * (stars/threed/space) project against. The projection lives on the main Camera -
- * see gfx_set_scene_fullwindow. */
-int                        g_origin_x  = 0;
-int                        g_origin_y  = 0;
+ * retired - canvasPlacement is identity). (g_scene_w,g_scene_h) is the live client size
+ * the CPU-projected HUD bits (stars/threed/space) project against; the projection lives
+ * on the main Camera - see gfx_set_scene_fullwindow. The floated draw-origin is gone: the
+ * flight HUD that used it now draws natively (RenderGameHud), so the remaining gfx2d
+ * consumers (starfield, explosion debris, target reticle, message text, intro) all author
+ * in plain client pixels. */
 int                        g_scene_w = 512;
 int                        g_scene_h = 384;
 
@@ -170,8 +167,6 @@ void pushTexQuad(ID3D11ShaderResourceView* srv,
 				 float x0, float y0, float x1, float y1,
 				 float u0, float v0, float u1, float v1, uint32_t tint)
 {
-	x0 += g_origin_x; x1 += g_origin_x;
-	y0 += g_origin_y; y1 += g_origin_y;
 	TexVertex q[6] = {
 		{ x0, y0, u0, v0, tint }, { x1, y0, u1, v0, tint }, { x1, y1, u1, v1, tint },
 		{ x0, y0, u0, v0, tint }, { x1, y1, u1, v1, tint }, { x0, y1, u0, v1, tint },
@@ -191,40 +186,13 @@ void pushTexQuad(ID3D11ShaderResourceView* srv,
 	g_tverts.insert(g_tverts.end(), q, q + 6);
 }
 
-/* All primitive coordinates pass through the draw-origin so the HUD can be
- * floated over the full-window 3D without each widget knowing where it sits. */
+// The only surviving colour primitive is the single-pixel plot (gfx_plot_pixel: the
+// starfield and the ship-death debris spray). Lines / rects / triangles went with the
+// flight HUD, which now draws natively (RenderGameHud), so their batch helpers are gone.
 void addPoint(int x, int y, uint32_t c)
 {
-	ColorVertex v{ x + g_origin_x + 0.5f, y + g_origin_y + 0.5f, c };
+	ColorVertex v{ x + 0.5f, y + 0.5f, c };
 	pushColor(Topo::Points, &v, 1);
-}
-void addSegment(int x1, int y1, int x2, int y2, uint32_t c)
-{
-	x1 += g_origin_x; x2 += g_origin_x; y1 += g_origin_y; y2 += g_origin_y;
-	ColorVertex v[2] = { { x1 + 0.5f, y1 + 0.5f, c }, { x2 + 0.5f, y2 + 0.5f, c } };
-	pushColor(Topo::Lines, v, 2);
-}
-void addRect(int x1, int y1, int x2, int y2, uint32_t c)
-{
-	if (x2 < x1) std::swap(x1, x2);
-	if (y2 < y1) std::swap(y1, y2);
-	x1 += g_origin_x; x2 += g_origin_x; y1 += g_origin_y; y2 += g_origin_y;
-	float l = (float)x1, t = (float)y1, r = (float)(x2 + 1), b = (float)(y2 + 1);
-	ColorVertex q[6] = { {l,t,c},{r,t,c},{r,b,c}, {l,t,c},{r,b,c},{l,b,c} };
-	pushColor(Topo::Tris, q, 6);
-}
-void addTri(int x1, int y1, int x2, int y2, int x3, int y3, uint32_t c)
-{
-	x1 += g_origin_x; x2 += g_origin_x; x3 += g_origin_x;
-	y1 += g_origin_y; y2 += g_origin_y; y3 += g_origin_y;
-	ColorVertex t[3] = { {x1+0.5f,y1+0.5f,c},{x2+0.5f,y2+0.5f,c},{x3+0.5f,y3+0.5f,c} };
-	pushColor(Topo::Tris, t, 3);
-}
-void drawLine(int x1, int y1, int x2, int y2, uint32_t c)
-{
-	if (y1 == y2)      addRect(x1, y1, x2, y1, c);
-	else if (x1 == x2) addRect(x1, y1, x1, y2, c);
-	else               addSegment(x1, y1, x2, y2, c);
 }
 
 /* ---- texture helpers ---- */
@@ -326,8 +294,6 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
  * ===================================================================== */
 
 void gfx_plot_pixel(int x, int y, int col)      { addPoint(x, y, col_rgba(col)); }
-void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
-void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
 {
 	/* No-op: ClientEngine::Frame clears the whole back buffer each frame (before the 3D
@@ -335,43 +301,16 @@ void gfx_clear_display(void)
 	 * black rect here would only paint over it. Kept as a call site for the legacy screens
 	 * that still invoke it. (Was the retro-canvas play-area clear before the letterbox retired.) */
 }
-void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
 
-void gfx_draw_circle(int cx, int cy, int radius, int col)
-{
-	if (radius < 1) { addPoint(cx, cy, col_rgba(col)); return; }
-	uint32_t c = col_rgba(col);
-	int seg = radius * 2; if (seg < 12) seg = 12; if (seg > 96) seg = 96;
-	int px = cx + radius, py = cy;
-	for (int i = 1; i <= seg; i++)
-	{
-		double a = 6.28318530718 * i / seg;
-		int nx = cx + (int)std::lround(std::cos(a) * radius);
-		int ny = cy + (int)std::lround(std::sin(a) * radius);
-		addSegment(px, py, nx, ny, c); px = nx; py = ny;
-	}
-}
-
-void gfx_draw_filled_circle(int cx, int cy, int radius, int col)
-{
-	if (radius < 1) { addPoint(cx, cy, col_rgba(col)); return; }
-	uint32_t c = col_rgba(col);
-	int seg = radius * 2; if (seg < 12) seg = 12; if (seg > 96) seg = 96;
-	int px = cx + radius, py = cy;
-	for (int i = 1; i <= seg; i++)
-	{
-		double a = 6.28318530718 * i / seg;
-		int nx = cx + (int)std::lround(std::cos(a) * radius);
-		int ny = cy + (int)std::lround(std::sin(a) * radius);
-		addTri(cx, cy, px, py, nx, ny, c); px = nx; py = ny;
-	}
-}
+/* The line / rectangle / circle primitives (and gfx_clear_text_area) drew the flight-HUD
+ * dashboard and the old letterboxed screens; both are retired (the HUD is native now), so
+ * they are gone. gfx_plot_pixel above is the last colour primitive - the starfield and the
+ * ship-death debris spray. */
 
 void gfx_set_clip_region(int tx, int ty, int bx, int by)
 {
-	/* Follow the draw-origin so a floated HUD's clip moves with it, and clamp to
-	 * the live canvas (which may be the full client area, not 512x514). */
-	LONG l = tx + g_origin_x, t = ty + g_origin_y, r = bx + 1 + g_origin_x, b = by + 1 + g_origin_y;
+	/* Clamp to the live canvas (which may be the full client area, not 512x514). */
+	LONG l = tx, t = ty, r = bx + 1, b = by + 1;
 	if (l < 0) l = 0; if (t < 0) t = 0;
 	if (r > canvasW()) r = canvasW();
 	if (b > canvasH()) b = canvasH();
@@ -409,10 +348,6 @@ void gfx_scene_size(int* w, int* h)
 	if (h) *h = g_scene_h;
 }
 
-// Offset every subsequent emitted coordinate (and clip rect) by (x,y). Used to
-// float the HUD; pass (0,0) to draw in the canvas's own space again.
-void gfx_set_draw_origin(int x, int y) { g_origin_x = x; g_origin_y = y; }
-
 // The current 2D authoring canvas size in pixels = the live client area (the letterbox
 // is retired). Screens read this to place content relative to the window edges.
 void gfx_canvas_size(int* w, int* h)
@@ -433,10 +368,6 @@ void gfx_set_scene_clip(void)
 void gfx_display_text(int x, int y, const char* txt)
 {
 	drawString(BODY_FONT, x, y, txt, col_rgba(GFX_COL_WHITE));
-}
-void gfx_display_colour_text(int x, int y, const char* txt, int col)
-{
-	drawString(BODY_FONT, x, y, txt, col_rgba(col));
 }
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
@@ -472,23 +403,6 @@ void gfx_draw_sprite_scaled(int sprite_no, int x, int y, int w, int h)
 	const Texture* t = getTexture(fn);
 	if (!t || !t->srv) return;
 	pushTexQuad(t->srv.get(), (float)x, (float)y, (float)(x + w), (float)(y + h),
-				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
-}
-
-void gfx_draw_scanner(void)
-{
-	/* The configured scanner image (and the default) name a .bmp - Renderer still
-	 * reads scanner.bmp for the master palette - but the HUD sprite itself now loads
-	 * as .dds through the TextureManager, so map the extension across. */
-	const char* cfg = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";
-	std::string fn = cfg;
-	if (const size_t dot = fn.find_last_of('.'); dot != std::string::npos)
-		fn.replace(dot, std::string::npos, ".dds");
-	else
-		fn += ".dds";
-	const Texture* t = getTexture(fn.c_str());
-	if (!t || !t->srv) return;
-	pushTexQuad(t->srv.get(), 0.0f, 385.0f, (float)t->w, (float)(385 + t->h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
 

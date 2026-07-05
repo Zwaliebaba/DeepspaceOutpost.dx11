@@ -54,16 +54,9 @@ int gfx_graphics_startup (void);
 void gfx_graphics_shutdown (void);
 void gfx_update_screen (void);
 void gfx_plot_pixel (int x, int y, int col);
-void gfx_draw_filled_circle (int cx, int cy, int radius, int circle_colour);
-void gfx_draw_circle (int cx, int cy, int radius, int circle_colour);
-void gfx_draw_colour_line (int x1, int y1, int x2, int y2, int line_colour);
-void gfx_draw_rectangle (int tx, int ty, int bx, int by, int col);
 void gfx_display_text (int x, int y, const char *txt);
-void gfx_display_colour_text (int x, int y, const char *txt, int col);
 void gfx_display_centre_text (int y, const char *str, int psize, int col);
 void gfx_clear_display (void);
-void gfx_clear_text_area (void);
-void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
 void gfx_draw_sprite (int sprite_no, int x, int y);
 void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
@@ -79,7 +72,7 @@ void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
 void gfx_render_3d_scene (void);
 
 /*
- * Full-window 3D scene + floating HUD (client modernization).
+ * Full-window 3D scene (client modernization).
  *
  * The letterbox is retired: the 2D batch and the 3D scene always fill the client window
  * 1:1 (see gfx2d.cpp canvasPlacement). gfx_set_scene_fullwindow() now just refreshes the
@@ -87,12 +80,11 @@ void gfx_render_3d_scene (void);
  * viewport (the legacy vertical field of view at the live aspect ratio) - safe to call
  * every frame; the `on` argument is vestigial. gfx_scene_size() returns that client size -
  * the space the CPU-projected HUD bits draw in. gfx_set_scene_clip() clips to the whole
- * window. gfx_set_draw_origin() floats a layout block by offsetting every emitted
- * coordinate (the flight HUD dashboard uses it to sit bottom-centre).
+ * window. (The floated draw-origin is gone: the flight HUD that used it now draws natively
+ * in RenderGameHud, so the remaining gfx2d consumers author in plain client pixels.)
  */
 void gfx_set_scene_fullwindow (int on);
 void gfx_scene_size (int *w, int *h);
-void gfx_set_draw_origin (int x, int y);
 void gfx_set_scene_clip (void);
 
 /* Current 2D authoring canvas size in pixels = the live client area (the letterbox is
