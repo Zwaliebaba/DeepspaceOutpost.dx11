@@ -928,7 +928,8 @@ The client is deliberately dumb. It keeps:
   Ships render through a single **solid** GPU mesh path (`draw_solid_ship` →
   `Scene3D::SubmitModel`); the planet is one lit green 3D sphere; the sun a
   billboard. The retro-vector art direction is realized by the low-poly
-  meshes and lands as batched instanced rendering in Track H (§13.2.1).
+  meshes; batched solid-mesh instancing (`DrawIndexedInstanced` per hull type)
+  and an emissive glow post pass shipped opt-in in Track H (§13.2.1, H2/H4).
 - **The free camera (2026-07-04): the camera is decoupled from the ship.**
   The cockpit view is gone — the player flies the CAMERA, and the active ship
   renders on screen like any other entity. `NeuronClient/Camera` is the one
@@ -1183,7 +1184,7 @@ Preserved from the retired migration roadmap (its §0 and §2.4) — these are
 | Logic boundary | `GameLogic` is server-only; the client shares **data schemas only**, never behavior |
 | Scale model | **Replication, not lockstep** — determinism kept for replays/tests; 100-player scale via interest-managed state replication |
 | Test harness | Headless `BotClient` over the real net stack for the 100-player load milestone |
-| Aesthetic | The faithful **low-poly wireframe / retro-vector** look is the art direction, not a placeholder — rendering work amplifies it, never replaces it |
+| Aesthetic | The faithful **low-poly / retro-vector** look is the art direction, not a placeholder — rendering work amplifies it, never replaces it. (Realized by the solid low-poly meshes; the CPU line wireframe was retired 2026-07-04 — `IMPLEMENTATION.md` §1.3.) |
 
 Phase status: 0/A/B/C/D/E ✅ (as of 2026-07-04) · G 🟡 (client-side prediction
 and chat outstanding) · F/H/I 🔴. Missions are deferred until after F. The **persistence-readiness rule** from
@@ -1199,8 +1200,8 @@ without refactoring gameplay.
 
 **Reviewed 2026-07-03** against the locked trajectory in §12: a
 server-authoritative, retro-future **tactical-digital 4X space MMO** — low-poly
-wireframe presentation over a large-scale emergent simulation. Verdict in one
-paragraph:
+/ retro-vector presentation over a large-scale emergent simulation. Verdict in
+one paragraph:
 
 > The bones are unusually good. The single load-bearing rule (server
 > simulates, client renders, only schemas are shared) is actually enforced —
@@ -1213,7 +1214,7 @@ paragraph:
 > assumption §12 explicitly forbids (§13.2); and hot paths that are
 > fine at 12 NPCs but shaped wrong for fleets — O(n²) pair sweeps, per-tick
 > allocation churn, an unquantized 58-byte snapshot (§13.3). Nothing below
-> changes the concept, the lore, or the wireframe direction; everything
+> changes the concept, the lore, or the retro-vector direction; everything
 > builds on the existing seams.
 
 ### 13.1 Concept integrity & simplification
@@ -1289,38 +1290,49 @@ for uniformity's sake.
 
 ### 13.2 Missing features & functional gaps
 
-#### 13.2.1 Wireframe tactical rendering & spatial partitioning
+#### 13.2.1 Low-poly tactical rendering & spatial partitioning
 
-The wireframe aesthetic is not just art direction — it is a **performance
-budget**. A hull is tens of line segments, not tens of thousands of shaded
-triangles; a thousand-ship battle is only a few hundred thousand lines. The
-current renderer does not cash that cheque:
+The low-poly aesthetic is not just art direction — it is a **performance
+budget**. A hull is tens of flat-shaded triangles, not tens of thousands; a
+thousand-ship battle is a few hundred thousand triangles. (The CPU line
+*wireframe* was retired 2026-07-04 — the retro-vector look is the solid
+low-poly meshes; see §1.3 of `IMPLEMENTATION.md`. This section is updated to
+that reality: instance and glow the **solid** meshes, not a line list.) The
+current renderer does not yet cash the budget cheque by default:
 
-- **Batched, instanced vector rendering.** The legacy path draws each object
-  immediately, mesh by mesh. Replace with: one persistent line-list vertex
-  buffer per hull type (`NetType` → mesh is already 1:1), one per-frame
-  instance buffer (world transform ± palette tint per replicated entity), one
-  `DrawIndexedInstanced` per hull type. Draw calls become O(hull types), not
-  O(entities) — the single change that makes fleet-scale battles renderable.
-- **Aesthetic as post-process, not per-object cost.** The retro-vector look
-  (line glow/bloom, additive trails, depth-faded tactical grid) belongs in a
-  small post chain: render lines to an emissive target, blur, composite.
-  Expand raw lines to anti-aliased screen-space quads in the vertex shader
-  (4 vertices per segment via `SV_VertexID`, no geometry shader) so line
-  weight is a style parameter, not a raster accident.
-- **Client-side spatial partitioning + iconic LOD.** `Spatial::Grid` lives in
-  NeuronCore but the client uses no partition: no frustum/range culling, and
-  every AOI entity renders as its full mesh at any distance. Add a
-  grid-backed cull, and beyond a range threshold draw the *glyph*, not the
-  mesh — a 2–6 line vector icon per hull class. Iconic LOD **is** the
-  tactical-digital look (distant contacts as symbology) and simultaneously
-  the LOD strategy; it also becomes the render path for the strategic tier
-  below. No smooth-LOD/mesh-decimation machinery is needed or wanted for
-  low-poly wireframe.
-- **Snapshot-type indirection.** `NetType` values are raw legacy `SHIP_*`
-  ints shared by sim and render. Before hull variety grows (§13.2.3 drones,
-  outposts), route them through a client-side table (`NetType` → mesh, glyph,
-  palette row) so adding a hull is data, not a switch statement.
+- **Batched, instanced solid rendering.** ✅ *Built (H2, opt-in, 2026-07-05.)*
+  The legacy path drew each object immediately, mesh by mesh. `Scene3D` now
+  groups a frame's ship models by hull type (`NetType` → mesh is already 1:1)
+  and issues one `DrawIndexedInstanced` per type from the existing immutable
+  per-type solid mesh + a per-frame per-instance stream (world matrix ± palette
+  tint), so draw calls become O(hull types), not O(entities) — the change that
+  makes fleet-scale battles renderable. Identical pixels; a draw-call win, not a
+  new look. Default off (`Scene3D::SetInstancingEnabled`) pending an in-app
+  visual confirmation; the pure per-instance packer is headless-tested.
+- **Aesthetic as post-process, not per-object cost.** ✅ *Built (H4 glow,
+  opt-in, 2026-07-05.)* The retro-vector look (mesh glow/bloom) is a small post
+  chain rather than per-object cost: `SceneGlow` renders the solid scene to an
+  emissive target, blurs it with a separable Gaussian, and additively
+  composites sharp + glow onto the back buffer. Default off
+  (`SceneGlow::SetEnabled`); the blur weights are headless-tested. (The old
+  `SV_VertexID` *line-expansion* sub-step is moot now the look is solid, not
+  wireframe. Additive trails / depth-faded tactical grid / GPU explosion debris
+  remain as later additive passes on this chain.)
+- **Client-side spatial partitioning + iconic LOD.** 🟡 *LOD decision built
+  (H3 core); grid cull pending.* `Spatial::Grid` lives in NeuronCore but the
+  client still uses no partition: no frustum/range culling yet. The range-based
+  glyph decision (`ShouldDrawAsGlyph`, `RenderTable.h`) is in and headless-
+  tested — beyond a range threshold a hull draws as the *glyph*, not the mesh
+  (a 2–6 line vector icon per hull class; currently a deferred contact blip).
+  Iconic LOD **is** the tactical-digital look (distant contacts as symbology)
+  and simultaneously the LOD strategy; it also becomes the render path for the
+  strategic tier below. No smooth-LOD/mesh-decimation machinery is needed or
+  wanted for low-poly meshes. Still to add: the grid-backed cull.
+- **Snapshot-type indirection.** ✅ *Built (H1.)* `NetType` values are raw
+  legacy `SHIP_*` ints shared by sim and render; they now route through a
+  client-side table (`RenderTable.h`: `NetType` → mesh/glyph/palette row via
+  `RenderFor`), consumed by `draw_ship` in place of the type switch, so adding
+  a hull (§13.2.3 drones, outposts) is a data row, not a switch statement.
 
 #### 13.2.2 4X MMO scalability — state, ticking, concurrency, persistence
 
@@ -1578,11 +1590,12 @@ amortizes the branchy code — leave it scalar.
 
 **E6 — GPU offload belongs on the client only.** The server must stay
 headless-deterministic — no GPU compute in `GameLogic`, ever. Client-side,
-the wireframe aesthetic maps perfectly onto cheap GPU work: vertex-shader
-line expansion + emissive post chain (§13.2.1), explosion debris as a GPU
-particle burst seeded by `EntityDeath` (the legacy `exp_seed` look, computed
-in a compute or vertex shader instead of CPU), starfield in a shader.
-None of this touches simulation truth.
+the low-poly aesthetic maps perfectly onto cheap GPU work: solid-mesh
+instancing + emissive glow post chain (§13.2.1, shipped opt-in as H2/H4),
+explosion debris as a GPU particle burst seeded by `EntityDeath` (the legacy
+`exp_seed` look, computed in a compute or vertex shader instead of CPU; still
+to build), starfield in a shader (already a scene-pass dust batch). None of
+this touches simulation truth.
 
 **E7 — Threading: single-threaded until measured, then phase-parallel.**
 Sequence: S5's accumulator first (so overruns are *visible*), then the E1
@@ -1623,7 +1636,7 @@ scooping; missions after persistence; chat UI) remains in scope as noted in
 | 10 | Snapshot quantization + delta + budgets ✅ (done 2026-07-04: v2 format 58→32 B/entity with an int64 reference origin so the world stays unbounded; per-session delta vs an acked baseline + keyframes; distance-sorted send budget. Fleet-density delta-fragment reassembly is a noted follow-up) | E4 | Perf | M–L | bandwidth wall |
 | 11 | Strategic AOI summary tier ✅ (done 2026-07-04: `StrategicSummary 0x1004` + per-system aggregation at ~1 Hz; v1 covers the player's current system, multi-system presence rides F1/F3, chart glyph render is a client-UI follow-up) | §13.2.2 | Feature | M | empire visibility |
 | 12 | First ordered unit (`UnitOrder` escort) — *the order infrastructure itself lands earlier with #22 (Track I); this item becomes the purchasable escort reusing it* | §13.2.3-2 | Feature | M | the Darwinia loop |
-| 13 | Batched instanced wireframe + iconic LOD + post chain | §13.2.1 | Render | M | fleet battles, style |
+| 13 | Batched instanced solid meshes + iconic LOD + glow post chain 🟡 (H1 ✅ NetType table; H3 ✅ core LOD decision; H2 ✅ solid instancing + H4 ✅ glow post — both opt-in, built 2026-07-05, in-app visual pass + grid cull + GPU debris pending) | §13.2.1 | Render | M | fleet battles, style |
 | 14 | Fog of war (`KnownSystems`) + incremental manifest | §13.2.3-5, S2 | Feature | M | explore |
 | 15 | Ownership + claimable/deployable outposts | §13.2.3-6 | Feature | L | expand |
 | 16 | Drifting markets + traders-as-supply + hauler routing | §13.2.3-3/4 | Feature | L | exploit, emergence |
