@@ -30,7 +30,35 @@ struct star
   double z;
 };
 
-star stars[20];
+star stars[64];
+
+// How many stars to plot (also the count regenerated on a fresh field). Denser than
+// the legacy 12 so the field fills a modern wide window rather than dotting it.
+static inline int star_count(void) { return witchspace ? 12 : 48; }
+
+// Star-space half-extents that cover the CURRENT window through star_to_screen (which
+// maps star-space s -> s*scale + centre, scale = focal/256). Generating and respawning
+// stars across these bounds keeps the field filling the whole window at any aspect and
+// any zoom, instead of a fixed central box the old ±120 range left bare at the edges.
+static inline void star_field_bounds(double* hx, double* hy)
+{
+  int w, h;
+  gfx_scene_size(&w, &h);
+  const double focal = Client::CameraFocalPixels(Client::MainCamera(), static_cast<float>(h > 0 ? h : 1));
+  const double scale = (focal > 1e-6) ? focal / 256.0 : 2.0;
+  *hx = (w > 0 ? w : 512) * 0.5 / scale;
+  *hy = (h > 0 ? h : 384) * 0.5 / scale;
+}
+
+// Uniform star-space coordinate in [-half, half], never dead-centre (a star at 0 does
+// not stream outward, so it would sit frozen in the middle).
+static inline double star_rand_span(double half)
+{
+  double v = (static_cast<double>(rand255()) / 255.0 * 2.0 - 1.0) * half;
+  if (v > -1.0 && v < 1.0)
+    v = (v < 0.0) ? -1.0 : 1.0;
+  return v;
+}
 
 /*
  * Map a star-space coordinate (roughly [-128,128] x [-96,96]) to screen pixels
@@ -87,12 +115,14 @@ static void push_dust(int sx, int sy, double zz)
 
 void create_new_stars(void)
 {
-  int nstars = witchspace ? 3 : 12;
+  double hx, hy;
+  star_field_bounds(&hx, &hy);
 
+  const int nstars = star_count();
   for (int i = 0; i < nstars; i++)
   {
-    stars[i].x = (rand255() - 128) | 8;
-    stars[i].y = (rand255() - 128) | 4;
+    stars[i].x = star_rand_span(hx);
+    stars[i].y = star_rand_span(hy);
     stars[i].z = rand255() | 0x90;
   }
 
@@ -104,7 +134,11 @@ void front_starfield(void)
   int sx;
   int sy;
 
-  int nstars = witchspace ? 3 : 12;
+  const int nstars = star_count();
+
+  /* Star-space bounds that cover the window this frame (aspect/zoom aware). */
+  double hx, hy;
+  star_field_bounds(&hx, &hy);
 
   /* The streaming/panning inputs come from the CAMERA's motion (set by the rig
    * each frame): delta streams the stars toward/away from the eye as the camera
@@ -142,13 +176,15 @@ void front_starfield(void)
     stars[i].y = yy;
     stars[i].x = xx;
 
-    sx = xx;
-    sy = yy;
-
-    if ((sx > 120) || (sx < -120) || (sy > 120) || (sy < -120) || (zz < 16))
+    /* Respawn a star once it leaves the screen-covering bounds (streamed past the
+       edge on forward motion), OR once it converges toward the eye - zooming OUT
+       drives z up and x,y toward the centre, so without a far-z cutoff the field
+       would collapse into a small central cluster. Fresh stars are scattered across
+       the full window so it stays filled at any zoom. */
+    if ((xx > hx) || (xx < -hx) || (yy > hy) || (yy < -hy) || (zz < 16.0) || (zz > 320.0))
     {
-      stars[i].x = (rand255() - 128) | 8;
-      stars[i].y = (rand255() - 128) | 4;
+      stars[i].x = star_rand_span(hx);
+      stars[i].y = star_rand_span(hy);
       stars[i].z = rand255() | 0x90;
     }
   }
