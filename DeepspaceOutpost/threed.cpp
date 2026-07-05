@@ -18,6 +18,7 @@
 #include "shipface.h"
 #include "threed.h"
 #include "space.h"
+#include "RenderTable.h"   // H1: NetType -> render descriptor table
 #include "random.h"
 
 
@@ -320,17 +321,21 @@ void draw_ship (struct local_object *ship)
 	if (cam.location.z <= 0)	/* Only display objects in front of the camera. */
 		return;
 
-	if (ship->type == SHIP_PLANET)
+	/* H1: the NetType -> render descriptor table replaces the hand-written type
+	 * if-chain, so a new hull is a data row (RenderTable.h), not an edit here. */
+	const RenderDescriptor rd = RenderFor (ship->type);
+	if (rd.kind == RenderKind::Planet)
 	{
 		draw_planet (ship);
 		return;
 	}
-
-	if (ship->type == SHIP_SUN)
+	if (rd.kind == RenderKind::Sun)
 	{
 		draw_sun (ship);
 		return;
 	}
+	if (rd.kind == RenderKind::Hidden)
+		return;   /* not drawn by the mesh path */
 
 	/* Field-of-vision cull against the camera's real frustum (|x| <= z*tan(fovX/2),
 	 * |y| <= z*tan(fovY/2)), so ships at the edges of a wide window are not
