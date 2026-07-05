@@ -483,6 +483,16 @@ void gfx_canvas_size(int* w, int* h)
 	if (h) *h = canvasH();
 }
 
+void gfx_window_to_canvas(int wx, int wy, int* cx, int* cy)
+{
+	// Invert canvasPlacement(): the canvas is drawn at (dstX,dstY) scaled by `scale`,
+	// so a window point maps back by subtracting the offset and dividing by the scale.
+	const CanvasPlacement p = canvasPlacement();
+	const float s = (p.scale > 0.0f) ? p.scale : 1.0f;
+	if (cx) *cx = static_cast<int>((static_cast<float>(wx) - static_cast<float>(p.dstX)) / s);
+	if (cy) *cy = static_cast<int>((static_cast<float>(wy) - static_cast<float>(p.dstY)) / s);
+}
+
 // Set the clip rect to the 3D play area for the current mode: the whole canvas
 // in full-window flight, or the legacy 1,1..510,383 rectangle in retro.
 void gfx_set_scene_clip(void)

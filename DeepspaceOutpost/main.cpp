@@ -726,6 +726,79 @@ void handle_ability_bar(void)
   s_prevLmb = lmb;
 }
 
+// ---- I6 pointer charts (interaction.md 3.8): click a system, click to jump -------
+//
+// The charts become pick surfaces. A click in the chart map parks the crosshair on
+// the clicked point (the nearest system is what chart_nearest_to_cursor selects, and
+// the existing readout / draw_cross show it); a HYPERSPACE button issues the jump
+// (teleport_to_cursor -> TravelRequest). Window pixels are mapped to the chart's
+// letterboxed 512x514 canvas via gfx_window_to_canvas. The arrow-key crosshair and
+// the hyperspace key still work as accelerators (their formal retirement is I7).
+//
+// Deferred (documented): drag-pan / wheel-zoom of the chart and find-by-name as a
+// pointer search field - the galactic and short-range charts are already separate
+// zoom presets, and the F-key name search still works.
+
+namespace
+{
+  constexpr int CHART_HYP_X = 344;   // canvas coords: the on-chart HYPERSPACE button
+  constexpr int CHART_HYP_Y = 356;
+  constexpr int CHART_HYP_W = 160;
+  constexpr int CHART_HYP_H = 18;
+
+  bool chart_on_hyperspace_button(int _cx, int _cy)
+  {
+    return _cx >= CHART_HYP_X && _cx < CHART_HYP_X + CHART_HYP_W
+        && _cy >= CHART_HYP_Y && _cy < CHART_HYP_Y + CHART_HYP_H;
+  }
+}
+
+// Draw the on-chart HYPERSPACE button (called from the chart render pass).
+static void draw_chart_hyperspace_button(void)
+{
+  if (current_screen != SCR_GALACTIC_CHART && current_screen != SCR_SHORT_RANGE)
+    return;
+  gfx_draw_rectangle(CHART_HYP_X, CHART_HYP_Y, CHART_HYP_X + CHART_HYP_W, CHART_HYP_Y + CHART_HYP_H, GFX_COL_GOLD);
+  gfx_display_colour_text(CHART_HYP_X + 10, CHART_HYP_Y + 5, "HYPERSPACE", GFX_COL_GOLD);
+}
+
+// Per-frame chart pointer input: a click parks the crosshair (selecting the nearest
+// system) or, on the HYPERSPACE button, jumps. No-op off the chart screens.
+static void handle_chart_pointer(void)
+{
+  if (GuiOverlay::IsShown())
+    return;
+  if (current_screen != SCR_GALACTIC_CHART && current_screen != SCR_SHORT_RANGE)
+    return;
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+  int cx = 0, cy = 0;
+  gfx_window_to_canvas(mx, my, &cx, &cy);
+
+  static bool s_prevLmb = false;
+  static bool s_downOnHyp = false;
+  if (lmb && !s_prevLmb)
+  {
+    s_downOnHyp = chart_on_hyperspace_button(cx, cy);
+  }
+  else if (!lmb && s_prevLmb)
+  {
+    if (s_downOnHyp && chart_on_hyperspace_button(cx, cy))
+    {
+      teleport_to_cursor();   // jump to the system nearest the crosshair
+    }
+    else if (!chart_on_hyperspace_button(cx, cy) && cx >= 1 && cx <= 510 && cy >= 37 && cy <= 320)
+    {
+      cross_x = cx;   // click selects: park the crosshair; the readout shows the system
+      cross_y = cy;
+    }
+    s_downOnHyp = false;
+  }
+  s_prevLmb = lmb;
+}
+
 void handle_flight_keys(void)
 {
   int keyasc;
@@ -1503,6 +1576,7 @@ static void game_update_flight(void)
   // handler so a fresh missile lock orbits from the next frame.
   handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
                                //     click is consumed instead of selecting behind it)
+  handle_chart_pointer();      // I6: chart click-select + on-chart hyperspace jump
 
   camera_rig_update();
 
@@ -1536,6 +1610,7 @@ static void game_render_flight(void)
       display_short_range_chart();
     show_distance_to_planet();
     draw_cross(cross_x, cross_y);
+    draw_chart_hyperspace_button();   // I6: on-chart pointer jump
     return;
   }
 

@@ -1512,6 +1512,20 @@ tap/click.
 dock → trade → hyperspace) playable with touch only and with mouse only; no
 gesture steals the camera from a tap or vice versa at the slop boundaries.
 
+*As built (2026-07-04) — 🟡 core, compile-verified (touch is inspection-only —
+CI has no touch device and the sandbox can't run the client):* `input_win.cpp`
+now tracks up to two `WM_POINTER` pointers (slot-assigned by pointer id). One
+finger maps to the mouse/LMB exactly as the old stub did — so **tap = select** and
+**one-finger drag = orbit** already work through the I2/I3 mouse paths — while two
+fingers **PINCH to zoom**, feeding the delta into the SAME `g_wheelSteps`
+accumulator the mouse wheel uses, so "wheel and pinch are one zoom event" falls out
+by construction. **Deferred (documented):** two-finger **pan** (needs camera-pan
+plumbing the controller doesn't expose yet), **long-press** → radial menu / gizmo
+(the radial menu is itself an I3 deferral), **double-tap**, and the widget-stack
+**ergonomics pass** (≥40 px rows / drag-scroll / steppers in Market/Equip). The
+device-neutral recognizer these need is the follow-up; this increment lands the one
+gesture (pinch) with a clean, existing mapping.
+
 ### I6 — Pointer charts — **S–M**
 
 Charts become pick surfaces: tap/click a system selects it (info card:
@@ -1526,6 +1540,21 @@ keys retire.
 visibly gated before the server round-trip (fuel mirror), server stays the
 authority.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+the charts are pick surfaces. A new `gfx_window_to_canvas` (NeuronClient) inverts
+the letterbox placement (offset + downscale from `canvasPlacement`) so a window-pixel
+click maps to the chart's 512×514 canvas. `handle_chart_pointer` (main.cpp) parks the
+crosshair (`cross_x/y`) on the clicked point — the existing `chart_nearest_to_cursor`
++ `draw_cross` + readout then show the selected system — and a drawn **HYPERSPACE**
+button (`draw_chart_hyperspace_button`) fires `teleport_to_cursor()` →
+`TravelRequest{Hyperspace}` (the server validates fuel/range). The chart help text
+now reads "Click a system … Click HYPERSPACE …". The arrow-key crosshair and the
+hyperspace key are RETAINED as accelerators (formal retirement is I7). **Deferred
+(documented):** chart drag-pan / wheel-zoom (galactic and short-range are already
+separate zoom presets) and find-by-name as a pointer search field (the F-key name
+search still works); the full economy/fuel-cost **info card** rides the same readout
+follow-up as I2's card.
+
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 
 Retire the dead `kbd_*` globals and bindings (speed keys are already dead;
@@ -1537,6 +1566,19 @@ marked done).
 
 *Acceptance:* grep for retired `kbd_*` names returns nothing; every
 remaining key has a pointer equivalent; docs match code.
+
+*As built (2026-07-04) — 🟡 doc pass done; key DELETION deliberately deferred:*
+the doc truth pass ran (this section + the M6 milestone; the Track I items carry
+their as-built notes; ARCHITECTURE.md §7's input bullet describes the
+order/pointer model). The actual retirement of the combat/chart key handlers
+(T/U/A/E/Tab/M/C/J/H, the arrow crosshair) is **held until the I2–I6 pointer UX is
+verified in an in-app run** — those keys are the safety net, and removing them
+before the un-CI-exercisable pointer path is confirmed working would leave no way
+to play if a pointer path has a bug. Every retired-key verb ALREADY has its pointer
+equivalent (I2 select, I3 orders, I4 ability bar, I6 chart click), so the deletion
+is a pure, low-risk cleanup to run once the UX is confirmed; the keys work in
+parallel until then (which also satisfies "keep the accelerator table"). The dead
+speed keys were already removed with the free-camera migration.
 
 ---
 
@@ -1600,8 +1642,14 @@ Three items are genuinely open and block only their own bullets:
    RMB-hold radial menu, clean-player Attack-friction, and the screen-nav strip
    (I3/I4 deferrals); formal keyboard retirement is I7. The I2–I4 client UX is
    compile-verified only — it needs an in-app run to confirm pixel-accuracy.
-6. **M6 "Touch-complete"** — I5–I7: the gesture layer, pointer charts,
-   keyboard reduced to accelerators. The full loop plays with touch only.
+6. **M6 "Touch-complete"** — 🟡 I5–I7 core ✅: pointer charts (I6, click-select +
+   on-chart hyperspace), the touch layer (I5, multi-pointer + pinch-zoom; two-finger
+   pan / long-press / double-tap deferred), and the I7 doc pass (key DELETION held
+   until the pointer UX is verified in-app — the keys are the safety net). Mouse
+   path complete; touch is compile-verified/inspection-only. Track I's remaining
+   residues: the full move gizmo + radial menu (I3), the widget ergonomics pass and
+   full gesture recognizer (I5), chart pan/zoom + info card (I6), and the actual
+   key-handler removal (I7).
 7. **M7 "The 4X turn"** — F1–F5, G4, with H landing in parallel (F1 reuses
    I1's protocol and I2/I3's UX verbatim).
 8. **M8 "Missions"** — G5, after M2 has soaked in production.

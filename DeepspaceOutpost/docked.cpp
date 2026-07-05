@@ -663,8 +663,8 @@ bool display_replicated_galactic_chart (void)
 		cross_y = 165;
 	}
 
-	gfx_display_text (16, 304, "Arrows: move crosshair   D: system data");
-	gfx_display_text (16, 326, "Hyperspace key: teleport to nearest system");
+	gfx_display_text (16, 304, "Click a system to select   D: system data");
+	gfx_display_text (16, 326, "Click HYPERSPACE (or press the key) to jump");
 	return true;
 }
 

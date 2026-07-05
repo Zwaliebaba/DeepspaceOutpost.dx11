@@ -189,4 +189,10 @@ void gfx_anchor (gfx_anchor_point where, int w, int h, int dx, int dy, int *ox, 
  * anchor content to the window edges. Either pointer may be null. */
 void gfx_canvas_size (int *w, int *h);
 
+/* Map a WINDOW client-pixel point (as the mouse reports) to the current 2D authoring
+ * canvas coordinates, inverting the letterbox placement (offset + downscale) the 2D
+ * batch presents with. Lets pointer input on the retro/letterboxed screens (e.g. the
+ * charts, drawn in the 512x514 canvas) hit-test against canvas-space geometry. */
+void gfx_window_to_canvas (int wx, int wy, int *cx, int *cy);
+
 #endif

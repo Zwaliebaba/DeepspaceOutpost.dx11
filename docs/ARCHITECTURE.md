@@ -930,27 +930,28 @@ The client is deliberately dumb. It keeps:
   There is **no offline simulation**: a disconnected client shows a
   connection-lost screen and retries (the single-player fallback was deleted —
   S4 extended).
-- **Input — camera-only control (piloting retired); order-based control
-  incoming.** The player no longer flies the hull. The per-frame
-  `InputCommand` cadence continues (the delta stream's ack rides it) with
-  **zero flight axes** — the ship launches at rest and idles; the server
-  remains the sole mover. **This is a transitional state: with piloting
-  retired the ship currently has no movement verb at all.** The accepted
-  replacement is the pointer-first **order model** (`docs/interaction.md`,
-  §13.2.4): select the ship, right-click/tap to issue validated
-  `UnitOrder`s (move/approach/dock/attack/collect) the server's autopilot
-  executes — the player's ship as the first ordered unit of the 4X
-  trajectory (Track I / roadmap #22). Until Track I lands, the combat and
-  travel keys stay: fire/missiles/ECM/bomb/pod flow as `ActionTriggered`
-  (LocalOnly bus) → command builder → `InputCommand`; station screens send
-  `StationRequest`s; the hyperspace key on a chart sends
-  `TravelRequest{Hyperspace}`; the jump key sends
-  `TravelRequest{InSystemJump}`. The arrow keys steer the chart crosshair on
-  the chart screens and the camera in flight (the rig gates on the flight
-  view, so the uses never overlap). In-flight docking is request-based and
-  ship-relative: near the station, station off the hull's nose, at rest → a
-  Dock request; the docked flow starts on `StationResponse{Dock, Ok}`.
-  (Track I replaces the heuristic with an explicit Dock order.)
+- **Input — pointer-first order control (Track I, 2026-07-04).** The player
+  no longer flies the hull: they **select** a unit and **order** it, and the
+  server's autopilot executes the order (the movement verb the free-camera
+  migration had removed). The pointer grammar, as built: **LMB click** =
+  select the entity under the cursor (screen-ray pick, I2); **LMB drag** =
+  orbit the camera; **RMB click** = the contextual default order for the
+  target under the cursor — planet/sun → Approach, station → Dock, canister →
+  Collect, ship → Attack, empty space → Move to the cursor-ray∩plane point
+  (I3) — sent as a reliable `UnitOrder` the server validates (ownership /
+  legality / range / crime), acked by `UnitOrderAck`. A non-modal **ability
+  bar** (I4) puts Stop/Missile/ECM/Bomb/Pod/Jump one click away (Bomb/Pod
+  hold-to-confirm); the **charts** are pick surfaces (I6: click a system,
+  click HYPERSPACE → `TravelRequest`); **touch** maps one finger to the mouse
+  and pinches to zoom (I5). The per-frame `InputCommand` continues as the
+  heartbeat that carries the delta-stream ack, with **zero flight axes**.
+  Equipment activations flow `ActionTriggered` (LocalOnly bus) → the ability
+  handlers / `AbilityRequest`; station screens send `StationRequest`s.
+  The combat/chart **keys are retained as accelerators** in parallel (their
+  formal retirement, I7, waits until the pointer UX is verified in an in-app
+  run — they are the safety net). Residues still folded forward: the full
+  move gizmo + RMB-hold radial menu (I3), the full gesture recognizer +
+  widget ergonomics (I5), chart pan/zoom (I6); see IMPLEMENTATION.md Track I.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
