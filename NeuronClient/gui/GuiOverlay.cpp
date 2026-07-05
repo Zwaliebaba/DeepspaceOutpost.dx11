@@ -172,12 +172,14 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   // no depth/cull, 1:1 mapping) and let Canvas submit every window/button/glyph into the
   // batch, flushed at End.
   //
-  // POINT sampling (not the Canvas default LINEAR): the bitmap font sheet is authored for
-  // 1:1 texel sampling, so linear filtering softens every glyph - the window/button labels
-  // came out blurry and grey. The native HUD pass already samples POINT for the same reason;
-  // match it here so the GUI text is crisp white.
+  // LINEAR (bilinear) sampling - the Darwinia look: the GPU blends neighbouring texels so
+  // glyph edges are smooth/soft rather than hard nearest-neighbour blocks. The earlier
+  // "blurry" text was NOT linear filtering - it was the font's auto mip chain pulling a
+  // low-res mip on minified text; the MakeSampler MinLOD/MaxLOD=0 clamp fixes that, so linear
+  // now samples the full-res glyph and just softens the edges (bilinear), which is what the
+  // reference does. (The HUD pass stays POINT for its crisp retro dials.)
   Canvas::Start(Core::GetRenderTargetView(), clientWidth, clientHeight, 0, 0, 1.0f,
-                D3D11_FILTER_MIN_MAG_MIP_POINT);
+                D3D11_FILTER_MIN_MAG_MIP_LINEAR);
   Canvas::Render();
   Canvas::End();
 }
