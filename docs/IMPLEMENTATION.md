@@ -1437,7 +1437,7 @@ card shows kind+range, not name/legal-status yet (needs the roster join — I3/I
 Behaviour needs an in-app run to verify pixel-accuracy of picking and card
 placement (CI compiles it but cannot exercise the DX11 client).
 
-### I3 — Command UX: contextual orders, move gizmo, radial menu — **M**
+### I3 — Command UX: contextual orders, move gizmo, radial menu — **M** — ✅ **done** (core 2026-07-04; residues 2026-07-05)
 
 - RMB click = contextual default order per `docs/interaction.md` §3.3
   (empty space → Move gizmo; enemy → Attack; station → Dock; canister →
@@ -1479,7 +1479,7 @@ ship currently defaults to Attack and the server enforces the crime rules. Needs
 in-app run to verify unproject pixel-accuracy and marker placement (CI compiles the
 client but cannot exercise it).
 
-### I4 — Ability bar & HUD restructure — **S**
+### I4 — Ability bar & HUD restructure — **S** — ✅ **done** (core 2026-07-04; nav strip 2026-07-05)
 
 Persistent non-modal GuiOverlay bar (the overlay must stop suppressing game
 input for non-modal elements): Stop / Missile / ECM / Energy bomb / Escape
@@ -1510,7 +1510,7 @@ navigate); (c) **Launch/undock** stays on the docked screen's own UI (the flight
 is flight-only). Needs an in-app run to verify bar placement/coordinate-space and
 that click regions line up with the drawn boxes.
 
-### I5 — Touch & gesture layer — **M**
+### I5 — Touch & gesture layer — **M** — 🟡 **core done** (2026-07-04; recognizer + gestures 2026-07-05; camera pan pending)
 
 Full `WM_POINTER` multi-pointer tracking (replacing the single-pointer→LMB
 stub) + a recognizer emitting device-neutral events: tap, double-tap,
@@ -1540,7 +1540,7 @@ plumbing the controller doesn't expose yet), **long-press** → radial menu / gi
 device-neutral recognizer these need is the follow-up; this increment lands the one
 gesture (pinch) with a clean, existing mapping.
 
-### I6 — Pointer charts — **S–M**
+### I6 — Pointer charts — **S–M** — ✅ **done** (core 2026-07-04/05; pan/zoom + info card 2026-07-05; name-search field pending)
 
 Charts become pick surfaces: tap/click a system selects it (info card:
 economy/government/distance/fuel cost/in-range), a **Hyperspace** button on
@@ -1668,6 +1668,52 @@ alongside the RMB Dock order). The `in.fire`/`s_frameFire` command-builder path 
 vestigial (always false); harmless, left in place. Doc truth pass done (this note, M6,
 ARCHITECTURE.md §7).
 
+### Track I residue closure (2026-07-05)
+
+The I2–I6 "core" increments left a documented residue list (the full move gizmo,
+the radial menu, clean-player friction, the nav strip, the touch gesture recognizer,
+and the chart pan/zoom + info card). Those are now landed. Because the Linux CI
+sandbox cannot compile or run the DX11 client (MSVC/DX11/WinRT), the strategy was
+**headless-tested cores + carefully pattern-matched glue**: every piece of logic that
+*could* be tested was extracted into pure, dependency-free headers under
+`NeuronClient/input/` and pinned by the NeuronClient test suite; the DX11/Win32 glue
+that wires them into the client is **compile-verified via the core seam only** and
+still needs an in-app run to confirm pixel-accuracy and gesture feel.
+
+- **Pure cores (headless GoogleTest, 30 cases — verified locally on Linux + CI):**
+  `input/GestureRecognizer.h` (device-neutral multi-pointer state machine: tap,
+  double-tap, long-press, drag, two-finger pan, pinch — the I5 piece the plan flagged
+  as "CI never runs"), `input/OrderMenu.h` (contextual default order + radial-menu
+  legal set + clean-player Attack-friction, over the wire `OrderKind`), and
+  `input/MoveGizmo.h` (ray∩plane on the camera-up command plane, grazing/too-far
+  clamp, elevation along the normal, Chebyshev clamp to the server Move reach).
+- **I3:** the full move gizmo (camera-up plane; a vertical RMB drag sets the elevation
+  stem; `draw_move_gizmo` renders the depth-faded plane ring + route line + stem +
+  marker), the RMB-hold **radial menu** (`open_radial_menu`/`radial_slice_at`/
+  `radial_commit` + `draw_radial_menu`), and **clean-player Attack-friction** (dispatch
+  routes through `OrderMenu::DefaultContextOrder`, so a click on a lawful player is
+  Approach; Attack is menu-only, crime still owner-attributed server-side). The I2 info
+  card is enriched via the roster join (player name + CLEAN/WANTED).
+- **I4:** the top-right **screen-nav strip** (Chart/Status/Inventory) opening the GUI
+  windows by pointer, non-modal, camera-select-safe (`nav_strip_button_at` gates both
+  CameraRig branches); F-keys stay as accelerators.
+- **I5:** the recognizer is wired into `input_win.cpp`'s `WM_POINTER` path (one clock
+  for Push+Tick); the proven one-finger→mouse + pinch→wheel synthesis stays, and the
+  new gestures are surfaced — **long-press → touch radial menu**, **double-tap → focus**,
+  **two-finger pan** exposed via `input_take_pan`. Widget ergonomics: taller touch rows
+  in Market/Equip. *Still open:* the two-finger camera **pan** is exposed but not
+  consumed (the Orbit controller has no translate axis — a camera-math change to verify
+  in-app), and the full widget drag-scroll / hold-repeat steppers.
+- **I6:** chart **wheel/pinch zoom** (`ChartWindow::Update`; CameraRig yields the wheel
+  when a GUI window owns input) and **drag-pan** (release-applied), plus an **info card**
+  with distance / fuel / IN RANGE from new render-free `ChartData` helpers. *Still open:*
+  the pointer find-by-name **search field** (the F-key name search is the accelerator).
+
+Net: the mouse command loop (select → order via gizmo/menu/ability-bar/nav-strip, jump
+from the chart) is complete in code; the touch loop has its gestures; the remaining
+residues (camera pan, widget drag-scroll/steppers, chart name-search) are the ones whose
+correctness genuinely depends on an in-app run and are called out above.
+
 ---
 
 ## 12. New message-id allocation (summary)
@@ -1726,18 +1772,21 @@ Three items are genuinely open and block only their own bullets:
 5. **M5 "Command of one"** — 🟡 I1–I4 core ✅: the order protocol + `OrderSystem`
    restore ship movement (I1, CI-green), pointer selection/picking (I2), the RMB
    command UX + move-plane + ack feedback (I3), and the non-modal ability bar (I4).
-   Mouse-playable end to end. Residues folded forward: the full move gizmo +
-   RMB-hold radial menu, clean-player Attack-friction, and the screen-nav strip
-   (I3/I4 deferrals); formal keyboard retirement is I7. The I2–I4 client UX is
-   compile-verified only — it needs an in-app run to confirm pixel-accuracy.
-6. **M6 "Touch-complete"** — 🟡 I5–I7 core ✅: pointer charts (I6, click-select +
-   on-chart hyperspace), the touch layer (I5, multi-pointer + pinch-zoom; two-finger
-   pan / long-press / double-tap deferred), and the I7 doc pass (key DELETION held
-   until the pointer UX is verified in-app — the keys are the safety net). Mouse
-   path complete; touch is compile-verified/inspection-only. Track I's remaining
-   residues: the full move gizmo + radial menu (I3), the widget ergonomics pass and
-   full gesture recognizer (I5), chart pan/zoom + info card (I6), and the actual
-   key-handler removal (I7).
+   Mouse-playable end to end. **Residues now landed (2026-07-05):** the full move
+   gizmo + RMB-hold radial menu + clean-player Attack-friction (I3) and the screen-nav
+   strip (I4), on headless-tested cores (`NeuronClient/input/*`); formal keyboard
+   retirement was already I7. The I2–I4 client GLUE is compile-verified via the core
+   seam — it needs an in-app run to confirm pixel-accuracy.
+6. **M6 "Touch-complete"** — 🟡 I5–I7 ✅ (core + residues): pointer charts (I6,
+   click-select + on-chart hyperspace + **wheel-zoom + drag-pan + distance/fuel info
+   card**), the touch layer (I5, multi-pointer + pinch-zoom + the **device-neutral
+   gesture recognizer** driving **long-press → radial menu**, **double-tap → focus**,
+   two-finger pan exposed), and the I7 key deletion (done). Mouse path complete; the
+   touch path has its gestures but is inspection-only. **Genuinely-remaining residues**
+   (correctness depends on an in-app run): two-finger camera **pan** consumption (the
+   Orbit controller needs a translate axis), widget **drag-scroll / hold-repeat
+   steppers**, and the chart **find-by-name search field** (F-key search is the
+   accelerator).
 7. **M7 "The 4X turn"** — F1–F5, G4, with H landing in parallel (F1 reuses
    I1's protocol and I2/I3's UX verbatim).
 8. **M8 "Missions"** — G5, after M2 has soaked in production.

@@ -194,7 +194,8 @@ void camera_rig_update(void)
 	/* Gather this frame's camera input. The GUI overlay owns the pointer and the
 	 * keys while a window is up, and on the non-flight screens (charts, status)
 	 * the arrows belong to the chart crosshair - the camera goes quiet in both
-	 * cases (the wheel is still consumed so notches don't burst through later). */
+	 * cases, and it leaves the wheel unconsumed so an open window (the chart) can
+	 * zoom with it (I6). */
 	Client::CameraInput in{};
 	in.dt = static_cast<float>(dt);
 
