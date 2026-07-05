@@ -10,7 +10,8 @@
 
 #include "pch.h"
 
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "GameUniverse.h"
 #include "GameComponents.h"
 #include "main.h"
@@ -32,10 +33,19 @@
 #include "Messages/Defs/InputActions.h"
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
+#include "Messages/Defs/UnitOrder.h"         // UnitOrder / UnitOrderAck (I1/I3 command protocol)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
+#include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
 #include "Scene3D.h"
+#include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
+#include "input_win.h"                        // input_mouse_state (I3 pointer commands)
+#include "GraphicsCore.h"                     // Graphics::Core::GetOutputSize (viewport size)
 
+#include <DirectXMath.h>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 
@@ -119,186 +129,10 @@ void initialise_game(void)
   PlayerCaps().maxFuel = 70; /* 7.0 Light Years */
 }
 
-/*
- * Move the planet chart cross hairs to specified position.
- */
-
-void move_cross(int dx, int dy)
-{
-  if (current_screen == SCR_SHORT_RANGE)
-  {
-    cross_x += (dx * 4);
-    cross_y += (dy * 4);
-    return;
-  }
-
-  if (current_screen == SCR_GALACTIC_CHART)
-  {
-    cross_x += (dx * 2);
-    cross_y += (dy * 2);
-
-    if (cross_x < 1)
-      cross_x = 1;
-
-    if (cross_x > 510)
-      cross_x = 510;
-
-    if (cross_y < 37)
-      cross_y = 37;
-
-    if (cross_y > 293)
-      cross_y = 293;
-  }
-}
-
-/*
- * Draw the cross hairs at the specified position.
- */
-
-// Draw the chart crosshair as a textured sprite (Textures/Crosshair.dds), centred on
-// (cx,cy) and clipped to the chart area. The chart is redrawn every frame (see
-// game_render_flight), so the crosshair is just drawn fresh on top each frame - no XOR
-// erase (the old logic-op path was dropped in the Render2D move). The half-size matches
-// the old cross reach: 16 px on the short-range chart, 8 px on the galactic chart.
-void draw_cross(int cx, int cy)
-{
-  int half;
-  int clipBottom;
-  if (current_screen == SCR_SHORT_RANGE)
-  {
-    half = 16;
-    clipBottom = 339;
-  }
-  else if (current_screen == SCR_GALACTIC_CHART)
-  {
-    half = 8;
-    clipBottom = 293;
-  }
-  else
-  {
-    return;
-  }
-
-  gfx_set_clip_region(1, 37, 510, clipBottom);
-  gfx_draw_sprite_scaled(IMG_CROSSHAIR, cx - half, cy - half, half * 2, half * 2);
-  gfx_set_clip_region(1, 1, 510, 383);
-}
-
-/*
- * The arrow keys own the CHART crosshair on the chart screens; in flight they
- * belong to the camera rig (CameraRig gathers them directly, gated on the
- * flight view, so the two uses never overlap). The old cockpit roll/climb
- * handling is gone with piloting.
- */
-
-void arrow_right(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(1, 0);
-    break;
-  }
-}
-
-void arrow_left(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(-1, 0);
-    break;
-  }
-}
-
-void arrow_up(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(0, -1);
-    break;
-  }
-}
-
-void arrow_down(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(0, 1);
-    break;
-  }
-}
-
-void d_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_GALACTIC_CHART:
-  case SCR_SHORT_RANGE:
-    show_distance_to_planet();
-    break;
-
-  }
-}
-
-void f_pressed(void)
-{
-  if ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE))
-  {
-    find_input = 1;
-    *find_name = '\0';
-    gfx_clear_text_area();
-    gfx_display_text(16, 340, "Planet Name?");
-  }
-}
-
-void add_find_char(int letter)
-{
-  char str[40];
-
-  if (strlen(find_name) == 16)
-    return;
-
-  str[0] = toupper(letter);
-  str[1] = '\0';
-  strcat(find_name, str);
-
-  sprintf(str, "Planet Name? %s", find_name);
-  gfx_clear_text_area();
-  gfx_display_text(16, 340, str);
-}
-
-void delete_find_char(void)
-{
-  char str[40];
-
-  size_t len = strlen(find_name);
-  if (len == 0)
-    return;
-
-  find_name[len - 1] = '\0';
-
-  sprintf(str, "Planet Name? %s", find_name);
-  gfx_clear_text_area();
-  gfx_display_text(16, 340, str);
-}
-
-void o_pressed()
-{
-  switch (current_screen)
-  {
-  case SCR_GALACTIC_CHART:
-  case SCR_SHORT_RANGE:
-    move_cursor_to_origin();
-    break;
-  }
-}
+// The chart crosshair, arrow-key steering, and D/F/O + name-search keys were the
+// keyboard controls for the letterboxed charts. The charts are a native GUI overlay
+// window now (ChartWindow) - it is mouse-driven and the overlay suppresses game keys
+// while open - so that whole keyboard subsystem is retired.
 
 // Pending fire-missile intent + the locked target it launches at, for the next
 // input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
@@ -306,40 +140,16 @@ void o_pressed()
 static bool s_fire_missile_intent = false;
 static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 
-// The entity the missile is currently locked onto (picked from the replicated view
-// with the target key), or 0xFFFFFFFF for none. Drives the HUD lock indicator and
-// the on-target reticle (drawn in render_replicated_objects), and is the target M
-// launches at. Global so the renderer can read it.
+// The entity the missile is aimed at (0xFFFFFFFF = none). Since I2 this is the
+// SELECTED entity (set by a pointer click, not the retired T/U lock keys): it drives
+// the on-target reticle (render_replicated_objects), the orbit-camera subject, and
+// the target the ability bar's Missile button launches at. Global so the renderer
+// reads it.
 unsigned int g_missile_lock_target = 0xFFFFFFFFu;
 
-// Lock the missile onto the ship in the crosshairs (T key). The server is
-// authoritative, so we pick the target from the replicated view and remember its
-// id; M then launches a homing missile at exactly that target. With nothing in the
-// sights, nothing locks.
-static void lock_missile_target(void)
-{
-  if (cmdr.missiles == 0)
-    return;
-
-  const unsigned int tgt = find_lock_target();
-  if (tgt == 0xFFFFFFFFu)
-    return; // nothing in the sights to lock
-
-  g_missile_lock_target = tgt;
-  missile_target = 0; // HUD: a missile is locked (red indicator)
-}
-
-// Clear the missile lock (U key).
-static void unlock_missile_target(void)
-{
-  g_missile_lock_target = 0xFFFFFFFFu;
-  missile_target = MISSILE_UNARMED; // HUD: no lock
-  snd_play_sample(SND_BOOP);
-}
-
-// Launch a missile (M key): only when a target is locked (T) and a round is in
-// the rack; the server spawns a projectile that homes that specific locked
-// target and the rack count comes back on PlayerStatus. No lock -> nothing fires.
+// Launch a missile at the current SELECTION (the ability bar Missile button / A1
+// residue path): only when something is selected and a round is in the rack; the
+// server spawns a homing projectile and the rack count comes back on PlayerStatus.
 static void launch_missile(void)
 {
   if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
@@ -352,10 +162,376 @@ static void launch_missile(void)
   snd_play_sample(SND_MISSILE);
 }
 
+// ---- I3 pointer commands (interaction.md): right-click to order your ship -------
+//
+// The order half of Track I's UX. An RMB CLICK on the flight view issues a
+// contextual default order to the player's own ship (the only unit today): an
+// entity under the cursor -> Attack/Dock/Collect/Approach by its kind; empty space
+// -> Move to where the cursor ray meets a horizontal plane through the ship. The
+// order rides the reliable UnitOrder lane (I1); an optimistic toast shows what was
+// asked and a rejecting UnitOrderAck flashes it red. Camera orbit moved to LMB-drag
+// (CameraRig) so RMB is free for commands.
+//
+// Deferred (documented in IMPLEMENTATION.md): the full move gizmo (elevation-drag
+// stem + depth-faded grid), the RMB-hold radial menu, and clean-player Attack-
+// friction (default Approach) - this increment lands the playable core.
+
+// Optimistic order feedback, drawn by space.cpp's display_order_feedback().
+unsigned int g_order_kind = 0;           // active order's OrderKind (0 = none)
+bool         g_order_has_point = false;  // the order carries a world point (Move)
+long long    g_order_point[3] = {0, 0, 0};
+char         g_order_toast[40] = {0};
+int          g_order_toast_timer = 0;    // frames the toast stays up
+int          g_order_toast_col = 0;
+
+static const char* order_kind_name(unsigned int _k)
+{
+  switch (static_cast<Neuron::Msg::OrderKind>(_k))
+  {
+    case Neuron::Msg::OrderKind::Stop:     return "STOP";
+    case Neuron::Msg::OrderKind::Move:     return "MOVE";
+    case Neuron::Msg::OrderKind::Approach: return "APPROACH";
+    case Neuron::Msg::OrderKind::Dock:     return "DOCK";
+    case Neuron::Msg::OrderKind::Attack:   return "ATTACK";
+    case Neuron::Msg::OrderKind::Collect:  return "COLLECT";
+    case Neuron::Msg::OrderKind::Escort:   return "ESCORT";
+    default:                               return "ORDER";
+  }
+}
+
+static void set_order_toast(const char* _text, int _col)
+{
+  snprintf(g_order_toast, sizeof(g_order_toast), "%s", _text);
+  g_order_toast_timer = 90;   // ~3 s
+  g_order_toast_col = _col;
+}
+
+// Cursor ray -> the point where it meets a horizontal plane through the ship, in
+// absolute world coords, clamped to the server's Move reach. Returns false when the
+// ship isn't visible or the ray is parallel to / behind the plane.
+static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  Neuron::Net::EntitySnapshot me{};
+  if (!rc.IsOpen() || !rc.Sample(rc.LocalPlayer(), 1.0, me))
+    return false;
+
+  const auto sz = Neuron::Graphics::Core::GetOutputSize();
+  const int vw = static_cast<int>(sz.Width);
+  const int vh = static_cast<int>(sz.Height);
+  if (vw <= 0 || vh <= 0)
+    return false;
+
+  using namespace DirectX;
+  Client::Camera& cam = Client::MainCamera();
+  const XMMATRIX vp = XMMatrixMultiply(cam.View(), cam.Projection());
+  const XMMATRIX invVP = XMMatrixInverse(nullptr, vp);
+
+  const float ndcx = 2.0f * static_cast<float>(_mx) / static_cast<float>(vw) - 1.0f;
+  const float ndcy = 1.0f - 2.0f * static_cast<float>(_my) / static_cast<float>(vh);
+  XMVECTOR pNear = XMVector4Transform(XMVectorSet(ndcx, ndcy, 0.0f, 1.0f), invVP);
+  XMVECTOR pFar  = XMVector4Transform(XMVectorSet(ndcx, ndcy, 1.0f, 1.0f), invVP);
+  pNear = XMVectorScale(pNear, 1.0f / XMVectorGetW(pNear));
+  pFar  = XMVectorScale(pFar,  1.0f / XMVectorGetW(pFar));
+
+  // Ray + ship live in origin-relative space (the camera eye is the floating-origin
+  // remainder), so the plane point is the ship minus the render origin.
+  const long long* org = camera_rig_origin();
+  const XMVECTOR ro = pNear;
+  const XMVECTOR rd = XMVectorSubtract(pFar, pNear);
+  const XMVECTOR planePt = XMVectorSet(
+      static_cast<float>(static_cast<double>(me.x) - static_cast<double>(org[0])),
+      static_cast<float>(static_cast<double>(me.y) - static_cast<double>(org[1])),
+      static_cast<float>(static_cast<double>(me.z) - static_cast<double>(org[2])), 0.0f);
+  const XMVECTOR n = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);   // horizontal plane through the ship
+
+  const float denom = XMVectorGetX(XMVector3Dot(rd, n));
+  if (std::fabs(denom) < 1e-4f)
+    return false;
+  const float t = XMVectorGetX(XMVector3Dot(XMVectorSubtract(planePt, ro), n)) / denom;
+  if (t < 0.0f)
+    return false;
+  const XMVECTOR hit = XMVectorAdd(ro, XMVectorScale(rd, t));
+
+  // Back to absolute world, clamped to the server's per-order Move reach so the
+  // client's request matches what the server will accept.
+  auto clampAxis = [](double _from, double _to) -> long long
+  {
+    double d = _to - _from;
+    if (d >  1.0e6) d =  1.0e6;
+    if (d < -1.0e6) d = -1.0e6;
+    return static_cast<long long>(_from + d);
+  };
+  _out[0] = clampAxis(static_cast<double>(me.x), static_cast<double>(org[0]) + XMVectorGetX(hit));
+  _out[1] = clampAxis(static_cast<double>(me.y), static_cast<double>(org[1]) + XMVectorGetY(hit));
+  _out[2] = clampAxis(static_cast<double>(me.z), static_cast<double>(org[2]) + XMVectorGetZ(hit));
+  return true;
+}
+
+// Issue the contextual default order for an RMB click at (mx,my).
+static void dispatch_context_order(int _mx, int _my)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  const unsigned int self = rc.LocalPlayer();
+  if (!rc.IsOpen() || self == 0xFFFFFFFFu)
+    return;
+
+  Neuron::Msg::UnitOrder ord;
+  ord.unitId = self;
+
+  const unsigned int tgt = pick_entity_at_screen(_mx, _my);
+  if (tgt != 0xFFFFFFFFu)
+  {
+    Neuron::Net::EntitySnapshot ts{};
+    if (!rc.Sample(tgt, 1.0, ts))
+      return;
+    ord.target = tgt;
+    if (ts.type == SHIP_PLANET || ts.type < 0)                 ord.order = Neuron::Msg::OrderKind::Approach;
+    else if (ts.type == SHIP_CORIOLIS || ts.type == SHIP_DODEC) ord.order = Neuron::Msg::OrderKind::Dock;
+    else if (ts.type == SHIP_CARGO)                            ord.order = Neuron::Msg::OrderKind::Collect;
+    else                                                       ord.order = Neuron::Msg::OrderKind::Attack;
+    g_order_has_point = false;
+    g_missile_lock_target = tgt;   // command-as-you-select: reticle + orbit follow it
+  }
+  else
+  {
+    long long pt[3];
+    if (!cursor_to_move_point(_mx, _my, pt))
+      return;
+    ord.order = Neuron::Msg::OrderKind::Move;
+    ord.targetX = pt[0]; ord.targetY = pt[1]; ord.targetZ = pt[2];
+    g_order_has_point = true;
+    g_order_point[0] = pt[0]; g_order_point[1] = pt[1]; g_order_point[2] = pt[2];
+  }
+
+  g_order_kind = static_cast<unsigned int>(ord.order);
+  rc.SendUnitOrder(ord);
+  set_order_toast(order_kind_name(g_order_kind), GFX_COL_YELLOW_2);   // optimistic
+}
+
+// Per-frame pointer-command polling (called from the flight update, after the
+// camera). An RMB press-release inside the slop is a CLICK -> contextual order.
+// Camera orbit (LMB-drag) and selection (LMB click, I2) live in CameraRig.
+void handle_pointer_commands(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+
+  static bool s_prevRmb = false;
+  static int  s_rmbDownX = 0, s_rmbDownY = 0;
+  static bool s_rmbMoved = false;
+
+  if (rmb && !s_prevRmb)
+  {
+    s_rmbDownX = mx; s_rmbDownY = my; s_rmbMoved = false;
+  }
+  else if (rmb)
+  {
+    int ddx = mx - s_rmbDownX; if (ddx < 0) ddx = -ddx;
+    int ddy = my - s_rmbDownY; if (ddy < 0) ddy = -ddy;
+    if (ddx > 6 || ddy > 6) s_rmbMoved = true;
+  }
+  else if (s_prevRmb && !s_rmbMoved)
+  {
+    dispatch_context_order(mx, my);   // RMB click -> contextual order
+  }
+  s_prevRmb = rmb;
+}
+
+// ---- I4 ability bar (interaction.md 3.7): abilities reachable by pointer --------
+//
+// A persistent, NON-MODAL strip of ability buttons across the top of the flight
+// view - Stop / Missile / ECM / Bomb / Pod / Jump - so every combat verb is a click,
+// not a key. It is non-modal: it does not raise GuiOverlay (which suppresses game
+// input); instead the camera's LMB select skips a click whose press began over a
+// button (ability_bar_button_at), and this handler triggers it. Availability greys
+// each button from the PlayerStatus / equipment mirrors, and Bomb/Pod need a HOLD so
+// a stray tap can't fire them.
+//
+// Deferred (documented): the screen-nav icon strip (charts/market/status/equip) and
+// the FORMAL retirement of the A/E/Tab/M/C/J keys (they still work in parallel -
+// key retirement is I7); "Launch"/undock stays on the docked screen's own UI.
+
+namespace
+{
+  enum AbilityAct { ACT_STOP, ACT_MISSILE, ACT_ECM, ACT_BOMB, ACT_POD, ACT_JUMP, ACT_COUNT };
+  struct AbilityButton { const char* label; int act; };
+  const AbilityButton s_bar[ACT_COUNT] = {
+    { "STOP", ACT_STOP }, { "MISSILE", ACT_MISSILE }, { "ECM", ACT_ECM },
+    { "BOMB", ACT_BOMB }, { "POD", ACT_POD }, { "JUMP", ACT_JUMP },
+  };
+  constexpr int BAR_SLOT_W = 80;
+  constexpr int BAR_SLOT_H = 20;
+  constexpr int BAR_GAP    = 4;
+  constexpr int BAR_TOP_Y  = 8;
+  constexpr int BOMB_POD_HOLD_FRAMES = 18;   // ~0.6 s hold-to-confirm
+
+  int  s_ability_down_btn = -1;   // button the current LMB press started on (-1 = none)
+  int  s_ability_held_frames = 0; // frames that press has been held
+}
+
+// The left edge of the button row for the current window (centred, clamped on-screen).
+static int ability_bar_origin_x(int _vw)
+{
+  const int total = ACT_COUNT * BAR_SLOT_W + (ACT_COUNT - 1) * BAR_GAP;
+  int x0 = (_vw - total) / 2;
+  if (x0 < 4) x0 = 4;
+  return x0;
+}
+
+// The bar button under (mx,my), or -1. Exposed so the camera's select can ignore a
+// click that landed on the bar. Only live on the flight view (not docked).
+int ability_bar_button_at(int _mx, int _my)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return -1;
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
+  const int x0 = ability_bar_origin_x(vw);
+  for (int i = 0; i < ACT_COUNT; ++i)
+  {
+    const int x = x0 + i * (BAR_SLOT_W + BAR_GAP);
+    if (_mx >= x && _mx < x + BAR_SLOT_W && _my >= BAR_TOP_Y && _my < BAR_TOP_Y + BAR_SLOT_H)
+      return i;
+  }
+  return -1;
+}
+
+static bool ability_enabled(int _act)
+{
+  switch (_act)
+  {
+    case ACT_STOP:    return true;
+    case ACT_MISSILE: return g_missile_lock_target != 0xFFFFFFFFu && cmdr.missiles > 0;
+    case ACT_ECM:     return cmdr.ecm != 0;
+    case ACT_BOMB:    return cmdr.energy_bomb != 0;
+    case ACT_POD:     return cmdr.escape_pod != 0;
+    case ACT_JUMP:    return !docked && !witchspace;
+    default:          return false;
+  }
+}
+
+static void ability_trigger(int _act)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  switch (_act)
+  {
+    case ACT_STOP:
+    {
+      Neuron::Msg::UnitOrder ord;
+      ord.unitId = rc.LocalPlayer();
+      ord.order = Neuron::Msg::OrderKind::Stop;
+      rc.SendUnitOrder(ord);
+      g_order_kind = static_cast<unsigned int>(Neuron::Msg::OrderKind::Stop);
+      g_order_has_point = false;
+      set_order_toast("STOP", GFX_COL_YELLOW_2);
+      break;
+    }
+    case ACT_MISSILE: launch_missile(); break;   // fires at the selection (rack-gated)
+    case ACT_ECM:
+      if (cmdr.ecm)
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
+      break;
+    case ACT_BOMB:
+      if (cmdr.energy_bomb)
+      {
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
+        cmdr.energy_bomb = 0;   // optimistic (no equipment mirror yet - see A1 residue)
+      }
+      break;
+    case ACT_POD:
+      if (cmdr.escape_pod)
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
+      break;
+    case ACT_JUMP:
+      if (!docked && !witchspace)
+        jump_warp();
+      break;
+    default: break;
+  }
+}
+
+// Draw the ability bar (called from the HUD pass in space.cpp). A box per button,
+// its label greyed when unavailable and flashed red while a Bomb/Pod hold-to-confirm
+// is in progress.
+void draw_ability_bar(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
+  hud_set_origin(0, 0);
+  const int x0 = ability_bar_origin_x(vw);
+
+  for (int i = 0; i < ACT_COUNT; ++i)
+  {
+    const int x = x0 + i * (BAR_SLOT_W + BAR_GAP);
+    const bool en = ability_enabled(s_bar[i].act);
+    const bool confirming = (i == s_ability_down_btn)
+                         && (s_bar[i].act == ACT_BOMB || s_bar[i].act == ACT_POD);
+
+    const int frameCol = confirming ? GFX_COL_RED : (en ? GFX_COL_GREY_1 : GFX_COL_GREY_3);
+    const int textCol  = confirming ? GFX_COL_RED : (en ? GFX_COL_WHITE  : GFX_COL_GREY_3);
+    hud_rect(x, BAR_TOP_Y, x + BAR_SLOT_W, BAR_TOP_Y + BAR_SLOT_H, frameCol);
+
+    const int len = static_cast<int>(strlen(s_bar[i].label));
+    const int tx = x + (BAR_SLOT_W - len * 8) / 2;
+    hud_text(tx, BAR_TOP_Y + 6, s_bar[i].label, textCol);
+  }
+}
+
+// Per-frame ability-bar input: an LMB press-release on the same button triggers it
+// (Bomb/Pod require the press be HELD past the confirm threshold). Runs before the
+// camera; the camera's select ignores a click whose press began on the bar.
+void handle_ability_bar(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  {
+    s_ability_down_btn = -1;
+    return;
+  }
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+
+  static bool s_prevLmb = false;
+  if (lmb && !s_prevLmb)
+  {
+    s_ability_down_btn = ability_bar_button_at(mx, my);
+    s_ability_held_frames = 0;
+  }
+  else if (lmb && s_ability_down_btn >= 0)
+  {
+    ++s_ability_held_frames;
+  }
+  else if (!lmb && s_prevLmb && s_ability_down_btn >= 0)
+  {
+    // Release: fire only if it landed back on the same button and it is available;
+    // Bomb/Pod additionally need the hold-to-confirm dwell.
+    if (ability_bar_button_at(mx, my) == s_ability_down_btn
+        && ability_enabled(s_bar[s_ability_down_btn].act))
+    {
+      const int act = s_bar[s_ability_down_btn].act;
+      const bool holdReq = (act == ACT_BOMB || act == ACT_POD);
+      if (!holdReq || s_ability_held_frames >= BOMB_POD_HOLD_FRAMES)
+        ability_trigger(act);
+    }
+    s_ability_down_btn = -1;
+  }
+  s_prevLmb = lmb;
+}
+
+// The charts moved to a native GUI overlay window (ChartWindow, GameWindows.cpp):
+// F5/F6/F7 open it, a click on its map selects the nearest system, and its own
+// HYPERSPACE button jumps. The old on-canvas pointer handler and the letterboxed
+// draw pass are gone - the overlay draws itself over the flight view.
+
 void handle_flight_keys(void)
 {
-  int keyasc;
-
   kbd_poll_keyboard();
 
   if (kbd_F1_pressed)
@@ -379,20 +555,20 @@ void handle_flight_keys(void)
   if (kbd_F5_pressed)
   {
     find_input = 0;
-    display_galactic_chart();
+    OpenChartWindow(ChartData::GALACTIC);      // native chart overlay (click to select, HYPERSPACE to jump)
   }
 
   if (kbd_F6_pressed)
   {
     find_input = 0;
-    display_short_range_chart();
+    OpenChartWindow(ChartData::SHORT_RANGE);
   }
 
   if (kbd_F7_pressed)
   {
     find_input = 0;
-    // The legacy screen shows server-replicated system data + chart cursor selection.
-    display_data_on_planet();
+    // System data now lives in the chart window's side panel (updates with the selection).
+    OpenChartWindow(ChartData::GALACTIC);
   }
 
   if (kbd_F8_pressed && (!witchspace))
@@ -437,34 +613,9 @@ void handle_flight_keys(void)
   else
     f12_was_down = 0;
 
-  if (find_input)
-  {
-    keyasc = kbd_read_key();
-
-    if (kbd_enter_pressed)
-    {
-      find_input = 0;
-      find_planet_by_name(find_name);
-      return;
-    }
-
-    if (kbd_backspace_pressed)
-    {
-      delete_find_char();
-      return;
-    }
-
-    if (isalpha(keyasc))
-      add_find_char(keyasc);
-
-    return;
-  }
-
-  if (kbd_fire_pressed)
-  {
-    if ((!docked) && (draw_lasers == 0))
-      draw_lasers = fire_laser();
-  }
+  // (I7: A=fire retired -> the Attack order fires; E/Tab/M/pod/J = ability bar;
+  //  T/U = pointer select. The chart keys - D/F/O, name search, arrow crosshair -
+  //  retired with the letterboxed charts; the native chart window is mouse-driven.)
 
   if (kbd_dock_pressed)
   {
@@ -473,88 +624,6 @@ void handle_flight_keys(void)
     // autopilot was retired with the single-player fallback.)
     if (!docked && cmdr.docking_computer)
       engage_docking_computer();
-  }
-
-  if (kbd_d_pressed)
-    d_pressed();
-
-  if (kbd_ecm_pressed)
-  {
-    // Thin client: the server owns the burst (validation, energy, cooldown, the
-    // downed missiles); the EcmPulse event coming back plays the classic buzz.
-    if (!docked && cmdr.ecm)
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
-  }
-
-  if (kbd_find_pressed)
-    f_pressed();
-
-  // The hyperspace key on either chart jumps to the system under the crosshair
-  // (server-validated fuel/range; works docked or in flight, per the protocol).
-  // teleport_to_cursor() is a no-op without a replicated galaxy. The legacy
-  // local countdown/witchspace jump was retired with the single-player fallback.
-  if (kbd_hyperspace_pressed && ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
-    teleport_to_cursor();
-
-  if (kbd_jump_pressed && (!docked) && (!witchspace))
-    jump_warp();
-
-  if (kbd_fire_missile_pressed)
-  {
-    if (!docked)
-      launch_missile();
-  }
-
-  if (kbd_origin_pressed)
-    o_pressed();
-
-  if (kbd_target_missile_pressed)
-  {
-    if (!docked)
-      lock_missile_target();
-  }
-
-  if (kbd_unarm_missile_pressed)
-  {
-    if (!docked)
-      unlock_missile_target();
-  }
-
-  /* (The speed keys went with piloting: the hull idles and the CAMERA moves -
-   * see CameraRig. The arrow keys below only steer the chart crosshair now.) */
-
-  if (kbd_up_pressed)
-    arrow_up();
-
-  if (kbd_down_pressed)
-    arrow_down();
-
-  if (kbd_left_pressed)
-    arrow_left();
-
-  if (kbd_right_pressed)
-    arrow_right();
-
-  if (kbd_energy_bomb_pressed)
-  {
-    // The server validates ownership and applies the blast. The local flag is
-    // cleared optimistically because no wire message mirrors equipment consumption
-    // yet (PlayerStatus carries no equipment bits) - a known residue, documented
-    // in IMPLEMENTATION.md; the server ignores duplicate detonate intents anyway.
-    if ((!docked) && (cmdr.energy_bomb))
-    {
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
-      cmdr.energy_bomb = 0;
-    }
-  }
-
-  if (kbd_escape_pressed)
-  {
-    // Thin client: the server consumes the pod, clears the record, refuels and
-    // respawns us docked; the EscapePodUsed event coming back flips the client
-    // into the docked flow (replacing the legacy local escape sequence).
-    if ((!docked) && (cmdr.escape_pod) && (!witchspace))
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
   }
 }
 
@@ -607,11 +676,20 @@ static void enter_intro2(void)
   s_state = GameState::Intro2;
 }
 
-// Enter live flight (and the docked menus); start on the commander status screen.
+// The docked "home": the camera-space 3D view of the station (current_screen stays the
+// front view so the scene renders full-window) with the native station menu window
+// floating over it - replacing the legacy 512x514 commander-status screen.
+static void enter_station(void)
+{
+  current_screen = SCR_FRONT_VIEW;
+  OpenStationMenu();
+}
+
+// Enter live flight (and the docked menus); start docked at the station.
 static void enter_flight(void)
 {
   dock_player();
-  display_commander_status();
+  enter_station();
   s_state = GameState::Flight;
 }
 
@@ -655,7 +733,6 @@ static void start_new_game(void)
   game_over = 0;
   initialise_game();
   dock_player();
-  update_console();
   current_screen = SCR_FRONT_VIEW;
   enter_intro1();
 }
@@ -672,36 +749,14 @@ static void respawn_after_death(void)
   // authoritative hold is already empty server-side).
   memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
   dock_player();
-  display_commander_status();
+  enter_station();
   s_state = GameState::Flight;
 }
 
-/*
- * Draw a break pattern (for launching, docking and hyperspacing).
- * Just draw a very simple one for the moment.
- */
-
-void display_break_pattern(void)
-{
-  int i;
-
-  gfx_set_clip_region(1, 1, 510, 383);
-  gfx_clear_display();
-
-  for (i = 0; i < 20; i++)
-  {
-    gfx_draw_circle(256, 192, 30 + i * 15, GFX_COL_WHITE);
-    gfx_update_screen();
-  }
-
-  if (docked)
-  {
-    display_commander_status();
-    update_console();
-  }
-  else
-    current_screen = SCR_FRONT_VIEW;
-}
+// The break-pattern transition (concentric rings filling the cockpit on launch / dock /
+// hyperspace) was a FIRST-PERSON effect. In the third-person camera model the ship simply
+// appears in space (or at the station) via the server's snapshots, so the transition is
+// gone: launch/dock/arrival just switch the view directly.
 
 void info_message(const char* message)
 {
@@ -760,7 +815,8 @@ static void register_client_event_handlers(void)
     {
       witchspace = (_t.status == Neuron::Msg::TravelStatus::Witchspace) ? 1 : 0;
       docked = 0;
-      current_screen = SCR_BREAK_PATTERN;
+      current_screen = SCR_FRONT_VIEW;   // arrive in space (camera-space view)
+      CloseStationMenu();
       snd_play_sample(SND_HYPERSPACE);
       return;
     }
@@ -793,7 +849,7 @@ static void register_client_event_handlers(void)
         reset_weapons();
         g_missile_lock_target = 0xFFFFFFFFu;
         snd_play_sample(SND_DOCK);
-        current_screen = SCR_BREAK_PATTERN;
+        enter_station();   // docked: camera-space view + the station menu window
       }
       cmdr.credits = _resp.credits;
       return;
@@ -881,6 +937,25 @@ static void register_client_event_handlers(void)
     PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
   });
 
+  // I3 order outcome: the server accepted or refused a UnitOrder. An accept keeps the
+  // optimistic marker/toast running; a refusal flashes the reason red and drops the
+  // marker so the client stops showing an order that isn't happening.
+  g_clientBus.Subscribe<Neuron::Msg::UnitOrderAck>([](const Neuron::Msg::UnitOrderAck& _ack)
+  {
+    if (_ack.status == Neuron::Msg::OrderStatus::Accepted)
+      return;
+    const char* why =
+        _ack.status == Neuron::Msg::OrderStatus::NotYours   ? "NOT YOURS"    :
+        _ack.status == Neuron::Msg::OrderStatus::BadTarget  ? "BAD TARGET"   :
+        _ack.status == Neuron::Msg::OrderStatus::Docked     ? "UNDOCK FIRST" :
+        _ack.status == Neuron::Msg::OrderStatus::Illegal    ? "ILLEGAL"      :
+        _ack.status == Neuron::Msg::OrderStatus::OutOfRange ? "OUT OF RANGE" :
+                                                              "REJECTED";
+    set_order_toast(why, GFX_COL_RED);
+    g_order_kind = 0;
+    g_order_has_point = false;
+  });
+
   // ECM burst (G8): someone's unit fired - play the classic buzz and light the
   // E indicator (it counts down via time_ecm). The downed missiles arrive as
   // EntityDeath events (explosions) alongside.
@@ -902,7 +977,7 @@ static void register_client_event_handlers(void)
     memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
     snd_play_sample(SND_DOCK);
     dock_player();
-    current_screen = SCR_BREAK_PATTERN;
+    enter_station();   // escape pod: respawn docked at the station
   });
 
   // Cargo manifest: the authoritative per-commodity hold, resent after a scoop or a
@@ -972,9 +1047,12 @@ static void process_server_events(void)
     Neuron::Msg::CargoManifest cargo;
     Neuron::Msg::EcmPulse ecm;
     Neuron::Msg::EscapePodUsed pod;
+    Neuron::Msg::UnitOrderAck oack;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
+    else if (Neuron::Msg::TryDecode(msg, oack))
+      g_clientBus.Publish(oack);
     else if (Neuron::Msg::TryDecode(msg, travel))
       g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))
@@ -1028,8 +1106,9 @@ static void send_player_input(void)
   s_frameEcm = false;
   s_frameEnergyBomb = false;
   s_frameEscapePod = false;
-  if (kbd_fire_pressed)
-    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
+  // (I7: manual A=fire is retired - the Attack order drives the ship's laser
+  //  server-side now. in.fire therefore stays false; the ability bar / orders own
+  //  the other actions.)
   if (s_fire_missile_intent)
   {
     g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::LaunchMissile, s_fire_missile_target });
@@ -1105,7 +1184,12 @@ static void game_update_flight(void)
   // The free camera: gather mouse/wheel/key input, advance the active controller
   // (first-person or orbit), and write this frame's view. Runs before the key
   // handler so a fresh missile lock orbits from the next frame.
+  handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
+                               //     click is consumed instead of selecting behind it)
+
   camera_rig_update();
+
+  handle_pointer_commands();   // I3: RMB contextual orders (after the camera reads input)
 
   handle_flight_keys();
 
@@ -1118,91 +1202,56 @@ static void game_update_flight(void)
     message_count--;
 }
 
+// Render-free accessor for the native HUD pass (HudRender.cpp, a winrt TU that stays off
+// the legacy game headers): is the replication socket up?
+bool game_client_connected(void) { return Client::ReplicationClientInstance().IsOpen(); }
+
 // Per-frame draw for the in-flight/docked state: the 3D scene, HUD and overlays the old
 // loop body emitted (with the simulation-and-draw steps that are still fused).
 static void game_render_flight(void)
 {
-  // Charts (galactic / short range): redraw the chart, the live selected-system readout
-  // and the crosshair every frame. The replicated chart functions are idempotent (they
-  // only re-park the cursor when it is off-screen), so a per-frame redraw suits the
-  // clear-and-redraw back buffer and the crosshair sprite moves cleanly without the old
-  // XOR erase. Handles the chart whether opened docked or in flight.
-  if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
-  {
-    if (current_screen == SCR_GALACTIC_CHART)
-      display_galactic_chart();
-    else
-      display_short_range_chart();
-    show_distance_to_planet();
-    draw_cross(cross_x, cross_y);
+  // The charts and the docked station menu are native GUI overlay windows now - they
+  // draw themselves over the camera-space view below. There is no retro chart / commander
+  // -status branch here; system data lives in the chart window's panel.
+
+  // No offline mode: without a connection there is no world to render (docked or in
+  // flight). ensure_connection keeps retrying; the native HUD pass (RenderGameHud) draws
+  // the "connection lost" banner meanwhile.
+  if (!Client::ReplicationClientInstance().IsOpen())
     return;
-  }
 
-  // Docked legacy screens (commander status, planet data) redraw every frame, like the charts
-  // above, so there is no empty frame to skip now that the idle-frame present gate is gone.
-  // Both are idempotent (they just re-render from current state). Skipped while a GUI overlay
-  // window is up: it draws + presents on top, so the legacy screen underneath would only be
-  // occluded. (Charts are handled above; the break pattern is handled at the end.)
-  if (docked && !GuiOverlay::IsShown())
+  // The camera-space 3D scene renders in BOTH docked and flight: docked shows the station
+  // in view with the StationMenuWindow floating over it (current_screen stays the front
+  // view so this is full-window); in flight it is the live world.
+  if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
+      (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
   {
-    if (current_screen == SCR_CMDR_STATUS)
-    {
-      display_commander_status();
-      return;
-    }
-    if (current_screen == SCR_PLANET_DATA)
-    {
-      display_data_on_planet();
-      return;
-    }
+    gfx_clear_display();
+    update_starfield();
   }
 
+  // The server owns the world: render the replicated, interpolated state.
+  render_replicated_objects();
+
+  // The flight HUD + display-only upkeep run only in flight; docked, the station menu
+  // window is the UI (no dashboard).
   if (!docked)
   {
-    // No offline mode: without a connection there is no world to render. Show
-    // the connection-lost state (ensure_connection keeps retrying) instead of
-    // simulated vitals.
-    if (!Client::ReplicationClientInstance().IsOpen())
-    {
-      gfx_clear_display();
-      int ch;
-      gfx_canvas_size(nullptr, &ch);
-      gfx_display_centre_text(ch / 2 - 10, "CONNECTION LOST - RECONNECTING", 140, GFX_COL_GOLD);
-      return;
-    }
-
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
-        (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
-    {
-      gfx_clear_display();
-      update_starfield();
-    }
-
-    // The server owns the world: render the replicated, interpolated state.
-    render_replicated_objects();
-
-    if (docked)
-    {
-      update_console();
-      return;
-    }
-
-    // The local hull's beam visual: while armed (fire_laser), the own ship's
-    // render record carries FLG_FIRING and the muzzle bolt draws with the ship
-    // (render_replicated_objects). Count the frames down here.
+    // The local hull's beam visual: while armed (fire_laser), the own ship's render
+    // record carries FLG_FIRING and the muzzle bolt draws with the ship. Count down here.
     if ((current_screen == SCR_FRONT_VIEW) && draw_lasers)
       draw_lasers--;
 
     if (message_count > 0)
-      gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
+      hud_centre_text(358, message_string, 120, GFX_COL_WHITE);
 
     mcount--;
     if (mcount < 0)
       mcount = 255;
 
     // Display-only upkeep: the energy-low warning and the altitude dial read the
-    // server-mirrored vitals and the replicated planet; the laser/ECM steps pace
-    // the beam visual and the E indicator. No game rule runs client-side.
+    // server-mirrored vitals; the laser/ECM steps pace the beam visual and the E
+    // indicator. No game rule runs client-side.
     if ((mcount & 31) == 10)
     {
       if (PlayerDefense().energy < 50)
@@ -1216,12 +1265,9 @@ static void game_render_flight(void)
 
     cool_laser();
     time_ecm();
-
-    update_console();
   }
-
-  if (current_screen == SCR_BREAK_PATTERN)
-    display_break_pattern();
+  // The cockpit dashboard + flight overlays (update_console) now draw natively in the
+  // RenderCanvas HUD pass (RenderGameHud), not into the gfx2d batch here.
 }
 
 // Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on
@@ -1297,7 +1343,7 @@ void game_render_scene(void)
       gfx_clear_display();
       update_starfield();
       update_local_objects();
-      gfx_display_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
+      hud_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
       break;
     }
   }

@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "elite.h"
-#include "gfx.h"
+#include "GameScene.h"
 #include "Scene3D.h"
 #include "Camera.h"
 #include "stars.h"
@@ -122,8 +122,9 @@ void front_starfield(void)
     star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
 
     /* Each on-screen star becomes a small 3D "dust" quad drawn as the background in the
-       scene pass - the streaming-speed cue. (Warp streaks are still 2D lines, below.) */
-    if ((!warp_stars) && star_on_screen(sx, sy))
+       scene pass - the streaming-speed cue. During a warp the field just streams faster
+       (delta above); the old 2D line streaks were a first-person effect and are gone. */
+    if (star_on_screen(sx, sy))
       push_dust(sx, sy, zz);
 
     /* Move the stars to their new locations...*/
@@ -140,13 +141,6 @@ void front_starfield(void)
 
     stars[i].y = yy;
     stars[i].x = xx;
-
-    if (warp_stars)
-    {
-      int ex, ey;
-      star_to_screen(xx, yy, &ex, &ey);
-      gfx_draw_line(sx, sy, ex, ey);
-    }
 
     sx = xx;
     sy = yy;

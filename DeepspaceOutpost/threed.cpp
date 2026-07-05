@@ -7,7 +7,8 @@
 #include <ctype.h>
 
 #include "elite.h"
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass
 #include "Camera.h"  // MainCamera() - the CPU paths project through the same optics as the GPU
 #include "CameraRig.h"
@@ -77,58 +78,10 @@ void draw_solid_ship (struct local_object *obj)
 }
 
 
-/*
- * Draw the firing beam for a ship whose FLG_FIRING is set - NPCs, remote players
- * AND (with the cockpit view gone) the player's own hull: project its muzzle
- * vertex and draw the 2D bolt from the gun to a screen edge. Works on the
- * CAMERA-SPACE copy draw_ship builds (the CPU projection needs camera coords).
- * Kept out of draw_solid_ship so that stays pure mesh submission.
- */
-
-static void draw_ship_laser (const struct local_object *obj)
-{
-	if (!(obj->flags & FLG_FIRING))
-		return;
-
-	struct ship_data *ship = ship_list[obj->type];
-
-	Matrix trans_mat;
-	double tmp;
-	struct vector vec;
-	double rx, ry, rz;
-	int sx, sy;
-	int lasv;
-	int col;
-
-	for (int i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-
-	tmp = trans_mat[0].y; trans_mat[0].y = trans_mat[1].x; trans_mat[1].x = tmp;
-	tmp = trans_mat[0].z; trans_mat[0].z = trans_mat[2].x; trans_mat[2].x = tmp;
-	tmp = trans_mat[1].z; trans_mat[1].z = trans_mat[2].y; trans_mat[2].y = tmp;
-
-	lasv = ship->front_laser;
-	vec.x = ship->points[lasv].x;
-	vec.y = ship->points[lasv].y;
-	vec.z = ship->points[lasv].z;
-	mult_vector (&vec, trans_mat);
-
-	rx = vec.x + obj->location.x;
-	ry = vec.y + obj->location.y;
-	rz = vec.z + obj->location.z;
-	if (rz <= 0)
-		rz = 1;
-
-	project_to_screen (rx, ry, rz, &sx, &sy);
-
-	int w, h;
-	gfx_scene_size (&w, &h);
-	col = (obj->type == SHIP_VIPER) ? GFX_COL_CYAN : GFX_COL_WHITE;
-
-	gfx_render_line (sx, sy,
-					 obj->location.x > 0 ? 0 : w - 1, (rand255() * h) / 256,
-					 (int) rz, col);
-}
+// The firing-beam visual (draw_ship_laser) was a first-person effect: it drew a 2D bolt
+// from the muzzle to a random SCREEN EDGE, which is meaningless in the third-person camera
+// (like the warp streaks and the break pattern). Removed - laser hits are server-resolved;
+// a world-space beam VFX can be added to Scene3D later if wanted.
 
 
 
@@ -318,7 +271,7 @@ void draw_explosion (struct local_object *obj)
 
 			for (psy = 0; psy < sizey; psy++)
 				for (psx = 0; psx < sizex; psx++)		
-					gfx_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
+					hud_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
 		}
 	}
 
@@ -392,6 +345,5 @@ void draw_ship (struct local_object *ship)
 	}
 
 	draw_solid_ship (ship);       // world-frame mesh; Scene3D applies the view + projection
-	draw_ship_laser (&cam);       // firing beam (only when FLG_FIRING); CPU camera-space
 }
 

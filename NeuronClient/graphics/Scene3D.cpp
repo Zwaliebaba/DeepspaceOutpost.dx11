@@ -25,7 +25,7 @@ namespace Neuron::Graphics
   {
     // The sun object type (drawn as a billboard, not a ship mesh). The planet (-1) is a real
     // sphere mesh now, so it goes through the normal mesh path keyed by its type.
-    constexpr int kShipSun = -2;
+    constexpr int SUN_MODEL_TYPE = -2;
 
     // Mirrors SceneCb in shaders/partials/scene3d.hlsli (row-major mvp + flat tint).
     struct SceneConstants
@@ -58,9 +58,9 @@ namespace Neuron::Graphics
     // A fixed directional light from the upper-right, angled slightly toward the camera
     // (view space: +z is forward). ambient + diffuse == 1, so a fully-lit face keeps its
     // original palette colour and shadowed faces darken toward 0.4x.
-    constexpr float kLightDir[3] = {0.5f, 0.7f, -0.5f};
-    constexpr float kAmbient = 0.40f;
-    constexpr float kDiffuse = 0.60f;
+    constexpr float LIGHT_DIR[3] = {0.5f, 0.7f, -0.5f};
+    constexpr float AMBIENT = 0.40f;
+    constexpr float DIFFUSE = 0.60f;
 
     // Resolve a palette index to an opaque RGBA8 (0xAABBGGRR), matching col_rgba.
     uint32_t paletteRgba(int _index)
@@ -368,7 +368,7 @@ namespace Neuron::Graphics
     {
       // The sun renders as a depth-tested billboard (a glowing radial-gradient disk). The
       // planet is now a real sphere mesh, so it falls through to the ship mesh path below.
-      if (m.type == kShipSun)
+      if (m.type == SUN_MODEL_TYPE)
       {
         renderBillboard(m);
         continue;
@@ -412,11 +412,11 @@ namespace Neuron::Graphics
       XMFLOAT4X4 mvT;
       XMStoreFloat4x4(&mvT, XMMatrixTranspose(mv));
       std::memcpy(lc.mv, &mvT, sizeof(lc.mv));
-      lc.lightDir[0] = kLightDir[0];
-      lc.lightDir[1] = kLightDir[1];
-      lc.lightDir[2] = kLightDir[2];
-      lc.ambient[0] = lc.ambient[1] = lc.ambient[2] = kAmbient;
-      lc.diffuse[0] = lc.diffuse[1] = lc.diffuse[2] = kDiffuse;
+      lc.lightDir[0] = LIGHT_DIR[0];
+      lc.lightDir[1] = LIGHT_DIR[1];
+      lc.lightDir[2] = LIGHT_DIR[2];
+      lc.ambient[0] = lc.ambient[1] = lc.ambient[2] = AMBIENT;
+      lc.diffuse[0] = lc.diffuse[1] = lc.diffuse[2] = DIFFUSE;
       lc.params[0] = s_lit ? 1.0f : 0.0f;
 
       D3D11_MAPPED_SUBRESOURCE mappedLc;
@@ -474,7 +474,7 @@ namespace Neuron::Graphics
     const float hf = static_cast<float>(h);
 
     // Primary colour (planet); the sun is shader-driven, so its vertex colour is unused.
-    const uint32_t rgba = (_model.type == kShipSun) ? 0xFFFFFFFFu : paletteRgba(_model.colour);
+    const uint32_t rgba = (_model.type == SUN_MODEL_TYPE) ? 0xFFFFFFFFu : paletteRgba(_model.colour);
 
     // Two camera-space triangles spanning [-h,+h] in x/y at depth cz. The NORMAL slot
     // carries the quad-local uv in [-1,1] for the pixel shader's radius test.

@@ -32,6 +32,8 @@ set(GAME_CLIENT_SOURCES
     GameApp.h
     GameWindows.h
     GameWindows.cpp
+    HudRender.h
+    HudRender.cpp
     SceneMeshes.h
     SceneMeshes.cpp
     CameraRig.h
@@ -43,21 +45,17 @@ add_executable(DeepspaceOutpost WIN32 pch.cpp ${GAME_SOURCES} ${GAME_CLIENT_SOUR
 
 target_compile_features(DeepspaceOutpost PRIVATE cxx_std_23)
 
-# The retro 512-wide logical canvas selects the GFX_SCALE=2 metrics block in
-# gfx.h (centre 256,192 - the values the charts/HUD are drawn against). This was
-# formerly set by the legacy DeepspaceOutpost/config.h header (#define
-# RES_800_600, since removed); it is a build-time canvas constant, so it now
-# lives as a target definition applied to every translation unit regardless of
-# include order.
-target_compile_definitions(DeepspaceOutpost PRIVATE RES_800_600)
+# (RES_800_600 was the selector for gfx.h's retro GFX_SCALE=2 canvas-metrics block;
+# those metrics moved to native ChartData constants and the block is gone, so the
+# compile definition is no longer needed.)
 
 # Precompiled header (pch.h / pch.cpp). pch.h pulls in NeuronClient.h ->
 # NeuronCore.h, so the engine core is available to every translation unit.
 target_precompile_headers(DeepspaceOutpost PRIVATE pch.h)
 
 # Only this target's own (game) headers live here; the engine + presentation
-# contracts (gfx.h, sound.h, Renderer.h, ...) come from NeuronClient's public
-# include dirs via the link below.
+# contracts (GamePalette.h, GameScene.h, sound.h, Renderer.h, ...) come from
+# NeuronClient's public include dirs via the link below.
 target_include_directories(DeepspaceOutpost PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

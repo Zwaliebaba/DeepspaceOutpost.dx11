@@ -47,7 +47,7 @@ namespace Neuron::Net
     // is set non-blocking. Returns false on failure.
     bool Open(uint16_t _bindPort = 0);
     void Close();
-    [[nodiscard]] bool IsOpen() const { return m_handle != kInvalid; }
+    [[nodiscard]] bool IsOpen() const { return m_handle != INVALID_HANDLE; }
 
     // Send one datagram to `_to`. Returns bytes sent, or -1 on error.
     int SendTo(const Endpoint& _to, const void* _data, std::size_t _size);
@@ -58,7 +58,7 @@ namespace Neuron::Net
     int RecvFrom(void* _buffer, std::size_t _capacity, Endpoint& _from);
 
   private:
-    static constexpr uintptr_t kInvalid = ~static_cast<uintptr_t>(0);   // INVALID_SOCKET
-    uintptr_t m_handle = kInvalid;
+    static constexpr uintptr_t INVALID_HANDLE = ~static_cast<uintptr_t>(0);   // INVALID_SOCKET
+    uintptr_t m_handle = INVALID_HANDLE;
   };
 }

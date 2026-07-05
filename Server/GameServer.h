@@ -28,6 +28,7 @@
 #include "Messages/MessageBus.h"
 #include "Messages/Defs/PlayerSession.h"
 #include "Messages/Defs/Travel.h"         // TravelRequest / TravelResponse
+#include "Messages/Defs/UnitOrder.h"      // UnitOrder / UnitOrderAck / AbilityRequest (I1)
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
@@ -116,6 +117,13 @@ namespace DSOServer
     void OnEntityKilled(const Neuron::GameLogic::EntityKilled& _k);
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
+    // I1: order a unit (validate ownership/target/range, record the ActiveOrder, ack)
+    // and route a discrete equipment activation to the combat bus.
+    void HandleUnitOrder(Neuron::GameLogic::Session& _session, const Neuron::Msg::UnitOrder& _req);
+    void HandleAbilityRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::AbilityRequest& _req);
+    // I1: auto-complete a Dock order when the ordered ship reaches dock range
+    // (reuses the tested station dock path and clears the order).
+    void CompleteDockOrders();
     void SendCargoTo(uint32_t _entityIndex);
     void BroadcastPlayerInfo(uint32_t _entityIndex);
 

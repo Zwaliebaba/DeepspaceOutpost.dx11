@@ -33,6 +33,7 @@ add_executable(GameLogic.Tests
     ReplicationTests.cpp
     GalaxyManifestTests.cpp
     StrategicTests.cpp
+    OrderSystemTests.cpp
 )
 
 target_compile_features(GameLogic.Tests PRIVATE cxx_std_23)

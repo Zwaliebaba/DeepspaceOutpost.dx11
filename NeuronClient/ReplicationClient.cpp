@@ -15,14 +15,14 @@ namespace Neuron::Client
   {
     // Largest datagram we expect (a single MTU-bounded snapshot packet, with a
     // little slack); anything bigger is a malformed packet and is discarded.
-    constexpr int kRecvBufferSize = 2048;
+    constexpr int RECV_BUFFER_SIZE = 2048;
 
     // Cap datagrams processed per Pump() so a flood can never stall the frame.
-    constexpr int kMaxDrainPerPump = 256;
+    constexpr int MAX_DRAIN_PER_PUMP = 256;
 
     // How often the client probes the server for a time-sync round trip (E1). ~1 Hz
     // keeps the RTT estimate fresh at negligible cost.
-    constexpr double kPingIntervalMs = 1000.0;
+    constexpr double PING_INTERVAL_MS = 1000.0;
 
     // Monotonic wall clock in milliseconds (presentation timing only - this is the
     // client render path, not the deterministic simulation).
@@ -70,10 +70,10 @@ namespace Neuron::Client
     if (!m_open)
       return;
 
-    uint8_t buffer[kRecvBufferSize];
+    uint8_t buffer[RECV_BUFFER_SIZE];
     Net::Endpoint from;
 
-    for (int i = 0; i < kMaxDrainPerPump; ++i)
+    for (int i = 0; i < MAX_DRAIN_PER_PUMP; ++i)
     {
       const int got = m_socket.RecvFrom(buffer, sizeof(buffer), from);
       if (got <= 0)
@@ -206,7 +206,7 @@ namespace Neuron::Client
     if (LocalPlayer() != 0xFFFFFFFFu)
     {
       const double now = NowMs();
-      if (m_lastPingMs == 0.0 || now - m_lastPingMs >= kPingIntervalMs)
+      if (m_lastPingMs == 0.0 || now - m_lastPingMs >= PING_INTERVAL_MS)
       {
         m_events.Send(Msg::Ping{ NowMs32(), static_cast<uint32_t>(m_latency.rttMs) });
         m_lastPingMs = now;

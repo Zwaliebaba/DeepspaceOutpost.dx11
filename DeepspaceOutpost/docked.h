@@ -1,14 +1,10 @@
 #ifndef DOCKED_H
 #define DOCKED_H
 
-void display_short_range_chart (void);
-void display_galactic_chart (void);
-void display_data_on_planet (void);
-void show_distance_to_planet (void);
-void teleport_to_cursor (void);   // thin-client: teleport to the system at the chart crosshair
-void move_cursor_to_origin (void);
-void find_planet_by_name (char *find_name);
-void display_commander_status (void);
+// The galactic / short-range / planet-data chart screens moved to the native
+// ChartWindow, and the docked commander-status screen to the StationMenuWindow +
+// camera-space view (GameWindows.cpp); the render-free data those windows show lives
+// in the ChartData API (ChartData.h) and the *_line accessors below.
 int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed to_planet);
 
 /* Render-free market accessors / actions, used by the GUI market window so it can

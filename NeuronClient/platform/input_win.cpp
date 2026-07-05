@@ -19,6 +19,7 @@
 #include "EventManager.h"
 
 #include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
+#include <cmath>      // std::sqrt (I5 pinch distance)
 
 namespace {
 
@@ -39,8 +40,15 @@ int  g_mouseY = 0;
 bool g_lmb = false;
 bool g_rmb = false;
 
-/* Accumulated wheel notches since last consumed (camera dolly/zoom). */
+/* Accumulated wheel notches since last consumed (camera dolly/zoom). Both the mouse
+ * wheel and the I5 touch PINCH feed this, so zoom is one device-neutral event. */
 float g_wheelSteps = 0.0f;
+
+/* I5 touch: track up to two active pointers so a two-finger PINCH can drive zoom.
+ * A single pointer still maps to the mouse/LMB (tap = select, drag = orbit). */
+struct TouchPt { UINT32 id = 0; int x = 0; int y = 0; bool active = false; };
+TouchPt g_touch[2];
+float   g_pinchPrevDist = -1.0f;   /* < 0 = no pinch in progress */
 
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
@@ -101,19 +109,63 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			g_wheelSteps += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
 			return 0;
 
-		// Minimal touch: map the primary pointer to the mouse (no multi-touch yet).
+		// I5 multi-touch: track up to two pointers. One finger maps to the mouse
+		// (tap = select, drag = orbit); two fingers PINCH to zoom (fed into the same
+		// wheel accumulator as the mouse wheel). Two-finger PAN and long-press
+		// (radial menu / gizmo) are deferred - see IMPLEMENTATION.md I5.
 		case WM_POINTERDOWN:
 		case WM_POINTERUPDATE:
 		case WM_POINTERUP:
 		{
+			const UINT32 pid = GET_POINTERID_WPARAM(wparam);
 			POINTER_INFO pi{};
-			if (GetPointerInfo(GET_POINTERID_WPARAM(wparam), &pi))
+			if (!GetPointerInfo(pid, &pi))
+				return 0;
+			POINT pt = pi.ptPixelLocation;
+			ScreenToClient(hwnd, &pt);
+			const bool inContact = (msg != WM_POINTERUP)
+			                    && (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
+
+			// Assign this pointer id to a slot (reuse its slot, else a free one).
+			int slot = -1;
+			for (int i = 0; i < 2; ++i)
+				if (g_touch[i].active && g_touch[i].id == pid) { slot = i; break; }
+			if (slot < 0 && inContact)
+				for (int i = 0; i < 2; ++i)
+					if (!g_touch[i].active) { g_touch[i].id = pid; g_touch[i].active = true; slot = i; break; }
+			if (slot >= 0)
 			{
-				POINT pt = pi.ptPixelLocation;
-				ScreenToClient(hwnd, &pt);
-				g_mouseX = pt.x;
-				g_mouseY = pt.y;
-				g_lmb = (msg != WM_POINTERUP) && (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
+				g_touch[slot].x = pt.x;
+				g_touch[slot].y = pt.y;
+				if (!inContact)
+					g_touch[slot].active = false;
+			}
+
+			const int n = (g_touch[0].active ? 1 : 0) + (g_touch[1].active ? 1 : 0);
+			if (n >= 2)
+			{
+				g_lmb = false;   // two fingers is a pinch, not a click/drag
+				const float dx = static_cast<float>(g_touch[0].x - g_touch[1].x);
+				const float dy = static_cast<float>(g_touch[0].y - g_touch[1].y);
+				const float dist = std::sqrt(dx * dx + dy * dy);
+				if (g_pinchPrevDist > 0.0f)
+					g_wheelSteps += (dist - g_pinchPrevDist) / 60.0f;   // ~60 px per zoom notch
+				g_pinchPrevDist = dist;
+			}
+			else
+			{
+				g_pinchPrevDist = -1.0f;
+				if (n == 1)
+				{
+					const TouchPt& p = g_touch[0].active ? g_touch[0] : g_touch[1];
+					g_mouseX = p.x;
+					g_mouseY = p.y;
+					g_lmb = true;
+				}
+				else
+				{
+					g_lmb = false;   // all fingers lifted
+				}
 			}
 			return 0;
 		}
@@ -183,10 +235,12 @@ int kbd_F1_pressed, kbd_F2_pressed, kbd_F3_pressed, kbd_F4_pressed;
 int kbd_F5_pressed, kbd_F6_pressed, kbd_F7_pressed, kbd_F8_pressed;
 int kbd_F9_pressed, kbd_F10_pressed, kbd_F11_pressed, kbd_F12_pressed;
 int kbd_y_pressed, kbd_n_pressed;
-int kbd_fire_pressed, kbd_ecm_pressed, kbd_energy_bomb_pressed;
-int kbd_hyperspace_pressed, kbd_ctrl_pressed, kbd_jump_pressed, kbd_escape_pressed;
+// I7: the combat keys (A/E/Tab/M/T/U/pod/J/H) retired into the pointer UX (I2 select,
+// I3 orders, I4 ability bar, I6 chart button); their kbd_* globals + mappings are
+// gone. kbd_ctrl stays (a modifier), and the chart D/F/O keys + the crosshair arrows
+// stay as accelerators.
+int kbd_ctrl_pressed;
 int kbd_dock_pressed, kbd_d_pressed, kbd_origin_pressed, kbd_find_pressed;
-int kbd_fire_missile_pressed, kbd_target_missile_pressed, kbd_unarm_missile_pressed;
 int kbd_inc_speed_pressed, kbd_dec_speed_pressed;
 int kbd_up_pressed, kbd_down_pressed, kbd_left_pressed, kbd_right_pressed;
 int kbd_enter_pressed, kbd_backspace_pressed, kbd_space_pressed;
@@ -206,22 +260,12 @@ void kbd_poll_keyboard(void)
 	kbd_y_pressed = down('Y');
 	kbd_n_pressed = down('N');
 
-	kbd_fire_pressed        = down('A');
-	kbd_ecm_pressed         = down('E');
-	kbd_energy_bomb_pressed = down(VK_TAB);
-	kbd_hyperspace_pressed  = down('H');
-	kbd_ctrl_pressed        = down(VK_CONTROL) || down(VK_LCONTROL) || down(VK_RCONTROL);
-	kbd_jump_pressed        = down('J');
-	kbd_escape_pressed      = down(VK_ESCAPE);
+	kbd_ctrl_pressed = down(VK_CONTROL) || down(VK_LCONTROL) || down(VK_RCONTROL);
 
 	kbd_dock_pressed   = down('C');
 	kbd_d_pressed      = down('D');
 	kbd_origin_pressed = down('O');
 	kbd_find_pressed   = down('F');
-
-	kbd_fire_missile_pressed   = down('M');
-	kbd_target_missile_pressed = down('T');
-	kbd_unarm_missile_pressed  = down('U');
 
 	kbd_inc_speed_pressed = down(VK_SPACE);
 	kbd_dec_speed_pressed = down(VK_OEM_2);   /* '/' */

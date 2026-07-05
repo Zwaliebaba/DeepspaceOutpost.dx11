@@ -335,6 +335,8 @@ namespace DSOServer
 
         Net::StationRequest req;
         Msg::TravelRequest travel;
+        Msg::UnitOrder order;
+        Msg::AbilityRequest ability;
         Msg::GalaxyChunkRequest chunkReq;
         Msg::Ping ping;
         if (Msg::TryDecode(msg, req))
@@ -347,6 +349,13 @@ namespace DSOServer
           LogCommand(s, msg);
           HandleTravelRequest(s, travel);
         }
+        else if (Msg::TryDecode(msg, order))
+        {
+          LogCommand(s, msg);   // ordered commands are audit/replay material (I1)
+          HandleUnitOrder(s, order);
+        }
+        else if (Msg::TryDecode(msg, ability))
+          HandleAbilityRequest(s, ability);   // a fire action; not logged (like input fire)
         else if (Msg::TryDecode(msg, chunkReq))
           m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
         else if (Msg::TryDecode(msg, ping))
@@ -530,6 +539,99 @@ namespace DSOServer
     _session.events.Send(resp);   // Gameplay lane
   }
 
+  void GameServer::HandleUnitOrder(GameLogic::Session& _session, const Msg::UnitOrder& _req)
+  {
+    Msg::UnitOrderAck ack;
+    ack.unitId = _req.unitId;
+    ack.order = _req.order;
+
+    // Validate + build the order in pure GameLogic (ownership, docked gating, target
+    // type, Move clamp - the anti-cheat matrix, unit-tested headlessly).
+    const GameLogic::OrderPlan plan =
+        GameLogic::PlanUnitOrder(m_world, _session.playerId, _req, Cfg::ORDER_MAX_MOVE_DIST);
+    ack.status = plan.status;
+
+    if (plan.status == Msg::OrderStatus::Accepted)
+    {
+      // Crime at ORDER time (interaction.md): committing an Attack on a PROTECTED
+      // victim (station/police/trader/clean player) makes you wanted the moment you
+      // order it - even if the target dodges - closing the "order the hit, dodge the
+      // blame" loophole. Attributed to the ordered unit (== the owner's own ship for
+      // I1) through the same FlagIfCrime path firing uses; fire-time flagging still
+      // applies on the shots that land.
+      if (_req.order == Msg::OrderKind::Attack)
+      {
+        const ECS::EntityId tgt = m_world.LiveEntity(_req.target);
+        if (const GameLogic::Combatant* tc = m_world.TryGet<GameLogic::Combatant>(tgt))
+          GameLogic::FlagIfCrime(m_world, m_bus, plan.unit, tgt, tc->team);
+        m_bus.Dispatch();   // publish the Crime fact (police dispatch + roster refresh)
+      }
+
+      // Record the order (Add upserts, so latest order wins).
+      m_world.Add<GameLogic::ActiveOrder>(plan.unit, plan.order);
+    }
+
+    _session.events.Send(ack);
+  }
+
+  void GameServer::HandleAbilityRequest(GameLogic::Session& _session, const Msg::AbilityRequest& _req)
+  {
+    if (!m_world.IsValid(_session.entity))
+      return;
+    // A discrete equipment activation on the reliable lane - the same FireWeapon
+    // commands OnInputPacket used to synthesise from the unreliable input flags, now
+    // driven by an undroppable request. Resolution (ownership/energy/cooldown/dock
+    // gating + crime) stays the combat bus subscriber.
+    switch (_req.kind)
+    {
+      case Msg::AbilityKind::FireMissile:
+        m_bus.Publish(GameLogic::FireWeapon{ _session.entity, GameLogic::Weapon::Missile, _req.target });
+        break;
+      case Msg::AbilityKind::Ecm:
+        m_bus.Publish(GameLogic::FireWeapon{ _session.entity, GameLogic::Weapon::Ecm, Msg::NO_MISSILE_TARGET });
+        break;
+      case Msg::AbilityKind::EnergyBomb:
+        m_bus.Publish(GameLogic::FireWeapon{ _session.entity, GameLogic::Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET });
+        break;
+      case Msg::AbilityKind::EscapePod:
+        m_bus.Publish(GameLogic::FireWeapon{ _session.entity, GameLogic::Weapon::EscapePod, Msg::NO_MISSILE_TARGET });
+        break;
+    }
+  }
+
+  void GameServer::CompleteDockOrders()
+  {
+    // A ship carrying a Dock order that has reached dock range docks now - reusing
+    // the tested station path so the response (and the client's docked flip) are
+    // identical to a manual dock - and the order is cleared.
+    std::vector<uint32_t> docked;
+    m_world.Each<GameLogic::ActiveOrder>([&](ECS::EntityId _id, GameLogic::ActiveOrder& _o)
+    {
+      if (_o.order != Msg::OrderKind::Dock)
+        return;
+      const GameLogic::WorldTransform* t = m_world.TryGet<GameLogic::WorldTransform>(_id);
+      if (t == nullptr)
+        return;
+      const ECS::EntityId station = GameLogic::NearestStation(m_world, t->position, Cfg::DOCK_RANGE);
+      if (station.index != ECS::INVALID_INDEX)
+        docked.push_back(_id.index);
+    });
+
+    for (uint32_t idx : docked)
+    {
+      // Route through the owning session so the StationResponse lands on the right
+      // client's reliable lane; issue the same Dock request a manual dock sends.
+      for (auto& entry : m_sessions.All())
+        if (entry.second.entity.index == idx)
+        {
+          HandleStationRequest(entry.second, Net::StationRequest{ Net::StationRequestKind::Dock, 0, 0 });
+          break;
+        }
+      if (const ECS::EntityId u = m_world.LiveEntity(idx); m_world.IsValid(u))
+        m_world.Remove<GameLogic::ActiveOrder>(u);   // order fulfilled
+    }
+  }
+
   // --- simulation --------------------------------------------------------------
 
   void GameServer::AdvanceSimulation()
@@ -540,6 +642,15 @@ namespace DSOServer
     // overrides this immediately.
     m_sessions.SafeParkSilent(m_world, m_tick, Cfg::SESSION_PARK_TICKS);
 
+    // I1: translate each unit's active order into a flight intent BEFORE StepAi (an
+    // order is the player's "input" now that piloting is retired), then drive ordered
+    // laser fire through the SAME lag-compensated, crime-attributing player-fire path
+    // a held trigger used - so an Attack order fires exactly as manual fire did (heat
+    // gating throttles the cadence). Resolved pre-Tick, like input fire.
+    for (const ECS::EntityId shooter : GameLogic::StepOrders(m_world))
+      m_bus.Publish(GameLogic::FireWeapon{ shooter, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
+    m_bus.Dispatch();
+
     // NPC tactics decide their flight intents (pursue/break-off/flee + panic
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
@@ -547,6 +658,10 @@ namespace DSOServer
     GameLogic::StepAi(m_world, m_tick, m_aiRng, m_scratch);
     GameLogic::Tick(m_world);
     ++m_tick;
+
+    // I1: a ship carrying a Dock order that has now reached dock range docks (via the
+    // tested station path) and drops the order.
+    CompleteDockOrders();
     m_spawner.Step(m_world, m_tick);
     m_spawner.StepTraders(m_world, m_tick);   // ambient station <-> planet traffic
 
@@ -835,6 +950,7 @@ namespace DSOServer
       if (const GameLogic::WorldTransform* pt = m_world.TryGet<GameLogic::WorldTransform>(_k.victim))
         GameLogic::DropPlayerCargo(m_world, _k.victim, pt->position, m_lootRng);
       GameLogic::RespawnAtNearestStation(m_world, _k.victim);
+      m_world.Remove<GameLogic::ActiveOrder>(_k.victim);   // I1: respawn clean of any standing order
 
       // Death wipes the wanted record - and every grudge: the player respawns
       // clean, so police warrants and pirate locks on them are torn up (the

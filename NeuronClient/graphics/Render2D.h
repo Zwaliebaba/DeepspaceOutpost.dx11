@@ -11,8 +11,8 @@
 // Native Direct3D 11 batched 2D layer (Neuron::Graphics).
 //
 // This is the shared foundation for all client 2D drawing - the GUI overlay
-// (GuiOverlay::Render) and the in-game HUD batch (gfx2d_flush) - replacing the
-// retired immediate-mode renderer each previously drove.
+// (GuiOverlay::Render) and the in-game HUD pass (RenderGameHud) - replacing the
+// retired immediate-mode renderer / gfx2d batch each previously drove.
 //
 // A frame's 2D work happens inside a Begin/End scope:
 //
@@ -29,8 +29,8 @@
 //
 // All-static, mirroring Graphics::Core so the siblings match. The built-in programs
 // (default + text outline) live in shaders/*.hlsl and are compiled offline by fxc into
-// shaders/CompiledShaders/*.h byte arrays at build time (the project's shader standard);
-// only caller-supplied custom programs (RegisterProgram) are compiled at runtime.
+// shaders/CompiledShaders/*.h byte arrays at build time (the project's shader standard).
+// There is no runtime HLSL compilation - every program is one of these offline byte arrays.
 
 namespace Neuron::Graphics
 {
@@ -73,6 +73,12 @@ namespace Neuron::Graphics
       static void DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t rgba);
       static void PlotPoint(float x, float y, uint32_t rgba);
 
+      // Circle outline / filled disc centred at (cx,cy). Segment count scales with the
+      // radius (clamped) and the disc is a triangle fan about the centre. Sub-pixel radii
+      // collapse to a single point. Native primitives (no dependence on the legacy gfx layer).
+      static void DrawCircle(float cx, float cy, float radius, uint32_t rgba);
+      static void FillCircle(float cx, float cy, float radius, uint32_t rgba);
+
       // Textured quad: the atlas sub-rect (u0,v0)-(u1,v1) stretched to the screen
       // rect (x0,y0)-(x1,y1), tinted by rgba. Used for glyphs and sprites.
       static void TexQuad(ID3D11ShaderResourceView* srv, float x0, float y0, float x1, float y1, float u0, float v0,
@@ -104,22 +110,11 @@ namespace Neuron::Graphics
       static void Submit(Topo topo, const Vertex* verts, int count, ID3D11ShaderResourceView* srv = nullptr);
 
       // --- Shader programs ---------------------------------------------------
-      // Handle to a shader program. DefaultProgram is the built-in col * texture pass.
+      // Handle to a shader program. DefaultProgram is the built-in col * texture pass;
+      // TextOutlineProgram() is the only other built-in. Both are offline-compiled byte
+      // arrays created in EnsureResources - there is no runtime program registration.
       using ProgramId = uint32_t;
       static constexpr ProgramId DefaultProgram = 0;
-
-      // Register an extra VS+PS pair from one inline HLSL source string, compiled at
-      // runtime (entry points VSMain / vs_5_0 and PSMain / ps_5_0 - same convention as
-      // the built-in shader). Returns a handle for SetProgram.
-      //
-      // The program shares Render2D's pipeline, so it MUST:
-      //   - consume the same vertex input signature (POSITION float2, TEXCOORD0 float2,
-      //     COLOR0) so the one input layout + vertex buffer apply, and
-      //   - keep cbuffer b0 as the row-major orthographic matrix (see the built-in
-      //     shader); bind any extra uniforms in a higher slot of your own.
-      // Call once the device is up (any time after Startup). Returns DefaultProgram if
-      // compilation or shader creation fails (so a bad shader degrades, not crashes).
-      static ProgramId RegisterProgram(const char* hlslSource);
 
       // Select the program for subsequent submissions until changed. Reset to
       // DefaultProgram at every Begin. Switching programs starts a new batch command
@@ -161,11 +156,11 @@ namespace Neuron::Graphics
       };
 
       static bool EnsureResources();
-      static ProgramId AddProgram(const char* hlslSource); // compile+create+append; device must be up
       static void Append(Topo topo, ID3D11ShaderResourceView* srv, const Vertex* v, int n);
       static void Flush();
 
-      // Registered shader programs; index 0 is the built-in default (DefaultProgram).
+      // Built-in shader programs; index 0 is the default (DefaultProgram), index 1 the
+      // text outline. Both are created once in EnsureResources.
       inline static std::vector<Program> s_programs;
       inline static ProgramId s_program = DefaultProgram;          // current selection (sticky)
       inline static ProgramId s_textOutlineProgram = DefaultProgram; // built-in, set in EnsureResources

@@ -6,10 +6,9 @@
  * The canvas/palette companion to Neuron::Graphics::Core. Core is the single owner of
  * the D3D11 device/context/swap chain and the one place presentation and device-lost
  * recovery live; Renderer keeps no device objects of its own and defers to Core for
- * them. Its remaining jobs are the master palette and the cached client size the 2D
- * letterbox math needs. The 2D layer (Render2D) draws straight to Core's back-buffer
- * render target - the game's virtual 512x514 space (or the client area in full-window
- * flight) is letterboxed onto it by the viewport in gfx2d_flush.
+ * them. Its remaining jobs are the master palette and the cached client size the native 2D
+ * passes read. The 2D layer (Render2D) draws straight to Core's back-buffer render target in
+ * client-pixel space (the letterbox is retired - the scene and 2D fill the window 1:1).
  */
 
 #ifndef RENDERER_H
@@ -25,8 +24,8 @@ public:
 	 * against: a 512x384 play area plus the 512x129 HUD strip at y=385 (=514 tall).
 	 * gfx2d draws in this virtual space (or the client area when the in-flight 3D
 	 * fills the window) and letterboxes it straight onto the back buffer. */
-	static constexpr int kCanvasWidth  = 512;
-	static constexpr int kCanvasHeight = 514;
+	static constexpr int CANVAS_WIDTH  = 512;
+	static constexpr int CANVAS_HEIGHT = 514;
 
 	/* Confirm Core's device is up and load the palette + cache the client size.
 	 * (Core, owned by ClientEngine, created the device/swap chain already.) */

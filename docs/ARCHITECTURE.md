@@ -1,8 +1,11 @@
 # DeepspaceOutpost — Architecture & Game Design
 
 **Status:** as-built (Phase G complete: G0-G8; chat deferred) + architectural
-review, 2026-07-03. This is the **single canonical design document** for the
-game: the client/server architecture, the authoritative simulation, the
+review, 2026-07-03; client presentation layer (§7) updated 2026-07-05 — the
+pointer-first interaction model (Track I) is in, and the legacy `gfx2d`/`gfx.h`
+2D layer is fully retired (all client 2D is native `Render2D`; see the §7
+"Native 2D stack" bullet). This is the **single canonical design document** for
+the game: the client/server architecture, the authoritative simulation, the
 complete game rules, the network protocol with every message type, the locked
 design decisions (§12), the standing **architectural review** (§13), and the
 consolidated roadmap (§14).
@@ -68,8 +71,8 @@ endpoint spawns a player entity and provisions a session (see §5.2).
 | `NeuronCore/` | Header-only shared **engine + protocol**: ECS, int64 math, message system, serialization, reliability, snapshot schema, station protocol, galaxy manifest. **Data and mechanism only — no game rules.** | — |
 | `GameLogic/` | **Server-only** authoritative simulation: flight, combat, AI, economy, stations, loot, collisions, hyperspace, sessions, spawning, AOI. Headless. | NeuronCore |
 | `Server/` | The dedicated host: UDP socket loop, fixed tick, session I/O, world bootstrap (home system + procedural galaxy). | GameLogic, NeuronCore |
-| `NeuronClient/` | Client-side engine: DX11 device/render, replication client (socket + interpolation), sound, fonts. | NeuronCore |
-| `DeepspaceOutpost/` | The game client: legacy-derived presentation (cockpit, charts, station screens), input → intent, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
+| `NeuronClient/` | Client-side engine: DX11 device (`GraphicsCore`), 3D scene pass (`Scene3D`), native 2D (`Render2D` + `TextRenderer` + the `GuiWindow`/overlay framework), replication client (socket + interpolation), sound. | NeuronCore |
+| `DeepspaceOutpost/` | The game client: legacy-derived presentation (flight HUD via `RenderGameHud`, native GUI windows for charts/market/station), input → orders/intent, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
 | `Tests/GameLogic/`, `Tests/NeuronCore/`, `Tests/NeuronClient/`, `Tests/NeuronServer/` | GoogleTest suites (headless). | respective libs |
 | `GameData/Models/` | Ship meshes (JSON), converted from the legacy tables. | — |
 
@@ -89,6 +92,13 @@ nothing above it.
   from a caller-owned, seeded LCG stream (`x = x*1664525 + 1013904223`); the
   server keeps separate streams for loot, AI and hyperspace so the sequences
   cannot perturb each other. Deterministic in, deterministic out.
+- **All HLSL is compiled offline, never at runtime.** Each `shaders/*.hlsl`
+  is compiled by fxc into a `shaders/CompiledShaders/<name>.h` byte array at
+  build time (`NeuronClient/CMakeLists.txt`), and the renderers create their
+  shaders from those arrays. There is no `D3DCompile` path — the `Render2D`
+  runtime-compile facility (`CompileHLSL`/`RegisterProgram`) and the
+  `d3dcompiler` dependency were removed (2026-07-05); `Render2D`'s only
+  programs are the built-in default and text-outline byte arrays.
 
 ---
 
@@ -946,30 +956,67 @@ The client is deliberately dumb. It keeps:
   There is **no offline simulation**: a disconnected client shows a
   connection-lost screen and retries (the single-player fallback was deleted —
   S4 extended).
-- **Input — camera-only control (piloting retired); order-based control
-  incoming.** The player no longer flies the hull. The per-frame
-  `InputCommand` cadence continues (the delta stream's ack rides it) with
-  **zero flight axes** — the ship launches at rest and idles; the server
-  remains the sole mover. **This is a transitional state: with piloting
-  retired the ship currently has no movement verb at all.** The accepted
-  replacement is the pointer-first **order model** (`docs/interaction.md`,
-  §13.2.4): select the ship, right-click/tap to issue validated
-  `UnitOrder`s (move/approach/dock/attack/collect) the server's autopilot
-  executes — the player's ship as the first ordered unit of the 4X
-  trajectory (Track I / roadmap #22). Until Track I lands, the combat and
-  travel keys stay: fire/missiles/ECM/bomb/pod flow as `ActionTriggered`
-  (LocalOnly bus) → command builder → `InputCommand`; station screens send
-  `StationRequest`s; the hyperspace key on a chart sends
-  `TravelRequest{Hyperspace}`; the jump key sends
-  `TravelRequest{InSystemJump}`. The arrow keys steer the chart crosshair on
-  the chart screens and the camera in flight (the rig gates on the flight
-  view, so the uses never overlap). In-flight docking is request-based and
-  ship-relative: near the station, station off the hull's nose, at rest → a
-  Dock request; the docked flow starts on `StationResponse{Dock, Ok}`.
-  (Track I replaces the heuristic with an explicit Dock order.)
+- **Input — pointer-first order control (Track I, 2026-07-04).** The player
+  no longer flies the hull: they **select** a unit and **order** it, and the
+  server's autopilot executes the order (the movement verb the free-camera
+  migration had removed). The pointer grammar, as built: **LMB click** =
+  select the entity under the cursor (screen-ray pick, I2); **LMB drag** =
+  orbit the camera; **RMB click** = the contextual default order for the
+  target under the cursor — planet/sun → Approach, station → Dock, canister →
+  Collect, ship → Attack, empty space → Move to the cursor-ray∩plane point
+  (I3) — sent as a reliable `UnitOrder` the server validates (ownership /
+  legality / range / crime), acked by `UnitOrderAck`. A non-modal **ability
+  bar** (I4) puts Stop/Missile/ECM/Bomb/Pod/Jump one click away (Bomb/Pod
+  hold-to-confirm); the **charts** are a native GUI window (2026-07-05: the
+  `ChartWindow` overlay — a native `GuiWindow` like market/equip, drawn through
+  `Render2D` off the 512×514 letterbox; click a system to select, its own HYPERSPACE
+  button → `TravelRequest`; F5/F6 switch galactic/short-range); **touch** maps one
+  finger to the mouse and pinches to zoom (I5). The per-frame `InputCommand`
+  continues as the heartbeat that carries the delta-stream ack, with **zero
+  flight axes**. Equipment activations flow `ActionTriggered` (LocalOnly bus) →
+  the ability handlers / `AbilityRequest`; station screens send `StationRequest`s.
+  The nine combat keys with exact pointer equivalents are **retired** (I7,
+  2026-07-05): A/E/Tab/M/T/U/pod/J/H are gone; the accelerator table that
+  stays is F1–F12, Esc (window-close), and the camera-fly arrows. The chart
+  keyboard controls (the crosshair arrows, D/F/O, and the planet name search)
+  retired with the letterboxed charts — the chart window is mouse-driven.
+  Residues folded forward: the full move gizmo + RMB-hold radial menu (I3), the
+  full gesture recognizer + widget ergonomics (I5), and chart drag-pan / zoom +
+  pointer name-search (charts, now the native window); see IMPLEMENTATION.md Track I.
+- **Docked view (2026-07-05):** docking shows the **camera-space 3D scene** (your
+  ship at the station) with a small native **`StationMenuWindow`** floating over it
+  (Launch + Market/Equip/Commander/Inventory/Options) — replacing the legacy
+  512×514 commander-status screen. Launch / F1 / hyperspace close the hub and drop
+  you straight into flight; the ship appears in space via the server's snapshots.
+  The first-person **break-pattern** transition (concentric rings) is retired — a
+  cockpit effect with no meaning in third person.
+- **No letterbox (2026-07-05):** every screen is a native GUI window or the
+  full-window camera-space scene, so the fixed 512×514 retro canvas and its
+  centering/scaling present path (`canvasPlacement`, `g_scene_full`, the
+  `gfx_*` scene-anchor API) are **decommissioned** — the 2D and the 3D scene
+  fill the client window 1:1.
+- **Native 2D stack — the legacy `gfx2d`/`gfx.h` layer is fully retired
+  (2026-07-05):** all client 2D draws through `Neuron::Graphics::Render2D`.
+  Per frame: `RenderScene` runs the game's world draw (models →
+  `Scene3D::SubmitModel`, then `gfx_render_3d_scene()` renders the depth-tested
+  pass over the dust); `RenderCanvas` then opens the native HUD pass
+  **`RenderGameHud`** (`HudRender.cpp`) — the deferred scene overlays queued
+  during the world draw (ship-death debris pixels, the target reticle, the
+  intro title sprite), the self-gated flight dashboard (`update_console`:
+  scanner console, dials, compass, missiles, plus the I2/I3/I4 overlays and the
+  ability bar), and the centred overlay text (intro prompts / info message /
+  GAME OVER) — and the GUI overlay (windows) renders on top. Text everywhere is
+  the shared bitmap-font sheet via `TextRenderer` (`g_gameFont`) with its
+  shader outline. The old deferred command batch, its sprite/font plumbing and
+  `gfx2d_flush` are **deleted**; what survives is a thin engine seam —
+  `platform/GameScene.h/.cpp` (the 3D scene pass + the live scene/viewport size
+  and projection; the platform lifecycle stays in `platform_win.cpp`) and
+  `GamePalette.h` (the `GFX_COL_*` palette indices the ship face tables and the
+  HUD colour helper key off, plus the `IMG_*` sprite ids). **`gfx.h`,
+  `gfx2d.h` and `gfx2d.cpp` no longer exist.**
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
-  hyperspace, scoop beep), the break-pattern screen transitions.
+  hyperspace, scoop beep).
 - **Scene background: the streaming "dust" starfield.** The flight scene pass
   (`Scene3D`) draws the projected star quads (`SetDust`, fed from `stars.cpp`)
   as the depth-disabled background behind the ships — the classic Elite

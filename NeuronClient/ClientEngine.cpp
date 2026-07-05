@@ -14,7 +14,7 @@
 #include "input_win.h"
 #include "platform_win.h" // platform_pump_messages
 
-#include "gfx.h"    // gfx_set_scene_fullwindow
+#include "GameScene.h"    // gfx_set_scene_fullwindow
 
 namespace
 {
@@ -25,15 +25,15 @@ namespace
   // 512x514 pixel-art canvas (menus / charts / station text) is letterboxed onto it at a
   // whole-number scale, staying pixel-exact. The 16:9 aspect is locked on resize (see the
   // WM_SIZING handler) so shrinking the window keeps the same shape - no stretching.
-  constexpr int kClientWidth = 1920;
-  constexpr int kClientHeight = 1080;
+  constexpr int CLIENT_WIDTH = 1920;
+  constexpr int CLIENT_HEIGHT = 1080;
 
   // Lock the window's client area to this aspect ratio while the user drags an edge.
   // Anchored to the default size above so the 3D scene never stretches.
-  constexpr double kAspect = static_cast<double>(kClientWidth) / static_cast<double>(kClientHeight);
+  constexpr double ASPECT = static_cast<double>(CLIENT_WIDTH) / static_cast<double>(CLIENT_HEIGHT);
 
   // During an interactive resize, clamp the proposed window rect so the *client* area keeps
-  // kAspect. _wParam tells us which edge/corner is being dragged: a horizontal edge drives
+  // ASPECT. _wParam tells us which edge/corner is being dragged: a horizontal edge drives
   // the height from the width, a vertical edge drives the width from the height, and a
   // corner drives the height from the width.
   void LockAspectDuringResize(WPARAM _wParam, RECT* _rect, DWORD _style)
@@ -53,11 +53,11 @@ namespace
     {
       case WMSZ_TOP:
       case WMSZ_BOTTOM:
-        clientW = static_cast<int>(clientH * kAspect + 0.5);
+        clientW = static_cast<int>(clientH * ASPECT + 0.5);
         _rect->right = _rect->left + clientW + borderW;
         break;
       default: // left / right edges and all four corners: width drives height
-        clientH = static_cast<int>(clientW / kAspect + 0.5);
+        clientH = static_cast<int>(clientW / ASPECT + 0.5);
         _rect->bottom = _rect->top + clientH + borderH;
         break;
     }
@@ -116,7 +116,7 @@ namespace Neuron::Client
     wc.lpszClassName = kWindowClass;
     RegisterClassExW(&wc);
 
-    RECT rc{0, 0, kClientWidth, kClientHeight};
+    RECT rc{0, 0, CLIENT_WIDTH, CLIENT_HEIGHT};
     const DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRect(&rc, style, FALSE);
 

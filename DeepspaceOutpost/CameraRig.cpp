@@ -32,6 +32,16 @@ namespace
 	int s_prevMouseY = 0;
 	bool s_prevRmb = false;
 
+	/* I2 pointer selection: an LMB press-then-release that stayed within the slop
+	 * is a CLICK (select the entity under the cursor); a drag beyond it is not (it
+	 * is reserved for the camera - RMB orbits today, so LMB-drag is simply ignored).
+	 */
+	bool s_prevLmb = false;
+	int  s_lmbDownX = 0;
+	int  s_lmbDownY = 0;
+	bool s_lmbMoved = false;
+	constexpr int CLICK_SLOP = 6;   // pixels of travel that still counts as a click
+
 	/* Starfield motion cue state: the previous look angles + eye, so the dust can
 	 * stream/pan with the camera the way it used to with the ship. */
 	float s_prevYaw = 0.0f;
@@ -43,9 +53,9 @@ namespace
 
 	/* Snap the rig behind the ship again when it teleports out from under us
 	 * (hyperspace, in-system jump, respawn at a distant station). */
-	constexpr double kReanchorDistance = 200000.0;
-	constexpr double kAnchorBack = 700.0;   // behind the hull, along -nose
-	constexpr double kAnchorUp = 180.0;     // above it, along +roof
+	constexpr double REANCHOR_DISTANCE = 200000.0;
+	constexpr double ANCHOR_BACK = 700.0;   // behind the hull, along -nose
+	constexpr double ANCHOR_UP = 180.0;     // above it, along +roof
 
 	double FrameDt(void)
 	{
@@ -79,9 +89,9 @@ namespace
 	{
 		const double ship[3] = {static_cast<double>(_me.x), static_cast<double>(_me.y), static_cast<double>(_me.z)};
 
-		s_fpv.SetEyeWorld(ship[0] - _me.noseX * kAnchorBack + _me.roofX * kAnchorUp,
-						  ship[1] - _me.noseY * kAnchorBack + _me.roofY * kAnchorUp,
-						  ship[2] - _me.noseZ * kAnchorBack + _me.roofZ * kAnchorUp);
+		s_fpv.SetEyeWorld(ship[0] - _me.noseX * ANCHOR_BACK + _me.roofX * ANCHOR_UP,
+						  ship[1] - _me.noseY * ANCHOR_BACK + _me.roofY * ANCHOR_UP,
+						  ship[2] - _me.noseZ * ANCHOR_BACK + _me.roofZ * ANCHOR_UP);
 		s_fpv.LookTowards(ship);
 
 		s_orbit.SetTarget(ship);
@@ -154,7 +164,7 @@ void camera_rig_update(void)
 		const double dy = static_cast<double>(me.y) - eye[1];
 		const double dz = static_cast<double>(me.z) - eye[2];
 		const double shipDist = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if (!s_ready || shipDist > kReanchorDistance)
+		if (!s_ready || shipDist > REANCHOR_DISTANCE)
 		{
 			AnchorBehindShip(me);
 			s_ready = true;
@@ -196,12 +206,17 @@ void camera_rig_update(void)
 	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW);
 	if (!uiOwns)
 	{
-		if (rmb && s_prevRmb)
+		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
+		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
+		 * once the press has crossed the slop, so a click never nudges the view. A
+		 * press that began on the I4 ability bar belongs to the bar, not the camera. */
+		const bool lmbDrag = lmb && s_lmbMoved && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0;
+		if (lmbDrag && s_prevLmb)
 		{
 			in.lookDX = static_cast<float>(mx - s_prevMouseX);
 			in.lookDY = static_cast<float>(my - s_prevMouseY);
 		}
-		in.looking = rmb;
+		in.looking = lmbDrag;
 		in.wheelSteps = wheel;
 
 		/* Camera movement keys: the arrows + PgUp/PgDn, freed by the piloting
@@ -212,6 +227,31 @@ void camera_rig_update(void)
 		in.moveUp = KeyAxis(VK_PRIOR, VK_NEXT);
 		in.boost = input_key_down(VK_SHIFT);
 	}
+	/* I2 pointer selection: track the LMB press so a release inside the slop is a
+	 * click. On the flight screen with no UI in front, a click selects the entity
+	 * under the cursor (empty space clears) - the reticle, orbit subject and missile
+	 * target all follow g_missile_lock_target. A drag beyond the slop is left to the
+	 * camera. */
+	if (lmb && !s_prevLmb)
+	{
+		s_lmbDownX = mx;
+		s_lmbDownY = my;
+		s_lmbMoved = false;
+	}
+	else if (lmb)
+	{
+		int ddx = mx - s_lmbDownX; if (ddx < 0) ddx = -ddx;
+		int ddy = my - s_lmbDownY; if (ddy < 0) ddy = -ddy;
+		if (ddx > CLICK_SLOP || ddy > CLICK_SLOP)
+			s_lmbMoved = true;
+	}
+	else if (s_prevLmb && !s_lmbMoved && !uiOwns
+	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0)   // not a bar click (I4)
+	{
+		g_missile_lock_target = pick_entity_at_screen(mx, my);
+	}
+	s_prevLmb = lmb;
+
 	s_prevMouseX = mx;
 	s_prevMouseY = my;
 	s_prevRmb = rmb;

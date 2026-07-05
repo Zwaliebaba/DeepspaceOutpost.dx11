@@ -5,8 +5,16 @@
 against the source at audit time; file/line references are to that snapshot.
 **Addendum 2026-07-04:** the interaction redesign (pointer-first command
 interface, `docs/interaction.md`, ARCHITECTURE.md §13.2.4, roadmap #22) adds
-**Track I** (§11) — its first item I1 is urgent, because the free-camera
-migration retired piloting and the ship currently has no movement verb.
+**Track I** (§11) — its first item I1 was urgent, because the free-camera
+migration had retired piloting, leaving the ship no movement verb (restored
+by I1's `UnitOrder`; I1–I7 are all ✅ done).
+**Addendum 2026-07-05:** the client presentation modernization that rode
+Track I is complete — the letterbox, the break pattern, and the entire legacy
+`gfx2d`/`gfx.h` 2D layer are retired (`gfx.h`/`gfx2d.h`/`gfx2d.cpp` deleted);
+all client 2D is native `Render2D`/`TextRenderer` via `RenderGameHud` + the
+GUI windows, with the engine seam in `platform/GameScene.h/.cpp` and the
+palette/sprite ids in `GamePalette.h`. The step-by-step log lives in the I6
+follow-ups (§11) and the §1.3 dead-code table.
 
 This document is the **execution companion** to ARCHITECTURE.md: it records
 where the code actually diverges from the design (§1), inventories dead and
@@ -105,6 +113,12 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `DeepspaceOutpost/file.cpp`, `file.h` + `GameData/newkind.cfg`, `newscan.cfg` | the local config subsystem (`read/write_config_file`, `read_scanner_config_file`, `get_filename`) | The MMO client keeps no on-disk settings; `write_config_file`/`get_filename` callers were the Save-Settings row and the dead `set_commander_name` | ✅ **Removed 2026-07-04** — the load-bearing values it read (scanner/compass HUD positions, frame-speed default) are baked into `elite.cpp`; the startup `read_config_file()` and the Save-Settings row are gone |
 | `NeuronClient` cube-map **skybox** (`Scene3D::renderSkybox` + `s_sky*` resources, `skyboxVS/PS.hlsl`, `partials/skybox.hlsli`, `Textures/Skybox.dds`) + `stars.cpp` skybox-orientation math (`SetSkyboxOrientation`, `accumulate_skybox_orientation`, `mat3_*`) | the DDS-loaded environment skybox behind the flight scene | Superseded by the streaming **dust** starfield (kept); `SetSkyboxEnabled` had no callers, so the skybox was always-on dead weight over the dust | ✅ **Removed 2026-07-04** — the dust background now draws unconditionally; `LoadCubemap` stays in TextureManager as a general utility |
 | The ship-fused camera/projection stack: `NeuronClient/ViewMetrics.h`, `SceneProjection.h`, `CameraFollow.h`, `DeepspaceOutpost/Camera.h/.cpp` (+ their tests) and the piloting keys (roll/climb ramps, speed keys, the cockpit corner-beam `draw_laser_lines`) | the implicit "camera == ship" view, the focal-pixel software projection, and hull piloting | Replaced by the free camera: `NeuronClient/Camera` (view+projection, DirectXMath) + `CameraController` (first-person / orbit) + the game's `CameraRig`; the renderer consumes `View()`/`Projection()`; records are world-frame; the active ship renders on screen; flight intent is always zero (camera-only control) | ✅ **Replaced 2026-07-04** — see ARCHITECTURE.md §7 "The free camera" |
+| `NeuronClient/graphics/Render2D` runtime-HLSL path: `CompileHLSL` (`D3DCompile`), `AddProgram`, the public `RegisterProgram`, `#include <d3dcompiler.h>`, and the `d3dcompiler` link (`NeuronClient/CMakeLists.txt`) | runtime compilation of caller-supplied 2D shader programs | Every program the renderer uses (default + text outline) is compiled offline by fxc into `shaders/CompiledShaders/*.h` byte arrays; `RegisterProgram` had no callers, so the whole runtime-compile chain was dead | ✅ **Removed 2026-07-05** (`SetProgram`/`SetShaderParams`/`TextOutlineProgram` for the built-in programs stay) |
+| Stale `NeuronClient/gfx.h` definitions: the unreachable `RES_512_512` metrics block (its guard is never defined in any TU that includes gfx.h), the unused `GFX_X_OFFSET`/`GFX_Y_OFFSET` and `GFX_VIEW_TX/TY/BX/BY` macros, the unreferenced palette entries `GFX_COL_YELLOW_3/4` + `GFX_ORANGE_1/2/3`, the `IMG_DICE` sprite id, and the never-called `gfx_draw_triangle`/`gfx_clear_area`/`xor_mode` (+ their `gfx2d.cpp` definitions and the vestigial `g_xor_mode`/`Cmd::xorop` XOR plumbing, which was never read at flush) | legacy Allegro-era graphics constants and dead 2D entry points | Zero references anywhere (`git grep`); the XOR path existed for the old chart cross-hairs that I6 replaced | ✅ **Removed 2026-07-05** (live metrics `GFX_SCALE`/`GFX_X_CENTRE`/`GFX_Y_CENTRE`, the used palette/`IMG_*` entries, and every called `gfx_*` entry point stay) |
+| The letterboxed chart screens: `docked.cpp` `display_galactic_chart`/`display_short_range_chart`/`display_data_on_planet` + their `display_replicated_*` draw helpers, `draw_fuel_limit_circle`, `show_distance_to_planet`, `move_cursor_to_origin`, `find_planet_by_name`, `teleport_to_cursor`, `chart_nearest_to_cursor`, `chart_project_current`; `main.cpp` `handle_chart_pointer`/`draw_chart_hyperspace_button`/`draw_cross`/`move_cross`/`arrow_*`/`d_pressed`/`f_pressed`/`o_pressed`/name-search; the `SCR_GALACTIC_CHART`/`SCR_SHORT_RANGE`/`SCR_PLANET_DATA` modes | the galactic / short-range / planet-data screens drawn in the 512×514 canvas + their keyboard crosshair controls | Replaced by the native `ChartWindow` (`GameWindows.cpp`) on the GUI overlay, fed by the render-free `ChartData` API (`ChartData.h`); the projection/selection helpers it reuses (`chart_project_all`/`chart_project_short_range`/`chart_current_system`/`current_system_name`/`hyperspace_system_name`) stay | ✅ **Removed 2026-07-05** — first screen migrated off the letterbox toward retiring it |
+| `docked.cpp` `display_commander_status` + its `EQUIP_*` layout macros; `SCR_CMDR_STATUS` | the legacy 512×514 commander-status screen (the default docked view) | Docked view is now the camera-space 3D scene + native `StationMenuWindow` (`GameWindows.cpp`); the commander data is the F9 `CommanderWindow`. `condition_txt` stays (`build_cmdr_status` uses it) | ✅ **Removed 2026-07-05** (Part B: docked side off the letterbox) |
+| `main.cpp` `display_break_pattern` + `SCR_BREAK_PATTERN` (+ its setters at launch / dock / hyperspace / escape-pod) | the first-person concentric-ring launch/dock/hyperspace transition | Obsolete in third person — the ship just appears in space / at the station via server snapshots; transitions switch the view directly (`enter_station()` / `SCR_FRONT_VIEW` + `CloseStationMenu()`) | ✅ **Removed 2026-07-05** (Part B; was the last retro-mode render) |
+| The **letterbox** present path: `NeuronClient/platform/gfx2d.cpp` `g_scene_full` + the retro branches of `canvasW/H`, `canvasPlacement`, `gfx_clear_display`, `gfx_set_scene_clip`, `gfx_display_centre_text`, `gfx_set_scene_fullwindow`; the scene-anchor helpers `gfx_hud_anchor`/`gfx_anchor`(+`gfx_anchor_point`)/`gfx_window_to_canvas` (`gfx.h`) | the fixed 512×514 retro canvas centered/scaled onto the window | With every screen full-window (native GUI windows + camera-space scene), retro mode was provably never active, so `canvasW/H` always return the client size → `canvasPlacement` is identity → the 2D batch and 3D scene fill the window 1:1. `gfx_scene_size`/`gfx_set_draw_origin`/`gfx_set_scene_clip`/`gfx_canvas_size` stay as client-space HUD utilities; `GFX_SCALE`/`GFX_X_CENTRE`/`GFX_Y_CENTRE` stay as the `ChartWindow`'s internal metrics | ✅ **Removed 2026-07-05** (Part B step 4 — the letterbox is decommissioned) |
 
 Not dead, do not remove: `Messages/Catalog.h`, `CatalogTools.h`,
 `PacketInspect.h` (test/tooling infrastructure the governance and fuzz suites
@@ -120,12 +134,12 @@ They fall into three classes with different fates:
 | Class | Files (roles) | Fate |
 |---|---|---|
 | **Legacy game rules — remove** (Track A1) | `swat.cpp` (local AI/combat/spawn engine), local-sim parts of `space.cpp` (`update_local_objects`, local hyperspace/witchspace, `regenerate_shields`, altitude/cabin-temp kill rules), local escape pod in `main.cpp`, `missions.cpp` (single-player mission scripts; server has no mission system), local market/jump fallbacks in `trade.cpp`/`docked.cpp`, `pilot.cpp` local autopilot | Delete with the offline fallback; replace disconnected play with a connection-lost screen. Mission *content* may be mined later when #F-era missions land server-side |
-| **Legacy presentation — keep, modernize incrementally** | `threed.cpp` (draw primitives), `stars.cpp`, `intro.cpp`, `shipdata.cpp`/`shipface.cpp` (mesh tables), `planet.cpp` (chart name/description text), station screens in `docked.cpp`, HUD in `space.cpp`, `random.cpp` (client VFX rng) | Stays; absorbed gradually by Track H (instanced renderer) and S6 (math-stack retirement). (`file.cpp` config subsystem removed 2026-07-04 — the MMO client keeps no local config files) |
+| **Legacy presentation — keep, modernize incrementally** | `threed.cpp` (draw primitives), `stars.cpp`, `intro.cpp`, `shipdata.cpp`/`shipface.cpp` (mesh tables), `planet.cpp` (chart name/description text), station screens in `docked.cpp`, HUD in `space.cpp`, `random.cpp` (client VFX rng) | Stays; absorbed gradually by Track H (instanced renderer) and S6 (math-stack retirement). (`file.cpp` config subsystem removed 2026-07-04 — no local config files. **2026-07-05: their 2D drawing is fully native now** — the `gfx2d`/`gfx.h` layer is deleted; these files draw via the Track I native paths: `Render2D`/`TextRenderer` through `RenderGameHud` + the GUI windows, with the engine seam in `GameScene.h` and the palette/sprite ids in `GamePalette.h`) |
 | **Legacy math stack — retire file-by-file** (S6) | `NeuronClient/vector.h/.cpp` (`Vector`, `Matrix[3]`) used by the legacy screens and the record structs (`ReplicatedScene.h` carries `Vector`/`Matrix` PODs) | 🟡 **Partially done 2026-07-04:** the live render path's matrix math is DirectXMath now (`Camera`/`CameraController` own view+projection; `Scene3D` composes XMMATRIX MVPs; `SceneProjection.h`/`ViewMetrics.h` deleted). Legacy screens + the POD record types convert as they are edited; delete `vector.h/.cpp` last |
 
-Also legacy: the `OpenglDirectx` GL-over-D3D layer in `NeuronClient`
-(explicitly frozen — do not extend; retired naturally by Track H), and the
-`EventManager` remnant (only the Win32 `WNDPROC` fan-out remains; keep).
+Also legacy: the `EventManager` remnant (only the Win32 `WNDPROC` fan-out
+remains; keep). (The `OpenglDirectx` GL-over-D3D layer this audit flagged was
+retired by the GraphicsCore/Render2D device unification; it no longer exists.)
 
 Orphaned assets: `GameData/Models/` (67 files: 33 `.obj` + 33 `.json` +
 `elite.mtl`) generated by `tools/shipdata2obj` but loaded by nothing — the
@@ -1303,7 +1317,7 @@ Sequencing: **I1 first and urgent** (the game has no movement verb without
 it); I2 parallel; I3/I4 on I1+I2; I5/I6 then; I7 last. F1 consumes I1's
 protocol and I2/I3's UX unchanged.
 
-### I1 — `UnitOrder` protocol + server `OrderSystem` — **M** — URGENT
+### I1 — `UnitOrder` protocol + server `OrderSystem` — **M** — ✅ **done 2026-07-04** (server + wire + tests; client command UX is I2–I3)
 
 The wire and server halves; playable with a temporary debug binding even
 before I3's UX.
@@ -1349,6 +1363,42 @@ order docks from any approach without the nose heuristic; ability requests
 route to the same handlers the flags reached, with G2's missile validation;
 the heartbeat keeps the delta stream acked across the re-cut.
 
+*As built (2026-07-04):* new NeuronCore wire messages `UnitOrder` (`0x1010`),
+`UnitOrderAck` (`0x1011`), `AbilityRequest` (`0x1014`), all on the reliable
+Gameplay lane (round-trip + golden-layout + governance tested,
+`UnitOrderTests.cpp`). `GameLogic/OrderSystem.h` holds the pure core:
+`ActiveOrder{order, target, targetPos, complete}` (a serializable component),
+`PlanUnitOrder(world, playerId, req, maxMoveDist)` (the anti-cheat validator —
+ownership via `Owner`, docked gating, per-kind target-type gate, Move
+`ClampToChebyshev` clamp — returning the status to ack), and `StepOrders(world)`
+which each tick translates every `ActiveOrder` into a `FlightIntent` through the
+shared `Detail::SteerToward` + an arrival-aware throttle (a `MIN_CREEP` floor so
+the ease-to-zero doesn't asymptote short of the arrival radius), and returns the
+Attack units that are aligned + in range as "wants to fire". `GameServer` decodes
+`UnitOrder` → `PlanUnitOrder` → (crime-at-order-time via `FlagIfCrime`) → record +
+`UnitOrderAck`; runs `StepOrders` before `StepAi` and publishes `FireWeapon{Laser}`
+for the returned units (so ordered fire reuses the E1 lag-compensated,
+crime-attributing player-fire path, heat-gated); `AbilityRequest` publishes the
+same `FireWeapon` commands the input flags did; `CompleteDockOrders` auto-docks a
+Dock-ordered ship at dock range through the tested station path. A player death
+clears any standing order. `ReplicationClient` gained `SendUnitOrder`/`SendAbility`;
+the BotClient idle bot became an **order bot** (zero-axis heartbeat + periodic
+`UnitOrder{Move}` orbit), so the D5 smoke exercises the whole order path over real
+UDP. Unit-tested headlessly in `OrderSystemTests.cpp` (the rejection matrix,
+Move-arrive-and-stop, Attack fire gating, dead-target hold, determinism).
+
+**Two deviations from the sketch, by design, to fit the no-runtime sandbox
+(CI-only oracle):** (a) the `InputCommand`→`{sequence, ackSnapshotTick}` heartbeat
+re-cut + `PROTOCOL_VERSION` bump is **deferred** to a mechanical follow-up — the
+flight axes are already always-zero, so orders are purely additive and movement is
+restored without touching the un-CI-testable client flight path or the framing ABI;
+the server still honours the (dormant) input fire flags, so the existing client is
+unbroken until I4 moves abilities onto `AbilityRequest`. (b) The **client command
+UX** (temporary debug binding → real selection/gizmo) is I2–I3; for I1 the order
+path is driven end-to-end by the BotClient, which is the CI-verifiable proof.
+Crime is attributed to the ordered unit (== the owner's own ship pre-F1); F1 routes
+true owner attribution.
+
 ### I2 — Selection & picking — **S–M** (parallel with I1)
 
 Client-side: pointer events (mouse first — LMB click select, slop-thresholded
@@ -1363,6 +1413,29 @@ the missile target IS the selected enemy. Double-click focuses the camera.
 *Acceptance:* every replicated entity is selectable at any zoom; selection
 survives snapshots/despawn correctly (clears on death/despawn like the old
 lock); orbit follows selection; no hover-dependent behaviour.
+
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+selection is unified onto the existing target field `g_missile_lock_target` (which
+already drives the orbit-camera subject, the on-hull reticle, the missile launch,
+and the clear-on-death/despawn sweep) — realizing the plan's "the missile target IS
+the selected enemy" without a risky rename. New `pick_entity_at_screen(mx,my)`
+(`space.cpp`) projects every replicated entity through the SAME optics the reticle
+uses (`camera_view_point` → `CameraSpaceToPixels` over `gfx_scene_size`) and returns
+the one nearest the cursor within a viewport-scaled hit radius — so what you click
+is what you see, and ANY entity is selectable (stations/planets/canisters included,
+for I3's orders), except your own hull and in-flight missiles. `CameraRig` tracks
+the LMB press so a release inside a 6-px slop is a CLICK → select (empty space
+clears); a drag is left to the camera. A compact info card (`display_selection_info`)
+shows the selection's kind + range top-left of the view, and vanishes the frame the
+entity leaves the AOI. **Deviations (low-risk, no-runtime sandbox):** (a) orbit stays
+on RMB-drag (LMB was free) rather than moving to LMB-drag — the plan's LMB-drag-orbit
+/ free-RMB rebind belongs with I3's RMB command grammar, so it lands there; (b) the
+T/U centre-cone lock keys are KEPT as keyboard fallbacks (both now set the same
+selection) — retiring keys is I7; (c) double-click camera-focus is deferred (the
+orbit already follows the selection, which is the focus behaviour); (d) the info
+card shows kind+range, not name/legal-status yet (needs the roster join — I3/I4).
+Behaviour needs an in-app run to verify pixel-accuracy of picking and card
+placement (CI compiles it but cannot exercise the DX11 client).
 
 ### I3 — Command UX: contextual orders, move gizmo, radial menu — **M**
 
@@ -1384,6 +1457,28 @@ lock); orbit follows selection; no hover-dependent behaviour.
 slop threshold; gizmo point stable under camera motion; every ack status
 surfaces visibly; no path requires a key.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+RMB **click** on the flight view issues the contextual default order to the player's
+own ship (`handle_pointer_commands` → `dispatch_context_order`, main.cpp): an entity
+under the cursor maps by kind — planet/sun → Approach, station → Dock, canister →
+Collect, any ship → Attack — else empty space → **Move**, whose destination is the
+cursor ray ∩ a horizontal plane through the ship (`cursor_to_move_point`: DirectXMath
+`XMMatrixInverse(View*Projection)` unproject in the floating-origin frame, then
+Chebyshev-clamped to the server's 1M reach so the client request matches the gate).
+The order rides the reliable `UnitOrder` lane (I1); camera **orbit moved to LMB-drag**
+(CameraRig) so RMB is free. Feedback: an optimistic toast naming the order, a
+projected Move marker (`display_order_feedback`, space.cpp, reusing the target-lock
+sprite; entity orders reuse the on-hull reticle), and a `UnitOrderAck` subscriber
+that flashes the refusal reason red and drops the marker. **Deferred (documented):**
+(a) the FULL move gizmo — command plane is world-up not camera-up, and the
+elevation-drag stem + depth-faded grid + route line are not drawn (a click-to-a-
+horizontal-plane point with a marker stands in); (b) the **RMB-hold radial menu**
+(all-legal-orders + Info) — a larger GUI piece, so Attack-on-a-clean-player friction
+(default Approach + menu-only Attack) and the Info action ride that follow-up; any
+ship currently defaults to Attack and the server enforces the crime rules. Needs an
+in-app run to verify unproject pixel-accuracy and marker placement (CI compiles the
+client but cannot exercise it).
+
 ### I4 — Ability bar & HUD restructure — **S**
 
 Persistent non-modal GuiOverlay bar (the overlay must stop suppressing game
@@ -1396,6 +1491,24 @@ the bar (Esc keeps window-close duty).
 
 *Acceptance:* every retired key's verb reachable by pointer alone; abilities
 grey correctly from mirrors; bomb/pod cannot fire on a stray tap.
+
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+a persistent, **non-modal** ability strip across the top of the flight view
+(`draw_ability_bar` / `handle_ability_bar`, main.cpp): **Stop / Missile / ECM / Bomb
+/ Pod / Jump**. Non-modal by design — it does NOT raise `GuiOverlay` (which would
+suppress game input); instead the camera's LMB select/orbit ignores any click whose
+press began over a button (`ability_bar_button_at`, gating CameraRig), and the bar's
+own handler triggers it. Each button greys from the equipment/`PlayerStatus` mirrors
+(`ability_enabled`: Missile needs a selection + rack, ECM/Bomb/Pod need the fitting,
+Jump needs undocked+not-witchspace); **Bomb/Pod require a ~0.6 s hold-to-confirm**
+(a stray tap can't fire them; the button flashes red while confirming). Actions
+reuse the exact key paths (`UnitOrder{Stop}`, `launch_missile`, the `ActionTriggered`
+equipment publishes, `jump_warp`). **Deferred (documented):** (a) the combat keys
+(A/E/Tab/M/C/J) are KEPT working in parallel — formal key retirement is I7; (b) the
+screen-nav icon strip (charts/market/status/equip) is not added (the F-keys still
+navigate); (c) **Launch/undock** stays on the docked screen's own UI (the flight bar
+is flight-only). Needs an in-app run to verify bar placement/coordinate-space and
+that click regions line up with the drawn boxes.
 
 ### I5 — Touch & gesture layer — **M**
 
@@ -1413,6 +1526,20 @@ tap/click.
 dock → trade → hyperspace) playable with touch only and with mouse only; no
 gesture steals the camera from a tap or vice versa at the slop boundaries.
 
+*As built (2026-07-04) — 🟡 core, compile-verified (touch is inspection-only —
+CI has no touch device and the sandbox can't run the client):* `input_win.cpp`
+now tracks up to two `WM_POINTER` pointers (slot-assigned by pointer id). One
+finger maps to the mouse/LMB exactly as the old stub did — so **tap = select** and
+**one-finger drag = orbit** already work through the I2/I3 mouse paths — while two
+fingers **PINCH to zoom**, feeding the delta into the SAME `g_wheelSteps`
+accumulator the mouse wheel uses, so "wheel and pinch are one zoom event" falls out
+by construction. **Deferred (documented):** two-finger **pan** (needs camera-pan
+plumbing the controller doesn't expose yet), **long-press** → radial menu / gizmo
+(the radial menu is itself an I3 deferral), **double-tap**, and the widget-stack
+**ergonomics pass** (≥40 px rows / drag-scroll / steppers in Market/Equip). The
+device-neutral recognizer these need is the follow-up; this increment lands the one
+gesture (pinch) with a clean, existing mapping.
+
 ### I6 — Pointer charts — **S–M**
 
 Charts become pick surfaces: tap/click a system selects it (info card:
@@ -1427,6 +1554,92 @@ keys retire.
 visibly gated before the server round-trip (fuel mirror), server stays the
 authority.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+the charts are pick surfaces. A new `gfx_window_to_canvas` (NeuronClient) inverts
+the letterbox placement (offset + downscale from `canvasPlacement`) so a window-pixel
+click maps to the chart's 512×514 canvas. `handle_chart_pointer` (main.cpp) parks the
+crosshair (`cross_x/y`) on the clicked point — the existing `chart_nearest_to_cursor`
++ `draw_cross` + readout then show the selected system — and a drawn **HYPERSPACE**
+button (`draw_chart_hyperspace_button`) fires `teleport_to_cursor()` →
+`TravelRequest{Hyperspace}` (the server validates fuel/range). The chart help text
+now reads "Click a system … Click HYPERSPACE …". The arrow-key crosshair and the
+hyperspace key are RETAINED as accelerators (formal retirement is I7). **Deferred
+(documented):** chart drag-pan / wheel-zoom (galactic and short-range are already
+separate zoom presets) and find-by-name as a pointer search field (the F-key name
+search still works); the full economy/fuel-cost **info card** rides the same readout
+follow-up as I2's card.
+
+*Superseded (2026-07-05) — charts moved to a native GUI window off the letterbox:*
+the letterboxed chart described above was replaced by a native `ChartWindow`
+(`GameWindows.cpp`) on the GUI overlay, fed by a render-free `ChartData` API
+(`ChartData.h` / `docked.cpp`). The window draws the map through `Render2D` (new
+native `DrawCircle`/`FillCircle` primitives) with a selected-system data panel, a
+click selects the nearest system (`MouseEvent` → `ChartData::SetCursor`), and its
+own **HYPERSPACE** button jumps; F5/F6/F7 open it and F5/F6 switch galactic/short-
+range. The whole letterboxed path is gone: `handle_chart_pointer`,
+`gfx_window_to_canvas` usage, `draw_cross`/`move_cross`, the D/F/O + name-search
+keys, `display_*_chart`/`display_data_on_planet` and their replicated draw helpers,
+and the `SCR_GALACTIC_CHART/SHORT_RANGE/PLANET_DATA` modes were all deleted. The
+selected-system data panel replaced the separate F7 screen. Name-search-by-pointer
+remains deferred. This is the first screen off the 512×514 letterbox toward
+retiring it (the flight HUD dashboard is the remaining long pole).
+
+*Follow-up (2026-07-05) — the flight HUD dashboard is now native too:* the in-flight
+cockpit (`update_console` and its helpers in `space.cpp`: scanner, dials, compass,
+speed/roll/climb, missiles, the station/ECM indicators) plus the I2/I3/I4 overlays
+(target card, order toast/marker, ability bar in `main.cpp`) no longer emit into the
+gfx2d deferred batch. They draw straight into the `Render2D` pass that `RenderGameHud`
+(`HudRender.cpp`) opens during `RenderCanvas`, through a small native primitive shim
+(`hud_line`/`hud_rect`/`hud_text`/`hud_sprite`/`hud_scanner`, palette-indexed colour via
+`Renderer::paletteColour`, sprites via `TextureManager`, text via `g_gameFont`'s
+outline path — the same look the batch produced). `update_console` self-gates
+(connected + undocked + front view) so it is called unconditionally from the HUD pass.
+Dropping the batch's stale scanner scissor also fixes a latent clip bug: the top-anchored
+overlays (ability bar, target card, order toast) were being clipped out of view on any
+window taller than ~520 px. The now-dead gfx2d primitives (`gfx_draw_colour_line`/
+`gfx_draw_rectangle`/`gfx_draw_circle`/`gfx_draw_filled_circle`/`gfx_clear_text_area`/
+`gfx_display_colour_text`/`gfx_draw_scanner`/`gfx_set_draw_origin`) and their batch helpers
+were removed with it.
+
+*Follow-up (2026-07-05) — the last gfx2d text path is native too:* `gfx_display_centre_text`
+(the centred intro titles/prompts, the transient flight info message, and the `GAME OVER`
+banner) is gone. Those are emitted from the RenderScene phase where no 2D pass is open, so a
+tiny native queue (`hud_centre_text` records; `RenderOverlayText` draws them via `g_gameFont`
+from `RenderGameHud`, then clears) bridges them into the HUD pass. gfx2d's whole bitmap-font
+layer (`drawString`/`emitGlyphs`/`fontSheetSRV`/the shared sheet) and the text-outline branch
+in `gfx2d_flush` went with it — the batch now replays sprites and pixels only.
+
+*Follow-up (2026-07-05) — the gfx2d 2D batch is deleted (endgame Phase 1):* the last three
+batch producers moved native — the ship-death debris (`gfx_plot_pixel`, `threed.cpp`), the
+per-ship target reticle (`gfx_draw_sprite_scaled`, `space.cpp`) and the intro title sprite
+(`gfx_draw_sprite`, `intro.cpp`). Like the centred text they are emitted from RenderScene, so
+they queue in `space.cpp` (`hud_plot_pixel`/`hud_sprite_deferred`/`hud_sprite_scaled_deferred`)
+and `RenderSceneOverlays` draws them via `Render2D::PlotPoint`/`TexQuad` from `RenderGameHud` —
+first, under the dashboard and text, matching the old batch-flush-under-HUD order. With no
+producers left, the entire gfx2d vertex batch is gone: `gfx2d_flush` (and its `RenderCanvas`
+call), the `ColorVertex`/`TexVertex`/`Cmd` streams, `pushColor`/`pushTexQuad`/`addPoint`, the
+`getTexture`/`spriteFile` sprite plumbing, `col_rgba`, and the batch's scissor. `gfx2d.cpp` is
+now just the scene/viewport seam (`gfx_render_3d_scene` → `Scene3D`, `gfx_set_scene_fullwindow`/
+`gfx_scene_size`/`gfx_canvas_size`, and vestigial clip/clear no-ops).
+
+**What's left of gfx.h/gfx2d (endgame Phase 2):** no 2D drawing at all — only the engine seam:
+lifecycle (`gfx_graphics_startup`/`shutdown`/`gfx_update_screen`), the 3D scene pass
+(`gfx_render_3d_scene`), the viewport/projection (`gfx_set_scene_fullwindow`/`gfx_scene_size`/
+`gfx_canvas_size`), the clip/clear no-ops, and the `GFX_COL_*`/`IMG_*` macros. Phase 2 rehomes
+those into a native header (fold into `GraphicsCore`/`ClientEngine`) and replaces the macros,
+after which `gfx.h`/`gfx2d.*` are deleted.
+
+*Follow-up (2026-07-05) — endgame Phase 2 done: `gfx.h`/`gfx2d.*` are deleted.* The seam moved
+into native modules, keeping the identifiers (a 431-site rename of the mostly-static ship
+geometry tables was not worth it): the scene/viewport functions now live in
+`platform/GameScene.h` + `platform/GameScene.cpp` (renamed from `gfx2d.cpp`), the platform
+lifecycle stays in `platform_win.cpp` (declared in `GameScene.h`), and the `GFX_COL_*`/`IMG_*`
+palette-index and sprite-id macros moved to `GamePalette.h` (still index-based — the 3D
+renderer resolves the index once via `paletteColour`). The 12 `#include "gfx.h"` sites were
+redirected (or dropped where stale), `gfx2d.h`/`gfx2d_flush` are gone, and CMake tracks the new
+files. **`gfx.h`, `gfx2d.h` and `gfx2d.cpp` no longer exist** — the legacy 2D layer is fully
+retired and all client rendering is native (`Render2D`/`Scene3D`).
+
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 
 Retire the dead `kbd_*` globals and bindings (speed keys are already dead;
@@ -1438,6 +1651,22 @@ marked done).
 
 *Acceptance:* grep for retired `kbd_*` names returns nothing; every
 remaining key has a pointer equivalent; docs match code.
+
+*As built — ✅ done (2026-07-05, after the pointer UX was verified in-app):* the
+nine combat keys with exact pointer equivalents are **retired** — their kbd_*
+globals, key mappings (`input_win.cpp`), `keyboard.h` decls, `handle_flight_keys`
+handlers, and now-orphaned functions (`lock_missile_target`, `unlock_missile_target`,
+the centre-cone `find_lock_target`) all deleted: **A**=fire (→ the Attack order fires
+server-side), **E**/**Tab**/**M**/**pod**/**J** (→ the I4 ability bar),
+**T**/**U** (→ I2 pointer select), **H** (→ the I6 chart HYPERSPACE button). `grep`
+for the retired `kbd_*` names returns nothing. **Kept as accelerators** (the
+`docs/interaction.md` §3.9 table): the F1–F12 screen/nav keys, **Esc** (window-close,
+now its sole duty), the camera-fly arrows, the chart crosshair arrows + **D**/**O**,
+and **F** (name search — I6's pointer search field is still deferred, so F is the
+only by-name search). **C**/docking-computer is kept (a purchased-equipment auto-dock
+alongside the RMB Dock order). The `in.fire`/`s_frameFire` command-builder path is now
+vestigial (always false); harmless, left in place. Doc truth pass done (this note, M6,
+ARCHITECTURE.md §7).
 
 ---
 
@@ -1494,11 +1723,21 @@ Three items are genuinely open and block only their own bullets:
    lag-compensated fire; snapshot quantization + per-session delta/keyframes +
    send budget; strategic per-system tier), validated in unit tests and pending
    the 100-bot bandwidth soak; G1–G3 remain.
-5. **M5 "Command of one"** — I1–I4: the order protocol + `OrderSystem`
-   restore ship movement (urgent — the game has no movement verb today),
-   selection/picking, the command UX, and the ability bar. Mouse-complete.
-6. **M6 "Touch-complete"** — I5–I7: the gesture layer, pointer charts,
-   keyboard reduced to accelerators. The full loop plays with touch only.
+5. **M5 "Command of one"** — 🟡 I1–I4 core ✅: the order protocol + `OrderSystem`
+   restore ship movement (I1, CI-green), pointer selection/picking (I2), the RMB
+   command UX + move-plane + ack feedback (I3), and the non-modal ability bar (I4).
+   Mouse-playable end to end. Residues folded forward: the full move gizmo +
+   RMB-hold radial menu, clean-player Attack-friction, and the screen-nav strip
+   (I3/I4 deferrals); formal keyboard retirement is I7. The I2–I4 client UX is
+   compile-verified only — it needs an in-app run to confirm pixel-accuracy.
+6. **M6 "Touch-complete"** — 🟡 I5–I7 core ✅: pointer charts (I6, click-select +
+   on-chart hyperspace), the touch layer (I5, multi-pointer + pinch-zoom; two-finger
+   pan / long-press / double-tap deferred), and the I7 doc pass (key DELETION held
+   until the pointer UX is verified in-app — the keys are the safety net). Mouse
+   path complete; touch is compile-verified/inspection-only. Track I's remaining
+   residues: the full move gizmo + radial menu (I3), the widget ergonomics pass and
+   full gesture recognizer (I5), chart pan/zoom + info card (I6), and the actual
+   key-handler removal (I7).
 7. **M7 "The 4X turn"** — F1–F5, G4, with H landing in parallel (F1 reuses
    I1's protocol and I2/I3's UX verbatim).
 8. **M8 "Missions"** — G5, after M2 has soaked in production.

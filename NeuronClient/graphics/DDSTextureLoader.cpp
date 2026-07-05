@@ -11,7 +11,7 @@ namespace Neuron::Graphics
 {
   namespace
   {
-    constexpr uint32_t kDdsMagic = 0x20534444; // "DDS "
+    constexpr uint32_t DDS_MAGIC = 0x20534444; // "DDS "
 
 #pragma pack(push, 1)
     struct DDS_PIXELFORMAT
@@ -203,7 +203,7 @@ namespace Neuron::Graphics
     if (!device || !ddsData || ddsDataSize < sizeof(uint32_t) + sizeof(DDS_HEADER))
       return E_INVALIDARG;
 
-    if (*reinterpret_cast<const uint32_t*>(ddsData) != kDdsMagic)
+    if (*reinterpret_cast<const uint32_t*>(ddsData) != DDS_MAGIC)
       return E_FAIL;
 
     const auto* header = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32_t));
@@ -344,7 +344,7 @@ namespace Neuron::Graphics
     if (!device || !ddsData || ddsDataSize < sizeof(uint32_t) + sizeof(DDS_HEADER))
       return E_INVALIDARG;
 
-    if (*reinterpret_cast<const uint32_t*>(ddsData) != kDdsMagic)
+    if (*reinterpret_cast<const uint32_t*>(ddsData) != DDS_MAGIC)
       return E_FAIL;
 
     const auto* header = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32_t));

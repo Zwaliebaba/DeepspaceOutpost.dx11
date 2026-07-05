@@ -7,14 +7,14 @@
 
 #define SCR_INTRO_ONE		1
 #define SCR_INTRO_TWO		2
-#define SCR_GALACTIC_CHART	3
-#define SCR_SHORT_RANGE		4
-#define	SCR_PLANET_DATA		5
-#define SCR_CMDR_STATUS		7
+// (SCR_GALACTIC_CHART 3, SCR_SHORT_RANGE 4, SCR_PLANET_DATA 5 retired: the charts
+//  and system-data panel are the native ChartWindow now. SCR_CMDR_STATUS 7 retired:
+//  the docked view is the camera-space scene + the native StationMenuWindow.)
 #define SCR_FRONT_VIEW		8
 // (SCR_REAR_VIEW 9, SCR_LEFT_VIEW 10, SCR_RIGHT_VIEW 11 retired: the cockpit
 //  has a single fixed forward view now; F2-F4 no longer switch views.)
-#define SCR_BREAK_PATTERN	12
+// (SCR_BREAK_PATTERN 12 retired: the launch/dock/hyperspace transition was a
+//  first-person cockpit effect; third-person just switches the view directly.)
 #define SCR_INVENTORY		13
 #define SCR_LOAD_CMDR		16
 #define SCR_SAVE_CMDR		17

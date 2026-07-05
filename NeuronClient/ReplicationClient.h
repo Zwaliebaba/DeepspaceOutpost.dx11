@@ -31,6 +31,7 @@
 #include "Messages/Reliable.h"
 #include "Messages/MessageEndpoint.h"
 #include "Messages/Defs/PlayerSession.h"   // Msg::ClientHello / PlayerInfo / PlayerStatus
+#include "Messages/Defs/UnitOrder.h"       // Msg::UnitOrder / AbilityRequest (I1 command protocol)
 #include "Messages/Defs/TimeSync.h"        // Msg::Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"       // Msg::StrategicSummary (E3 strategic tier)
 #include "LatencyEstimate.h"               // Net::LatencyEstimate (smoothed RTT)
@@ -72,6 +73,15 @@ namespace Neuron::Client
     // authoritative StationResponse arrives later via PollEvent(). No-op until
     // the client is open.
     void SendStationRequest(const Net::StationRequest& _request) { Send(_request); }
+
+    // Order a unit the player owns (I1): move/approach/dock/attack/collect. Rides the
+    // reliable Gameplay lane; the outcome comes back as a UnitOrderAck via PollEvent().
+    // No-op until open. This is the movement verb now that piloting is retired.
+    void SendUnitOrder(const Msg::UnitOrder& _order) { Send(_order); }
+
+    // Request a discrete equipment activation (I1): missile / ECM / energy bomb /
+    // escape pod, on the reliable lane so a button press is never dropped.
+    void SendAbility(const Msg::AbilityRequest& _ability) { Send(_ability); }
 
     // Queue the opening handshake: protocol version + the player's commander name.
     // Since B1 this is the FRONT DOOR - the server spawns nothing until this valid,

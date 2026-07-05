@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "gfx.h"
 #include "GameUniverse.h"
 #include "elite.h"
 #include "planet.h"
@@ -19,6 +18,7 @@
 #include "sound.h"
 #include "ReplicationClient.h"
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
+#include "ChartData.h"              // render-free chart data API for the native ChartWindow
 
 
 
@@ -56,45 +56,11 @@ int cross_y = 0;
 static int g_chart_selected = -1;
 
 
-// Thin-client galactic chart helpers (defined further down, used by the legacy
-// chart entry points above their definition).
-int chart_nearest_to_cursor (void);
+// Thin-client galactic chart helpers, consumed by the render-free ChartData API
+// (the native ChartWindow) further down.
 int chart_current_system (void);
-bool display_replicated_galactic_chart (void);
-bool display_replicated_short_range_chart (void);
-bool display_replicated_system_data (void);
 static void chart_project_all (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
 							   std::vector<int>& _px, std::vector<int>& _py);
-static void chart_project_current (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
-								   std::vector<int>& _px, std::vector<int>& _py);
-
-
-
-
-
-
-
-void draw_fuel_limit_circle (int cx, int cy)
-{
-	int radius;
-	int cross_size;
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		radius = cmdr.fuel / 4 * GFX_SCALE;
-		cross_size = 7 * GFX_SCALE;
-	}
-	else
-	{
-		radius = cmdr.fuel * GFX_SCALE;
-		cross_size = 16 * GFX_SCALE;
-	}
-	
-	gfx_draw_circle (cx, cy, radius, GFX_COL_GREEN_1);
-
-	gfx_draw_line (cx, cy - cross_size, cx, cy + cross_size);
-	gfx_draw_line (cx - cross_size, cy, cx + cross_size, cy);
-}
 
 
 
@@ -117,347 +83,6 @@ int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed 
 
 	return light_years;
 }
-
-
-void show_distance (int ypos, struct galaxy_seed from_planet, struct galaxy_seed to_planet)
-{
-	char str[100];
-	int light_years;
-
-	light_years = calc_distance_to_planet (from_planet, to_planet);
-	
-	if (light_years > 0)
-		sprintf (str, "Distance: %2d.%d Light Years ", light_years / 10, light_years % 10);
-	else
-		strcpy (str,"                                                     ");
-
-	gfx_display_text (16, ypos, str);
-}
-
-
-
-void show_distance_to_planet (void)
-{
-	int px,py;
-	char planet_name[16];
-	char str[32];
-
-	// Thin-client chart: report the manifest system nearest the crosshair (this is
-	// what the hyperspace key will teleport to), instead of the legacy lookup.
-	{
-		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-		if (rc.IsOpen() && rc.HasGalaxy() &&
-			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
-		{
-			const int sel = chart_nearest_to_cursor();
-			if (sel >= 0)
-			{
-				g_chart_selected = sel;   // the teleport target the status screen reports
-				strncpy (planet_name, rc.Galaxy()[sel].name, sizeof(planet_name) - 1);
-				planet_name[sizeof(planet_name) - 1] = '\0';
-				gfx_clear_text_area();
-				sprintf (str, "%-18s", planet_name);
-				gfx_display_text (16, 340, str);
-			}
-			return;
-		}
-	}
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		px = cross_x / GFX_SCALE;
-		py = (cross_y - ((18 * GFX_SCALE) + 1)) * (2 / GFX_SCALE);
-	}
-	else
-	{
-		px = ((cross_x - GFX_X_CENTRE) / (4 * GFX_SCALE)) + docked_planet.d;
-		py = ((cross_y - GFX_Y_CENTRE) / (2 * GFX_SCALE)) + docked_planet.b;
-	}
-
-	hyperspace_planet = find_planet (px, py);
-
-	name_planet (planet_name, hyperspace_planet);
-
-	gfx_clear_text_area();
-	sprintf (str, "%-18s", planet_name);
-	gfx_display_text (16, 340, str);
-
-	show_distance (356, docked_planet, hyperspace_planet);
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		cross_x = hyperspace_planet.d * GFX_SCALE;
-		cross_y = hyperspace_planet.b / (2 / GFX_SCALE) + (18 * GFX_SCALE) + 1;
-	}
-	else
-	{
-		cross_x = ((hyperspace_planet.d - docked_planet.d) * (4 * GFX_SCALE)) + GFX_X_CENTRE;
-		cross_y = ((hyperspace_planet.b - docked_planet.b) * (2 * GFX_SCALE)) + GFX_Y_CENTRE;
-	}
-}
-
-
-void move_cursor_to_origin (void)
-{
-	// Thin-client charts are driven by the manifest, not the legacy seeds. Park the
-	// crosshair on the current system: chart centre on the short range chart, and
-	// the current system's plotted dot on the galactic chart.
-	{
-		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-		if (rc.IsOpen() && rc.HasGalaxy() &&
-			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
-		{
-			if (current_screen == SCR_SHORT_RANGE)
-			{
-				cross_x = GFX_X_CENTRE;
-				cross_y = GFX_Y_CENTRE;
-			}
-			else
-			{
-				const int cur = chart_current_system();
-				std::vector<int> px, py;
-				chart_project_all (rc.Galaxy(), px, py);
-				if (cur >= 0 && cur < (int)px.size())
-				{
-					cross_x = px[cur];
-					cross_y = py[cur];
-				}
-			}
-			show_distance_to_planet();
-			return;
-		}
-	}
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		cross_x = docked_planet.d * GFX_SCALE;
-		cross_y = docked_planet.b / (2 / GFX_SCALE) + (18 * GFX_SCALE) + 1;
-	}
-	else
-	{
-		cross_x = GFX_X_CENTRE;
-		cross_y = GFX_Y_CENTRE;
-	}
-
-	show_distance_to_planet();
-}
-
-
-void find_planet_by_name (char *find_name)
-{
-    int i;
-	struct galaxy_seed glx;
-	char planet_name[16];
-	int found;
-	char str[32];
-	
-	// Thin-client charts search the manifest (the same galaxy the chart plots),
-	// not the legacy procedural seeds. Match by name (case-insensitive) and move
-	// the crosshair onto that system's dot in the active chart.
-	{
-		Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-		if (rc.IsOpen() && rc.HasGalaxy() &&
-			(current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE))
-		{
-			const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
-			int hit = -1;
-			for (size_t k = 0; k < g.size(); k++)
-			{
-				char nm[16];
-				strncpy (nm, g[k].name, sizeof(nm) - 1);
-				nm[sizeof(nm) - 1] = '\0';
-
-				int same = 1;
-				const char *a = nm;
-				const char *b = find_name;
-				while (*a || *b)
-				{
-					if (toupper((unsigned char)*a) != toupper((unsigned char)*b))
-					{
-						same = 0;
-						break;
-					}
-					a++;
-					b++;
-				}
-				if (same)
-				{
-					hit = (int)k;
-					break;
-				}
-			}
-
-			if (hit < 0)
-			{
-				gfx_clear_text_area();
-				gfx_display_text (16, 340, "Unknown Planet");
-				return;
-			}
-
-			g_chart_selected = hit;   // the found system becomes the hyperspace target
-
-			std::vector<int> px, py;
-			chart_project_current (g, px, py);
-			cross_x = px[hit];
-			cross_y = py[hit];
-
-			char nm[16];
-			strncpy (nm, g[hit].name, sizeof(nm) - 1);
-			nm[sizeof(nm) - 1] = '\0';
-			capitalise_name (nm);
-			gfx_clear_text_area();
-			sprintf (str, "%-18s", nm);
-			gfx_display_text (16, 340, str);
-			return;
-		}
-	}
-
-	glx = cmdr.galaxy;
-	found = 0;
-
-	for (i = 0; i < 256; i++)
-	{
-		name_planet (planet_name, glx);
-
-		if (strcmp (planet_name, find_name) == 0)
-		{
-			found = 1;
-			break;
-		}
-
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-	}
-
-	if (!found)
-	{
-		gfx_clear_text_area();
-		gfx_display_text (16, 340, "Unknown Planet");
-		return;
-	}
-
-	hyperspace_planet = glx;
-
-	gfx_clear_text_area ();
-	sprintf (str, "%-18s", planet_name);
-	gfx_display_text (16, 340, str);
-
-	show_distance (356, docked_planet, hyperspace_planet);
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		cross_x = hyperspace_planet.d * GFX_SCALE;
-		cross_y = hyperspace_planet.b / (2 / GFX_SCALE) + (18 * GFX_SCALE) + 1;
-	}
-	else
-	{
-		cross_x = ((hyperspace_planet.d - docked_planet.d) * (4 * GFX_SCALE)) + GFX_X_CENTRE;
-		cross_y = ((hyperspace_planet.b - docked_planet.b) * (2 * GFX_SCALE)) + GFX_Y_CENTRE;
-	}
-}
-
-
-
-void display_short_range_chart (void)
-{
-    int i;
-	struct galaxy_seed glx;
-	int dx,dy;
-	int px,py;
-	char planet_name[16];
-	int row_used[64];
-	int row;
-	int blob_size;
-
-	if (display_replicated_short_range_chart())
-		return;
-
-	current_screen = SCR_SHORT_RANGE;
-
-	gfx_clear_display();
-
-	gfx_display_centre_text (10, "SHORT RANGE CHART", 140, GFX_COL_GOLD);
-
-	gfx_draw_line (0, 36, 511, 36);
-
-	draw_fuel_limit_circle (GFX_X_CENTRE, GFX_Y_CENTRE);
-
-	for (i = 0; i < 64; i++)
-		row_used[i] = 0;
-
-	glx = cmdr.galaxy;
-
-	for (i = 0; i < 256; i++)
-	{
-
-		dx = abs (glx.d - docked_planet.d);
-		dy = abs (glx.b - docked_planet.b);
-
-		if ((dx >= 20) || (dy >= 38))
-		{
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-
-			continue;
-		}
-
-		px = (glx.d - docked_planet.d);
-		px = px * 4 * GFX_SCALE + GFX_X_CENTRE;  /* Convert to screen co-ords */
-
-		py = (glx.b - docked_planet.b);
-		py = py * 2 * GFX_SCALE + GFX_Y_CENTRE;	/* Convert to screen co-ords */
-
-		row = py / (8 * GFX_SCALE);
-
-		if (row_used[row] == 1)
-		    row++;
-
-		if (row_used[row] == 1)
-			row -= 2;
-
-		if (row <= 3)
-		{
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-			waggle_galaxy (&glx);
-
-			continue;
-		}
-
-		if (row_used[row] == 0)
-		{
-			row_used[row] = 1;
-
-			name_planet (planet_name, glx);
-			capitalise_name (planet_name);
-
-			gfx_display_text (px + (4 * GFX_SCALE), (row * 8 - 5) * GFX_SCALE, planet_name);
-		}
-
-
-		/* The next bit calculates the size of the circle used to represent */
-		/* a planet.  The carry_flag is left over from the name generation. */
-		/* Yes this was how it was done... don't ask :-( */
-
-		blob_size = (glx.f & 1) + 2 + carry_flag;
-		blob_size *= GFX_SCALE;
-		gfx_draw_filled_circle (px, py, blob_size, GFX_COL_GOLD);
-
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-	}
-
-	cross_x = ((hyperspace_planet.d - docked_planet.d) * 4 * GFX_SCALE) + GFX_X_CENTRE;
-	cross_y = ((hyperspace_planet.b - docked_planet.b) * 2 * GFX_SCALE) + GFX_Y_CENTRE;
-}
-
 
 
 
@@ -588,316 +213,182 @@ static void chart_project_short_range (const std::vector<Neuron::Net::GalaxySyst
 	{
 		double lyx = (double)(_g[i].x - ox) / (double)SR_UNITS_PER_LY;
 		double lyz = (double)(_g[i].z - oz) / (double)SR_UNITS_PER_LY;
-		_px[i] = GFX_X_CENTRE + (int)lround (lyx * SR_PX_PER_LY);
-		_py[i] = GFX_Y_CENTRE + (int)lround (lyz * SR_PX_PER_LY);
+		_px[i] = ChartData::PLOT_W / 2 + (int)lround (lyx * SR_PX_PER_LY);
+		_py[i] = ChartData::PLOT_H / 2 + (int)lround (lyz * SR_PX_PER_LY);
 	}
 }
 
-// Project the manifest into the chart pixels of whichever chart is active, so the
-// crosshair "nearest system" pick matches what is actually drawn on screen.
-static void chart_project_current (const std::vector<Neuron::Net::GalaxySystemInfo>& _g,
-								   std::vector<int>& _px, std::vector<int>& _py)
+// ===== Render-free chart data API (ChartData.h) ================================
+//
+// Drawing-free accessors over the replicated galaxy manifest for the native
+// ChartWindow (GameWindows.cpp), which draws in the GUI overlay's Render2D pass and so
+// cannot touch the legacy gfx_* layer. Everything is expressed in the fixed chart-canvas
+// pixel space (ChartData::PLOT_W x PLOT_H). The crosshair (cross_x/cross_y) and the
+// selection (g_chart_selected) are the SAME state the legacy chart used, so the two
+// agree during the transition.
+
+namespace
 {
-	if (current_screen == SCR_SHORT_RANGE)
-		chart_project_short_range (_g, chart_current_system(), _px, _py);
+	// Per-frame projection cache filled by ChartData::Begin.
+	std::vector<int> s_plotPx, s_plotPy;
+
+	// Nearest manifest system to the crosshair, projected for an EXPLICIT kind. (Unlike
+	// chart_nearest_to_cursor, which reads current_screen - the native window no longer
+	// sets that, so it passes the kind directly.)
+	int chart_nearest_for_kind (int _kind, const std::vector<Neuron::Net::GalaxySystemInfo>& _g)
+	{
+		std::vector<int> px, py;
+		if (_kind == ChartData::SHORT_RANGE)
+			chart_project_short_range (_g, chart_current_system(), px, py);
+		else
+			chart_project_all (_g, px, py);
+
+		int best = 0;
+		long long bestD = 1LL << 62;
+		for (size_t i = 0; i < _g.size(); i++)
+		{
+			long long dx = px[i] - cross_x;
+			long long dy = py[i] - cross_y;
+			long long d = dx * dx + dy * dy;
+			if (d < bestD) { bestD = d; best = (int) i; }
+		}
+		return best;
+	}
+}
+
+bool ChartData::Ready (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	return rc.IsOpen() && rc.HasGalaxy();
+}
+
+int ChartData::Count (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	return (rc.IsOpen() && rc.HasGalaxy()) ? (int) rc.Galaxy().size() : 0;
+}
+
+void ChartData::Begin (int _kind)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy()) { s_plotPx.clear(); s_plotPy.clear(); return; }
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+	if (_kind == ChartData::SHORT_RANGE)
+		chart_project_short_range (g, chart_current_system(), s_plotPx, s_plotPy);
 	else
-		chart_project_all (_g, _px, _py);
+		chart_project_all (g, s_plotPx, s_plotPy);
 }
 
-// Index of the manifest system whose plotted dot is nearest the crosshair, or -1
-// when there is no replicated galaxy.
-int chart_nearest_to_cursor (void)
+int ChartData::X (int _i) { return (_i >= 0 && _i < (int) s_plotPx.size()) ? s_plotPx[_i] : 0; }
+int ChartData::Y (int _i) { return (_i >= 0 && _i < (int) s_plotPy.size()) ? s_plotPy[_i] : 0; }
+
+bool ChartData::Visible (int _i)
 {
-	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy())
-		return -1;
-
-	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
-	std::vector<int> px, py;
-	chart_project_current (g, px, py);
-
-	int best = 0;
-	long long bestD = 1LL << 62;
-	for (size_t i = 0; i < g.size(); i++)
-	{
-		long long dx = px[i] - cross_x;
-		long long dy = py[i] - cross_y;
-		long long d = dx * dx + dy * dy;
-		if (d < bestD)
-		{
-			bestD = d;
-			best = (int)i;
-		}
-	}
-	return best;
+	if (_i < 0 || _i >= (int) s_plotPx.size()) return false;
+	const int x = s_plotPx[_i], y = s_plotPy[_i];
+	return x >= 2 && x <= PLOT_W - 2 && y >= 2 && y <= PLOT_H - 2;
 }
 
-// Draw the chart from the manifest. Returns false (so the legacy chart runs) when
-// not in thin-client mode or the manifest has not arrived yet.
-bool display_replicated_galactic_chart (void)
+void ChartData::Name (int _i, char* _buf, int _buflen)
 {
+	if (_buflen <= 0) return;
+	_buf[0] = '\0';
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy())
-		return false;
-
-	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
-
-	current_screen = SCR_GALACTIC_CHART;
-	gfx_clear_display();
-	gfx_display_centre_text (10, "GALACTIC CHART", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-	gfx_draw_line (0, 36 + 258, 511, 36 + 258);
-
-	std::vector<int> px, py;
-	chart_project_all (g, px, py);
-	for (size_t i = 0; i < g.size(); i++)
-	{
-		gfx_plot_pixel (px[i], py[i], GFX_COL_WHITE);
-		gfx_plot_pixel (px[i] + 1, py[i], GFX_COL_WHITE);
-	}
-
-	// Park the crosshair in the chart centre when first opening the screen.
-	if (cross_x < 1 || cross_x > 510 || cross_y < 37 || cross_y > 293)
-	{
-		cross_x = 256;
-		cross_y = 165;
-	}
-
-	gfx_display_text (16, 304, "Arrows: move crosshair   D: system data");
-	gfx_display_text (16, 326, "Hyperspace key: teleport to nearest system");
-	return true;
-}
-
-// Draw the short range chart from the manifest, zoomed around the current system,
-// so it shows the SAME galaxy as the galactic chart (just nearer). Returns false
-// (so the legacy chart runs) when not in thin-client mode or the manifest has not
-// arrived yet.
-bool display_replicated_short_range_chart (void)
-{
-	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy())
-		return false;
-
-	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
-
-	current_screen = SCR_SHORT_RANGE;
-	gfx_clear_display();
-	gfx_display_centre_text (10, "SHORT RANGE CHART", 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
-
-	draw_fuel_limit_circle (GFX_X_CENTRE, GFX_Y_CENTRE);
-
-	const int origin = chart_current_system();
-	std::vector<int> px, py;
-	chart_project_short_range (g, origin, px, py);
-
-	int row_used[64];
-	for (int i = 0; i < 64; i++)
-		row_used[i] = 0;
-
-	for (size_t i = 0; i < g.size(); i++)
-	{
-		// Only plot systems whose dot falls inside the visible chart area.
-		if (px[i] < 1 || px[i] > 510 || py[i] < 37 || py[i] > 339)
-			continue;
-
-		int row = py[i] / (8 * GFX_SCALE);
-		if (row > 3 && row < 64 && row_used[row] == 0)
-		{
-			row_used[row] = 1;
-
-			char planet_name[16];
-			strncpy (planet_name, g[i].name, sizeof(planet_name) - 1);
-			planet_name[sizeof(planet_name) - 1] = '\0';
-			capitalise_name (planet_name);
-
-			gfx_display_text (px[i] + (4 * GFX_SCALE), (row * 8 - 5) * GFX_SCALE, planet_name);
-		}
-
-		// A little size variety (2..4), echoing the legacy chart's blob sizes; the
-		// manifest carries no carry_flag, so derive it from the system attributes.
-		int blob_size = ((g[i].economy ^ g[i].techLevel) & 1) + (g[i].government & 1) + 2;
-		blob_size *= GFX_SCALE;
-		gfx_draw_filled_circle (px[i], py[i], blob_size, GFX_COL_GOLD);
-	}
-
-	// Park the crosshair on the current system (chart centre) when first opening.
-	if (cross_x < 1 || cross_x > 510 || cross_y < 37 || cross_y > 339)
-	{
-		cross_x = GFX_X_CENTRE;
-		cross_y = GFX_Y_CENTRE;
-	}
-
-	return true;
-}
-
-// Show data on the manifest system nearest the crosshair (the F7 "data" screen in
-// thin-client mode). Returns false when there is no replicated galaxy.
-bool display_replicated_system_data (void)
-{
-	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy())
-		return false;
-
-	const int sel = chart_nearest_to_cursor();
-	if (sel < 0)
-		return false;
-	g_chart_selected = sel;
-	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[sel];
-
-	char str[100];
+	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return;
 	char name[16];
-	strncpy (name, s.name, sizeof(name) - 1);
+	strncpy (name, rc.Galaxy()[_i].name, sizeof(name) - 1);
 	name[sizeof(name) - 1] = '\0';
+	capitalise_name (name);
+	strncpy (_buf, name, _buflen - 1);
+	_buf[_buflen - 1] = '\0';
+}
 
-	current_screen = SCR_PLANET_DATA;
-	gfx_clear_display();
-	sprintf (str, "DATA ON %s", name);
-	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
-	gfx_draw_line (0, 36, 511, 36);
+int ChartData::Blob (int _i)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return ChartData::SCALE * 2;
+	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[_i];
+	const int blob = ((s.economy ^ s.techLevel) & 1) + (s.government & 1) + 2;   // 2..4, echoing the legacy blobs
+	return blob * ChartData::SCALE;
+}
 
-	sprintf (str, "Economy:%s", economy_type[s.economy & 7]);
-	gfx_display_text (16, 74, str);
-	sprintf (str, "Government:%s", government_type[s.government & 7]);
-	gfx_display_text (16, 106, str);
-	sprintf (str, "Tech.Level:%3d", s.techLevel + 1);
-	gfx_display_text (16, 138, str);
-	sprintf (str, "Population:%d.%d Billion", s.population / 10, s.population % 10);
-	gfx_display_text (16, 170, str);
-	sprintf (str, "Gross Productivity:%5d M CR", s.productivity);
-	gfx_display_text (16, 202, str);
+int ChartData::CurrentIndex (void) { return chart_current_system(); }
+int ChartData::SelectedIndex (void) { return g_chart_selected; }
+
+bool ChartData::FuelCircle (int _kind, int* _cx, int* _cy, int* _r)
+{
+	if (_kind != ChartData::SHORT_RANGE) return false;   // the galactic chart draws no fuel ring
+	// Short-range is centred on the current system, so the fuel ring sits at the chart
+	// centre; radius is the fuel range in chart px (cmdr.fuel is tenths of a light year).
+	if (_cx) *_cx = ChartData::PLOT_W / 2;
+	if (_cy) *_cy = ChartData::PLOT_H / 2;
+	if (_r)  *_r  = cmdr.fuel * ChartData::SCALE;
 	return true;
 }
 
-// Teleport (while docked) to the manifest system nearest the crosshair. The
-// server validates and performs the jump; we just request it and play the break
-// pattern. No-op when not on a replicated chart.
-void teleport_to_cursor (void)
+void ChartData::GetCursor (int* _cx, int* _cy)
+{
+	if (_cx) *_cx = cross_x;
+	if (_cy) *_cy = cross_y;
+}
+
+void ChartData::SetCursor (int _kind, int _cx, int _cy)
+{
+	if (_cx < 1) _cx = 1;
+	if (_cx > PLOT_W - 2) _cx = PLOT_W - 2;
+	if (_cy < 1) _cy = 1;
+	if (_cy > PLOT_H - 2) _cy = PLOT_H - 2;
+	cross_x = _cx;
+	cross_y = _cy;
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (rc.IsOpen() && rc.HasGalaxy() && !rc.Galaxy().empty())
+		g_chart_selected = chart_nearest_for_kind (_kind, rc.Galaxy());
+}
+
+void ChartData::Jump (int _kind)
 {
 	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !rc.HasGalaxy())
-		return;
+	if (!rc.IsOpen() || !rc.HasGalaxy() || rc.Galaxy().empty()) return;
 
-	const int sel = chart_nearest_to_cursor();
-	if (sel < 0)
-		return;
+	const int sel = chart_nearest_for_kind (_kind, rc.Galaxy());
 
 	Neuron::Msg::TravelRequest req;
 	req.kind = Neuron::Msg::TravelKind::Hyperspace;
-	req.systemId = rc.Galaxy()[sel].id;   // server resolves the destination station
+	req.systemId = rc.Galaxy()[sel].id;   // server resolves + validates the destination
 	rc.Send (req);
 
 	snd_play_sample (SND_HYPERSPACE);
-	current_screen = SCR_BREAK_PATTERN;
+	// No client-side transition: stay on the docked view until the server's
+	// TravelResponse{Arrived} flips us into flight (the break pattern is retired).
 }
 
-void display_galactic_chart (void)
+int ChartData::DataLineCount (void)
 {
-    int i;
-	struct galaxy_seed glx;
-	char str[64];
-	int px,py;
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || g_chart_selected < 0 || g_chart_selected >= (int) rc.Galaxy().size())
+		return 0;
+	return 5;
+}
 
-	if (display_replicated_galactic_chart())
+void ChartData::DataLine (int _i, char* _buf, int _buflen)
+{
+	if (_buflen <= 0) return;
+	_buf[0] = '\0';
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || g_chart_selected < 0 || g_chart_selected >= (int) rc.Galaxy().size())
 		return;
-
-	current_screen = SCR_GALACTIC_CHART;
-
-	gfx_clear_display();
-
-	sprintf (str, "GALACTIC CHART");   /* one continuous galaxy now - no numbering */
-
-	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
-
-	gfx_draw_line (0, 36, 511, 36);
-	gfx_draw_line (0, 36+258, 511, 36+258);
-
-	draw_fuel_limit_circle (docked_planet.d * GFX_SCALE,
-					(docked_planet.b / (2 / GFX_SCALE)) + (18 * GFX_SCALE) + 1);
-
-	glx = cmdr.galaxy;
-
-	for (i = 0; i < 256; i++)
+	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[g_chart_selected];
+	switch (_i)
 	{
-		px = glx.d * GFX_SCALE;
-		py = (glx.b / (2 / GFX_SCALE)) + (18 * GFX_SCALE) + 1;
-
-		gfx_plot_pixel (px, py, GFX_COL_WHITE);
-
-		if ((glx.e | 0x50) < 0x90)
-			gfx_plot_pixel (px + 1, py, GFX_COL_WHITE);
-
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-		waggle_galaxy (&glx);
-
+		case 0: snprintf (_buf, _buflen, "Economy: %s", economy_type[s.economy & 7]); break;
+		case 1: snprintf (_buf, _buflen, "Government: %s", government_type[s.government & 7]); break;
+		case 2: snprintf (_buf, _buflen, "Tech Level: %d", s.techLevel + 1); break;
+		case 3: snprintf (_buf, _buflen, "Population: %d.%d Billion", s.population / 10, s.population % 10); break;
+		case 4: snprintf (_buf, _buflen, "Gross Productivity: %d M CR", s.productivity); break;
+		default: break;
 	}
-
-
-	cross_x = hyperspace_planet.d * GFX_SCALE;
-	cross_y = (hyperspace_planet.b / (2 / GFX_SCALE)) + (18 * GFX_SCALE) + 1;
 }
-
-
-
-
-
-/*
- * Displays data on the currently selected Hyperspace Planet.
- */
-
-void display_data_on_planet (void)
-{
-    char planet_name[16];
-	char str[100];
-	char *description;
-	struct planet_data hyper_planet_data;
-
-	if (display_replicated_system_data())
-		return;
-
-	current_screen = SCR_PLANET_DATA;
-
-	gfx_clear_display();
-
-	name_planet (planet_name, hyperspace_planet);
-	sprintf (str, "DATA ON %s", planet_name);
-
-	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
-
-	gfx_draw_line (0, 36, 511, 36);
-
-
-	generate_planet_data (&hyper_planet_data, hyperspace_planet);
-
-	show_distance (42, docked_planet, hyperspace_planet);
-
-	sprintf (str, "Economy:%s", economy_type[hyper_planet_data.economy]);
-	gfx_display_text (16, 74, str);
-
-	sprintf (str, "Government:%s", government_type[hyper_planet_data.government]);
-	gfx_display_text (16, 106, str);
-
-	sprintf (str, "Tech.Level:%3d", hyper_planet_data.techlevel + 1);
-	gfx_display_text (16, 138, str);
-
-	sprintf (str, "Population:%d.%d Billion", hyper_planet_data.population / 10, hyper_planet_data.population % 10);
-	gfx_display_text (16, 170, str);
-
-	describe_inhabitants (str, hyperspace_planet);
-	gfx_display_text (16, 202, str);
-
-	sprintf (str, "Gross Productivity:%5d M CR", hyper_planet_data.productivity);
-	gfx_display_text (16, 234, str);
-
-	sprintf (str, "Average Radius:%5d km", hyper_planet_data.radius);
-	gfx_display_text (16, 266, str);
-
-	description = describe_planet (hyperspace_planet);
-	gfx_display_pretty_text (16, 298, 400, 384, description);
-}
-
 
 
 struct rank
@@ -946,11 +437,6 @@ char *laser_type (int strength)
 }
 
 
-#define EQUIP_START_Y	202
-#define EQUIP_START_X	50
-#define EQUIP_MAX_Y		290
-#define EQUIP_WIDTH		200
-#define Y_INC			16
 
 
 static char *condition_txt[] =
@@ -961,166 +447,6 @@ static char *condition_txt[] =
 	"Red"
 };
 
-void display_commander_status (void)
-{
-    char planet_name[16];
-	char str[100];
-	int i;
-	int x,y;
-	int condition;
-	int type;
-	
-	current_screen = SCR_CMDR_STATUS;
-
-	gfx_clear_display();
-
-	sprintf (str, "COMMANDER %s", cmdr.name);
-
-	gfx_display_centre_text (10, str, 140, GFX_COL_GOLD);
-
-	gfx_draw_line (0, 36, 511, 36);
-
-
-	gfx_display_colour_text (16, 58, "Present System:", GFX_COL_GREEN_1);
-	
-	if (!witchspace)
-	{
-		current_system_name (planet_name);
-		capitalise_name (planet_name);
-		sprintf (str, "%s", planet_name);
-		gfx_display_text (190, 58, str);
-	}
-
-	gfx_display_colour_text (16, 74, "Hyperspace System:", GFX_COL_GREEN_1);
-	hyperspace_system_name (planet_name);
-	capitalise_name (planet_name);
-	sprintf (str, "%s", planet_name);
-	gfx_display_text (190, 74, str);
-
-	if (docked)
-		condition = 0;
-	else
-	{
-		condition = 1;
-
-		for (i = 0; i < MAX_LOCAL_OBJECTS; i++)
-		{
-			type = local_objects[i].type;
-		
-			if ((type == SHIP_MISSILE) ||
-				((type > SHIP_ROCK) && (type < SHIP_DODEC)))
-			{
-				condition = 2;
-				break;
-			}
-		}
- 
-		if ((condition == 2) && (PlayerDefense().energy < 128))
-			condition = 3;
-	}
-	
-	gfx_display_colour_text (16, 90, "Condition:", GFX_COL_GREEN_1);
-	gfx_display_text (190, 90, condition_txt[condition]);
-
-	sprintf (str, "%d.%d Light Years", cmdr.fuel / 10, cmdr.fuel % 10);
-	gfx_display_colour_text (16, 106, "Fuel:", GFX_COL_GREEN_1);
-	gfx_display_text (70, 106, str);
-
-	sprintf (str, "%d.%d Cr", cmdr.credits / 10, cmdr.credits % 10);
-	gfx_display_colour_text (16, 122, "Cash:", GFX_COL_GREEN_1);
-	gfx_display_text (70, 122, str);
-
-	if (cmdr.legal_status == 0)
-		strcpy (str, "Clean");
-	else
-		strcpy (str, cmdr.legal_status > 50 ? "Fugitive" : "Offender");
-
-	gfx_display_colour_text (16, 138, "Legal Status:", GFX_COL_GREEN_1);
-	gfx_display_text (128, 138, str);
-
-	for (i = 0; i < NO_OF_RANKS; i++)
-		if (cmdr.score >= rating[i].score)
-			strcpy (str, rating[i].title);
-	
-	gfx_display_colour_text (16, 154, "Rating:", GFX_COL_GREEN_1);
-	gfx_display_text (80, 154, str);
-
-	gfx_display_colour_text (16, 186, "EQUIPMENT:", GFX_COL_GREEN_1);
-
-	x = EQUIP_START_X;
-	y = EQUIP_START_Y;
-
-	if (cmdr.cargo_capacity > 20)
-	{
-		gfx_display_text (x, y, "Large Cargo Bay");
-		y += Y_INC;
-	}
-	
-	if (cmdr.escape_pod)
-	{
-		gfx_display_text (x, y, "Escape Pod");
-		y += Y_INC;
-	}
-	
-	if (cmdr.fuel_scoop)
-	{
-		gfx_display_text (x, y, "Fuel Scoops");
-		y += Y_INC;
-	}
-
-	if (cmdr.ecm)
-	{
-		gfx_display_text (x, y, "E.C.M. System");
-		y += Y_INC;
-	}
-
-	if (cmdr.energy_bomb)
-	{
-		gfx_display_text (x, y, "Energy Bomb");
-		y += Y_INC;
-	}
-
-	if (cmdr.energy_unit)
-	{
-		gfx_display_text (x, y,
-				  cmdr.energy_unit == 1 ? "Extra Energy Unit" :"Naval Energy Unit");
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-
-	if (cmdr.docking_computer)
-	{
-		gfx_display_text (x, y, "Docking Computers");
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-
-	
-	if (cmdr.galactic_hyperdrive)
-	{
-		gfx_display_text (x, y, "Galactic Hyperspace");
-		y += Y_INC;
-		if (y > EQUIP_MAX_Y)
-		{
-			y = EQUIP_START_Y;
-			x += EQUIP_WIDTH;
-		}
-	}
-
-	if (cmdr.front_laser)
-	{
-		sprintf (str, "%s Laser", laser_type(cmdr.front_laser));
-		gfx_display_text (x, y, str);
-	}
-}
 
 
 

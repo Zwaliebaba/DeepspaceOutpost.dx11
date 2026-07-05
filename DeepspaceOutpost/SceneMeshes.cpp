@@ -8,7 +8,7 @@
 #include "Scene3D.h"
 
 #include "Renderer.h" // master palette (palette index -> RGBA)
-#include "gfx.h"      // GFX_COL_* palette indices
+#include "GamePalette.h"      // GFX_COL_* palette indices
 #include "elite.h"    // ship_list
 #include "shipdata.h"
 #include "shipface.h"
@@ -18,7 +18,7 @@
 // 6291456/256 = 24576 units regardless of distance (see the retired Scene3D::renderBillboard
 // radius formula), so matching it here makes the billboard->mesh switch size-preserving. Tune
 // here if the planet should read larger/smaller.
-static constexpr float kPlanetRadius = 24576.0f;
+static constexpr float PLANET_RADIUS = 24576.0f;
 
 // Build a GPU-ready mesh for one legacy ship type from its point table + solid faces.
 // Returns false if the type is not a real ship (planet/sun and out-of-range types have
@@ -33,7 +33,7 @@ static bool build_ship_mesh(int _type, Neuron::Graphics::MeshData& _out)
   {
     Renderer* r = platform_renderer();
     const uint32_t rgba = (r ? r->paletteColour(GFX_COL_GREEN_1) : 0xFF33AA33u) | 0xFF000000u;
-    _out = Neuron::Graphics::BuildUVSphere(kPlanetRadius, 32, 48, rgba);
+    _out = Neuron::Graphics::BuildUVSphere(PLANET_RADIUS, 32, 48, rgba);
     return !_out.vertices.empty() && !_out.indices.empty();
   }
 

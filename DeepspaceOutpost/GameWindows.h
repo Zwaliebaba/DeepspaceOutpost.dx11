@@ -20,3 +20,15 @@ void OpenCommanderWindow();
 void OpenInventoryWindow();
 void OpenPlanetDataWindow();
 void OpenEquipWindow();
+
+// Open (or focus) the native galactic / short-range chart window. `kind` is a
+// ChartData::Kind (ChartData.h): GALACTIC or SHORT_RANGE. Routed from F5/F6.
+void OpenChartWindow(int kind);
+
+// Open (or focus) the docked station menu (Launch + the native screens). The docked
+// view is the camera-space 3D scene with this small hub window floating over it.
+void OpenStationMenu();
+
+// Close the docked station menu. Called when leaving the station (launch / hyperspace
+// arrival), so the hub doesn't linger over the flight view.
+void CloseStationMenu();

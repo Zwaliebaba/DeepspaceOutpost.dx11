@@ -21,20 +21,13 @@ extern int kbd_F11_pressed;
 extern int kbd_F12_pressed;
 extern int kbd_y_pressed;
 extern int kbd_n_pressed;
-extern int kbd_fire_pressed;
-extern int kbd_ecm_pressed;
-extern int kbd_energy_bomb_pressed;
-extern int kbd_hyperspace_pressed;
+// I7: the combat keys retired into the pointer UX - kbd_fire/ecm/energy_bomb/
+// hyperspace/jump/escape(pod)/fire_missile/target_missile/unarm_missile are gone.
 extern int kbd_ctrl_pressed;
-extern int kbd_jump_pressed;
-extern int kbd_escape_pressed;
 extern int kbd_dock_pressed;
 extern int kbd_d_pressed;
 extern int kbd_origin_pressed;
 extern int kbd_find_pressed;
-extern int kbd_fire_missile_pressed;
-extern int kbd_target_missile_pressed;
-extern int kbd_unarm_missile_pressed;
 extern int kbd_inc_speed_pressed;
 extern int kbd_dec_speed_pressed;
 extern int kbd_up_pressed;

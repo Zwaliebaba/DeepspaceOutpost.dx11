@@ -6,7 +6,6 @@
 
 #include <stdlib.h>
  
-#include "gfx.h"
 #include "elite.h"
 #include "trade.h"
 #include "docked.h"

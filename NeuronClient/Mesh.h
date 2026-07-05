@@ -119,18 +119,18 @@ namespace Neuron::Graphics
     if (_radius <= 0.0f || _stacks < 2 || _slices < 3)
       return out;
 
-    constexpr float kPi = 3.14159265358979323846f;
+    constexpr float PI = 3.14159265358979323846f;
 
     // (_stacks+1) rings x (_slices+1) vertices. phi runs 0..pi (top pole to bottom pole),
     // theta runs 0..2pi around the axis.
     for (int i = 0; i <= _stacks; ++i)
     {
-      const float phi = kPi * static_cast<float>(i) / static_cast<float>(_stacks);
+      const float phi = PI * static_cast<float>(i) / static_cast<float>(_stacks);
       const float sp = std::sin(phi);
       const float cp = std::cos(phi);
       for (int j = 0; j <= _slices; ++j)
       {
-        const float theta = 2.0f * kPi * static_cast<float>(j) / static_cast<float>(_slices);
+        const float theta = 2.0f * PI * static_cast<float>(j) / static_cast<float>(_slices);
         const float nx = sp * std::cos(theta);
         const float ny = cp;
         const float nz = sp * std::sin(theta);

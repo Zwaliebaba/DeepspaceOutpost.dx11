@@ -69,11 +69,55 @@ void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
-unsigned int find_lock_target (void);
+unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
 
-// Entity index of the missile-locked ship (0xFFFFFFFF = none). Set by the missile
-// lock keys in main.cpp; read by render_replicated_objects to draw the target
-// reticle on the locked ship.
+// I4 ability bar (defined in main.cpp): draw the flight ability strip, and report
+// which bar button (if any) is under the cursor so the camera's select can ignore
+// a click that landed on the bar.
+void draw_ability_bar (void);
+int  ability_bar_button_at (int mx, int my);
+
+// Native flight-HUD primitives (defined in space.cpp). The cockpit dashboard and the
+// I2/I3/I4 overlays draw straight into the Render2D pass RenderGameHud brackets during
+// RenderCanvas, replacing the gfx2d deferred batch. Colours are palette indices (the
+// GFX_COL_* macros); coordinates are offset by a floated draw origin. draw_ability_bar
+// (main.cpp) uses these too, so they live in the shared header.
+void hud_set_origin (int x, int y);
+void hud_line (int x1, int y1, int x2, int y2, int col);
+void hud_rect (int x1, int y1, int x2, int y2, int col);
+void hud_text (int x, int y, const char *str, int col);
+
+// Centred overlay text (intro titles/prompts, the flight info message, GAME OVER). Emitted
+// from the RenderScene phase; hud_centre_text records the line and RenderOverlayText (called
+// from RenderGameHud) draws them natively. Replaces gfx_display_centre_text.
+void hud_centre_text (int y, const char *str, int psize, int col);
+void RenderOverlayText (void);
+
+// Deferred scene overlays: the ship-death debris points (threed.cpp), the target reticle
+// (space.cpp) and the intro title sprite (intro.cpp). Recorded during RenderScene; drawn by
+// RenderSceneOverlays from RenderGameHud, replacing the last gfx2d batch draws (gfx_plot_pixel
+// / gfx_draw_sprite / gfx_draw_sprite_scaled). x == -1 centres a sprite on the window; a
+// sprite w <= 0 uses its native size.
+void hud_plot_pixel (int x, int y, int col);
+void hud_sprite_deferred (int img, int x, int y);
+void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h);
+void RenderSceneOverlays (void);
+
+// I3 pointer-command feedback (state defined in main.cpp): the active order's kind
+// (0 = none), an optional world Move point, and a short-lived toast. Drawn each
+// frame by display_order_feedback() (space.cpp).
+extern unsigned int g_order_kind;
+extern bool         g_order_has_point;
+extern long long    g_order_point[3];
+extern char         g_order_toast[40];
+extern int          g_order_toast_timer;
+extern int          g_order_toast_col;
+
+// Entity index of the SELECTED / targeted entity (0xFFFFFFFF = none). Set by a
+// pointer click (pick_entity_at_screen) or the centre-cone lock key; read by
+// render_replicated_objects to draw the target reticle, by the camera rig as the
+// orbit subject, and by the missile launch as its target - "the missile target IS
+// the selected enemy" (interaction.md I2). Cleared when the entity dies/despawns.
 extern unsigned int g_missile_lock_target;
 
 /* Weapon / HUD presentation state (the server owns the authoritative state). */
