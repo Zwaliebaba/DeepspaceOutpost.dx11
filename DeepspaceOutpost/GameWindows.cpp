@@ -979,7 +979,7 @@ namespace
       StationMenuWindow()
         : GuiWindow("Station")
       {
-        SetTitle("Station");
+        SetTitle("STATION");
         Centre(this, 200, 262);
       }
 
