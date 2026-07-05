@@ -57,6 +57,7 @@ set(NEURONCLIENT_HEADERS
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h
+    graphics/LineExpand.h
     graphics/Render2D.h
     graphics/Scene3D.h
     graphics/TextureManager.h

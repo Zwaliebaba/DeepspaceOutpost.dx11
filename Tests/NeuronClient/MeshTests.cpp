@@ -155,3 +155,46 @@ TEST(Mesh, UVSphereRejectsDegenerateParameters)
   EXPECT_TRUE(BuildUVSphere(1.0f, 1, 8, 0xFFFFFFFFu).vertices.empty());
   EXPECT_TRUE(BuildUVSphere(1.0f, 8, 2, 0xFFFFFFFFu).vertices.empty());
 }
+
+// --- BuildWireMesh (H2 edge extraction) -----------------------------------------
+
+TEST(Mesh, WireMeshExtractsUniqueEdgesOfAQuad)
+{
+  // A single 4-point square face -> 4 perimeter edges, no duplicates.
+  const MeshPoint pts[4] = { {0,0,0}, {1,0,0}, {1,1,0}, {0,1,0} };
+  MeshFace f{}; f.count = 4; f.idx[0]=0; f.idx[1]=1; f.idx[2]=2; f.idx[3]=3;
+  const MeshData m = BuildWireMesh(pts, 4, &f, 1);
+  EXPECT_EQ(m.vertices.size(), 4u);
+  EXPECT_EQ(m.indices.size(), 8u);   // 4 edges * 2 endpoints
+}
+
+TEST(Mesh, WireMeshDeduplicatesSharedEdges)
+{
+  // Two triangles sharing edge (1,2): edges {0-1,1-2,2-0} and {1-3,3-2,2-1}.
+  // Shared 1-2 counted once -> 5 unique edges.
+  const MeshPoint pts[4] = { {0,0,0}, {1,0,0}, {0,1,0}, {1,1,0} };
+  MeshFace f0{}; f0.count = 3; f0.idx[0]=0; f0.idx[1]=1; f0.idx[2]=2;
+  MeshFace f1{}; f1.count = 3; f1.idx[0]=1; f1.idx[1]=3; f1.idx[2]=2;
+  MeshFace faces[2] = { f0, f1 };
+  const MeshData m = BuildWireMesh(pts, 4, faces, 2);
+  EXPECT_EQ(m.indices.size(), 5u * 2u);   // 5 unique edges
+}
+
+TEST(Mesh, WireMeshKeepsTwoPointLineFacesSolidBuilderDrops)
+{
+  const MeshPoint pts[2] = { {0,0,0}, {5,0,0} };
+  MeshFace line{}; line.count = 2; line.idx[0]=0; line.idx[1]=1;
+  const MeshData wire = BuildWireMesh(pts, 2, &line, 1);
+  EXPECT_EQ(wire.indices.size(), 2u);                 // one edge kept
+  EXPECT_TRUE(BuildSolidMesh(pts, 2, &line, 1).indices.empty());  // solid builder drops it
+}
+
+TEST(Mesh, WireMeshRejectsOutOfRangeAndEmpty)
+{
+  EXPECT_TRUE(BuildWireMesh(nullptr, 0, nullptr, 0).vertices.empty());
+  const MeshPoint pts[2] = { {0,0,0}, {1,0,0} };
+  MeshFace bad{}; bad.count = 3; bad.idx[0]=0; bad.idx[1]=1; bad.idx[2]=9;  // 9 out of range
+  const MeshData m = BuildWireMesh(pts, 2, &bad, 1);
+  // The 0-1 edge is valid; edges touching index 9 are dropped.
+  EXPECT_EQ(m.indices.size(), 2u);
+}
