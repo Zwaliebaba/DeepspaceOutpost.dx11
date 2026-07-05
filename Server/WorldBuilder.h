@@ -2,14 +2,15 @@
 
 // WorldBuilder - bootstrap the authoritative world (Server).
 //
-// Lays out the universe from durable SYSTEM ROWS (planet + market-carrying
-// station per system, home included) and builds the chart manifest shipped to
-// every client on connect. The rows come from the persistence store when the DB
-// is seeded (the initial-loading mechanism, so ids/positions are stable); with no
-// store the same rows are generated from the galaxy seed as a fallback, so the
-// no-persistence server is byte-for-byte the old world. Each station's market
+// Lays out the universe from durable SYSTEM ROWS (a planet + a market-carrying
+// station per system) and builds the chart manifest shipped to every client on
+// connect. The rows come from the persistence store when the DB is seeded (the
+// initial-loading mechanism, so ids/positions are stable); with no store the same
+// rows are generated from the galaxy seed as a fallback. Each station's market
 // starts at the generated baseline and is overlaid with any persisted drift.
-// Pure world-construction - no sockets, no loop state.
+// There is no special home system - new commanders are placed docked at a system
+// chosen from their name (GameLogic::DockAtNameChosenSystem). Pure world-
+// construction - no sockets, no loop state.
 
 #include <vector>
 
@@ -26,8 +27,7 @@ namespace DSOServer
     // destroyed, so the ids stay valid for the process lifetime.
     std::vector<Neuron::ECS::EntityId> landmarks;
 
-    // The chart manifest: every system, home (id -1) included, so players can
-    // always teleport back.
+    // The chart manifest: every system in the galaxy (no special home system).
     std::vector<Neuron::Net::GalaxySystemInfo> manifest;
   };
 

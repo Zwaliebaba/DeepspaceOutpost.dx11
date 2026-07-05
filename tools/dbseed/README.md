@@ -9,8 +9,8 @@ commodity market (`dbo.station_markets`) has a durable, referable home.
 `dbseed` generates the canonical galaxy from the fixed `GalaxyConfig` seed and
 writes:
 
-- one `dbo.systems` row per system (all 256 procedural systems **plus** the
-  hand-placed home system, id `-1`) — name, planet/station int64 positions,
+- one `dbo.systems` row per system (all 256 procedural systems) — name,
+  planet/station int64 positions,
   economy/government/tech/population/productivity/radius, and the market seed;
 - the **baseline** `dbo.station_markets` rows for every system (stock/price from
   `GenerateMarket`);

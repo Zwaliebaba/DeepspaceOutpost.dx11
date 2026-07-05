@@ -291,6 +291,11 @@ namespace DSOServer
           const GameLogic::HelloOutcome out = m_sessions.OnHello(m_world, s.endpoint, hello, m_tick, defer);
           if (out.result == GameLogic::HelloResult::Accepted)
           {
+            // No persistence (this path only runs with DSO_DB unset): a fresh
+            // commander is placed docked at a system chosen from their name, so
+            // players scatter across the galaxy rather than all launching from one
+            // spot. (With persistence on, account creation docks in FinishLoadedSpawn.)
+            GameLogic::DockAtNameChosenSystem(m_world, out.entity, s.name);
             printf("Client connected: entity %u (\"%s\")\n", out.entity.index, s.name.c_str());
             // Replay the full roster: the joiner learns everyone, everyone learns
             // the joiner. (A leaver's ship goes out as EntityDespawn on reap.)
@@ -405,8 +410,10 @@ namespace DSOServer
     }
     else if (m_persist)
     {
-      // Unknown commander: the fresh spawn's defaults ARE the new account - persist
-      // it now so the row exists to reload next time.
+      // Unknown commander = account creation: place them docked at a system chosen
+      // from their name (deterministic, scattered), THEN persist - so the saved
+      // lastSystemId is where they were created and they wake there next time.
+      GameLogic::DockAtNameChosenSystem(m_world, e, session.name);
       m_persist->QueuePlayerSnapshot(GameLogic::PlayerStateFromComponents(
           m_world, e, m_tick, session.name, session.score));
       printf("Client connected (new account): entity %u\n", e.index);

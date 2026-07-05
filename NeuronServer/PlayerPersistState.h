@@ -46,7 +46,7 @@ namespace Neuron::Persist
     int32_t  holdCapacity = 0;    // CargoHold.capacity
     int32_t  missiles = 0;        // Equipment.missiles
     uint32_t equipFlags = 0;      // PersistEquipFlags bitmask
-    int32_t  lastSystemId = -1;   // system to wake docked at (-1 = home)
+    int32_t  lastSystemId = -1;   // system to wake docked at (-1 = none: dock at nearest)
     bool     inWitchspace = false;
     uint64_t updatedTick = 0;     // world tick of the snapshot (sim clock, not wall)
     std::array<int32_t, PERSIST_COMMODITY_COUNT> cargo{};   // per-commodity units

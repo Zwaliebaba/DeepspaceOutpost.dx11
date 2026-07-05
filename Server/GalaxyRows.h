@@ -24,12 +24,6 @@
 
 namespace DSOServer
 {
-  // The hand-placed home system's fixed layout (id -1). Mirrors WorldBuilder's
-  // original constants so a seeded galaxy and an unseeded (generated) one agree.
-  inline constexpr int HOME_SYSTEM_ID = -1;
-  inline constexpr int64_t HOME_PLANET_Z = 65536;
-  inline constexpr int64_t HOME_STATION_Z = -3000;
-
   // Convert one generated system to its durable row.
   [[nodiscard]] inline Neuron::Persist::SystemRow SystemRowFrom(const Neuron::GameLogic::GalaxySystem& _s)
   {
@@ -52,36 +46,17 @@ namespace DSOServer
     return r;
   }
 
-  // The home system's durable row (id -1). Positions are hand-placed; attributes
-  // come from the canonical base seed, exactly as WorldBuilder used to derive them.
-  [[nodiscard]] inline Neuron::Persist::SystemRow HomeSystemRow()
-  {
-    const Neuron::GameLogic::PlanetData home = Neuron::GameLogic::GeneratePlanet(Neuron::GameLogic::BASE_GALAXY_SEED);
-    Neuron::Persist::SystemRow r;
-    r.systemId     = HOME_SYSTEM_ID;
-    r.name         = "HOME";
-    r.planetX      = 0;  r.planetY = 0;  r.planetZ = HOME_PLANET_Z;
-    r.stationX     = 0;  r.stationY = 0; r.stationZ = HOME_STATION_Z;
-    r.economy      = home.economy;
-    r.government   = home.government;
-    r.techLevel    = home.techLevel;
-    r.population   = home.population;
-    r.productivity = home.productivity;
-    r.radius       = home.radius;
-    r.marketSeed   = Neuron::GameLogic::BASE_GALAXY_SEED.f;
-    return r;
-  }
-
-  // Every system row for a whole galaxy: the procedural systems then the home
-  // system last (the order preserves the manifest's historical index layout).
+  // Every system row for a whole galaxy: the procedural systems. There is no
+  // special home system - players are placed at a system chosen from their name at
+  // account creation (see GameLogic::DockAtNameChosenSystem), so the universe is a
+  // uniform field of systems with no privileged origin.
   [[nodiscard]] inline std::vector<Neuron::Persist::SystemRow> BuildSystemRows(const Neuron::GameLogic::GalaxyConfig& _cfg)
   {
     std::vector<Neuron::Persist::SystemRow> rows;
     const std::vector<Neuron::GameLogic::GalaxySystem> systems = Neuron::GameLogic::GenerateGalaxy(_cfg);
-    rows.reserve(systems.size() + 1);
+    rows.reserve(systems.size());
     for (const Neuron::GameLogic::GalaxySystem& s : systems)
       rows.push_back(SystemRowFrom(s));
-    rows.push_back(HomeSystemRow());
     return rows;
   }
 

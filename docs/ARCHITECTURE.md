@@ -844,9 +844,15 @@ sun entities exist yet — see §14).
 
 ### 6.10 World generation
 
-- **Home system** (id −1): planet at (0, 0, 65536), station at (0, 0, −3000)
-  with its own market, one hand-placed pirate on the way to the planet.
-  Players spawn near the station, spread 2000 units apart, docked=false.
+- **No special home system (v2).** The universe is a uniform field of systems
+  with no privileged origin; the old hand-placed home system (id −1) and its
+  starter pirate were removed. New commanders are placed **docked at a system
+  chosen from their name** (`GameLogic::DockAtNameChosenSystem`: a SplitMix64 of
+  the name picks a system, deterministic and varied per player, no wall-clock
+  RNG per §8), so players scatter across the galaxy and a returning commander
+  wakes wherever they last were (persisted `lastSystemId`; −1 falls back to the
+  nearest station). Dynamic spawning (`SpawnDirector`) still provides pirates
+  near players.
 - **Procedural galaxy:** 256 systems scattered over ±100M units; each system
   gets a planet entity, a station entity (orbit +8000 x) with a market, and
   legacy-style name/attributes. Shipped to clients as the pulled manifest.
@@ -856,9 +862,11 @@ sun entities exist yet — see §14).
   can key against it with a real foreign key. The seed (`0xC0FFEE`) is retained
   only to *generate* those rows once (via `tools/dbseed`) and as the fallback
   when there is no DB — an unseeded/persistence-off server regenerates the
-  identical galaxy in memory, so nothing about the offline world changed. The
-  one place that maps generator ↔ rows ↔ manifest is `Server/GalaxyRows.h`, so
-  the seeded rows are exactly the rows the server would have generated.
+  identical galaxy in memory. The one place that maps generator ↔ rows ↔
+  manifest is `Server/GalaxyRows.h`, so the seeded rows are exactly the rows the
+  server would have generated, and swapping in a different generator (or hand-
+  authoring/editing rows) only changes what `systems` holds — the server just
+  loads it.
 - **Replicated ship types** (`NetType.type` = legacy `SHIP_*`): Sun −2,
   Planet −1, Missile 1, Coriolis 2, Alloy 4, Cargo 5, Rock 8, Shuttle 9,
   Transporter 10, Viper 16, Thargoid 29. The client maps them straight onto

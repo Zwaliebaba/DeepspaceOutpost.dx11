@@ -291,19 +291,15 @@ TEST(Persistence, CommandLogReplayReproducesWalletOutcomes)
 
 // --- v2: durable galaxy layout + persistent markets ---------------------------
 
-TEST(GalaxyPersistence, BuildSystemRowsCoversTheWholeGalaxyPlusHome)
+TEST(GalaxyPersistence, BuildSystemRowsCoversTheWholeGalaxyWithNoSpecialHome)
 {
   constexpr GameLogic::GalaxyConfig cfg{};
   const std::vector<Persist::SystemRow> rows = DSOServer::BuildSystemRows(cfg);
 
-  // Every procedural system plus the hand-placed home (id -1) at the last index.
-  ASSERT_EQ(rows.size(), static_cast<std::size_t>(cfg.planetCount) + 1);
-  const Persist::SystemRow& home = rows.back();
-  EXPECT_EQ(home.systemId, -1);
-  EXPECT_EQ(home.name, "HOME");
-  EXPECT_EQ(home.planetX, 0);
-  EXPECT_EQ(home.planetZ, 65536);
-  EXPECT_EQ(home.stationZ, -3000);
+  // Exactly the procedural systems - no privileged home system (id -1) anymore.
+  ASSERT_EQ(rows.size(), static_cast<std::size_t>(cfg.planetCount));
+  for (const Persist::SystemRow& r : rows)
+    EXPECT_GE(r.systemId, 0);
 }
 
 TEST(GalaxyPersistence, RowsMatchTheGeneratorSoTheUnseededFallbackIsUnchanged)

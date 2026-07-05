@@ -49,7 +49,7 @@ namespace Neuron::Persist
   // int64 world coordinates (static - not the §12-forbidden per-tick kind).
   struct SystemRow
   {
-    int32_t systemId = 0;           // stable galaxy id (-1 = home)
+    int32_t systemId = 0;           // stable galaxy id (the procedural index)
     std::string name;
     int64_t planetX = 0, planetY = 0, planetZ = 0;
     int64_t stationX = 0, stationY = 0, stationZ = 0;

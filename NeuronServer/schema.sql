@@ -45,7 +45,7 @@ CREATE TABLE dbo.players (             -- one avatar row today; N owned units la
   hold_capacity  SMALLINT NOT NULL,    -- CargoHold.capacity
   missiles       SMALLINT NOT NULL,    -- Equipment.missiles
   equip_flags    INT NOT NULL,         -- PersistEquipFlags bitmask (PlayerPersistState.h)
-  last_system_id INT NOT NULL,         -- system to wake docked at (-1 = home)
+  last_system_id INT NOT NULL,         -- system to wake docked at (-1 = none: dock at nearest)
   in_witchspace  BIT NOT NULL,
   updated_tick   BIGINT NOT NULL,      -- world tick of the snapshot
   updated_utc    DATETIME2 NOT NULL    -- stamped by the persistence thread
@@ -98,10 +98,10 @@ INSERT INTO dbo.world_meta (meta_key, meta_value) VALUES ('schema_version', '1')
 -- and referable. tools/dbseed populates it once (it can regenerate from the seed
 -- to fill an empty table, or the rows can be authored/edited directly).
 -- system_id is NOT an identity column: it is the stable galaxy id (the procedural
--- index, or -1 for the hand-placed home system), assigned by the seeder.
+-- index), assigned by the seeder.
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'systems')
 CREATE TABLE dbo.systems (
-  system_id    INT PRIMARY KEY,       -- stable galaxy id (-1 = home); assigned, not IDENTITY
+  system_id    INT PRIMARY KEY,       -- stable galaxy id; assigned, not IDENTITY
   name         NVARCHAR(32) NOT NULL,
   planet_x     BIGINT NOT NULL,       -- absolute int64 world position of the planet
   planet_y     BIGINT NOT NULL,

@@ -79,19 +79,9 @@ namespace DSOServer
     for (const Persist::SystemRow& sys : systems)
       MaterializeSystem(_world, setup, sys, drift);
 
-    // One hand-placed pirate in the home system, out toward the planet. Placed
-    // well beyond its own (shortened) engage range from the spawn so a fresh
-    // launch isn't sniped at the spawn point; you meet it as an opt-in fight on
-    // the way to the planet. It flies by intent like the dynamic spawns.
-    const ECS::EntityId pirate = _world.Create();
-    _world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1500, 400, 14000 } });
-    _world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
-    _world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
-    _world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
-    _world.Add<GameLogic::Bounty>(pirate, GameLogic::Bounty{ GameLogic::PIRATE_BOUNTY });   // killing it pays out
-    _world.Add<GameLogic::FlightIntent>(pirate, GameLogic::FlightIntent{});
-    _world.Add<GameLogic::FlightCaps>(pirate, GameLogic::NpcFlightCaps());
-    _world.Add<GameLogic::AiPilot>(pirate, GameLogic::AiPilot{ /*bravery*/ 96, /*missiles*/ 2, /*maxEnergy*/ 80 });
+    // No hand-placed home system or starter pirate: the universe is a uniform field
+    // of systems, and dynamic spawning (SpawnDirector) provides pirates near
+    // players. New commanders are placed docked at a name-chosen system (§6.10).
 
     printf("Galaxy: %zu systems %s.\n", systems.size(),
            _systems.empty() ? "generated (unseeded DB / no persistence)" : "loaded from the store");
