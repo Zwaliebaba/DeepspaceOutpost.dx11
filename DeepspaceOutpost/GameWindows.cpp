@@ -980,7 +980,7 @@ namespace
         : GuiWindow("Station")
       {
         SetTitle("Station");
-        Centre(this, 200, 250);
+        Centre(this, 200, 262);
       }
 
       void Create() override
@@ -1006,6 +1006,11 @@ namespace
         add("Launch", "Launch", launch_player);
         add("Market", "Market", OpenMarketWindow);
         add("Equip", "Equip Ship", OpenEquipWindow);
+        // Charts are reachable straight from the docked hub (they are always available
+        // while docked): the galactic map and the short-range local map, the same
+        // windows F5/F6 open in flight.
+        add("Galaxy", "Galaxy Map", []() { OpenChartWindow(ChartData::GALACTIC); });
+        add("Local", "Local Map", []() { OpenChartWindow(ChartData::SHORT_RANGE); });
         add("Commander", "Commander", OpenCommanderWindow);
         add("Inventory", "Inventory", OpenInventoryWindow);
         add("Options", "Options", []() { GuiOverlay::Open(); });

@@ -589,7 +589,14 @@ void render_replicated_objects (void)
 				local_objects[slot] = camObj;
 		}
 
-		draw_ship (&obj);
+		// Docked, the station hub should read as the station against black space
+		// and the streaming starfield. The planet's visual sphere (radius 24576) is
+		// far larger than the station's 8000-unit orbit, so the docked camera sits
+		// INSIDE it and the whole view floods green; the sun billboard would likewise
+		// hang behind the menu. Skip both while docked (the scanner/compass mirror
+		// above still records them); in flight they draw as normal.
+		if (!(docked && (obj.type == SHIP_PLANET || obj.type == SHIP_SUN)))
+			draw_ship (&obj);
 		++drawn;
 
 		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) on the

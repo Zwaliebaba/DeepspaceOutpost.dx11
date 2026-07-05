@@ -85,10 +85,16 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
     else
       g_editorFont.SetColor(255, 255, 255, 255);
 
+    // Draw the label through the shader outline (a crisp 1px black edge), the same as
+    // the highlighted state. Without it the anti-aliased white glyphs bleed into the
+    // textured red panel and read blurry / dull-grey; the outline makes them sharp and
+    // white, matching the reference menu.
+    g_editorFont.SetRenderShadow(true);
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
     else
       g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
+    g_editorFont.SetRenderShadow(false);
   }
 }
 

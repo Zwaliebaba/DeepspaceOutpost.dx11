@@ -171,7 +171,13 @@ void GuiOverlay::Render(int clientWidth, int clientHeight)
   // Canvas places windows. Open one native 2D pass (client-space ortho, Y down, alpha blend,
   // no depth/cull, 1:1 mapping) and let Canvas submit every window/button/glyph into the
   // batch, flushed at End.
-  Canvas::Start(Core::GetRenderTargetView(), clientWidth, clientHeight);
+  //
+  // POINT sampling (not the Canvas default LINEAR): the bitmap font sheet is authored for
+  // 1:1 texel sampling, so linear filtering softens every glyph - the window/button labels
+  // came out blurry and grey. The native HUD pass already samples POINT for the same reason;
+  // match it here so the GUI text is crisp white.
+  Canvas::Start(Core::GetRenderTargetView(), clientWidth, clientHeight, 0, 0, 1.0f,
+                D3D11_FILTER_MIN_MAG_MIP_POINT);
   Canvas::Render();
   Canvas::End();
 }
