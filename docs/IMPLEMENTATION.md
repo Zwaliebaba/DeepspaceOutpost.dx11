@@ -1264,21 +1264,49 @@ Wire: `PlayerInfo` successor already carries `playerId` (C); add
 
 ## 9. Track G — MMO polish & deferred gameplay
 
-### G1 — Kill VFX broadcast (#18a) — **XS**
+### G1 — Kill VFX broadcast (#18a) — **XS** — ✅ **done 2026-07-05**
+
+*As built: `Msg::ExplosionAt` (`0x1005`, Wire/Event/Gameplay, S→C broadcast:
+`x,y,z i64` + `scale u8`), broadcast by `GameServer::OnEntityKilled` at a player's
+death position BEFORE the respawn teleports the hull — so the killer/bystanders
+finally see the kill (the victim still gets its private `EntityDeath`). The client
+plays the existing world-anchored debris burst (`spawn_explosion_at`, a Viper-hull
+pop) + explosion cue. Round-trip + catalog-governance tested headless.*
+
 
 New `ExplosionAt` (`0x1005`, Wire/Event/Gameplay/S→C broadcast:
 `x,y,z i64`, `scale u8`) published on *player* deaths (NPC deaths already
 broadcast `EntityDeath`). The killer finally sees the kill. Client plays
 the existing debris VFX world-anchored.
 
-### G2 — Missile-lock validation (#18b, closes D6) — **XS**
+### G2 — Missile-lock validation (#18b, closes D6) — **XS** — ✅ **done 2026-07-05**
+
+*As built: `ResolveFireWeapon`'s Missile case now gates on `MissileTargetValid`
+(the locked index must be a live, distinct COMBATANT within `MISSILE_LOCK_RANGE`
+6000 and the forward hemisphere — spoofed/dead/out-of-range/behind/self refused)
+and `SpendMissile` (consumes an `Equipment` rack round; refuses when empty) BEFORE
+spawning. A refused launch spends nothing, silently — the client's optimistic
+decrement is corrected by `PlayerStatus`. Also closed a second hole: the server
+never checked the rack at all before. Unit-tested (the validation matrix + rack
+spend). NPC missiles are unchanged.*
+
 
 At launch, validate `missileTarget` with the same gates the laser has:
 live entity (`LiveEntity`), within a lock range (6000) and a generous
 forward cone at *lock time*; otherwise the launch is refused silently
 (missile not spent). Headless tests for spoofed indices.
 
-### G3 — Chat (#18c, §14 preamble) — **S–M**
+### G3 — Chat (#18c, §14 preamble) — **S–M** — ✅ **core done 2026-07-05** (server-persisted mute deferred)
+
+*As built: `GameLogic/ChatModeration.h` (pure/tested) — a per-session `ChatLimiter`
+(≤6 lines / ~10 s window) + `SanitizeChat` (strip control bytes, keep UTF-8, cap,
+trim). `GameServer::HandleChat` rate-limits (drop + a system "too fast" warning),
+sanitises, stamps the authenticated `sender = playerId`, and rebroadcasts to the
+roster. Client: an 8-line scrollback (muted senders dropped), Enter-opened one-line
+input off the WM_CHAR ring, and a client-side `/mute <id>` / `/unmute <id>` set;
+a playerId→name map from `PlayerInfo`. Deferred: server-persisted mute list (B4),
+AOI-scoped delivery (roster-wide is a superset).*
+
 
 Server: relay `Chat{sender, text}` (already registered, `0x0300`) from a
 session to AOI-plus-roster recipients, with server-side rate limit
@@ -1288,7 +1316,18 @@ HUD, and a client-side **mute list** (by `PlayerId` — designed in from day
 one per §13.2.2, persisted server-side with the player record; the client
 keeps no local config file).
 
-### G4 — Suns & cabin heat (§14 preamble; deferred G8+ payoff) — **M**
+### G4 — Suns & cabin heat (§14 preamble; deferred G8+ payoff) — **M** — ✅ **done 2026-07-05**
+
+*As built: `GameLogic/CabinHeatSystem.h` (pure/tested) — a `Sun` body per system
+(placed by `WorldBuilder`, offset from the planet) + a per-ship `CabinHeat`.
+`StepCabinHeat` warms a ship in a star's Chebyshev heat band, cools it outside, and
+— held at max — drains the energy bank directly (heat bypasses shields, the legacy
+zero-altitude analogue) until it dies; a fuel-scoop ship skimming the band tops its
+tank (the scoop's long-missing payoff). Spawn grace respected. `PlayerStatus` gains
+`cabinTemp` (pre-launch field add); the client mirrors it into `PlayerCaps().cabTemp`,
+reviving the cabin-temp HUD dial `A1` deleted. Unit-tested (rise/fall/clamp,
+cook-to-death, spawn-grace, scoop gains/limits/no-scoop/out-of-band, no-suns).*
+
 
 Server-side: each system gains a sun entity (`NetType −2` already reserved,
 rendered today by the billboard path) placed by `GalaxyGen`; a
