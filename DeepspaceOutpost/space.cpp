@@ -1148,6 +1148,10 @@ void jump_warp (void)
 }
 
 
+// Defined in GameWindows.cpp; closes the docked station-menu window on undock (declared
+// here to keep this legacy TU off the winrt/GUI headers).
+void CloseStationMenu (void);
+
 void launch_player (void)
 {
 	docked = 0;
@@ -1168,7 +1172,8 @@ void launch_player (void)
 	create_new_stars();
 	clear_local_objects();
 
-	current_screen = SCR_BREAK_PATTERN;
+	current_screen = SCR_FRONT_VIEW;   // launch straight into the camera-space flight view
+	CloseStationMenu();                // leave the station: dismiss the hub window
 	snd_play_sample (SND_LAUNCH);
 }
 

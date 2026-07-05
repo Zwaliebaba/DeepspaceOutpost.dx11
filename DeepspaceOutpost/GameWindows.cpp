@@ -930,9 +930,9 @@ namespace
           y += 28;
         };
 
-        // Launch leaves the station (and closes this hub so the overlay hands input back
-        // to flight); the rest open the existing native screens.
-        add("Launch", "Launch", []() { launch_player(); Canvas::EclRemoveWindow(std::string_view("Station")); });
+        // Launch leaves the station (launch_player closes this hub via CloseStationMenu);
+        // the rest open the existing native screens.
+        add("Launch", "Launch", launch_player);
         add("Market", "Market", OpenMarketWindow);
         add("Equip", "Equip Ship", OpenEquipWindow);
         add("Commander", "Commander", OpenCommanderWindow);
@@ -992,4 +992,9 @@ void OpenChartWindow(int kind)
 void OpenStationMenu()
 {
   GuiOverlay::ShowWindow(std::string_view("Station"), []() -> GuiWindow* { return NEW StationMenuWindow(); });
+}
+
+void CloseStationMenu()
+{
+  Canvas::EclRemoveWindow(std::string_view("Station"));
 }

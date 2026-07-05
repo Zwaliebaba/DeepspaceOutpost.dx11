@@ -376,7 +376,8 @@ void ChartData::Jump (int _kind)
 	rc.Send (req);
 
 	snd_play_sample (SND_HYPERSPACE);
-	current_screen = SCR_BREAK_PATTERN;
+	// No client-side transition: stay on the docked view until the server's
+	// TravelResponse{Arrived} flips us into flight (the break pattern is retired).
 }
 
 int ChartData::DataLineCount (void)

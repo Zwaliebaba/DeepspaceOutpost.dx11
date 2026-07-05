@@ -754,29 +754,10 @@ static void respawn_after_death(void)
   s_state = GameState::Flight;
 }
 
-/*
- * Draw a break pattern (for launching, docking and hyperspacing).
- * Just draw a very simple one for the moment.
- */
-
-void display_break_pattern(void)
-{
-  int i;
-
-  gfx_set_clip_region(1, 1, 510, 383);
-  gfx_clear_display();
-
-  for (i = 0; i < 20; i++)
-  {
-    gfx_draw_circle(256, 192, 30 + i * 15, GFX_COL_WHITE);
-    gfx_update_screen();
-  }
-
-  if (docked)
-    enter_station();          // arrive at the station: camera-space view + station menu
-  else
-    current_screen = SCR_FRONT_VIEW;
-}
+// The break-pattern transition (concentric rings filling the cockpit on launch / dock /
+// hyperspace) was a FIRST-PERSON effect. In the third-person camera model the ship simply
+// appears in space (or at the station) via the server's snapshots, so the transition is
+// gone: launch/dock/arrival just switch the view directly.
 
 void info_message(const char* message)
 {
@@ -835,7 +816,8 @@ static void register_client_event_handlers(void)
     {
       witchspace = (_t.status == Neuron::Msg::TravelStatus::Witchspace) ? 1 : 0;
       docked = 0;
-      current_screen = SCR_BREAK_PATTERN;
+      current_screen = SCR_FRONT_VIEW;   // arrive in space (camera-space view)
+      CloseStationMenu();
       snd_play_sample(SND_HYPERSPACE);
       return;
     }
@@ -868,7 +850,7 @@ static void register_client_event_handlers(void)
         reset_weapons();
         g_missile_lock_target = 0xFFFFFFFFu;
         snd_play_sample(SND_DOCK);
-        current_screen = SCR_BREAK_PATTERN;
+        enter_station();   // docked: camera-space view + the station menu window
       }
       cmdr.credits = _resp.credits;
       return;
@@ -996,7 +978,7 @@ static void register_client_event_handlers(void)
     memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
     snd_play_sample(SND_DOCK);
     dock_player();
-    current_screen = SCR_BREAK_PATTERN;
+    enter_station();   // escape pod: respawn docked at the station
   });
 
   // Cargo manifest: the authoritative per-commodity hold, resent after a scoop or a
@@ -1288,9 +1270,6 @@ static void game_render_flight(void)
 
     update_console();
   }
-
-  if (current_screen == SCR_BREAK_PATTERN)
-    display_break_pattern();
 }
 
 // Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on

@@ -13,7 +13,8 @@
 #define SCR_FRONT_VIEW		8
 // (SCR_REAR_VIEW 9, SCR_LEFT_VIEW 10, SCR_RIGHT_VIEW 11 retired: the cockpit
 //  has a single fixed forward view now; F2-F4 no longer switch views.)
-#define SCR_BREAK_PATTERN	12
+// (SCR_BREAK_PATTERN 12 retired: the launch/dock/hyperspace transition was a
+//  first-person cockpit effect; third-person just switches the view directly.)
 #define SCR_INVENTORY		13
 #define SCR_LOAD_CMDR		16
 #define SCR_SAVE_CMDR		17
