@@ -77,6 +77,16 @@ unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity 
 void draw_ability_bar (void);
 int  ability_bar_button_at (int mx, int my);
 
+// Native flight-HUD primitives (defined in space.cpp). The cockpit dashboard and the
+// I2/I3/I4 overlays draw straight into the Render2D pass RenderGameHud brackets during
+// RenderCanvas, replacing the gfx2d deferred batch. Colours are palette indices (the
+// GFX_COL_* macros); coordinates are offset by a floated draw origin. draw_ability_bar
+// (main.cpp) uses these too, so they live in the shared header.
+void hud_set_origin (int x, int y);
+void hud_line (int x1, int y1, int x2, int y2, int col);
+void hud_rect (int x1, int y1, int x2, int y2, int col);
+void hud_text (int x, int y, const char *str, int col);
+
 // I3 pointer-command feedback (state defined in main.cpp): the active order's kind
 // (0 = none), an optional world Move point, and a short-lived toast. Drawn each
 // frame by display_order_feedback() (space.cpp).

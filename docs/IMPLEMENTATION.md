@@ -1576,6 +1576,22 @@ selected-system data panel replaced the separate F7 screen. Name-search-by-point
 remains deferred. This is the first screen off the 512×514 letterbox toward
 retiring it (the flight HUD dashboard is the remaining long pole).
 
+*Follow-up (2026-07-05) — the flight HUD dashboard is now native too:* the in-flight
+cockpit (`update_console` and its helpers in `space.cpp`: scanner, dials, compass,
+speed/roll/climb, missiles, the station/ECM indicators) plus the I2/I3/I4 overlays
+(target card, order toast/marker, ability bar in `main.cpp`) no longer emit into the
+gfx2d deferred batch. They draw straight into the `Render2D` pass that `RenderGameHud`
+(`HudRender.cpp`) opens during `RenderCanvas`, through a small native primitive shim
+(`hud_line`/`hud_rect`/`hud_text`/`hud_sprite`/`hud_scanner`, palette-indexed colour via
+`Renderer::paletteColour`, sprites via `TextureManager`, text via `g_gameFont`'s
+outline path — the same look the batch produced). `update_console` self-gates
+(connected + undocked + front view) so it is called unconditionally from the HUD pass.
+Dropping the batch's stale scanner scissor also fixes a latent clip bug: the top-anchored
+overlays (ability bar, target card, order toast) were being clipped out of view on any
+window taller than ~520 px. Still on gfx2d in flight: the per-ship target reticle, the
+centred info/`GAME OVER` message text, and the starfield — plus the intro. gfx2d/gfx.h
+shrink further but are not yet gone.
+
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 
 Retire the dead `kbd_*` globals and bindings (speed keys are already dead;

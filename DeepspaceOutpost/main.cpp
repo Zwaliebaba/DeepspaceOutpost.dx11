@@ -463,7 +463,7 @@ void draw_ability_bar(void)
     return;
 
   const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
-  gfx_set_draw_origin(0, 0);
+  hud_set_origin(0, 0);
   const int x0 = ability_bar_origin_x(vw);
 
   for (int i = 0; i < ACT_COUNT; ++i)
@@ -475,11 +475,11 @@ void draw_ability_bar(void)
 
     const int frameCol = confirming ? GFX_COL_RED : (en ? GFX_COL_GREY_1 : GFX_COL_GREY_3);
     const int textCol  = confirming ? GFX_COL_RED : (en ? GFX_COL_WHITE  : GFX_COL_GREY_3);
-    gfx_draw_rectangle(x, BAR_TOP_Y, x + BAR_SLOT_W, BAR_TOP_Y + BAR_SLOT_H, frameCol);
+    hud_rect(x, BAR_TOP_Y, x + BAR_SLOT_W, BAR_TOP_Y + BAR_SLOT_H, frameCol);
 
     const int len = static_cast<int>(strlen(s_bar[i].label));
     const int tx = x + (BAR_SLOT_W - len * 8) / 2;
-    gfx_display_colour_text(tx, BAR_TOP_Y + 6, s_bar[i].label, textCol);
+    hud_text(tx, BAR_TOP_Y + 6, s_bar[i].label, textCol);
   }
 }
 
@@ -733,7 +733,6 @@ static void start_new_game(void)
   game_over = 0;
   initialise_game();
   dock_player();
-  update_console();
   current_screen = SCR_FRONT_VIEW;
   enter_intro1();
 }
@@ -1266,9 +1265,9 @@ static void game_render_flight(void)
 
     cool_laser();
     time_ecm();
-
-    update_console();
   }
+  // The cockpit dashboard + flight overlays (update_console) now draw natively in the
+  // RenderCanvas HUD pass (RenderGameHud), not into the gfx2d batch here.
 }
 
 // Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on

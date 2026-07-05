@@ -36,6 +36,14 @@
 #include "ReplicationClient.h"
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
+#include "Render2D.h"       // native 2D pass the flight HUD now draws straight into
+#include "TextRenderer.h"   // g_gameFont - the shared bitmap font (HUD text)
+#include "TextureManager.h" // sprite / scanner .dds
+#include "Renderer.h"       // platform_renderer()->paletteColour (HUD palette)
+
+#include <algorithm>
+#include <cstdint>
+#include <string>
 
 
 // ---- Weapon / HUD presentation state (moved from the retired swat.cpp) -------
@@ -729,6 +737,152 @@ unsigned int pick_entity_at_screen (int mx, int my)
 
 
 
+// ---- Native flight-HUD primitives -------------------------------------------
+//
+// The cockpit dashboard (scanner, dials, compass, missiles) and the I2/I3/I4 overlays
+// used to be emitted into the gfx2d deferred batch (gfx_draw_*) and replayed at flush
+// time. They now draw straight into the Render2D pass that RenderGameHud (HudRender.cpp)
+// brackets during RenderCanvas - so the dashboard no longer rides gfx2d at all. These
+// helpers mirror the old gfx2d primitives (palette-indexed colour, a floated draw origin,
+// the shared bitmap font) but submit immediately to the open pass instead of batching.
+//
+// Unlike the old path there is no leftover scanner scissor: the whole HUD draws in the
+// full client window, so the top-anchored overlays (ability bar, target card, order toast)
+// are no longer clipped out by the dashboard's clip rect.
+
+using Neuron::Graphics::Render2D;
+
+extern char scanner_filename[256];   // configured scanner art (elite.cpp)
+
+namespace {
+
+// The classic 512-wide dashboard is authored at (0,0) and floated to the bottom-centre
+// of the window; every HUD coordinate is offset by this origin (was gfx_set_draw_origin).
+int s_hud_ox = 0;
+int s_hud_oy = 0;
+
+// TextRenderer advance is size*0.6 per glyph; 8/0.6 reproduces the gfx2d body font's
+// 8px monospaced cell (the dashboard layout assumes an 8px advance).
+constexpr float HUD_FONT_PX = 8.0f / 0.6f;
+
+// Palette index -> opaque 0xAABBGGRR, exactly as the gfx2d batch resolved colours.
+uint32_t hud_col (int index)
+{
+	Renderer* r = platform_renderer();
+	uint32_t c = r ? r->paletteColour(index) : 0xFFFFFFFFu;
+	return c | 0xFF000000u;
+}
+
+// Borrow a sprite/scanner SRV from the TextureManager (it caches, so this is a hash
+// lookup after the first frame). Fills the pixel size when asked.
+ID3D11ShaderResourceView* hud_tex (const char* fn, float* w, float* h)
+{
+	auto t = Neuron::Graphics::TextureManager::LoadTexture(fn);
+	if (!t || !t->IsLoaded())
+		return nullptr;
+	if (w) *w = t->GetWidth();
+	if (h) *h = t->GetHeight();
+	return t->GetShaderResourceView();
+}
+
+const char* hud_sprite_file (int sprite_no)
+{
+	switch (sprite_no)
+	{
+		case IMG_GREEN_DOT:      return "greendot.dds";
+		case IMG_RED_DOT:        return "reddot.dds";
+		case IMG_BIG_S:          return "safe.dds";
+		case IMG_BIG_E:          return "ecm.dds";
+		case IMG_MISSILE_GREEN:  return "missgrn.dds";
+		case IMG_MISSILE_YELLOW: return "missyell.dds";
+		case IMG_MISSILE_RED:    return "missred.dds";
+		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
+		default:                 return nullptr;
+	}
+}
+
+} // namespace
+
+// Float the HUD (pass (0,0) to draw in absolute window space again).
+void hud_set_origin (int x, int y) { s_hud_ox = x; s_hud_oy = y; }
+
+// A horizontal/vertical run fills a 1px-tall/-wide rect (matching the old batch, which
+// turned axis-aligned lines into filled rects); a diagonal is a true line.
+void hud_line (int x1, int y1, int x2, int y2, int col)
+{
+	const uint32_t c = hud_col(col);
+	x1 += s_hud_ox; x2 += s_hud_ox; y1 += s_hud_oy; y2 += s_hud_oy;
+	if (y1 == y2)
+		Render2D::FillRect((float)std::min(x1, x2), (float)y1, (float)(std::max(x1, x2) + 1), (float)(y1 + 1), c);
+	else if (x1 == x2)
+		Render2D::FillRect((float)x1, (float)std::min(y1, y2), (float)(x1 + 1), (float)(std::max(y1, y2) + 1), c);
+	else
+		Render2D::DrawLine(x1 + 0.5f, y1 + 0.5f, x2 + 0.5f, y2 + 0.5f, c);
+}
+
+// Filled box (gfx_draw_rectangle was a filled quad; the ability-bar buttons rely on it).
+void hud_rect (int x1, int y1, int x2, int y2, int col)
+{
+	const uint32_t c = hud_col(col);
+	const int l = std::min(x1, x2) + s_hud_ox, t = std::min(y1, y2) + s_hud_oy;
+	const int r = std::max(x1, x2) + s_hud_ox, b = std::max(y1, y2) + s_hud_oy;
+	Render2D::FillRect((float)l, (float)t, (float)(r + 1), (float)(b + 1), c);
+}
+
+// Bitmap-font text. Shadow-on routes g_gameFont through the same Render2D text-outline
+// program the gfx2d HUD text used, so it stays crisp over the busy 3D. The +3/+7 undoes
+// TextRenderer's built-in compatibility offset so the glyph top-left lands at (x,y).
+void hud_text (int x, int y, const char* str, int col)
+{
+	if (!str) return;
+	const uint32_t c = hud_col(col);
+	g_gameFont.SetColor((uint8_t)(c & 0xff), (uint8_t)((c >> 8) & 0xff), (uint8_t)((c >> 16) & 0xff), 255);
+	g_gameFont.SetRenderShadow(true);
+	g_gameFont.DrawText2D((float)(x + s_hud_ox) + 3.0f, (float)(y + s_hud_oy) + 7.0f, HUD_FONT_PX, str);
+	g_gameFont.SetRenderShadow(false);
+}
+
+// A HUD sprite at its native size (IMG_* -> .dds via the TextureManager).
+static void hud_sprite (int sprite_no, int x, int y)
+{
+	const char* fn = hud_sprite_file(sprite_no);
+	if (!fn) return;
+	float w = 0.0f, h = 0.0f;
+	ID3D11ShaderResourceView* srv = hud_tex(fn, &w, &h);
+	if (!srv) return;
+	const float x0 = (float)(x + s_hud_ox), y0 = (float)(y + s_hud_oy);
+	Render2D::TexQuad(srv, x0, y0, x0 + w, y0 + h, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+// A HUD sprite stretched to an explicit w x h (the missile-target reticle).
+static void hud_sprite_scaled (int sprite_no, int x, int y, int w, int h)
+{
+	const char* fn = hud_sprite_file(sprite_no);
+	if (!fn) return;
+	ID3D11ShaderResourceView* srv = hud_tex(fn, nullptr, nullptr);
+	if (!srv) return;
+	const float x0 = (float)(x + s_hud_ox), y0 = (float)(y + s_hud_oy);
+	Render2D::TexQuad(srv, x0, y0, x0 + (float)w, y0 + (float)h, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+// The scanner console backdrop. The configured name is a .bmp (Renderer still reads it for
+// the palette) but the sprite loads as .dds, so map the extension across, as gfx2d did.
+static void hud_scanner (void)
+{
+	const char* cfg = (scanner_filename[0] != '\0') ? scanner_filename : "scanner.bmp";
+	std::string fn = cfg;
+	if (const size_t dot = fn.find_last_of('.'); dot != std::string::npos)
+		fn.replace(dot, std::string::npos, ".dds");
+	else
+		fn += ".dds";
+	float w = 0.0f, h = 0.0f;
+	ID3D11ShaderResourceView* srv = hud_tex(fn.c_str(), &w, &h);
+	if (!srv) return;
+	const float x0 = (float)s_hud_ox, y0 = (float)(385 + s_hud_oy);
+	Render2D::TexQuad(srv, x0, y0, x0 + w, y0 + h, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+
 /*
  * Update the scanner and draw all the lollipops.
  */
@@ -781,15 +935,15 @@ void update_scanner (void)
 				break;
 		}
 			
-		gfx_draw_colour_line (x1+2, y2,   x1-3, y2, colour);
-		gfx_draw_colour_line (x1+2, y2+1, x1-3, y2+1, colour);
-		gfx_draw_colour_line (x1+2, y2+2, x1-3, y2+2, colour);
-		gfx_draw_colour_line (x1+2, y2+3, x1-3, y2+3, colour);
+		hud_line(x1+2, y2,   x1-3, y2, colour);
+		hud_line(x1+2, y2+1, x1-3, y2+1, colour);
+		hud_line(x1+2, y2+2, x1-3, y2+2, colour);
+		hud_line(x1+2, y2+3, x1-3, y2+3, colour);
 
 
-		gfx_draw_colour_line (x1,   y1, x1,   y2, colour);
-		gfx_draw_colour_line (x1+1, y1, x1+1, y2, colour);
-		gfx_draw_colour_line (x1+2, y1, x1+2, y2, colour);
+		hud_line(x1,   y1, x1,   y2, colour);
+		hud_line(x1+1, y1, x1+1, y2, colour);
+		hud_line(x1+2, y1, x1+2, y2, colour);
 	}
 }
 
@@ -818,11 +972,11 @@ void update_compass (void)
 	
 	if (dest.z < 0)
 	{
-		gfx_draw_sprite (IMG_RED_DOT, compass_x, compass_y);
+		hud_sprite(IMG_RED_DOT, compass_x, compass_y);
 	}
 	else
 	{
-		gfx_draw_sprite (IMG_GREEN_DOT, compass_x, compass_y);
+		hud_sprite(IMG_GREEN_DOT, compass_x, compass_y);
 	}
 				
 }
@@ -848,7 +1002,7 @@ void display_speed (void)
 
 	for (i = 0; i < 6; i++)
 	{
-		gfx_draw_colour_line (sx, sy + i, sx + len, sy + i, colour);
+		hud_line(sx, sy + i, sx + len, sy + i, colour);
 	}
 }
 
@@ -862,14 +1016,14 @@ void display_dial_bar (int len, int x, int y)
 {
 	int i = 0;
 
-	gfx_draw_colour_line (x, y + 384, x + len, y + 384, GFX_COL_GOLD);
+	hud_line(x, y + 384, x + len, y + 384, GFX_COL_GOLD);
 	i++;
-	gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_GOLD);
+	hud_line(x, y + i + 384, x + len, y + i + 384, GFX_COL_GOLD);
 	
 	for (i = 2; i < 7; i++)
-		gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_YELLOW_1);
+		hud_line(x, y + i + 384, x + len, y + i + 384, GFX_COL_YELLOW_1);
 
-	gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_DARK_RED);
+	hud_line(x, y + i + 384, x + len, y + i + 384, GFX_COL_DARK_RED);
 }
 
 
@@ -949,7 +1103,7 @@ void display_flight_roll (void)
 
 	for (i = 0; i < 4; i++)
 	{
-		gfx_draw_colour_line (pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
+		hud_line(pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
 	}
 }
 
@@ -967,7 +1121,7 @@ void display_flight_climb (void)
 
 	for (i = 0; i < 4; i++)
 	{
-		gfx_draw_colour_line (pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
+		hud_line(pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
 	}
 }
 
@@ -994,7 +1148,7 @@ void display_missiles (void)
 	
 	if (missile_target != MISSILE_UNARMED)
 	{
-		gfx_draw_sprite ((missile_target < 0) ? IMG_MISSILE_YELLOW :
+		hud_sprite((missile_target < 0) ? IMG_MISSILE_YELLOW :
 											    IMG_MISSILE_RED, x, y);
 		x += 16;
 		nomiss--;
@@ -1002,7 +1156,7 @@ void display_missiles (void)
 
 	for (; nomiss > 0; nomiss--)
 	{
-		gfx_draw_sprite (IMG_MISSILE_GREEN, x, y);
+		hud_sprite(IMG_MISSILE_GREEN, x, y);
 		x += 16;
 	}
 }
@@ -1038,8 +1192,8 @@ static void display_selection_info (void)
 
 	char line[64];
 	snprintf (line, sizeof (line), "TARGET %s  %ld", kind, dist);
-	gfx_set_draw_origin (0, 0);
-	gfx_display_colour_text (16, 16, line, GFX_COL_YELLOW_2);
+	hud_set_origin (0, 0);
+	hud_text (16, 16, line, GFX_COL_YELLOW_2);
 }
 
 
@@ -1052,8 +1206,8 @@ static void display_order_feedback (void)
 {
 	if (g_order_toast_timer > 0)
 	{
-		gfx_set_draw_origin (0, 0);
-		gfx_display_colour_text (220, 40, g_order_toast, g_order_toast_col);
+		hud_set_origin (0, 0);
+		hud_text (220, 40, g_order_toast, g_order_toast_col);
 		--g_order_toast_timer;
 	}
 
@@ -1079,28 +1233,35 @@ static void display_order_feedback (void)
 	double sx = 0.0, sy = 0.0;
 	if (Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera(), p.x, p.y, p.z, vw, vh, sx, sy))
 	{
-		gfx_set_draw_origin (0, 0);
+		hud_set_origin (0, 0);
 		const int box = 24;
-		gfx_draw_sprite_scaled (IMG_TARGET_LOCK, (int) sx - box / 2, (int) sy - box / 2, box, box);
+		hud_sprite_scaled (IMG_TARGET_LOCK, (int) sx - box / 2, (int) sy - box / 2, box, box);
 	}
 }
 
 
+// Draw the cockpit dashboard + flight overlays into the native HUD pass. Called from
+// RenderGameHud (HudRender.cpp) inside its Render2D Begin/End during RenderCanvas, so it
+// gates itself: the dashboard shows only while actually flying (connected, undocked, front
+// view). It reads the frame's already-populated state (render_replicated_objects ran during
+// RenderScene), so nothing here mutates game state - it is pure drawing.
 void update_console (void)
 {
-	// Float the classic 512x514 dashboard to the bottom-centre of the window (client
-	// space - the dashboard is always full-window flight now). gfx_set_draw_origin and
-	// every draw below pick up this origin, so the 512-wide layout is unchanged - it just
-	// slides as a unit. (Replaces the old gfx_hud_anchor, part of the retired letterbox.)
+	if (!Neuron::Client::ReplicationClientInstance().IsOpen() || docked || current_screen != SCR_FRONT_VIEW)
+		return;
+
+	// Float the classic 512-wide dashboard to the bottom-centre of the window; every draw
+	// below picks up this origin, so the layout is unchanged - it just slides as a unit.
+	// (No clip: the whole HUD draws in the full client window now. The gfx2d path left a
+	// stale scanner scissor that clipped the top-anchored overlays below out of view.)
 	const auto sz = Neuron::Graphics::Core::GetOutputSize();
 	int hud_ox = (static_cast<int>(sz.Width) - 512) / 2;
 	int hud_oy = static_cast<int>(sz.Height) - 514;
 	if (hud_ox < 0) hud_ox = 0;
 	if (hud_oy < 0) hud_oy = 0;
-	gfx_set_draw_origin (hud_ox, hud_oy);
+	hud_set_origin (hud_ox, hud_oy);
 
-	gfx_set_clip_region (0, 0, 512, 512);
-	gfx_draw_scanner();
+	hud_scanner();
 
 	display_speed();
 	display_flight_climb();
@@ -1113,20 +1274,14 @@ void update_console (void)
 	display_fuel();
 	display_missiles();
 
-	if (docked)
-	{
-		gfx_set_draw_origin (0, 0);
-		return;
-	}
-
 	update_scanner();
 	update_compass();
 
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
-		gfx_draw_sprite (IMG_BIG_S, 387, 490);
+		hud_sprite(IMG_BIG_S, 387, 490);
 
 	if (ecm_active)
-		gfx_draw_sprite (IMG_BIG_E, 115, 490);
+		hud_sprite(IMG_BIG_E, 115, 490);
 
 	// I2/I3/I4 overlays LAST: they reset the draw origin to (0,0) for their own
 	// full-view placement, so they must run after the dashboard-anchored draws.
@@ -1134,7 +1289,7 @@ void update_console (void)
 	display_order_feedback();
 	draw_ability_bar();
 
-	gfx_set_draw_origin (0, 0);
+	hud_set_origin (0, 0);
 }
 
 void jump_warp (void)

@@ -13,6 +13,11 @@ using Neuron::Graphics::Render2D;
 // the game headers, mirroring the market_*/ChartData pattern.
 extern bool game_client_connected();
 
+// The in-flight cockpit dashboard + I2/I3/I4 overlays (space.cpp). It draws straight into
+// the open Render2D pass and gates itself (only while flying), so it is safe to call every
+// frame: nothing draws when docked / in menus / disconnected.
+extern void update_console();
+
 void RenderGameHud()
 {
   ID3D11RenderTargetView* rtv = Neuron::Graphics::Core::GetRenderTargetView();
@@ -36,6 +41,9 @@ void RenderGameHud()
     g_gameFont.DrawText2DCenter(w / 2.0f, h / 2.0f - 10.0f, 14, "CONNECTION LOST - RECONNECTING");
     g_gameFont.SetRenderShadow(false);
   }
+
+  // The cockpit dashboard + flight overlays (self-gated: draws only while flying).
+  update_console();
 
   Render2D::End();
 }
