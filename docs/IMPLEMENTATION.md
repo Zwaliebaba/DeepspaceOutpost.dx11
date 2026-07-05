@@ -1443,6 +1443,28 @@ placement (CI compiles it but cannot exercise the DX11 client).
 slop threshold; gizmo point stable under camera motion; every ack status
 surfaces visibly; no path requires a key.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+RMB **click** on the flight view issues the contextual default order to the player's
+own ship (`handle_pointer_commands` → `dispatch_context_order`, main.cpp): an entity
+under the cursor maps by kind — planet/sun → Approach, station → Dock, canister →
+Collect, any ship → Attack — else empty space → **Move**, whose destination is the
+cursor ray ∩ a horizontal plane through the ship (`cursor_to_move_point`: DirectXMath
+`XMMatrixInverse(View*Projection)` unproject in the floating-origin frame, then
+Chebyshev-clamped to the server's 1M reach so the client request matches the gate).
+The order rides the reliable `UnitOrder` lane (I1); camera **orbit moved to LMB-drag**
+(CameraRig) so RMB is free. Feedback: an optimistic toast naming the order, a
+projected Move marker (`display_order_feedback`, space.cpp, reusing the target-lock
+sprite; entity orders reuse the on-hull reticle), and a `UnitOrderAck` subscriber
+that flashes the refusal reason red and drops the marker. **Deferred (documented):**
+(a) the FULL move gizmo — command plane is world-up not camera-up, and the
+elevation-drag stem + depth-faded grid + route line are not drawn (a click-to-a-
+horizontal-plane point with a marker stands in); (b) the **RMB-hold radial menu**
+(all-legal-orders + Info) — a larger GUI piece, so Attack-on-a-clean-player friction
+(default Approach + menu-only Attack) and the Info action ride that follow-up; any
+ship currently defaults to Attack and the server enforces the crime rules. Needs an
+in-app run to verify unproject pixel-accuracy and marker placement (CI compiles the
+client but cannot exercise it).
+
 ### I4 — Ability bar & HUD restructure — **S**
 
 Persistent non-modal GuiOverlay bar (the overlay must stop suppressing game

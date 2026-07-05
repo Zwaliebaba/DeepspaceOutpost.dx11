@@ -72,6 +72,16 @@ void render_replicated_objects (void);
 unsigned int find_lock_target (void);
 unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
 
+// I3 pointer-command feedback (state defined in main.cpp): the active order's kind
+// (0 = none), an optional world Move point, and a short-lived toast. Drawn each
+// frame by display_order_feedback() (space.cpp).
+extern unsigned int g_order_kind;
+extern bool         g_order_has_point;
+extern long long    g_order_point[3];
+extern char         g_order_toast[40];
+extern int          g_order_toast_timer;
+extern int          g_order_toast_col;
+
 // Entity index of the SELECTED / targeted entity (0xFFFFFFFF = none). Set by a
 // pointer click (pick_entity_at_screen) or the centre-cone lock key; read by
 // render_replicated_objects to draw the target reticle, by the camera rig as the

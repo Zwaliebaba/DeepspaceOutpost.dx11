@@ -206,12 +206,16 @@ void camera_rig_update(void)
 	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW);
 	if (!uiOwns)
 	{
-		if (rmb && s_prevRmb)
+		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
+		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
+		 * once the press has crossed the slop, so a click never nudges the view. */
+		const bool lmbDrag = lmb && s_lmbMoved;
+		if (lmbDrag && s_prevLmb)
 		{
 			in.lookDX = static_cast<float>(mx - s_prevMouseX);
 			in.lookDY = static_cast<float>(my - s_prevMouseY);
 		}
-		in.looking = rmb;
+		in.looking = lmbDrag;
 		in.wheelSteps = wheel;
 
 		/* Camera movement keys: the arrows + PgUp/PgDn, freed by the piloting

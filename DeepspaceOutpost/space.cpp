@@ -1082,6 +1082,48 @@ static void display_selection_info (void)
 }
 
 
+// I3 pointer-command feedback: a short-lived toast (what was ordered / why it was
+// refused) and, for a Move order, a marker projected at the destination point. The
+// state lives in main.cpp (set when an order is sent and by the UnitOrderAck
+// subscriber); this only draws it. Entity-targeted orders reuse the target reticle
+// (drawn on g_missile_lock_target), so only Move needs its own world marker.
+static void display_order_feedback (void)
+{
+	if (g_order_toast_timer > 0)
+	{
+		gfx_set_draw_origin (0, 0);
+		gfx_display_colour_text (220, 40, g_order_toast, g_order_toast_col);
+		--g_order_toast_timer;
+	}
+
+	if (g_order_kind == 0 || !g_order_has_point)
+		return;
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !camera_rig_ready())
+		return;
+
+	const long long* org = camera_rig_origin();
+	struct vector p;
+	p.x = (double) (g_order_point[0] - org[0]);
+	p.y = (double) (g_order_point[1] - org[1]);
+	p.z = (double) (g_order_point[2] - org[2]);
+	camera_view_point (&p);
+	if (p.z <= 0.0)
+		return;   // the Move point is behind the camera
+
+	int vw = 0, vh = 0;
+	gfx_scene_size (&vw, &vh);
+	double sx = 0.0, sy = 0.0;
+	if (Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera(), p.x, p.y, p.z, vw, vh, sx, sy))
+	{
+		gfx_set_draw_origin (0, 0);
+		const int box = 24;
+		gfx_draw_sprite_scaled (IMG_TARGET_LOCK, (int) sx - box / 2, (int) sy - box / 2, box, box);
+	}
+}
+
+
 void update_console (void)
 {
 	// Float the classic 512x514 dashboard to the bottom-centre of the window when
@@ -1121,9 +1163,10 @@ void update_console (void)
 	if (ecm_active)
 		gfx_draw_sprite (IMG_BIG_E, 115, 490);
 
-	// I2 selected-entity readout LAST: it resets the draw origin to (0,0) for its
-	// own top-of-view placement, so it must run after the dashboard-anchored draws.
+	// I2/I3 overlays LAST: they reset the draw origin to (0,0) for their own
+	// top-of-view placement, so they must run after the dashboard-anchored draws.
 	display_selection_info();
+	display_order_feedback();
 
 	gfx_set_draw_origin (0, 0);
 }

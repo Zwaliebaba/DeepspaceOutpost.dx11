@@ -32,10 +32,17 @@
 #include "Messages/Defs/InputActions.h"
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
+#include "Messages/Defs/UnitOrder.h"         // UnitOrder / UnitOrderAck (I1/I3 command protocol)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "Scene3D.h"
+#include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
+#include "input_win.h"                        // input_mouse_state (I3 pointer commands)
+#include "gfx.h"                              // gfx_scene_size + GFX_COL_* (I3 feedback)
 
+#include <DirectXMath.h>
+#include <cmath>
+#include <cstdio>
 #include <string>
 #include <unordered_map>
 
@@ -350,6 +357,185 @@ static void launch_missile(void)
   g_missile_lock_target = 0xFFFFFFFFu;
   missile_target = MISSILE_UNARMED; // lock consumed
   snd_play_sample(SND_MISSILE);
+}
+
+// ---- I3 pointer commands (interaction.md): right-click to order your ship -------
+//
+// The order half of Track I's UX. An RMB CLICK on the flight view issues a
+// contextual default order to the player's own ship (the only unit today): an
+// entity under the cursor -> Attack/Dock/Collect/Approach by its kind; empty space
+// -> Move to where the cursor ray meets a horizontal plane through the ship. The
+// order rides the reliable UnitOrder lane (I1); an optimistic toast shows what was
+// asked and a rejecting UnitOrderAck flashes it red. Camera orbit moved to LMB-drag
+// (CameraRig) so RMB is free for commands.
+//
+// Deferred (documented in IMPLEMENTATION.md): the full move gizmo (elevation-drag
+// stem + depth-faded grid), the RMB-hold radial menu, and clean-player Attack-
+// friction (default Approach) - this increment lands the playable core.
+
+// Optimistic order feedback, drawn by space.cpp's display_order_feedback().
+unsigned int g_order_kind = 0;           // active order's OrderKind (0 = none)
+bool         g_order_has_point = false;  // the order carries a world point (Move)
+long long    g_order_point[3] = {0, 0, 0};
+char         g_order_toast[40] = {0};
+int          g_order_toast_timer = 0;    // frames the toast stays up
+int          g_order_toast_col = 0;
+
+static const char* order_kind_name(unsigned int _k)
+{
+  switch (static_cast<Neuron::Msg::OrderKind>(_k))
+  {
+    case Neuron::Msg::OrderKind::Stop:     return "STOP";
+    case Neuron::Msg::OrderKind::Move:     return "MOVE";
+    case Neuron::Msg::OrderKind::Approach: return "APPROACH";
+    case Neuron::Msg::OrderKind::Dock:     return "DOCK";
+    case Neuron::Msg::OrderKind::Attack:   return "ATTACK";
+    case Neuron::Msg::OrderKind::Collect:  return "COLLECT";
+    case Neuron::Msg::OrderKind::Escort:   return "ESCORT";
+    default:                               return "ORDER";
+  }
+}
+
+static void set_order_toast(const char* _text, int _col)
+{
+  snprintf(g_order_toast, sizeof(g_order_toast), "%s", _text);
+  g_order_toast_timer = 90;   // ~3 s
+  g_order_toast_col = _col;
+}
+
+// Cursor ray -> the point where it meets a horizontal plane through the ship, in
+// absolute world coords, clamped to the server's Move reach. Returns false when the
+// ship isn't visible or the ray is parallel to / behind the plane.
+static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  Neuron::Net::EntitySnapshot me{};
+  if (!rc.IsOpen() || !rc.Sample(rc.LocalPlayer(), 1.0, me))
+    return false;
+
+  int vw = 0, vh = 0;
+  gfx_scene_size(&vw, &vh);
+  if (vw <= 0 || vh <= 0)
+    return false;
+
+  using namespace DirectX;
+  Client::Camera& cam = Client::MainCamera();
+  const XMMATRIX vp = XMMatrixMultiply(cam.View(), cam.Projection());
+  const XMMATRIX invVP = XMMatrixInverse(nullptr, vp);
+
+  const float ndcx = 2.0f * static_cast<float>(_mx) / static_cast<float>(vw) - 1.0f;
+  const float ndcy = 1.0f - 2.0f * static_cast<float>(_my) / static_cast<float>(vh);
+  XMVECTOR pNear = XMVector4Transform(XMVectorSet(ndcx, ndcy, 0.0f, 1.0f), invVP);
+  XMVECTOR pFar  = XMVector4Transform(XMVectorSet(ndcx, ndcy, 1.0f, 1.0f), invVP);
+  pNear = XMVectorScale(pNear, 1.0f / XMVectorGetW(pNear));
+  pFar  = XMVectorScale(pFar,  1.0f / XMVectorGetW(pFar));
+
+  // Ray + ship live in origin-relative space (the camera eye is the floating-origin
+  // remainder), so the plane point is the ship minus the render origin.
+  const long long* org = camera_rig_origin();
+  const XMVECTOR ro = pNear;
+  const XMVECTOR rd = XMVectorSubtract(pFar, pNear);
+  const XMVECTOR planePt = XMVectorSet(
+      static_cast<float>(static_cast<double>(me.x) - static_cast<double>(org[0])),
+      static_cast<float>(static_cast<double>(me.y) - static_cast<double>(org[1])),
+      static_cast<float>(static_cast<double>(me.z) - static_cast<double>(org[2])), 0.0f);
+  const XMVECTOR n = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);   // horizontal plane through the ship
+
+  const float denom = XMVectorGetX(XMVector3Dot(rd, n));
+  if (std::fabs(denom) < 1e-4f)
+    return false;
+  const float t = XMVectorGetX(XMVector3Dot(XMVectorSubtract(planePt, ro), n)) / denom;
+  if (t < 0.0f)
+    return false;
+  const XMVECTOR hit = XMVectorAdd(ro, XMVectorScale(rd, t));
+
+  // Back to absolute world, clamped to the server's per-order Move reach so the
+  // client's request matches what the server will accept.
+  auto clampAxis = [](double _from, double _to) -> long long
+  {
+    double d = _to - _from;
+    if (d >  1.0e6) d =  1.0e6;
+    if (d < -1.0e6) d = -1.0e6;
+    return static_cast<long long>(_from + d);
+  };
+  _out[0] = clampAxis(static_cast<double>(me.x), static_cast<double>(org[0]) + XMVectorGetX(hit));
+  _out[1] = clampAxis(static_cast<double>(me.y), static_cast<double>(org[1]) + XMVectorGetY(hit));
+  _out[2] = clampAxis(static_cast<double>(me.z), static_cast<double>(org[2]) + XMVectorGetZ(hit));
+  return true;
+}
+
+// Issue the contextual default order for an RMB click at (mx,my).
+static void dispatch_context_order(int _mx, int _my)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  const unsigned int self = rc.LocalPlayer();
+  if (!rc.IsOpen() || self == 0xFFFFFFFFu)
+    return;
+
+  Neuron::Msg::UnitOrder ord;
+  ord.unitId = self;
+
+  const unsigned int tgt = pick_entity_at_screen(_mx, _my);
+  if (tgt != 0xFFFFFFFFu)
+  {
+    Neuron::Net::EntitySnapshot ts{};
+    if (!rc.Sample(tgt, 1.0, ts))
+      return;
+    ord.target = tgt;
+    if (ts.type == SHIP_PLANET || ts.type < 0)                 ord.order = Neuron::Msg::OrderKind::Approach;
+    else if (ts.type == SHIP_CORIOLIS || ts.type == SHIP_DODEC) ord.order = Neuron::Msg::OrderKind::Dock;
+    else if (ts.type == SHIP_CARGO)                            ord.order = Neuron::Msg::OrderKind::Collect;
+    else                                                       ord.order = Neuron::Msg::OrderKind::Attack;
+    g_order_has_point = false;
+    g_missile_lock_target = tgt;   // command-as-you-select: reticle + orbit follow it
+  }
+  else
+  {
+    long long pt[3];
+    if (!cursor_to_move_point(_mx, _my, pt))
+      return;
+    ord.order = Neuron::Msg::OrderKind::Move;
+    ord.targetX = pt[0]; ord.targetY = pt[1]; ord.targetZ = pt[2];
+    g_order_has_point = true;
+    g_order_point[0] = pt[0]; g_order_point[1] = pt[1]; g_order_point[2] = pt[2];
+  }
+
+  g_order_kind = static_cast<unsigned int>(ord.order);
+  rc.SendUnitOrder(ord);
+  set_order_toast(order_kind_name(g_order_kind), GFX_COL_YELLOW_2);   // optimistic
+}
+
+// Per-frame pointer-command polling (called from the flight update, after the
+// camera). An RMB press-release inside the slop is a CLICK -> contextual order.
+// Camera orbit (LMB-drag) and selection (LMB click, I2) live in CameraRig.
+void handle_pointer_commands(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+
+  static bool s_prevRmb = false;
+  static int  s_rmbDownX = 0, s_rmbDownY = 0;
+  static bool s_rmbMoved = false;
+
+  if (rmb && !s_prevRmb)
+  {
+    s_rmbDownX = mx; s_rmbDownY = my; s_rmbMoved = false;
+  }
+  else if (rmb)
+  {
+    int ddx = mx - s_rmbDownX; if (ddx < 0) ddx = -ddx;
+    int ddy = my - s_rmbDownY; if (ddy < 0) ddy = -ddy;
+    if (ddx > 6 || ddy > 6) s_rmbMoved = true;
+  }
+  else if (s_prevRmb && !s_rmbMoved)
+  {
+    dispatch_context_order(mx, my);   // RMB click -> contextual order
+  }
+  s_prevRmb = rmb;
 }
 
 void handle_flight_keys(void)
@@ -881,6 +1067,25 @@ static void register_client_event_handlers(void)
     PlayerDefense().laserHeat = _ps.laserTemp;   // laser dial (G8): server-owned heat
   });
 
+  // I3 order outcome: the server accepted or refused a UnitOrder. An accept keeps the
+  // optimistic marker/toast running; a refusal flashes the reason red and drops the
+  // marker so the client stops showing an order that isn't happening.
+  g_clientBus.Subscribe<Neuron::Msg::UnitOrderAck>([](const Neuron::Msg::UnitOrderAck& _ack)
+  {
+    if (_ack.status == Neuron::Msg::OrderStatus::Accepted)
+      return;
+    const char* why =
+        _ack.status == Neuron::Msg::OrderStatus::NotYours   ? "NOT YOURS"    :
+        _ack.status == Neuron::Msg::OrderStatus::BadTarget  ? "BAD TARGET"   :
+        _ack.status == Neuron::Msg::OrderStatus::Docked     ? "UNDOCK FIRST" :
+        _ack.status == Neuron::Msg::OrderStatus::Illegal    ? "ILLEGAL"      :
+        _ack.status == Neuron::Msg::OrderStatus::OutOfRange ? "OUT OF RANGE" :
+                                                              "REJECTED";
+    set_order_toast(why, GFX_COL_RED);
+    g_order_kind = 0;
+    g_order_has_point = false;
+  });
+
   // ECM burst (G8): someone's unit fired - play the classic buzz and light the
   // E indicator (it counts down via time_ecm). The downed missiles arrive as
   // EntityDeath events (explosions) alongside.
@@ -972,9 +1177,12 @@ static void process_server_events(void)
     Neuron::Msg::CargoManifest cargo;
     Neuron::Msg::EcmPulse ecm;
     Neuron::Msg::EscapePodUsed pod;
+    Neuron::Msg::UnitOrderAck oack;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
+    else if (Neuron::Msg::TryDecode(msg, oack))
+      g_clientBus.Publish(oack);
     else if (Neuron::Msg::TryDecode(msg, travel))
       g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))
@@ -1106,6 +1314,8 @@ static void game_update_flight(void)
   // (first-person or orbit), and write this frame's view. Runs before the key
   // handler so a fresh missile lock orbits from the next frame.
   camera_rig_update();
+
+  handle_pointer_commands();   // I3: RMB contextual orders (after the camera reads input)
 
   handle_flight_keys();
 
