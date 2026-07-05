@@ -21,7 +21,6 @@
 // Game config globals (declared in elite.h), re-declared here so this
 // winrt/widget-based translation unit stays free of the legacy game headers
 // (which define macros that don't mix with the GUI headers).
-extern int anti_alias_gfx;
 extern int scene_shading;
 extern int scene_instancing;
 extern int scene_glow;
@@ -139,7 +138,6 @@ namespace
         // In-session settings (name + value labels) mapped to their globals. The
         // MMO client keeps no local config file, so there is nothing to persist -
         // these toggles apply for the session only.
-        addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
         addCycle("Ship Instancing", &scene_instancing, {"Off", "On"});
         addCycle("Ship Glow", &scene_glow, {"Off", "On"});

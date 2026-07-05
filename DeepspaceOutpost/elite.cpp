@@ -20,7 +20,6 @@ int carry_flag = 0;
 int current_screen = 0;
 int witchspace;
 
-int anti_alias_gfx = 0;
 int hoopy_casinos = 0;
 int speed_cap = 75;
 int instant_dock = 0;
