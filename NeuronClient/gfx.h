@@ -76,7 +76,6 @@ void gfx_update_screen (void);
 void gfx_plot_pixel (int x, int y, int col);
 void gfx_draw_filled_circle (int cx, int cy, int radius, int circle_colour);
 void gfx_draw_circle (int cx, int cy, int radius, int circle_colour);
-void gfx_draw_line (int x1, int y1, int x2, int y2);
 void gfx_draw_colour_line (int x1, int y1, int x2, int y2, int line_colour);
 void gfx_draw_rectangle (int tx, int ty, int bx, int by, int col);
 void gfx_display_text (int x, int y, const char *txt);
@@ -89,7 +88,6 @@ void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
 void gfx_draw_sprite (int sprite_no, int x, int y);
 void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
-void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
 
 /*
  * Render the fully-submitted 3D scene (dust starfield background -> depth-tested models) onto

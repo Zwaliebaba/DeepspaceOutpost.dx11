@@ -319,11 +319,6 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
 }
 
-/* The depth-sorted painter's chain was retired once the 3D scene moved to the GPU
- * (Scene3D resolves visibility with the hardware z-buffer). gfx_render_line now draws
- * immediately as a plain 2D line, kept for the laser bolt which still projects on the
- * CPU (see threed.cpp draw_solid_ship). */
-
 } // namespace
 
 /* =====================================================================
@@ -331,7 +326,6 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
  * ===================================================================== */
 
 void gfx_plot_pixel(int x, int y, int col)      { addPoint(x, y, col_rgba(col)); }
-void gfx_draw_line(int x1, int y1, int x2, int y2)               { drawLine(x1, y1, x2, y2, col_rgba(GFX_COL_WHITE)); }
 void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
@@ -527,16 +521,6 @@ void gfx_draw_scanner(void)
 	pushTexQuad(t->srv.get(), 0.0f, 385.0f, (float)t->w, (float)(385 + t->h),
 				0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
-
-/* ---- 3D scene submission (depth via the GPU z-buffer, no CPU painter's sort) ---- */
-
-/* Draw immediately as a flat 2D line; the depth key is ignored (the GPU z-buffer orders
- * the 3D scene now). Kept for the laser bolt, which still projects on the CPU. */
-void gfx_render_line(int x1, int y1, int x2, int y2, int /*dist*/, int col)
-{
-	gfx_draw_colour_line(x1, y1, x2, y2, col);
-}
-
 
 /* =====================================================================
  *  Scene pass + 2D flush
