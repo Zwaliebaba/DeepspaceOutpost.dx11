@@ -19,6 +19,7 @@
 #include "sound.h"
 #include "ReplicationClient.h"
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
+#include "ChartData.h"              // render-free chart data API for the native ChartWindow
 
 
 
@@ -790,6 +791,179 @@ void teleport_to_cursor (void)
 	snd_play_sample (SND_HYPERSPACE);
 	current_screen = SCR_BREAK_PATTERN;
 }
+
+
+// ===== Render-free chart data API (ChartData.h) ================================
+//
+// Drawing-free accessors over the replicated galaxy manifest for the native
+// ChartWindow (GameWindows.cpp), which draws in the GUI overlay's Render2D pass and so
+// cannot touch the legacy gfx_* layer. Everything is expressed in the fixed chart-canvas
+// pixel space (ChartData::PLOT_W x PLOT_H). The crosshair (cross_x/cross_y) and the
+// selection (g_chart_selected) are the SAME state the legacy chart used, so the two
+// agree during the transition.
+
+namespace
+{
+	// Per-frame projection cache filled by ChartData::Begin.
+	std::vector<int> s_plotPx, s_plotPy;
+
+	// Nearest manifest system to the crosshair, projected for an EXPLICIT kind. (Unlike
+	// chart_nearest_to_cursor, which reads current_screen - the native window no longer
+	// sets that, so it passes the kind directly.)
+	int chart_nearest_for_kind (int _kind, const std::vector<Neuron::Net::GalaxySystemInfo>& _g)
+	{
+		std::vector<int> px, py;
+		if (_kind == ChartData::SHORT_RANGE)
+			chart_project_short_range (_g, chart_current_system(), px, py);
+		else
+			chart_project_all (_g, px, py);
+
+		int best = 0;
+		long long bestD = 1LL << 62;
+		for (size_t i = 0; i < _g.size(); i++)
+		{
+			long long dx = px[i] - cross_x;
+			long long dy = py[i] - cross_y;
+			long long d = dx * dx + dy * dy;
+			if (d < bestD) { bestD = d; best = (int) i; }
+		}
+		return best;
+	}
+}
+
+bool ChartData::Ready (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	return rc.IsOpen() && rc.HasGalaxy();
+}
+
+int ChartData::Count (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	return (rc.IsOpen() && rc.HasGalaxy()) ? (int) rc.Galaxy().size() : 0;
+}
+
+void ChartData::Begin (int _kind)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy()) { s_plotPx.clear(); s_plotPy.clear(); return; }
+	const std::vector<Neuron::Net::GalaxySystemInfo>& g = rc.Galaxy();
+	if (_kind == ChartData::SHORT_RANGE)
+		chart_project_short_range (g, chart_current_system(), s_plotPx, s_plotPy);
+	else
+		chart_project_all (g, s_plotPx, s_plotPy);
+}
+
+int ChartData::X (int _i) { return (_i >= 0 && _i < (int) s_plotPx.size()) ? s_plotPx[_i] : 0; }
+int ChartData::Y (int _i) { return (_i >= 0 && _i < (int) s_plotPy.size()) ? s_plotPy[_i] : 0; }
+
+bool ChartData::Visible (int _i)
+{
+	if (_i < 0 || _i >= (int) s_plotPx.size()) return false;
+	const int x = s_plotPx[_i], y = s_plotPy[_i];
+	return x >= 2 && x <= PLOT_W - 2 && y >= 2 && y <= PLOT_H - 2;
+}
+
+void ChartData::Name (int _i, char* _buf, int _buflen)
+{
+	if (_buflen <= 0) return;
+	_buf[0] = '\0';
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return;
+	char name[16];
+	strncpy (name, rc.Galaxy()[_i].name, sizeof(name) - 1);
+	name[sizeof(name) - 1] = '\0';
+	capitalise_name (name);
+	strncpy (_buf, name, _buflen - 1);
+	_buf[_buflen - 1] = '\0';
+}
+
+int ChartData::Blob (int _i)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || _i < 0 || _i >= (int) rc.Galaxy().size()) return GFX_SCALE * 2;
+	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[_i];
+	const int blob = ((s.economy ^ s.techLevel) & 1) + (s.government & 1) + 2;   // 2..4, echoing the legacy blobs
+	return blob * GFX_SCALE;
+}
+
+int ChartData::CurrentIndex (void) { return chart_current_system(); }
+int ChartData::SelectedIndex (void) { return g_chart_selected; }
+
+bool ChartData::FuelCircle (int _kind, int* _cx, int* _cy, int* _r)
+{
+	if (_kind != ChartData::SHORT_RANGE) return false;   // the galactic chart draws no fuel ring
+	// Short-range is centred on the current system, so the fuel ring sits at the chart
+	// centre; radius is the fuel range in chart px (cmdr.fuel is tenths of a light year).
+	if (_cx) *_cx = GFX_X_CENTRE;
+	if (_cy) *_cy = GFX_Y_CENTRE;
+	if (_r)  *_r  = cmdr.fuel * GFX_SCALE;
+	return true;
+}
+
+void ChartData::GetCursor (int* _cx, int* _cy)
+{
+	if (_cx) *_cx = cross_x;
+	if (_cy) *_cy = cross_y;
+}
+
+void ChartData::SetCursor (int _kind, int _cx, int _cy)
+{
+	if (_cx < 1) _cx = 1;
+	if (_cx > PLOT_W - 2) _cx = PLOT_W - 2;
+	if (_cy < 1) _cy = 1;
+	if (_cy > PLOT_H - 2) _cy = PLOT_H - 2;
+	cross_x = _cx;
+	cross_y = _cy;
+
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (rc.IsOpen() && rc.HasGalaxy() && !rc.Galaxy().empty())
+		g_chart_selected = chart_nearest_for_kind (_kind, rc.Galaxy());
+}
+
+void ChartData::Jump (int _kind)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || rc.Galaxy().empty()) return;
+
+	const int sel = chart_nearest_for_kind (_kind, rc.Galaxy());
+
+	Neuron::Msg::TravelRequest req;
+	req.kind = Neuron::Msg::TravelKind::Hyperspace;
+	req.systemId = rc.Galaxy()[sel].id;   // server resolves + validates the destination
+	rc.Send (req);
+
+	snd_play_sample (SND_HYPERSPACE);
+	current_screen = SCR_BREAK_PATTERN;
+}
+
+int ChartData::DataLineCount (void)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || g_chart_selected < 0 || g_chart_selected >= (int) rc.Galaxy().size())
+		return 0;
+	return 5;
+}
+
+void ChartData::DataLine (int _i, char* _buf, int _buflen)
+{
+	if (_buflen <= 0) return;
+	_buf[0] = '\0';
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !rc.HasGalaxy() || g_chart_selected < 0 || g_chart_selected >= (int) rc.Galaxy().size())
+		return;
+	const Neuron::Net::GalaxySystemInfo& s = rc.Galaxy()[g_chart_selected];
+	switch (_i)
+	{
+		case 0: snprintf (_buf, _buflen, "Economy: %s", economy_type[s.economy & 7]); break;
+		case 1: snprintf (_buf, _buflen, "Government: %s", government_type[s.government & 7]); break;
+		case 2: snprintf (_buf, _buflen, "Tech Level: %d", s.techLevel + 1); break;
+		case 3: snprintf (_buf, _buflen, "Population: %d.%d Billion", s.population / 10, s.population % 10); break;
+		case 4: snprintf (_buf, _buflen, "Gross Productivity: %d M CR", s.productivity); break;
+		default: break;
+	}
+}
+
 
 void display_galactic_chart (void)
 {
