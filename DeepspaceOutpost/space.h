@@ -87,6 +87,12 @@ void hud_line (int x1, int y1, int x2, int y2, int col);
 void hud_rect (int x1, int y1, int x2, int y2, int col);
 void hud_text (int x, int y, const char *str, int col);
 
+// Centred overlay text (intro titles/prompts, the flight info message, GAME OVER). Emitted
+// from the RenderScene phase; hud_centre_text records the line and RenderOverlayText (called
+// from RenderGameHud) draws them natively. Replaces gfx_display_centre_text.
+void hud_centre_text (int y, const char *str, int psize, int col);
+void RenderOverlayText (void);
+
 // I3 pointer-command feedback (state defined in main.cpp): the active order's kind
 // (0 = none), an optional world Move point, and a short-lived toast. Drawn each
 // frame by display_order_feedback() (space.cpp).

@@ -18,6 +18,10 @@ extern bool game_client_connected();
 // frame: nothing draws when docked / in menus / disconnected.
 extern void update_console();
 
+// Centred overlay text queued during RenderScene (intro titles/prompts, the flight info
+// message, GAME OVER). Drawn natively here; the queue is empty in states that emit none.
+extern void RenderOverlayText();
+
 void RenderGameHud()
 {
   ID3D11RenderTargetView* rtv = Neuron::Graphics::Core::GetRenderTargetView();
@@ -44,6 +48,9 @@ void RenderGameHud()
 
   // The cockpit dashboard + flight overlays (self-gated: draws only while flying).
   update_console();
+
+  // Centred overlay text queued from the scene phase (intro / message / GAME OVER).
+  RenderOverlayText();
 
   Render2D::End();
 }

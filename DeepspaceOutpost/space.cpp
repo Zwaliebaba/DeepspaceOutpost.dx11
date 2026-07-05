@@ -44,6 +44,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 
 // ---- Weapon / HUD presentation state (moved from the retired swat.cpp) -------
@@ -880,6 +881,45 @@ static void hud_scanner (void)
 	if (!srv) return;
 	const float x0 = (float)s_hud_ox, y0 = (float)(385 + s_hud_oy);
 	Render2D::TexQuad(srv, x0, y0, x0 + w, y0 + h, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+// ---- Deferred centred overlay text ------------------------------------------
+//
+// The centred titles / prompts (intro screens), the transient flight info message and the
+// GAME OVER banner are still emitted from the RenderScene phase (intro.cpp / main.cpp),
+// where there is no open 2D pass. hud_centre_text records them; RenderOverlayText draws
+// them natively from RenderGameHud during RenderCanvas, then clears the list for the next
+// frame. Only the active state records, so the list is naturally state-correct. This
+// replaces the last gfx2d text path (gfx_display_centre_text).
+
+namespace {
+struct OverlayLine { int y; int psize; int col; std::string text; };
+std::vector<OverlayLine> s_overlay_text;
+}
+
+void hud_centre_text (int y, const char* str, int psize, int col)
+{
+	if (str) s_overlay_text.push_back({ y, psize, col, str });
+}
+
+void RenderOverlayText (void)
+{
+	if (s_overlay_text.empty()) return;
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	const float midx = static_cast<int>(sz.Width) / 2.0f;
+	for (const OverlayLine& ln : s_overlay_text)
+	{
+		// psize 140 selects the larger heading font, 120 the body font. TextRenderer's glyph
+		// height IS the size and the advance is size*0.6, matching gfx2d's 20px / 13px cells;
+		// the +7 undoes TextRenderer's compat offset so the line sits at the requested y.
+		const uint32_t c = hud_col(ln.col);
+		const float px = (ln.psize == 140) ? 20.0f : HUD_FONT_PX;
+		g_gameFont.SetColor((uint8_t)(c & 0xff), (uint8_t)((c >> 8) & 0xff), (uint8_t)((c >> 16) & 0xff), 255);
+		g_gameFont.SetRenderShadow(true);
+		g_gameFont.DrawText2DCenter(midx, (float)ln.y + 7.0f, px, ln.text);
+		g_gameFont.SetRenderShadow(false);
+	}
+	s_overlay_text.clear();
 }
 
 

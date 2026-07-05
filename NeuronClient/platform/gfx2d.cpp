@@ -119,20 +119,9 @@ CanvasPlacement canvasPlacement()
  * layer no longer owns any Direct3D shaders / buffers / pipeline state. */
 std::map<std::string, Texture> g_textures;
 
-/* The shared .dds bitmap font: a 16-column x 14-row grid of cells starting at
- * ASCII 32, identical to the sheet the GUI's TextRenderer draws (so game text and
- * menu text match). It is loaded once at engine start via TextureManager; we just
- * borrow its SRV and feed glyph quads through this batch. Replaces the old
- * verd2/verd4 grabber-font atlas (platform/Font). */
-std::shared_ptr<Neuron::Graphics::Texture> g_font_sheet;
-
-/* Monospaced cell metrics in canvas pixels. The ~8px body advance matches the layout
- * the game assumes (text wraps at width/8), and the ~0.6 w:h ratio matches TextRenderer
- * so the sheet looks the same here and in the menus. The title size is the larger heading
- * font (psize 140). */
-struct FontSize { float charW, charH; };
-constexpr FontSize BODY_FONT  { 8.0f, 13.0f };
-constexpr FontSize TITLE_FONT { 12.0f, 20.0f };
+/* Text no longer draws through this batch: all game text (HUD, charts, menus, the intro
+ * titles / flight message / GAME OVER banner) is native now (TextRenderer / g_gameFont via
+ * Render2D). So the shared bitmap-font sheet and its glyph plumbing are gone from here. */
 
 inline uint32_t col_rgba(int index)
 {
@@ -236,57 +225,6 @@ const char* spriteFile(int sprite_no)
 	}
 }
 
-ID3D11ShaderResourceView* fontSheetSRV()
-{
-	/* TextureManager caches, so this is a hash lookup after the first call.
-	 * ClientEngine loads this sheet at start-up (once the device is up), so by the
-	 * time the game draws text it is resident. */
-	if (!g_font_sheet)
-		g_font_sheet = Neuron::Graphics::TextureManager::LoadTexture("Fonts/SpeccyFontENG.dds");
-	return (g_font_sheet && g_font_sheet->IsLoaded()) ? g_font_sheet->GetShaderResourceView() : nullptr;
-}
-
-/* Emit one run of glyph quads at (x,y) in a single tint. Factored out of drawString
- * so a drop-shadow pass can be laid down before the coloured glyphs. */
-void emitGlyphs(ID3D11ShaderResourceView* srv, const FontSize& fs, float x, float y, const char* s, uint32_t tint)
-{
-	/* Per-glyph tex cell on the 16-col x 14-row grid (16x16 px cells in the 256x224
-	 * sheet) starting at ASCII 32. Sample the WHOLE cell on exact texel boundaries:
-	 * with point sampling that reconstructs the native glyph pixels cleanly at any
-	 * destination size. (The old fudged UVs - a 0.9 width crop plus sub-texel margins -
-	 * pushed the sample window off the texel grid, so small body text sampled between
-	 * source pixels and lost crispness; see TextRenderer::GetTexCoord* for the GUI's
-	 * matching cells.) chars <= 32 (space + control) advance without drawing. */
-	constexpr float CELL_W = 1.0f / 16.0f;   // 16 columns
-	constexpr float CELL_H = 1.0f / 14.0f;   // 14 rows
-
-	float pen = x;
-	for (; *s; s++)
-	{
-		const unsigned char c = (unsigned char)*s;
-		if (c > 32)
-		{
-			const float u0 = (c % 16) * CELL_W;
-			const float v0 = ((c >> 4) - 2) * CELL_H;
-			pushTexQuad(srv, pen, y, pen + fs.charW, y + fs.charH,
-						u0, v0, u0 + CELL_W, v0 + CELL_H, tint);
-		}
-		pen += fs.charW;
-	}
-}
-
-void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
-{
-	ID3D11ShaderResourceView* srv = fontSheetSRV();
-	if (!srv || !s) return;
-
-	/* Single pass: the glyphs get a crisp outline in the shader at flush time. Commands
-	 * bound to the font sheet are replayed through Render2D's text-outline program (see
-	 * gfx2d_flush), so the text stays readable over the busy 3D backdrop without an
-	 * extra offset-shadow geometry pass. */
-	emitGlyphs(srv, fs, (float)x, (float)y, s, tint);
-}
-
 } // namespace
 
 /* =====================================================================
@@ -364,20 +302,6 @@ void gfx_set_scene_clip(void)
 	gfx_set_clip_region(0, 0, canvasW() - 1, canvasH() - 1);
 }
 
-/* ---- text ---- */
-void gfx_display_centre_text(int y, const char* str, int psize, int col)
-{
-	/* Centre on the live client window (the 3D fills the screen; the letterbox is retired). */
-	const int mid = canvasW() / 2;
-	/* psize 140 selects the larger heading font; both are the one .dds sheet now
-	 * (the old ELITE_2 multicolour title sheet is gone), tinted by the caller's
-	 * colour. Monospaced, so the width is simply chars * cell width. */
-	const FontSize& fs = (psize == 140) ? TITLE_FONT : BODY_FONT;
-	const int w = static_cast<int>(std::strlen(str) * fs.charW);
-	drawString(fs, mid - w / 2, y, str, col_rgba(col));
-}
-
-
 /* ---- sprites / HUD ---- */
 void gfx_draw_sprite(int sprite_no, int x, int y)
 {
@@ -453,15 +377,8 @@ void gfx2d_flush(void)
 		 * is slated for a texture.) */
 		Canvas::Start(rtv, vw, vh, dstX, dstY, static_cast<float>(scale), D3D11_FILTER_MIN_MAG_MIP_POINT);
 
-		/* Text commands (those bound to the font sheet) replay through the built-in
-		 * text-outline program for a shader-side outline; sprites/HUD and colored prims
-		 * use the default program. Configure the outline from the sheet's texel size. */
-		ID3D11ShaderResourceView* fontSrv = fontSheetSRV();
-		if (g_font_sheet && g_font_sheet->IsLoaded() && g_font_sheet->GetWidth() > 0.0f &&
-			g_font_sheet->GetHeight() > 0.0f)
-			Render2D::SetTextOutline(0xFF000000u, 1.0f / g_font_sheet->GetWidth(), 1.0f / g_font_sheet->GetHeight(),
-									 1.0f);
-
+		/* Only sprites and single-pixel plots reach this batch now (text went native), so
+		 * every command replays through the default col*texture program. */
 		static std::vector<Render2D::Vertex> scratch; // reused across frames (single-threaded)
 		for (const Cmd& c : g_cmds)
 		{
@@ -470,6 +387,7 @@ void gfx2d_flush(void)
 
 			scratch.clear();
 			scratch.reserve(c.count);
+			Render2D::SetProgram(Render2D::DefaultProgram);
 
 			if (c.kind == Kind::Tex)
 			{
@@ -478,7 +396,6 @@ void gfx2d_flush(void)
 					const TexVertex& v = g_tverts[c.start + i];
 					scratch.push_back({v.x, v.y, v.u, v.v, v.rgba});
 				}
-				Render2D::SetProgram(c.srv == fontSrv ? Render2D::TextOutlineProgram() : Render2D::DefaultProgram);
 				Render2D::Submit(Render2D::Topo::Tris, scratch.data(), static_cast<int>(scratch.size()), c.srv);
 			}
 			else
@@ -491,7 +408,6 @@ void gfx2d_flush(void)
 				const Render2D::Topo topo = (c.topo == Topo::Points) ? Render2D::Topo::Points
 										  : (c.topo == Topo::Lines)  ? Render2D::Topo::Lines
 																	 : Render2D::Topo::Tris;
-				Render2D::SetProgram(Render2D::DefaultProgram);
 				Render2D::Submit(topo, scratch.data(), static_cast<int>(scratch.size()), nullptr);
 			}
 		}

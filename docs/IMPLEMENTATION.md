@@ -1588,9 +1588,24 @@ outline path — the same look the batch produced). `update_console` self-gates
 (connected + undocked + front view) so it is called unconditionally from the HUD pass.
 Dropping the batch's stale scanner scissor also fixes a latent clip bug: the top-anchored
 overlays (ability bar, target card, order toast) were being clipped out of view on any
-window taller than ~520 px. Still on gfx2d in flight: the per-ship target reticle, the
-centred info/`GAME OVER` message text, and the starfield — plus the intro. gfx2d/gfx.h
-shrink further but are not yet gone.
+window taller than ~520 px. The now-dead gfx2d primitives (`gfx_draw_colour_line`/
+`gfx_draw_rectangle`/`gfx_draw_circle`/`gfx_draw_filled_circle`/`gfx_clear_text_area`/
+`gfx_display_colour_text`/`gfx_draw_scanner`/`gfx_set_draw_origin`) and their batch helpers
+were removed with it.
+
+*Follow-up (2026-07-05) — the last gfx2d text path is native too:* `gfx_display_centre_text`
+(the centred intro titles/prompts, the transient flight info message, and the `GAME OVER`
+banner) is gone. Those are emitted from the RenderScene phase where no 2D pass is open, so a
+tiny native queue (`hud_centre_text` records; `RenderOverlayText` draws them via `g_gameFont`
+from `RenderGameHud`, then clears) bridges them into the HUD pass. gfx2d's whole bitmap-font
+layer (`drawString`/`emitGlyphs`/`fontSheetSRV`/the shared sheet) and the text-outline branch
+in `gfx2d_flush` went with it — the batch now replays sprites and pixels only.
+
+**Still on gfx2d:** `gfx_plot_pixel` (starfield + ship-death debris), `gfx_draw_sprite`/
+`_scaled` (the per-ship target reticle and the intro ship art), the `gfx_render_3d_scene`
+pass, and the `gfx_scene_size`/clip/`gfx_canvas_size` plumbing. gfx2d/gfx.h are much smaller
+but not yet gone — the starfield/debris pixels and the reticle/intro sprites are the last
+2D-batch consumers.
 
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 

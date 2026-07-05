@@ -1243,7 +1243,7 @@ static void game_render_flight(void)
       draw_lasers--;
 
     if (message_count > 0)
-      gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
+      hud_centre_text(358, message_string, 120, GFX_COL_WHITE);
 
     mcount--;
     if (mcount < 0)
@@ -1343,7 +1343,7 @@ void game_render_scene(void)
       gfx_clear_display();
       update_starfield();
       update_local_objects();
-      gfx_display_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
+      hud_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
       break;
     }
   }
