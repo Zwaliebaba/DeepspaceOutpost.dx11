@@ -1088,12 +1088,15 @@ static void display_order_feedback (void)
 
 void update_console (void)
 {
-	// Float the classic 512x514 dashboard to the bottom-centre of the window when
-	// the 3D fills the screen (no-op offset in retro mode). gfx_set_clip_region
-	// and every draw below pick up this origin, so the layout is unchanged - it
-	// just slides as a unit.
-	int hud_ox, hud_oy;
-	gfx_hud_anchor (&hud_ox, &hud_oy);
+	// Float the classic 512x514 dashboard to the bottom-centre of the window (client
+	// space - the dashboard is always full-window flight now). gfx_set_draw_origin and
+	// every draw below pick up this origin, so the 512-wide layout is unchanged - it just
+	// slides as a unit. (Replaces the old gfx_hud_anchor, part of the retired letterbox.)
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	int hud_ox = (static_cast<int>(sz.Width) - 512) / 2;
+	int hud_oy = static_cast<int>(sz.Height) - 514;
+	if (hud_ox < 0) hud_ox = 0;
+	if (hud_oy < 0) hud_oy = 0;
 	gfx_set_draw_origin (hud_ox, hud_oy);
 
 	gfx_set_clip_region (0, 0, 512, 512);
