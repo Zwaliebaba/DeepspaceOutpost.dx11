@@ -3,105 +3,88 @@
 #include "WorldBuilder.h"
 
 #include <cstdio>
+#include <map>
+#include <utility>
 
 #include "GameLogic.h"
+#include "GalaxyRows.h"   // row <-> generator/manifest/market conversions
 
 using namespace Neuron;
 
 namespace DSOServer
 {
-  WorldSetup BuildWorld(ECS::Registry& _world)
+  namespace
+  {
+    // Materialize one system row into the world: a planet entity, a station entity
+    // carrying its market (baseline, then any persisted drift overlaid). Appends
+    // both to `_setup.landmarks` and the system to the chart manifest.
+    void MaterializeSystem(ECS::Registry& _world, WorldSetup& _setup,
+                           const Persist::SystemRow& _sys,
+                           const std::map<std::pair<int32_t, int32_t>, Persist::MarketRow>& _drift)
+    {
+      const ECS::EntityId planet = _world.Create();
+      _world.Add<GameLogic::WorldTransform>(planet,
+          GameLogic::WorldTransform{ { _sys.planetX, _sys.planetY, _sys.planetZ } });
+      _world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
+      _setup.landmarks.push_back(planet);
+
+      const ECS::EntityId station = _world.Create();
+      _world.Add<GameLogic::WorldTransform>(station,
+          GameLogic::WorldTransform{ { _sys.stationX, _sys.stationY, _sys.stationZ } });
+      _world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
+      // A near-indestructible combat target: firing on it is a detectable crime; it
+      // never initiates fire (autoEngage = false).
+      _world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
+      _setup.landmarks.push_back(station);
+
+      // Market: the generated baseline, then overlay any persisted drifted rows so
+      // trade state survives a restart.
+      GameLogic::ServerStation ss;
+      ss.systemId = _sys.systemId;
+      GameLogic::GenerateMarket(_sys.economy, _sys.marketSeed, ss.market);
+      for (int c = 0; c < GameLogic::COMMODITY_COUNT; ++c)
+      {
+        const auto it = _drift.find(std::make_pair(_sys.systemId, c));
+        if (it != _drift.end())
+        {
+          ss.market[c].quantity = it->second.stock;
+          ss.market[c].price = it->second.price;
+        }
+      }
+      _world.Add<GameLogic::ServerStation>(station, ss);
+
+      _setup.manifest.push_back(ManifestEntryFrom(_sys));
+    }
+  }
+
+  WorldSetup BuildWorld(ECS::Registry& _world,
+                        const std::vector<Persist::SystemRow>& _systems,
+                        const std::vector<Persist::MarketRow>& _marketDrift)
   {
     WorldSetup setup;
 
-    // The home system's celestial bodies, ahead of the spawn so a launching
-    // player sees them (typed so the client draws the planet/station models,
-    // not a ship).
-    const ECS::EntityId planet = _world.Create();
-    _world.Add<GameLogic::WorldTransform>(planet, GameLogic::WorldTransform{ { 0, 0, 65536 } });
-    _world.Add<GameLogic::NetType>(planet, GameLogic::NetType{ GameLogic::ShipType::Planet });
-    setup.landmarks.push_back(planet);
-
-    // One pirate ahead-right, out toward the planet. Placed well beyond its own
-    // engage range from the spawn (and station behind), so a fresh launch isn't
-    // sniped/farmed at the spawn point; you meet it as an opt-in fight on the
-    // way to the planet. Its range is shortened too, so it only opens fire at
-    // close quarters rather than from afar.
-    const ECS::EntityId pirate = _world.Create();
-    _world.Add<GameLogic::WorldTransform>(pirate, GameLogic::WorldTransform{ { 1500, 400, 14000 } });
-    _world.Add<GameLogic::Flight>(pirate, GameLogic::Flight{});
-    _world.Add<GameLogic::Combatant>(pirate, GameLogic::Combatant{ GameLogic::Team::Pirate, /*energy*/ 80, /*laser*/ 3, /*range*/ 3000, /*autoEngage*/ true });
-    _world.Add<GameLogic::NetType>(pirate, GameLogic::NetType{ GameLogic::ShipType::Viper });
-    _world.Add<GameLogic::Bounty>(pirate, GameLogic::Bounty{ GameLogic::PIRATE_BOUNTY });   // killing it pays out
-    // G5: it flies by intent like the dynamic spawns - hunts, breaks off, flees.
-    _world.Add<GameLogic::FlightIntent>(pirate, GameLogic::FlightIntent{});
-    _world.Add<GameLogic::FlightCaps>(pirate, GameLogic::NpcFlightCaps());
-    _world.Add<GameLogic::AiPilot>(pirate, GameLogic::AiPilot{ /*bravery*/ 96, /*missiles*/ 2, /*maxEnergy*/ 80 });
-
-    // Home system station, BEHIND the spawn (negative z) so a launching player
-    // faces the planet with the station at their back (classic Elite launch);
-    // within docking range of spawn, and carrying its own market.
-    const ECS::EntityId station = _world.Create();
-    _world.Add<GameLogic::WorldTransform>(station, GameLogic::WorldTransform{ { 0, 0, -3000 } });
-    _world.Add<GameLogic::NetType>(station, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
-    setup.landmarks.push_back(station);
-    // The station is a (near-indestructible) combat target so firing on it is a
-    // detectable crime; it never initiates fire (autoEngage = false).
-    _world.Add<GameLogic::Combatant>(station, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
-    {
-      const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
-      GameLogic::ServerStation ss;
-      ss.systemId = -1;   // the hand-placed home system
-      GameLogic::GenerateMarket(home.economy, GameLogic::BASE_GALAXY_SEED.f, ss.market);
-      _world.Add<GameLogic::ServerStation>(station, ss);
-    }
-
-    // The procedural galaxy: every system's planet + station, scattered far
-    // across the int64 field (reachable by teleport, or a long flight). AOI
-    // keeps them off the wire until a player is near one. Each station carries
-    // its own market.
+    // The system rows to lay out: the loaded (seeded) ones, or - when the DB is
+    // unseeded / persistence is off - the default galaxy generated from the seed,
+    // so the no-persistence world is unchanged.
     constexpr GameLogic::GalaxyConfig GALAXY_CFG{};
-    const std::vector<GameLogic::GalaxySystem> systems = GameLogic::GenerateGalaxy(GALAXY_CFG);
+    const std::vector<Persist::SystemRow> generated =
+        _systems.empty() ? BuildSystemRows(GALAXY_CFG) : std::vector<Persist::SystemRow>{};
+    const std::vector<Persist::SystemRow>& systems = _systems.empty() ? generated : _systems;
 
-    for (const GameLogic::GalaxySystem& sys : systems)
-    {
-      const ECS::EntityId pl = _world.Create();
-      _world.Add<GameLogic::WorldTransform>(pl, GameLogic::WorldTransform{ sys.planetPos });
-      _world.Add<GameLogic::NetType>(pl, GameLogic::NetType{ GameLogic::ShipType::Planet });
-      setup.landmarks.push_back(pl);
+    // Index the persisted market drift by (system, commodity) for O(1) overlay.
+    std::map<std::pair<int32_t, int32_t>, Persist::MarketRow> drift;
+    for (const Persist::MarketRow& r : _marketDrift)
+      drift[std::make_pair(r.systemId, r.commodity)] = r;
 
-      const ECS::EntityId stn = _world.Create();
-      _world.Add<GameLogic::WorldTransform>(stn, GameLogic::WorldTransform{ sys.stationPos });
-      _world.Add<GameLogic::NetType>(stn, GameLogic::NetType{ GameLogic::ShipType::Coriolis });
-      _world.Add<GameLogic::Combatant>(stn, GameLogic::Combatant{ GameLogic::Team::Station, 1000000, 0, 1, false });
-      setup.landmarks.push_back(stn);
-      GameLogic::ServerStation ss;
-      ss.systemId = static_cast<int>(sys.id);
-      GameLogic::GenerateMarket(sys.planet.economy, sys.marketSeed, ss.market);
-      _world.Add<GameLogic::ServerStation>(stn, ss);
-    }
-    printf("Galaxy: %d systems generated.\n", GALAXY_CFG.planetCount);
+    for (const Persist::SystemRow& sys : systems)
+      MaterializeSystem(_world, setup, sys, drift);
 
-    // The chart manifest shipped to every client on connect: the procedural
-    // systems plus the hand-placed home system (id -1) so players can always
-    // teleport back.
-    setup.manifest = GameLogic::BuildManifest(systems);
-    {
-      const GameLogic::PlanetData home = GameLogic::GeneratePlanet(GameLogic::BASE_GALAXY_SEED);
-      Net::GalaxySystemInfo h;
-      h.id = static_cast<uint32_t>(-1);   // matches the home station's systemId (-1)
-      h.x = 0; h.y = 0; h.z = 65536;      // the home planet
+    // No hand-placed home system or starter pirate: the universe is a uniform field
+    // of systems, and dynamic spawning (SpawnDirector) provides pirates near
+    // players. New commanders are placed docked at a name-chosen system (§6.10).
 
-      const char* HOME_NAME = "HOME";
-      for (std::size_t i = 0; HOME_NAME[i] != '\0' && i < Net::GALAXY_NAME_MAX - 1; ++i)
-        h.name[i] = HOME_NAME[i];
-      h.government = static_cast<uint8_t>(home.government);
-      h.economy = static_cast<uint8_t>(home.economy);
-      h.techLevel = static_cast<uint8_t>(home.techLevel);
-      h.population = static_cast<uint16_t>(home.population);
-      h.productivity = static_cast<uint16_t>(home.productivity);
-      setup.manifest.push_back(h);
-    }
+    printf("Galaxy: %zu systems %s.\n", systems.size(),
+           _systems.empty() ? "generated (unseeded DB / no persistence)" : "loaded from the store");
 
     return setup;
   }

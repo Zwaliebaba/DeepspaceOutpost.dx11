@@ -11,6 +11,8 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <windows.h>
@@ -256,6 +258,102 @@ namespace DSOServer
                });
       }
 
+      std::vector<MarketRow> LoadMarketRows() override
+      {
+        std::vector<MarketRow> out;
+        Stmt stmt(m_dbc);
+        const SQLHSTMT h = stmt.Handle();
+        const char* sql = "SELECT system_id, commodity, stock, price, updated_tick FROM dbo.station_markets;";
+        if (!Ok(SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(sql)), SQL_NTS)))
+        {
+          Diag("LoadMarketRows select", SQL_HANDLE_STMT, h);
+          return out;
+        }
+        while (Ok(SQLFetch(h)))
+        {
+          MarketRow r;
+          r.systemId    = GetInt(h, 1);
+          r.commodity   = GetInt(h, 2);
+          r.stock       = GetInt(h, 3);
+          r.price       = GetInt(h, 4);
+          r.updatedTick = static_cast<uint64_t>(GetBigInt(h, 5));
+          out.push_back(r);
+        }
+        return out;
+      }
+
+      void UpsertSystems(const std::vector<SystemRow>& _batch) override
+      {
+        for (const SystemRow& r : _batch)
+          Exec(
+            "MERGE dbo.systems AS t USING (SELECT ? AS id) AS s ON t.system_id = s.id "
+            "WHEN MATCHED THEN UPDATE SET name=?, planet_x=?, planet_y=?, planet_z=?, "
+            "  station_x=?, station_y=?, station_z=?, economy=?, government=?, tech_level=?, "
+            "  population=?, productivity=?, radius=?, market_seed=? "
+            "WHEN NOT MATCHED THEN INSERT (system_id, name, planet_x, planet_y, planet_z, "
+            "  station_x, station_y, station_z, economy, government, tech_level, population, "
+            "  productivity, radius, market_seed) "
+            "VALUES (s.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            [&](SQLHSTMT h)
+            {
+              SQLSMALLINT p = 1;
+              BindInt(h, p++, r.systemId);
+              for (int pass = 0; pass < 2; ++pass)   // UPDATE set-list then INSERT values (same order)
+              {
+                BindText(h, p++, r.name);
+                BindBigInt(h, p++, static_cast<long long>(r.planetX));
+                BindBigInt(h, p++, static_cast<long long>(r.planetY));
+                BindBigInt(h, p++, static_cast<long long>(r.planetZ));
+                BindBigInt(h, p++, static_cast<long long>(r.stationX));
+                BindBigInt(h, p++, static_cast<long long>(r.stationY));
+                BindBigInt(h, p++, static_cast<long long>(r.stationZ));
+                BindInt(h, p++, r.economy);
+                BindInt(h, p++, r.government);
+                BindInt(h, p++, r.techLevel);
+                BindInt(h, p++, r.population);
+                BindInt(h, p++, r.productivity);
+                BindInt(h, p++, r.radius);
+                BindInt(h, p++, r.marketSeed);
+              }
+            });
+      }
+
+      std::vector<SystemRow> LoadSystems() override
+      {
+        std::vector<SystemRow> out;
+        Stmt stmt(m_dbc);
+        const SQLHSTMT h = stmt.Handle();
+        const char* sql =
+          "SELECT system_id, name, planet_x, planet_y, planet_z, station_x, station_y, station_z, "
+          "  economy, government, tech_level, population, productivity, radius, market_seed FROM dbo.systems;";
+        if (!Ok(SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(sql)), SQL_NTS)))
+        {
+          Diag("LoadSystems select", SQL_HANDLE_STMT, h);
+          return out;
+        }
+        while (Ok(SQLFetch(h)))
+        {
+          SystemRow r;
+          r.systemId     = GetInt(h, 1);
+          r.name         = GetString(h, 2);
+          r.planetX      = GetBigInt(h, 3);
+          r.planetY      = GetBigInt(h, 4);
+          r.planetZ      = GetBigInt(h, 5);
+          r.stationX     = GetBigInt(h, 6);
+          r.stationY     = GetBigInt(h, 7);
+          r.stationZ     = GetBigInt(h, 8);
+          r.economy      = GetInt(h, 9);
+          r.government   = GetInt(h, 10);
+          r.techLevel    = GetInt(h, 11);
+          r.population   = GetInt(h, 12);
+          r.productivity = GetInt(h, 13);
+          r.radius       = GetInt(h, 14);
+          r.marketSeed   = GetInt(h, 15);
+          out.push_back(std::move(r));
+        }
+        return out;
+      }
+
       std::optional<std::string> ReadMeta(const std::string& _key) override
       {
         Stmt stmt(m_dbc);
@@ -333,6 +431,23 @@ namespace DSOServer
         SQLLEN ind = 0;
         SQLGetData(_h, _col, SQL_C_LONG, &v, 0, &ind);
         return (ind == SQL_NULL_DATA) ? 0 : v;
+      }
+
+      [[nodiscard]] static long long GetBigInt(SQLHSTMT _h, SQLUSMALLINT _col)
+      {
+        long long v = 0;
+        SQLLEN ind = 0;
+        SQLGetData(_h, _col, SQL_C_SBIGINT, &v, 0, &ind);
+        return (ind == SQL_NULL_DATA) ? 0 : v;
+      }
+
+      [[nodiscard]] static std::string GetString(SQLHSTMT _h, SQLUSMALLINT _col)
+      {
+        char buf[256] = {};
+        SQLLEN ind = 0;
+        if (!Ok(SQLGetData(_h, _col, SQL_C_CHAR, buf, sizeof(buf), &ind)) || ind == SQL_NULL_DATA)
+          return {};
+        return std::string(buf);
       }
 
       // Run a parameterized statement (no result rows).

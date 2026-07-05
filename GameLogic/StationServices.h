@@ -8,7 +8,10 @@
 // to a quantity, and validated so a client can never conjure credits or cargo.
 // Pure (mutates only the structs passed in), so every rule is unit-tested headless.
 
+#include <algorithm>
 #include <cstdint>
+#include <string_view>
+#include <vector>
 
 #include "ECS.h"
 #include "Vector3i64.h"
@@ -403,6 +406,39 @@ namespace Neuron::GameLogic
     dock->docked = true;
     dock->stationId = station.index;
     return true;
+  }
+
+  // Choose a spawn system for a fresh commander by hashing their NAME (SplitMix64),
+  // then dock them at that system's station. Deterministic and varied per player -
+  // no wall-clock RNG (§8: every draw comes from a seeded source), so the same name
+  // always starts in the same place and the choice is reproducible in tests. The
+  // player's persisted lastSystemId is then captured from where they wake, so a
+  // returning commander reappears there. No-op (returns false) when the world has
+  // no stations. Used at ACCOUNT CREATION only; returning players wake at their
+  // saved system instead.
+  inline bool DockAtNameChosenSystem(ECS::Registry& _world, ECS::EntityId _player, std::string_view _name)
+  {
+    // Collect station system ids in a stable (sorted) order so the pick does not
+    // depend on entity-creation order.
+    std::vector<int> ids;
+    _world.Each<ServerStation>([&](ECS::EntityId, ServerStation& _st) { ids.push_back(_st.systemId); });
+    if (ids.empty())
+      return false;
+    std::sort(ids.begin(), ids.end());
+
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    for (unsigned char c : _name)                 // fold the name in
+    {
+      h ^= c;
+      h *= 0x100000001B3ull;
+    }
+    h += 0x9E3779B97F4A7C15ull;                   // SplitMix64 finalizer for good spread
+    h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ull;
+    h = (h ^ (h >> 27)) * 0x94D049BB133111EBull;
+    h ^= h >> 31;
+
+    const int systemId = ids[static_cast<std::size_t>(h % ids.size())];
+    return DockAtSystemOrNearest(_world, _player, systemId);
   }
 
   // Apply a station request to `_player`'s authoritative components and the market

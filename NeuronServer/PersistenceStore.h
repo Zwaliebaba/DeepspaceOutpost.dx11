@@ -31,8 +31,9 @@ namespace Neuron::Persist
     std::vector<uint8_t> payload;
   };
 
-  // One drifted market row (lazily materialized; authoritative once F4 makes
-  // markets mutable). Schema now so the retrofit is additive.
+  // One market row. Seeded to the generated baseline by tools/dbseed and then
+  // authoritative: the server loads it at boot and persists drift on a cadence,
+  // so trade state (stock/price) survives a restart.
   struct MarketRow
   {
     int32_t  systemId = 0;
@@ -40,6 +41,25 @@ namespace Neuron::Persist
     int32_t  stock = 0;
     int32_t  price = 0;              // legacy x4 fixed-point, as in MarketEntry
     uint64_t updatedTick = 0;
+  };
+
+  // One system's durable LOCATION + attributes (v2 schema). The universe is loaded
+  // from these rows at boot rather than regenerated from a seed, so the planet id
+  // is stable and station_markets can key against it. Positions are the absolute
+  // int64 world coordinates (static - not the §12-forbidden per-tick kind).
+  struct SystemRow
+  {
+    int32_t systemId = 0;           // stable galaxy id (the procedural index)
+    std::string name;
+    int64_t planetX = 0, planetY = 0, planetZ = 0;
+    int64_t stationX = 0, stationY = 0, stationZ = 0;
+    int32_t economy = 0;            // 0..7
+    int32_t government = 0;         // 0..7
+    int32_t techLevel = 0;
+    int32_t population = 0;
+    int32_t productivity = 0;
+    int32_t radius = 0;
+    int32_t marketSeed = 0;         // fed to GenerateMarket() for the baseline
   };
 
   class IPersistenceStore
@@ -55,6 +75,13 @@ namespace Neuron::Persist
     virtual void AppendCommands(const std::vector<CommandLogEntry>& _batch) = 0;
     // Insert-or-replace a batch of market rows (keyed by system+commodity).
     virtual void UpsertMarketRows(const std::vector<MarketRow>& _batch) = 0;
+    // Every persisted market row (loaded at boot to restore drifted trade state).
+    virtual std::vector<MarketRow> LoadMarketRows() = 0;
+    // Insert-or-replace a batch of system (location) rows. Used by the seeding
+    // tool; the running server only reads systems.
+    virtual void UpsertSystems(const std::vector<SystemRow>& _batch) = 0;
+    // Every system row (loaded at boot to lay out the universe). Empty ⇒ unseeded.
+    virtual std::vector<SystemRow> LoadSystems() = 0;
     // World metadata (schema_version, galaxy_seed, world_tick).
     virtual std::optional<std::string> ReadMeta(const std::string& _key) = 0;
     virtual void WriteMeta(const std::string& _key, const std::string& _value) = 0;
@@ -90,6 +117,30 @@ namespace Neuron::Persist
         m_markets[std::make_pair(r.systemId, r.commodity)] = r;
     }
 
+    std::vector<MarketRow> LoadMarketRows() override
+    {
+      std::vector<MarketRow> out;
+      out.reserve(m_markets.size());
+      for (const auto& kv : m_markets)
+        out.push_back(kv.second);
+      return out;
+    }
+
+    void UpsertSystems(const std::vector<SystemRow>& _batch) override
+    {
+      for (const SystemRow& r : _batch)
+        m_systems[r.systemId] = r;
+    }
+
+    std::vector<SystemRow> LoadSystems() override
+    {
+      std::vector<SystemRow> out;
+      out.reserve(m_systems.size());
+      for (const auto& kv : m_systems)
+        out.push_back(kv.second);
+      return out;
+    }
+
     std::optional<std::string> ReadMeta(const std::string& _key) override
     {
       const auto it = m_meta.find(_key);
@@ -107,11 +158,13 @@ namespace Neuron::Persist
     [[nodiscard]] std::size_t PlayerCount() const { return m_players.size(); }
     [[nodiscard]] const std::vector<CommandLogEntry>& Commands() const { return m_commands; }
     [[nodiscard]] std::size_t MarketRowCount() const { return m_markets.size(); }
+    [[nodiscard]] std::size_t SystemCount() const { return m_systems.size(); }
 
   private:
     std::unordered_map<std::string, PlayerPersistState> m_players;
     std::vector<CommandLogEntry> m_commands;
     std::map<std::pair<int32_t, int32_t>, MarketRow> m_markets;   // (system,commodity) -> row
+    std::map<int32_t, SystemRow> m_systems;                       // system_id -> row
     std::unordered_map<std::string, std::string> m_meta;
   };
 }

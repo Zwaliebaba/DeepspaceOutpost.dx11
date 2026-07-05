@@ -428,3 +428,35 @@ TEST(Station, UndockResetsFlightToFaceOutward)
   const Math::Vector3i64 station = w.Get<GameLogic::WorldTransform>(stn).position;
   EXPECT_TRUE(station.z < player.z);   // station is behind (smaller z) the outward-facing player
 }
+
+// --- name-chosen spawn (account creation) -------------------------------------
+
+TEST(Station, DockAtNameChosenSystemPicksAnExistingSystemDeterministically)
+{
+  ECS::Registry w;
+  SpawnSystemStation(w, /*systemId*/ 3, 1000, 0, 0);
+  SpawnSystemStation(w, /*systemId*/ 7, 0, 2000, 0);
+  SpawnSystemStation(w, /*systemId*/ 9, 0, 0, 3000);
+
+  ECS::EntityId p = SpawnTrader(w, 500, 100);
+  ASSERT_TRUE(GameLogic::DockAtNameChosenSystem(w, p, "Jameson"));
+  ASSERT_TRUE(w.Get<GameLogic::DockState>(p).docked);
+
+  const uint32_t stationIdx = w.Get<GameLogic::DockState>(p).stationId;
+  const int sysId = w.Get<GameLogic::ServerStation>(w.LiveEntity(stationIdx)).systemId;
+  EXPECT_TRUE(sysId == 3 || sysId == 7 || sysId == 9);   // an existing system, not a made-up id
+
+  // Deterministic: the same name always lands at the same system (no wall-clock RNG).
+  ECS::EntityId p2 = SpawnTrader(w, 600, 100);
+  ASSERT_TRUE(GameLogic::DockAtNameChosenSystem(w, p2, "Jameson"));
+  const uint32_t stationIdx2 = w.Get<GameLogic::DockState>(p2).stationId;
+  EXPECT_EQ(w.Get<GameLogic::ServerStation>(w.LiveEntity(stationIdx2)).systemId, sysId);
+}
+
+TEST(Station, DockAtNameChosenSystemIsANoOpWhenNoStationsExist)
+{
+  ECS::Registry w;
+  ECS::EntityId p = SpawnTrader(w, 0, 100);
+  EXPECT_FALSE(GameLogic::DockAtNameChosenSystem(w, p, "Anyone"));
+  EXPECT_FALSE(w.Get<GameLogic::DockState>(p).docked);
+}

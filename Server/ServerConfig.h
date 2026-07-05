@@ -21,6 +21,7 @@ namespace DSOServer::Cfg
   inline constexpr uint32_t SESSION_GRACE_TICKS = 1800;     // keep an AUTHENTICATED session alive this long on silence (~60s) for reconnect (B3)
   inline constexpr uint32_t SESSION_PARK_TICKS = 45;        // after this much silence, safe-park a live ship (zero its intent) (~1.5s) (B3)
   inline constexpr uint32_t PERSIST_INTERVAL = 150;        // snapshot live players to the store this often (~5s) (B4)
+  inline constexpr uint32_t MARKET_PERSIST_INTERVAL = 900; // snapshot drifted station markets this often (~30s); change-gated (v2)
   inline constexpr uint64_t METRICS_WINDOW_TICKS = 150;    // emit a tick-metrics summary line this often (~5s) (D3)
   inline constexpr uint32_t STRATEGIC_INTERVAL = 30;       // send each viewer a strategic per-system rollup this often (~1s) (E3)
   inline constexpr int TICK_MAX_CATCHUP = 5;               // max catch-up ticks per loop pump before declaring overrun (D3)

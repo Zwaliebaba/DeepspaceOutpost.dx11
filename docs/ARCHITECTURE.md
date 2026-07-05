@@ -844,13 +844,29 @@ sun entities exist yet — see §14).
 
 ### 6.10 World generation
 
-- **Home system** (id −1): planet at (0, 0, 65536), station at (0, 0, −3000)
-  with its own market, one hand-placed pirate on the way to the planet.
-  Players spawn near the station, spread 2000 units apart, docked=false.
-- **Procedural galaxy:** 256 systems scattered over ±100M units from a single
-  seed (`0xC0FFEE`); each system gets a planet entity, a station entity
-  (orbit +8000 x) with a generated market, and legacy-style name/attributes
-  synthesized from a per-system seed. Shipped to clients once as the manifest.
+- **No special home system (v2).** The universe is a uniform field of systems
+  with no privileged origin; the old hand-placed home system (id −1) and its
+  starter pirate were removed. New commanders are placed **docked at a system
+  chosen from their name** (`GameLogic::DockAtNameChosenSystem`: a SplitMix64 of
+  the name picks a system, deterministic and varied per player, no wall-clock
+  RNG per §8), so players scatter across the galaxy and a returning commander
+  wakes wherever they last were (persisted `lastSystemId`; −1 falls back to the
+  nearest station). Dynamic spawning (`SpawnDirector`) still provides pirates
+  near players.
+- **Procedural galaxy:** 256 systems scattered over ±100M units; each system
+  gets a planet entity, a station entity (orbit +8000 x) with a market, and
+  legacy-style name/attributes. Shipped to clients as the pulled manifest.
+  **Locations are loaded, not just seeded (v2):** when the DB is seeded, the
+  server lays the universe out from the durable `systems` rows (stable ids +
+  positions), so the map survives generator/config changes and `station_markets`
+  can key against it with a real foreign key. The seed (`0xC0FFEE`) is retained
+  only to *generate* those rows once (via `tools/dbseed`) and as the fallback
+  when there is no DB — an unseeded/persistence-off server regenerates the
+  identical galaxy in memory. The one place that maps generator ↔ rows ↔
+  manifest is `Server/GalaxyRows.h`, so the seeded rows are exactly the rows the
+  server would have generated, and swapping in a different generator (or hand-
+  authoring/editing rows) only changes what `systems` holds — the server just
+  loads it.
 - **Replicated ship types** (`NetType.type` = legacy `SHIP_*`): Sun −2,
   Planet −1, Missile 1, Coriolis 2, Alloy 4, Cargo 5, Rock 8, Shuttle 9,
   Transporter 10, Viper 16, Thargoid 29. The client maps them straight onto
@@ -1276,6 +1292,18 @@ In dependency order; the first three block everything else being "real".
   schema.sql`) carries accounts, **empires**, players, cargo, markets, world-meta,
   and an append-only command log; `empires` exists from day one so Track C is an
   additive migration. `DSO_DB` unset ⇒ the whole feature is off (unchanged server).
+  **v2 — durable galaxy + persistent markets:** a `systems` table holds every
+  planet/station *location* (the initial-loading mechanism: the server loads the
+  universe from it at boot rather than regenerating from a seed alone), populated
+  once by the standalone `tools/dbseed` (which generates from the seed and writes
+  the rows + baseline markets). `station_markets` gained a foreign key onto
+  `systems` and is now authoritative: the server loads persisted market drift at
+  boot and writes it back on a slow (~30 s), change-gated cadence, so trade state
+  survives a restart. Planet positions are *static*, so persisting them keeps the
+  §12 "never per-tick positions" rule intact (that rule is about moving entities).
+  Market write-back is enabled only when the galaxy was loaded from seeded rows
+  (else the FK targets don't exist — the server warns and runs with ephemeral
+  markets and seed-generated layout).
 - **Session security: the UDP endpoint must stop being the identity.**
   ✅ *Done 2026-07-04 (B2):* `HelloAck` hands the client a CSPRNG 64-bit token;
   every subsequent `'NMSG'`/`'NRLB'` datagram carries it after the lane byte, and

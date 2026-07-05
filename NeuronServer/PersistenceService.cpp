@@ -58,6 +58,28 @@ namespace Neuron::Persist
     m_cv.notify_one();
   }
 
+  void PersistenceService::QueueMarketRows(const std::vector<MarketRow>& _rows)
+  {
+    if (_rows.empty())
+      return;
+    {
+      std::lock_guard<std::mutex> lk(m_mutex);
+      for (const MarketRow& r : _rows)
+        m_pendingMarkets[std::make_pair(r.systemId, r.commodity)] = r;   // coalesce: latest wins
+    }
+    m_cv.notify_one();
+  }
+
+  std::vector<SystemRow> PersistenceService::LoadSystems()
+  {
+    return m_store->LoadSystems();   // boot-only: writer thread is idle (see header)
+  }
+
+  std::vector<MarketRow> PersistenceService::LoadMarkets()
+  {
+    return m_store->LoadMarketRows();   // boot-only: writer thread is idle (see header)
+  }
+
   void PersistenceService::RequestLoad(const std::string& _commanderName)
   {
     {
@@ -77,7 +99,8 @@ namespace Neuron::Persist
 
   bool PersistenceService::HasPending() const
   {
-    return !m_pendingPlayers.empty() || !m_pendingCommands.empty() || !m_pendingLoads.empty();
+    return !m_pendingPlayers.empty() || !m_pendingCommands.empty()
+        || !m_pendingMarkets.empty() || !m_pendingLoads.empty();
   }
 
   std::size_t PersistenceService::FlushPendingOnce()
@@ -85,12 +108,17 @@ namespace Neuron::Persist
     // Drain everything under the lock into locals, then do all store I/O unlocked.
     std::unordered_map<std::string, PlayerPersistState> players;
     std::vector<CommandLogEntry> commands;
+    std::vector<MarketRow> markets;
     std::vector<std::string> loads;
     {
       std::lock_guard<std::mutex> lk(m_mutex);
       players.swap(m_pendingPlayers);
       commands.assign(m_pendingCommands.begin(), m_pendingCommands.end());
       m_pendingCommands.clear();
+      markets.reserve(m_pendingMarkets.size());
+      for (auto& kv : m_pendingMarkets)
+        markets.push_back(kv.second);
+      m_pendingMarkets.clear();
       loads.swap(m_pendingLoads);
     }
 
@@ -99,6 +127,9 @@ namespace Neuron::Persist
 
     if (!commands.empty())
       m_store->AppendCommands(commands);
+
+    if (!markets.empty())
+      m_store->UpsertMarketRows(markets);
 
     std::vector<PlayerLoadResult> results;
     results.reserve(loads.size());
