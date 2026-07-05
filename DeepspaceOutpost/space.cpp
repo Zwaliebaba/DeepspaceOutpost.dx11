@@ -30,6 +30,7 @@
 #include "main.h"
 #include "random.h"
 #include "stars.h"
+#include "GraphicsCore.h" // Graphics::Core::GetOutputSize (viewport size)
 #include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers
 #include "CameraRig.h"   // the free camera: origin, world->camera transforms
 #include "ReplicationClient.h"
@@ -668,7 +669,8 @@ void render_replicated_objects (void)
 // I2 (interaction.md): pick the replicated entity nearest the SCREEN CURSOR
 // (mx,my in the same full-window pixel space input_mouse_state reports). Projects
 // every entity through the SAME optics the target reticle uses (camera_view_point
-// -> CameraSpaceToPixels over gfx_scene_size), so what you click is what you see.
+// -> CameraSpaceToPixels over Graphics::Core::GetOutputSize), so what you click
+// is what you see.
 // Unlike find_lock_target's centre-cone lock, ANY entity is selectable (stations,
 // planets and canisters too - I3's orders act on them) except your own hull and
 // in-flight missiles. Returns 0xFFFFFFFF when nothing is within the hit radius.
@@ -678,8 +680,9 @@ unsigned int pick_entity_at_screen (int mx, int my)
 	if (!rc.IsOpen() || !camera_rig_ready())
 		return 0xFFFFFFFFu;
 
-	int vw = 0, vh = 0;
-	gfx_scene_size (&vw, &vh);
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	const int vw = static_cast<int>(sz.Width);
+	const int vh = static_cast<int>(sz.Height);
 	Neuron::Client::Camera& camera = Neuron::Client::MainCamera();
 
 	const long long* org = camera_rig_origin();
@@ -1070,8 +1073,9 @@ static void display_order_feedback (void)
 	if (p.z <= 0.0)
 		return;   // the Move point is behind the camera
 
-	int vw = 0, vh = 0;
-	gfx_scene_size (&vw, &vh);
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	const int vw = static_cast<int>(sz.Width);
+	const int vh = static_cast<int>(sz.Height);
 	double sx = 0.0, sy = 0.0;
 	if (Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera(), p.x, p.y, p.z, vw, vh, sx, sy))
 	{

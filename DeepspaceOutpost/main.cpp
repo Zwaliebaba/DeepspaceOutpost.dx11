@@ -38,7 +38,8 @@
 #include "Scene3D.h"
 #include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
 #include "input_win.h"                        // input_mouse_state (I3 pointer commands)
-#include "gfx.h"                              // gfx_scene_size + GFX_COL_* (I3 feedback)
+#include "GraphicsCore.h"                     // Graphics::Core::GetOutputSize (viewport size)
+#include "gfx.h"                              // GFX_COL_* + 2D draw primitives (legacy)
 
 #include <DirectXMath.h>
 #include <cmath>
@@ -390,8 +391,9 @@ static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
   if (!rc.IsOpen() || !rc.Sample(rc.LocalPlayer(), 1.0, me))
     return false;
 
-  int vw = 0, vh = 0;
-  gfx_scene_size(&vw, &vh);
+  const auto sz = Neuron::Graphics::Core::GetOutputSize();
+  const int vw = static_cast<int>(sz.Width);
+  const int vh = static_cast<int>(sz.Height);
   if (vw <= 0 || vh <= 0)
     return false;
 
@@ -562,9 +564,7 @@ int ability_bar_button_at(int _mx, int _my)
 {
   if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
     return -1;
-  int vw = 0, vh = 0;
-  gfx_scene_size(&vw, &vh);
-  (void)vh;
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
   const int x0 = ability_bar_origin_x(vw);
   for (int i = 0; i < ACT_COUNT; ++i)
   {
@@ -637,9 +637,7 @@ void draw_ability_bar(void)
   if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
     return;
 
-  int vw = 0, vh = 0;
-  gfx_scene_size(&vw, &vh);
-  (void)vh;
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
   gfx_set_draw_origin(0, 0);
   const int x0 = ability_bar_origin_x(vw);
 
