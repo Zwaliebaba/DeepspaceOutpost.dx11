@@ -298,7 +298,7 @@ namespace
         : GuiWindow("Market")
       {
         SetTitle("Market Prices");
-        Centre(this, 560, 360);
+        Centre(this, 560, 480);   // I5: taller for the 22px touch rows (auto-grows to fit)
       }
 
       void Create() override
@@ -312,7 +312,11 @@ namespace
         const int buyX = infoX + infoW + 6;   // 376
         const int sellX = buyX + 86;           // 462
         const int actW = 80;
-        const int rowH = 16;
+        // I5 ergonomics: taller rows / action buttons for touch spacing. The window
+        // auto-grows to fit the buttons (RegisterButton), so the extra height is
+        // absorbed; the Centre() below seeds a matching size.
+        const int rowH = 22;
+        const int rowBtnH = 20;
 
         char hdr[128];
         snprintf(hdr, sizeof(hdr), "%-15s %-2s %7s %6s %6s", "PRODUCT", "U", "PRICE", "SALE", "HOLD");
@@ -325,17 +329,17 @@ namespace
         for (int i = 0; i < count; ++i)
         {
           auto* info = NEW LabelButton();
-          info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, 14, "");
+          info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, rowBtnH, "");
           RegisterButton(info);
           m_rows.push_back(info);
 
           auto* buy = NEW TradeButton(i, true);
-          buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, 14, "Buy");
+          buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, rowBtnH, "Buy");
           RegisterButton(buy);
           m_buttonOrder.push_back(buy);
 
           auto* sell = NEW TradeButton(i, false);
-          sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, 14, "Sell");
+          sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, rowBtnH, "Sell");
           RegisterButton(sell);
           m_buttonOrder.push_back(sell);
 
@@ -540,11 +544,11 @@ namespace
           m_shownIndices.push_back(idx);
 
           auto* row = NEW EquipButton(idx);
-          row->SetProperties("Eq" + std::to_string(idx), x, y, w, 14, "");
+          row->SetProperties("Eq" + std::to_string(idx), x, y, w, 20, "");   // I5: taller touch row
           RegisterButton(row);
           m_rows.push_back(row);
           m_buttonOrder.push_back(row);
-          y += 16;
+          y += 24;   // I5 ergonomics: 24px row pitch for touch spacing
         }
 
         y += 6;

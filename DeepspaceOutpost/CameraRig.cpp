@@ -203,7 +203,9 @@ void camera_rig_update(void)
 	input_mouse_state(mx, my, lmb, rmb);
 	const float wheel = input_take_mouse_wheel();
 
-	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW);
+	/* The camera also goes quiet while a radial command menu is open (I3/I5): the
+	 * finger driving the menu highlight must not orbit or select underneath it. */
+	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW) || g_radial_open;
 	if (!uiOwns)
 	{
 		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2

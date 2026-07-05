@@ -501,6 +501,8 @@ static void radial_commit(void)
 // (LMB click, I2) live in CameraRig.
 void handle_pointer_commands(void)
 {
+  input_pointer_tick();   // drive the I5 recognizer's long-press timer every frame
+
   if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
   {
     g_gizmo_active = false;
@@ -511,6 +513,35 @@ void handle_pointer_commands(void)
   int mx = 0, my = 0;
   bool lmb = false, rmb = false;
   input_mouse_state(mx, my, lmb, rmb);
+
+  // I5 touch gestures. A LONG-PRESS opens the radial menu (touch equivalent of the
+  // RMB-hold); the finger then drives the highlight and lifting commits. A
+  // DOUBLE-TAP focuses the camera by selecting whatever is under it.
+  static bool s_touchRadial = false;
+  int gx = 0, gy = 0;
+  if (input_take_double_tap(gx, gy))
+  {
+    const unsigned int t = pick_entity_at_screen(gx, gy);
+    if (t != 0xFFFFFFFFu)
+      g_missile_lock_target = t;   // orbit already follows the selection = focus
+  }
+  if (input_take_long_press(gx, gy))
+  {
+    open_radial_menu(gx, gy);
+    s_touchRadial = g_radial_open;
+  }
+  if (s_touchRadial)
+  {
+    if (g_radial_open && input_touch_count() > 0)
+    {
+      g_radial_hot = radial_slice_at(mx, my);
+      return;   // the touch radial owns this frame
+    }
+    if (g_radial_open)
+      radial_commit();   // finger lifted -> issue the highlighted slice
+    s_touchRadial = false;
+    return;
+  }
 
   static bool s_prevRmb = false;
   static int  s_downX = 0, s_downY = 0;
