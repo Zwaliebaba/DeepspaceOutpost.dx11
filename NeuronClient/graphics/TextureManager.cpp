@@ -3,6 +3,24 @@
 #include "DDSTextureLoader.h"
 #include "FileSys.h"
 
+#include <string>
+
+// A texture that never loads shows up as "nothing rendered" downstream (e.g. the star
+// sprite pass draws no pixels), which is hard to diagnose from the black screen alone.
+// Log the two failure modes - file missing (bad path / working dir) vs decode failure -
+// so the debugger's output window names the culprit. Unconditional (not _DEBUG-only) so a
+// release build surfaces it too.
+static void log_texture_failure(const std::string& _key, const char* _why, long _hr)
+{
+  char msg[512];
+  if (_hr != 0)
+    std::snprintf(msg, sizeof(msg), "[TextureManager] FAILED to load '%s': %s (hr=0x%08lX)\n", _key.c_str(), _why,
+                  static_cast<unsigned long>(_hr));
+  else
+    std::snprintf(msg, sizeof(msg), "[TextureManager] FAILED to load '%s': %s\n", _key.c_str(), _why);
+  OutputDebugStringA(msg);
+}
+
 namespace Neuron::Graphics
 {
   namespace
@@ -36,8 +54,9 @@ namespace Neuron::Graphics
       {
         com_ptr<ID3D11Texture2D> tex;
         com_ptr<ID3D11ShaderResourceView> srv;
-        if (SUCCEEDED(CreateDDSTextureFromMemory(device, Core::GetD3DDeviceContext(), bytes.data(), bytes.size(), tex.put(), srv.put(),
-                                                 /*generateMips*/ true)))
+        const HRESULT hr = CreateDDSTextureFromMemory(device, Core::GetD3DDeviceContext(), bytes.data(), bytes.size(),
+                                                      tex.put(), srv.put(), /*generateMips*/ true);
+        if (SUCCEEDED(hr))
         {
           D3D11_TEXTURE2D_DESC desc{};
           tex->GetDesc(&desc);
@@ -46,6 +65,14 @@ namespace Neuron::Graphics
           texture->m_width = static_cast<float>(desc.Width);
           texture->m_height = static_cast<float>(desc.Height);
         }
+        else
+        {
+          log_texture_failure(key, "DDS decode/create failed", hr);
+        }
+      }
+      else
+      {
+        log_texture_failure(key, "file not found or empty (check working dir / asset deploy)", 0);
       }
     }
 

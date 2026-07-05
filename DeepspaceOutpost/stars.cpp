@@ -28,9 +28,23 @@ struct star
   double x;
   double y;
   double z;
+  float mag;     // intrinsic brightness 0..1, power-law skewed toward faint (few brilliant)
+  float r, g, b; // spectral tint (blue-white .. white .. yellow .. red)
 };
 
 star stars[20];
+
+// (Re)seed one star: scattered position, fresh depth, a power-law magnitude (u^2 -> most
+// stars faint, a few brilliant, like a real magnitude distribution) and a spectral tint.
+static inline void star_spawn(star& s, double hx, double hy)
+{
+  s.x = star_rand_span(hx);
+  s.y = star_rand_span(hy);
+  s.z = rand255() | 0x90;
+  const double u = rand01();
+  s.mag = 0.30f + 0.70f * static_cast<float>(u * u);
+  star_pick_color(s);
+}
 
 /*
  * Map a star-space coordinate (roughly [-128,128] x [-96,96]) to screen pixels
@@ -60,26 +74,28 @@ static inline int star_on_screen(int sx, int sy)
  * the legacy 2D white-pixel starfield. */
 static std::vector<Graphics::Scene3D::DustVertex> s_dustQuads;
 
-static void push_dust(int sx, int sy, double zz)
+// Emit one star as a textured, additively-blended sprite quad. sizePx sizes the Starburst
+// sprite (bright stars a little larger so their glow/spikes read); r,g,b is the spectral
+// tint and intensity the magnitude x distance falloff the pixel shader multiplies in. The
+// six vertices carry sprite uvs (0..1) so the pixel shader can sample the soft profile.
+static void push_dust(int sx, int sy, float sizePx, float r, float g, float b, float intensity)
 {
   int w, h;
   gfx_scene_size(&w, &h);
   if (w <= 0 || h <= 0)
     return;
 
-  /* A touch bigger for nearer stars (smaller z), echoing the legacy 1-4px dots. Sizes
-   * are in pixels; tune to taste. */
-  const float sizePx = (zz < 0x90) ? 2.4f : (zz < 0xC0 ? 1.8f : 1.2f);
   const float hx = sizePx / static_cast<float>(w);
   const float hy = sizePx / static_cast<float>(h);
   const float cx = 2.0f * static_cast<float>(sx) / static_cast<float>(w) - 1.0f;
   const float cy = 1.0f - 2.0f * static_cast<float>(sy) / static_cast<float>(h);
-  constexpr float b = 1.0f;
 
   using DV = Graphics::Scene3D::DustVertex;
+  // pos.xy, uv, rgb, intensity. Two triangles; uv spans the sprite across the quad.
   const DV quad[6] = {
-    {cx - hx, cy - hy, b}, {cx + hx, cy - hy, b}, {cx + hx, cy + hy, b}, {cx - hx, cy - hy, b}, {cx + hx, cy + hy, b},
-    {cx - hx, cy + hy, b},
+    {cx - hx, cy - hy, 0.0f, 1.0f, r, g, b, intensity}, {cx + hx, cy - hy, 1.0f, 1.0f, r, g, b, intensity},
+    {cx + hx, cy + hy, 1.0f, 0.0f, r, g, b, intensity}, {cx - hx, cy - hy, 0.0f, 1.0f, r, g, b, intensity},
+    {cx + hx, cy + hy, 1.0f, 0.0f, r, g, b, intensity}, {cx - hx, cy + hy, 0.0f, 0.0f, r, g, b, intensity},
   };
   for (const DV& v : quad)
     s_dustQuads.push_back(v);
@@ -121,11 +137,19 @@ void front_starfield(void)
     double zz = stars[i].z;
     star_to_screen(stars[i].x, stars[i].y, &sx, &sy);
 
-    /* Each on-screen star becomes a small 3D "dust" quad drawn as the background in the
-       scene pass - the streaming-speed cue. During a warp the field just streams faster
-       (delta above); the old 2D line streaks were a first-person effect and are gone. */
+    /* Each on-screen star becomes a small textured "dust" sprite drawn as the background in
+       the scene pass - the streaming-speed cue. During a warp the field just streams faster
+       (delta above); the old 2D line streaks were a first-person effect and are gone.
+       Brightness ties to depth: nearer stars (smaller z) glow brighter and a touch larger,
+       far ones fade toward invisible, so the field reads as a volume rather than a plane. */
     if (star_on_screen(sx, sy))
-      push_dust(sx, sy, zz);
+    {
+      float distF = 1.2f - static_cast<float>(zz / 320.0);
+      distF = (distF < 0.0f) ? 0.0f : (distF > 1.0f ? 1.0f : distF);
+      const float intensity = stars[i].mag * distF;
+      const float sizePx = 1.0f + 2.5f * intensity; /* continuous: bright = larger soft disc */
+      push_dust(sx, sy, sizePx, stars[i].r, stars[i].g, stars[i].b, intensity);
+    }
 
     /* Move the stars to their new locations...*/
 

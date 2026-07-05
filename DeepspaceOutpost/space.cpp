@@ -21,15 +21,10 @@
 #include "GamePalette.h"
 #include "GameScene.h"
 #include "GameUniverse.h"
-#include "docked.h"
-#include "intro.h"
 #include "shipdata.h"
-#include "shipface.h"
 #include "space.h"
 #include "threed.h"
 #include "sound.h"
-#include "main.h"
-#include "random.h"
 #include "stars.h"
 #include "GraphicsCore.h" // Graphics::Core::GetOutputSize (viewport size)
 #include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers

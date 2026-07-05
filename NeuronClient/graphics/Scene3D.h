@@ -7,12 +7,14 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "Mesh.h"
 #include "ModelDraw.h"        // Neuron::Render::ModelDraw
 #include "Camera.h"           // Neuron::Client::Camera - the view + projection source
+#include "TextureManager.h"   // Neuron::Graphics::Texture - the Starburst star sprite
 
 // Native Direct3D 11 3D scene renderer (Neuron::Graphics) - the GPU successor to the
 // CPU-projected flight scene. Where the legacy path projected each ship's vertices on
@@ -59,8 +61,9 @@ namespace Neuron::Graphics
       // Dust points for this frame: the streaming starfield rendered in the scene pass (behind
       // the ships) instead of the legacy 2D batch. The game projects the stars with the scene
       // optics and hands over small clip-space quads (6 verts each); Scene3D draws them every
-      // frame as the background. One vertex = clip-space XY + brightness.
-      struct DustVertex { float x, y, bright; };
+      // frame as the background, textured with the Starburst sprite and blended additively.
+      // One vertex = clip-space XY + sprite uv + spectral tint (rgb) + intensity.
+      struct DustVertex { float x, y, u, v, r, g, b, intensity; };
       static void SetDust(const DustVertex* _pts, int _count);
 
       // Submit one WORLD-frame model (ship / planet / sun) for this frame's scene pass. The
@@ -134,12 +137,17 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11Buffer> s_bbParamsCb;
 
       // Dust program (the scene-pass starfield) + its dynamic vertex buffer, this frame's
-      // quads, and the depth-off state the background pass draws with.
+      // quads, and the depth-off state the background pass draws with. The sprite pass adds
+      // its own additive blend, a linear-clamp sampler, and the Starburst texture (the first
+      // textured pass in Scene3D; the ship/billboard passes are procedural).
       inline static winrt::com_ptr<ID3D11VertexShader> s_dustVs;
       inline static winrt::com_ptr<ID3D11PixelShader> s_dustPs;
       inline static winrt::com_ptr<ID3D11InputLayout> s_dustLayout;
       inline static winrt::com_ptr<ID3D11Buffer> s_dustVb;
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_dustDepth; // depth test/write off
+      inline static winrt::com_ptr<ID3D11BlendState> s_dustBlend;        // additive (glow accumulate)
+      inline static winrt::com_ptr<ID3D11SamplerState> s_dustSampler;    // linear clamp
+      inline static std::shared_ptr<Texture> s_dustSprite;               // Textures/Starburst.dds
       inline static size_t s_dustCapacity = 0;
       inline static std::vector<DustVertex> s_dust;
 

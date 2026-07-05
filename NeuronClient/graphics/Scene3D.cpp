@@ -120,6 +120,9 @@ namespace Neuron::Graphics
     s_dustLayout = nullptr;
     s_dustVb = nullptr;
     s_dustDepth = nullptr;
+    s_dustBlend = nullptr;
+    s_dustSampler = nullptr;
+    s_dustSprite = nullptr;
     s_dustCapacity = 0;
     s_dust.clear();
     s_models.clear();
@@ -221,11 +224,44 @@ namespace Neuron::Graphics
     check_hresult(device->CreateVertexShader(g_dustVS, sizeof(g_dustVS), nullptr, s_dustVs.put()));
     check_hresult(device->CreatePixelShader(g_dustPS, sizeof(g_dustPS), nullptr, s_dustPs.put()));
 
+    // Matches DustVertex { float x,y; float u,v; float r,g,b; float intensity; } (32 bytes).
     const D3D11_INPUT_ELEMENT_DESC dustElems[] = {
       {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-      {"COLOR", 0, DXGI_FORMAT_R32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+      {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+      {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
+      {"COLOR", 1, DXGI_FORMAT_R32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     check_hresult(device->CreateInputLayout(dustElems, _countof(dustElems), g_dustVS, sizeof(g_dustVS), s_dustLayout.put()));
+
+    // Additive blend for the star sprites: each star adds the light it contributes, so soft
+    // sprites feather into the black and overlapping stars accumulate (glow) rather than
+    // punching opaque squares. The pixel shader outputs premultiplied colour, hence SrcBlend
+    // ONE. Bound in renderDust in place of the opaque scene blend.
+    D3D11_BLEND_DESC abd{};
+    abd.RenderTarget[0].BlendEnable = TRUE;
+    abd.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    abd.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+    abd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    abd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    abd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    abd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    abd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    check_hresult(device->CreateBlendState(&abd, s_dustBlend.put()));
+
+    // Linear-clamp sampler for the star sprite (smooth edges, no wrap bleed at the quad rim).
+    D3D11_SAMPLER_DESC ssd{};
+    ssd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    ssd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    ssd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    ssd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    ssd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    ssd.MinLOD = 0.0f;
+    ssd.MaxLOD = D3D11_FLOAT32_MAX;
+    check_hresult(device->CreateSamplerState(&ssd, s_dustSampler.put()));
+
+    // The star sprite (cached by the TextureManager). If it fails to load the pass simply
+    // draws nothing (renderDust guards on it), rather than punching black squares.
+    s_dustSprite = TextureManager::LoadTexture("Textures\\Starburst.dds");
 
     // Instanced ship program (H2, opt-in). A second VS/PS drawn from the same solid mesh
     // but with a per-instance world/tint stream. Two input slots: slot 0 the per-vertex
@@ -309,6 +345,13 @@ namespace Neuron::Graphics
     if (s_dust.empty())
       return;
 
+    // The sprite pass needs the Starburst texture; without it the additive PS samples black
+    // and draws nothing, so skip the whole pass rather than upload/draw for no pixels.
+    ID3D11ShaderResourceView* spriteSrv =
+      (s_dustSprite && s_dustSprite->IsLoaded()) ? s_dustSprite->GetShaderResourceView() : nullptr;
+    if (!spriteSrv)
+      return;
+
     ID3D11DeviceContext* ctx = Core::GetD3DDeviceContext();
     if (!ctx)
       return;
@@ -336,7 +379,7 @@ namespace Neuron::Graphics
     ctx->OMSetDepthStencilState(s_dustDepth.get(), 0); // depth off (background pass, under ships)
     ctx->RSSetState(s_raster.get());
     const float blendFactor[4] = {0, 0, 0, 0};
-    ctx->OMSetBlendState(s_blend.get(), blendFactor, 0xFFFFFFFF);
+    ctx->OMSetBlendState(s_dustBlend.get(), blendFactor, 0xFFFFFFFF); // additive (glow accumulate)
     ctx->IASetInputLayout(s_dustLayout.get());
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     const UINT stride = sizeof(DustVertex);
@@ -345,7 +388,15 @@ namespace Neuron::Graphics
     ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
     ctx->VSSetShader(s_dustVs.get(), nullptr, 0);
     ctx->PSSetShader(s_dustPs.get(), nullptr, 0);
+    ID3D11SamplerState* samp = s_dustSampler.get();
+    ctx->PSSetSamplers(0, 1, &samp);
+    ctx->PSSetShaderResources(0, 1, &spriteSrv);
     ctx->Draw(static_cast<UINT>(s_dust.size()), 0);
+
+    // Unbind the sprite SRV so it can't linger on the PS input if a later pass ever binds
+    // that slot as an output (defensive; the ship passes don't use t0 today).
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    ctx->PSSetShaderResources(0, 1, &nullSrv);
   }
 
   void Scene3D::renderModelsInstanced(const XMMATRIX& _view, const XMMATRIX& _viewProj)
