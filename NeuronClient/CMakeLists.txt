@@ -194,7 +194,6 @@ if(WIN32)
     target_link_libraries(NeuronClient PUBLIC
         d3d11
         dxgi
-        d3dcompiler
         dxguid
         xaudio2
         winmm         # timing + MIDI

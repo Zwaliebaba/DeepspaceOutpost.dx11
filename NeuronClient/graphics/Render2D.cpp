@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "Render2D.h"
 
-#include <d3dcompiler.h>
 #include <DirectXMath.h>
 
 #include <cassert>
@@ -10,8 +9,8 @@
 // Offline-compiled (fxc) byte arrays for the built-in programs. Each shaders/*.hlsl is
 // compiled to shaders/CompiledShaders/<name>.h (array g_<name>) by the CMake build, and
 // that directory is on this target's private include path. See NeuronClient/CMakeLists.txt
-// and the sources under shaders/. Caller-supplied custom programs (RegisterProgram) are
-// still compiled at runtime with D3DCompile.
+// and the sources under shaders/. Every program the renderer uses is compiled offline this
+// way - there is no runtime HLSL compilation.
 #include "render2dVS.h"     // g_render2dVS  - shared vertex shader (all programs)
 #include "render2dPS.h"     // g_render2dPS  - default pixel shader (col * texture)
 #include "text-outlinePS.h" // g_text_outlinePS - built-in text-outline pixel shader
@@ -24,27 +23,6 @@ namespace Neuron::Graphics
 {
   namespace
   {
-    // Compile one HLSL source/entry/profile. Returns null on failure (logging the
-    // compiler errors) rather than throwing, so a bad caller-supplied program shader
-    // degrades to the default instead of taking down the app.
-    com_ptr<ID3DBlob> CompileHLSL(const char* src, const char* entry, const char* target)
-    {
-      UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-#ifdef _DEBUG
-      flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-      com_ptr<ID3DBlob> code, errors;
-      const HRESULT hr =
-        D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr, entry, target, flags, 0, code.put(), errors.put());
-      if (FAILED(hr))
-      {
-        if (errors)
-          OutputDebugStringA(static_cast<const char*>(errors->GetBufferPointer()));
-        return nullptr;
-      }
-      return code;
-    }
-
     com_ptr<ID3D11SamplerState> MakeSampler(ID3D11Device* device, D3D11_FILTER filter)
     {
       D3D11_SAMPLER_DESC sd{};
@@ -182,43 +160,6 @@ namespace Neuron::Graphics
     s_textOutlineProgram = static_cast<ProgramId>(s_programs.size() - 1);
 
     return true;
-  }
-
-  // Compile (VSMain/PSMain) + create a program from one HLSL source and append it.
-  // The device must already be up. Returns DefaultProgram on any failure.
-  Render2D::ProgramId Render2D::AddProgram(const char* hlslSource)
-  {
-    ID3D11Device* device = Core::GetD3DDevice();
-    if (!device || !hlslSource)
-      return DefaultProgram;
-
-    com_ptr<ID3DBlob> vs = CompileHLSL(hlslSource, "VSMain", "vs_5_0");
-    com_ptr<ID3DBlob> ps = CompileHLSL(hlslSource, "PSMain", "ps_5_0");
-    if (!vs || !ps)
-    {
-      // CompileHLSL already logged the compiler errors.
-      assert(false && "Render2D::AddProgram: shader compile failed");
-      return DefaultProgram;
-    }
-
-    Program p;
-    if (FAILED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, p.vs.put())) ||
-        FAILED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, p.ps.put())))
-    {
-      OutputDebugStringA("Render2D: shader program creation failed; falling back to the default program.\n");
-      assert(false && "Render2D::AddProgram: shader creation failed");
-      return DefaultProgram;
-    }
-
-    s_programs.push_back(std::move(p));
-    return static_cast<ProgramId>(s_programs.size() - 1);
-  }
-
-  Render2D::ProgramId Render2D::RegisterProgram(const char* hlslSource)
-  {
-    if (!EnsureResources())
-      return DefaultProgram;
-    return AddProgram(hlslSource);
   }
 
   void Render2D::SetProgram(ProgramId program)

@@ -89,6 +89,13 @@ nothing above it.
   from a caller-owned, seeded LCG stream (`x = x*1664525 + 1013904223`); the
   server keeps separate streams for loot, AI and hyperspace so the sequences
   cannot perturb each other. Deterministic in, deterministic out.
+- **All HLSL is compiled offline, never at runtime.** Each `shaders/*.hlsl`
+  is compiled by fxc into a `shaders/CompiledShaders/<name>.h` byte array at
+  build time (`NeuronClient/CMakeLists.txt`), and the renderers create their
+  shaders from those arrays. There is no `D3DCompile` path — the `Render2D`
+  runtime-compile facility (`CompileHLSL`/`RegisterProgram`) and the
+  `d3dcompiler` dependency were removed (2026-07-05); `Render2D`'s only
+  programs are the built-in default and text-outline byte arrays.
 
 ---
 
