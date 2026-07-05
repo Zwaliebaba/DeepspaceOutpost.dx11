@@ -129,186 +129,10 @@ void initialise_game(void)
   PlayerCaps().maxFuel = 70; /* 7.0 Light Years */
 }
 
-/*
- * Move the planet chart cross hairs to specified position.
- */
-
-void move_cross(int dx, int dy)
-{
-  if (current_screen == SCR_SHORT_RANGE)
-  {
-    cross_x += (dx * 4);
-    cross_y += (dy * 4);
-    return;
-  }
-
-  if (current_screen == SCR_GALACTIC_CHART)
-  {
-    cross_x += (dx * 2);
-    cross_y += (dy * 2);
-
-    if (cross_x < 1)
-      cross_x = 1;
-
-    if (cross_x > 510)
-      cross_x = 510;
-
-    if (cross_y < 37)
-      cross_y = 37;
-
-    if (cross_y > 293)
-      cross_y = 293;
-  }
-}
-
-/*
- * Draw the cross hairs at the specified position.
- */
-
-// Draw the chart crosshair as a textured sprite (Textures/Crosshair.dds), centred on
-// (cx,cy) and clipped to the chart area. The chart is redrawn every frame (see
-// game_render_flight), so the crosshair is just drawn fresh on top each frame - no XOR
-// erase (the old logic-op path was dropped in the Render2D move). The half-size matches
-// the old cross reach: 16 px on the short-range chart, 8 px on the galactic chart.
-void draw_cross(int cx, int cy)
-{
-  int half;
-  int clipBottom;
-  if (current_screen == SCR_SHORT_RANGE)
-  {
-    half = 16;
-    clipBottom = 339;
-  }
-  else if (current_screen == SCR_GALACTIC_CHART)
-  {
-    half = 8;
-    clipBottom = 293;
-  }
-  else
-  {
-    return;
-  }
-
-  gfx_set_clip_region(1, 37, 510, clipBottom);
-  gfx_draw_sprite_scaled(IMG_CROSSHAIR, cx - half, cy - half, half * 2, half * 2);
-  gfx_set_clip_region(1, 1, 510, 383);
-}
-
-/*
- * The arrow keys own the CHART crosshair on the chart screens; in flight they
- * belong to the camera rig (CameraRig gathers them directly, gated on the
- * flight view, so the two uses never overlap). The old cockpit roll/climb
- * handling is gone with piloting.
- */
-
-void arrow_right(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(1, 0);
-    break;
-  }
-}
-
-void arrow_left(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(-1, 0);
-    break;
-  }
-}
-
-void arrow_up(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(0, -1);
-    break;
-  }
-}
-
-void arrow_down(void)
-{
-  switch (current_screen)
-  {
-  case SCR_SHORT_RANGE:
-  case SCR_GALACTIC_CHART:
-    move_cross(0, 1);
-    break;
-  }
-}
-
-void d_pressed(void)
-{
-  switch (current_screen)
-  {
-  case SCR_GALACTIC_CHART:
-  case SCR_SHORT_RANGE:
-    show_distance_to_planet();
-    break;
-
-  }
-}
-
-void f_pressed(void)
-{
-  if ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE))
-  {
-    find_input = 1;
-    *find_name = '\0';
-    gfx_clear_text_area();
-    gfx_display_text(16, 340, "Planet Name?");
-  }
-}
-
-void add_find_char(int letter)
-{
-  char str[40];
-
-  if (strlen(find_name) == 16)
-    return;
-
-  str[0] = toupper(letter);
-  str[1] = '\0';
-  strcat(find_name, str);
-
-  sprintf(str, "Planet Name? %s", find_name);
-  gfx_clear_text_area();
-  gfx_display_text(16, 340, str);
-}
-
-void delete_find_char(void)
-{
-  char str[40];
-
-  size_t len = strlen(find_name);
-  if (len == 0)
-    return;
-
-  find_name[len - 1] = '\0';
-
-  sprintf(str, "Planet Name? %s", find_name);
-  gfx_clear_text_area();
-  gfx_display_text(16, 340, str);
-}
-
-void o_pressed()
-{
-  switch (current_screen)
-  {
-  case SCR_GALACTIC_CHART:
-  case SCR_SHORT_RANGE:
-    move_cursor_to_origin();
-    break;
-  }
-}
+// The chart crosshair, arrow-key steering, and D/F/O + name-search keys were the
+// keyboard controls for the letterboxed charts. The charts are a native GUI overlay
+// window now (ChartWindow) - it is mouse-driven and the overlay suppresses game keys
+// while open - so that whole keyboard subsystem is retired.
 
 // Pending fire-missile intent + the locked target it launches at, for the next
 // input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
@@ -708,8 +532,6 @@ void handle_ability_bar(void)
 
 void handle_flight_keys(void)
 {
-  int keyasc;
-
   kbd_poll_keyboard();
 
   if (kbd_F1_pressed)
@@ -791,31 +613,9 @@ void handle_flight_keys(void)
   else
     f12_was_down = 0;
 
-  if (find_input)
-  {
-    keyasc = kbd_read_key();
-
-    if (kbd_enter_pressed)
-    {
-      find_input = 0;
-      find_planet_by_name(find_name);
-      return;
-    }
-
-    if (kbd_backspace_pressed)
-    {
-      delete_find_char();
-      return;
-    }
-
-    if (isalpha(keyasc))
-      add_find_char(keyasc);
-
-    return;
-  }
-
   // (I7: A=fire retired -> the Attack order fires; E/Tab/M/pod/J = ability bar;
-  //  T/U = pointer select; H = the chart HYPERSPACE button.)
+  //  T/U = pointer select. The chart keys - D/F/O, name search, arrow crosshair -
+  //  retired with the letterboxed charts; the native chart window is mouse-driven.)
 
   if (kbd_dock_pressed)
   {
@@ -825,31 +625,6 @@ void handle_flight_keys(void)
     if (!docked && cmdr.docking_computer)
       engage_docking_computer();
   }
-
-  if (kbd_d_pressed)
-    d_pressed();
-
-  if (kbd_find_pressed)
-    f_pressed();
-
-  if (kbd_origin_pressed)
-    o_pressed();
-
-  /* (The speed keys went with piloting: the hull idles and the CAMERA moves -
-   * see CameraRig. The arrow keys below only steer the chart crosshair - kept as
-   * an accelerator alongside the I6 chart click.) */
-
-  if (kbd_up_pressed)
-    arrow_up();
-
-  if (kbd_down_pressed)
-    arrow_down();
-
-  if (kbd_left_pressed)
-    arrow_left();
-
-  if (kbd_right_pressed)
-    arrow_right();
 }
 
 // ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
