@@ -336,10 +336,13 @@ namespace Neuron::GameLogic
         if (sc != nullptr)
         {
           sc->focus = _o.target;   // the pilot's chosen prey (StepCombat / memory)
-          // Aligned and inside laser range: fire this tick. The actual target
-          // selection + hit stay ResolvePlayerFire's job (nearest in cone); heat
-          // gating throttles the cadence exactly like a held trigger.
-          if (ahead >= AI_FIRE_ALIGN && dist <= static_cast<double>(sc->range))
+          // Aligned and inside laser range: a MANUAL-fire unit (the player, whose
+          // Combatant.autoEngage is false) fires this tick via the returned list ->
+          // FireWeapon -> ResolvePlayerFire (lag comp + crime). An AUTO-engage unit
+          // (an F1 escort) instead fires through StepCombat with the NPC discipline,
+          // so it is NOT added here - the focus above is enough to point it, and
+          // adding it would double-fire.
+          if (!sc->autoEngage && ahead >= AI_FIRE_ALIGN && dist <= static_cast<double>(sc->range))
             wantsFire.push_back(_self);
         }
         return;

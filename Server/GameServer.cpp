@@ -504,11 +504,63 @@ namespace DSOServer
 
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)
   {
+    // F1: the escort is a purchased UNIT, not a fitted upgrade, so the pure equip
+    // dispatcher (which only knows the Equipment booleans) can't handle it - it
+    // needs to spawn an entity + grant ownership. Intercept that one case here where
+    // the world + session (playerId, ownership) are in reach.
+    if (_req.kind == Net::StationRequestKind::Equip
+        && _req.commodity == static_cast<uint16_t>(Net::EquipItem::EscortFighter))
+    {
+      HandleBuyEscort(_session);
+      return;
+    }
+
     // Docking + commerce only. The retired travel kinds (Teleport/JumpDrive)
     // fall through to the station dispatcher, which rejects them - travel rides
     // TravelRequest (HandleTravelRequest) since the protocol split.
     const Net::StationResponse resp =
         GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
+    _session.events.Send(resp);   // Gameplay lane
+  }
+
+  // F1: buy an escort. Validate docking + the per-player cap + credits in pure
+  // GameLogic (BuyEscort, which charges on success), then spawn the Viper escort and
+  // grant ownership so it reaps with the session and counts in "all my units". The
+  // reply reuses the Equip StationResponse the client already understands.
+  void GameServer::HandleBuyEscort(GameLogic::Session& _session)
+  {
+    Net::StationResponse resp;
+    resp.kind = Net::StationRequestKind::Equip;
+    resp.commodity = static_cast<uint16_t>(Net::EquipItem::EscortFighter);
+
+    GameLogic::Wallet* wallet = m_world.IsValid(_session.entity)
+                              ? m_world.TryGet<GameLogic::Wallet>(_session.entity) : nullptr;
+    GameLogic::DockState* dock = m_world.IsValid(_session.entity)
+                              ? m_world.TryGet<GameLogic::DockState>(_session.entity) : nullptr;
+    if (wallet == nullptr || dock == nullptr)
+    {
+      resp.status = Net::StationStatus::BadCommodity;   // not a commerce-capable ship
+      _session.events.Send(resp);
+      return;
+    }
+
+    // Escorts already owned = every owned entity minus the primary ship.
+    const int owned = static_cast<int>(m_sessions.Ownership().OwnedCount(_session.playerId));
+    const int currentEscorts = owned > 0 ? owned - 1 : 0;
+
+    const GameLogic::EquipResult r =
+        GameLogic::BuyEscort(*wallet, *dock, currentEscorts, Cfg::MAX_ESCORTS);
+    resp.status = r.status;
+    resp.credits = r.credits;
+
+    if (r.status == Net::StationStatus::Ok)
+    {
+      const ECS::EntityId esc = GameLogic::SpawnEscort(m_world, _session.entity, currentEscorts);
+      m_sessions.GrantOwnership(m_world, _session.playerId, esc);
+      printf("[tick %u] player %u bought escort %u (now %d escorts)\n",
+             m_tick, _session.playerId, esc.index, currentEscorts + 1);
+    }
+
     _session.events.Send(resp);   // Gameplay lane
   }
 
@@ -556,14 +608,15 @@ namespace DSOServer
       // Crime at ORDER time (interaction.md): committing an Attack on a PROTECTED
       // victim (station/police/trader/clean player) makes you wanted the moment you
       // order it - even if the target dodges - closing the "order the hit, dodge the
-      // blame" loophole. Attributed to the ordered unit (== the owner's own ship for
-      // I1) through the same FlagIfCrime path firing uses; fire-time flagging still
-      // applies on the shots that land.
+      // blame" loophole. Attributed to the OWNER's own ship (_session.entity), not the
+      // ordered unit: F1 makes ordering an ESCORT to attack a protected victim make
+      // YOU wanted, not the drone - true owner attribution (I1 noted this follow-up).
+      // Fire-time flagging still applies on the shots the player's own ship lands.
       if (_req.order == Msg::OrderKind::Attack)
       {
         const ECS::EntityId tgt = m_world.LiveEntity(_req.target);
         if (const GameLogic::Combatant* tc = m_world.TryGet<GameLogic::Combatant>(tgt))
-          GameLogic::FlagIfCrime(m_world, m_bus, plan.unit, tgt, tc->team);
+          GameLogic::FlagIfCrime(m_world, m_bus, _session.entity, tgt, tc->team);
         m_bus.Dispatch();   // publish the Crime fact (police dispatch + roster refresh)
       }
 

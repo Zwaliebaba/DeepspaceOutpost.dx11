@@ -40,6 +40,8 @@ set(GAMELOGIC_HEADERS
     CombatMessages.h
     PlayerPersistence.h
     StrategicView.h
+    OrderSystem.h
+    EscortSpawn.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

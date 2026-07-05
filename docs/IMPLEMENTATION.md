@@ -1143,7 +1143,7 @@ pipeline" thesis. C (identity) is a hard prerequisite; B4 (persistence) is
 required by F2–F4 to be meaningful; **Track I (I1–I3) precedes F1**, which
 reuses its `UnitOrder` protocol and selection/command UX.
 
-### F1 — First ordered unit: the escort (#12) — **M**
+### F1 — First ordered unit: the escort (#12) — **M** — ✅ **core done 2026-07-05** (server + tests; persistence deferred)
 
 *Note (2026-07-04): the order infrastructure this item originally carried —
 `UnitOrder`/`UnitOrderAck`, the validation rules, the `OrderSystem`
@@ -1165,6 +1165,48 @@ itself, reusing all of it.*
   handles "select escort, right-click/tap a target".
 - Escorts replicate, fight, die and drop loot through every existing path;
   they persist (B4) as owned entities.
+
+*As built (2026-07-05) — ✅ core, headless-tested (GameLogic verified locally on
+Linux; the Server wiring reuses the tested helpers and rides CI):*
+
+- **Purchase.** `Net::EquipItem::EscortFighter = 7` (`StationProtocol.h`). Because an
+  escort is a UNIT, not a fitted boolean, it does NOT go through `EquipPlayer`;
+  `GameServer::HandleStationRequest` intercepts `Equip{EscortFighter}` and calls
+  `HandleBuyEscort`, which validates through the pure `GameLogic::BuyEscort` (docked +
+  the per-player `Cfg::MAX_ESCORTS = 4` cap + `ESCORT_FIGHTER_PRICE = 50000` (5000.0
+  Cr), charging on success), then `GameLogic::SpawnEscort` + `m_sessions.GrantOwnership`
+  so the escort is `Owner`-stamped, indexed, and **reaps with the session** (the C
+  ownership path). The reply reuses the `Equip` `StationResponse`.
+- **Spawn (`GameLogic/EscortSpawn.h`, pure/tested).** A Viper NPC with `Team::Player`,
+  `autoEngage = true`, `NpcFlightCaps`, `Combatant`/`ShipGear`, and a default
+  `ActiveOrder{Escort → owner}` — but **no `AiPilot`**, so `StepOrders` (not `StepAi`)
+  drives it: no new steering, exactly the §13.2.3-2 promise.
+- **Orders.** I1's `UnitOrder` unchanged: the validator already accepts `Escort` (a
+  `WorldTransform` target) and any owned unit, and `StepOrders`' Escort case already
+  follows the owner's live position without arrive-stopping. The client needs zero new
+  UX — I2/I3 select-and-order the escort as another owned unit.
+- **Engagement discipline.** `StepCombat` gained `DisciplinedShooter` (Police **and**
+  Player teams) so an auto-engaging escort fires only on legitimate hostiles
+  (`PoliceMayEngage`: pirates + wanted) — without it a `Team::Player` auto-shooter would
+  open up on police, traders and the station. `StepOrders`' "wants to fire" list is now
+  gated on `!autoEngage`, so the escort fires via the NPC `StepCombat` path (its Attack
+  order just sets `focus`) while the player's own ship keeps the command-fire path — no
+  double-fire.
+- **Crime.** Order-time `FlagIfCrime` now attributes to `_session.entity` (the owner's
+  ship), not the ordered unit — so ordering an escort to attack a protected victim makes
+  **you** wanted, not the drone (the "true owner attribution" I1 flagged).
+- **Tests** (`Tests/GameLogic/EscortTests.cpp`, 11 cases; the full affected-system suite
+  — 172 tests — stays green): purchase gate (undocked / broke / at-cap / success+charge),
+  spawn loadout (owned, `Team::Player`, auto-engage, Escort order, no `AiPilot`), follow
+  + hold-when-owner-gone, engages pirates but **not** traders/police, and the
+  wantsFire-gating both ways.
+- **Deferred (documented):** (a) **persistence** of escorts — `PlayerPersistState` is
+  single-ship today, so surviving-escort save/load is a net-new B4 extension (an owned-
+  units list + re-grant on load); until then an escort reaps on disconnect and is
+  re-bought. (b) **Respawn re-target** — after the owner dies its escorts hold (their
+  Escort target is the dead hull) until re-ordered; they still auto-defend. (c) Escorts
+  can't help against **wanted players** (same `Team::Player`, so allies) — cross-owner
+  PvP assistance waits on F5 factions. (d) The BotClient escort-fleet load script.
 
 ### F2 — Fog of war (#14) — **M**
 

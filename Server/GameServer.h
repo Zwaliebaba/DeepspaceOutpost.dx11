@@ -116,6 +116,7 @@ namespace DSOServer
     void OnCrime(const Neuron::GameLogic::Crime& _c);
     void OnEntityKilled(const Neuron::GameLogic::EntityKilled& _k);
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
+    void HandleBuyEscort(Neuron::GameLogic::Session& _session);   // F1: purchase + spawn an owned escort
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
     // I1: order a unit (validate ownership/target/range, record the ActiveOrder, ack)
     // and route a discrete equipment activation to the combat bus.

@@ -176,6 +176,17 @@ namespace Neuron::GameLogic
     return false;
   }
 
+  // Which auto-engaging teams fight under target discipline: the law (Police) and a
+  // player's own allies (Team::Player escorts, F1). Both may only shoot legitimate
+  // hostiles - pirates and WANTED players (PoliceMayEngage) - never traders, the
+  // station, clean players, or each other; without this an auto-engaging escort
+  // would open fire on police, traders and the station it shares no team with.
+  // Pirates keep their indiscriminate "anyone not my team" targeting.
+  [[nodiscard]] inline bool DisciplinedShooter(int _team)
+  {
+    return _team == Team::Police || _team == Team::Player;
+  }
+
   // Which shield a hit lands on: true = FRONT (the attacker lies ahead of the
   // victim's nose), false = aft. Unshielded/facing-less victims default to front.
   [[nodiscard]] inline bool HitOnFront(ECS::Registry& _world, ECS::EntityId _victim, const Math::Vector3i64& _attackerPos)
@@ -307,7 +318,7 @@ namespace Neuron::GameLogic
           if (b.id.index == a.c->focus)
           {
             if (b.c->team != a.c->team && inRange(b)
-                && (a.c->team != Team::Police || PoliceMayEngage(_world, b.id, b.c->team)))
+                && (!DisciplinedShooter(a.c->team) || PoliceMayEngage(_world, b.id, b.c->team)))
               best = &b;
             break;
           }
@@ -325,8 +336,8 @@ namespace Neuron::GameLogic
             ++*_candidatePairs;
           if (b.c->team == a.c->team)
             continue;   // never target allies (and never yourself)
-          if (a.c->team == Team::Police && !PoliceMayEngage(_world, b.id, b.c->team))
-            continue;   // the law spares traders and the innocent
+          if (DisciplinedShooter(a.c->team) && !PoliceMayEngage(_world, b.id, b.c->team))
+            continue;   // the law - and player escorts - spare traders and the innocent
           if (!inRange(b))
             continue;
 
