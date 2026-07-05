@@ -42,6 +42,10 @@ namespace Neuron::Net
     FuelScoop = 4,
     EnergyBomb = 5,
     EscapePod = 6,
+    // F1: not a fitted upgrade but a purchased UNIT - the server spawns an owned
+    // escort NPC instead of setting an Equipment flag. Handled by the GameServer
+    // escort path, not EquipPlayer (which only knows the fitted booleans above).
+    EscortFighter = 7,
   };
 
   // Result of a station request (also returned by the server-side services).

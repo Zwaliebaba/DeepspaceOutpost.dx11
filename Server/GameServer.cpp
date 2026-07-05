@@ -339,6 +339,7 @@ namespace DSOServer
         Msg::AbilityRequest ability;
         Msg::GalaxyChunkRequest chunkReq;
         Msg::Ping ping;
+        Msg::Chat chat;
         if (Msg::TryDecode(msg, req))
         {
           LogCommand(s, msg);   // audit/replay (before the mutation it authorizes)
@@ -367,8 +368,27 @@ namespace DSOServer
           s.rttMs = ping.rttMs;
           s.events.Send(Msg::Pong{ ping.clientTimeMs, m_tick });
         }
+        else if (Msg::TryDecode(msg, chat))
+          HandleChat(s, chat);   // G3: rate-limited, sanitised relay
       }
     }
+  }
+
+  // G3: relay a chat line. Rate-limit per session (drop + warn over cap), sanitise
+  // the text server-side, stamp the AUTHENTICATED sender (playerId, so clients can
+  // mute by it), and rebroadcast to the roster. AOI-scoped delivery is a refinement;
+  // roster-wide is a superset for now.
+  void GameServer::HandleChat(GameLogic::Session& _session, const Msg::Chat& _in)
+  {
+    if (!GameLogic::ChatAllowed(_session.chat, m_tick))
+    {
+      _session.events.Send(Msg::Chat{ 0, "You are chatting too fast." });   // sender 0 = system
+      return;
+    }
+    const std::string text = GameLogic::SanitizeChat(_in.text);
+    if (text.empty())
+      return;
+    m_sessions.Broadcast(Msg::Chat{ _session.playerId, text });
   }
 
   void GameServer::ApplyCompletedLoads()
@@ -504,11 +524,63 @@ namespace DSOServer
 
   void GameServer::HandleStationRequest(GameLogic::Session& _session, const Net::StationRequest& _req)
   {
+    // F1: the escort is a purchased UNIT, not a fitted upgrade, so the pure equip
+    // dispatcher (which only knows the Equipment booleans) can't handle it - it
+    // needs to spawn an entity + grant ownership. Intercept that one case here where
+    // the world + session (playerId, ownership) are in reach.
+    if (_req.kind == Net::StationRequestKind::Equip
+        && _req.commodity == static_cast<uint16_t>(Net::EquipItem::EscortFighter))
+    {
+      HandleBuyEscort(_session);
+      return;
+    }
+
     // Docking + commerce only. The retired travel kinds (Teleport/JumpDrive)
     // fall through to the station dispatcher, which rejects them - travel rides
     // TravelRequest (HandleTravelRequest) since the protocol split.
     const Net::StationResponse resp =
         GameLogic::ProcessStationRequest(m_world, _session.entity, Cfg::DOCK_RANGE, _req);
+    _session.events.Send(resp);   // Gameplay lane
+  }
+
+  // F1: buy an escort. Validate docking + the per-player cap + credits in pure
+  // GameLogic (BuyEscort, which charges on success), then spawn the Viper escort and
+  // grant ownership so it reaps with the session and counts in "all my units". The
+  // reply reuses the Equip StationResponse the client already understands.
+  void GameServer::HandleBuyEscort(GameLogic::Session& _session)
+  {
+    Net::StationResponse resp;
+    resp.kind = Net::StationRequestKind::Equip;
+    resp.commodity = static_cast<uint16_t>(Net::EquipItem::EscortFighter);
+
+    GameLogic::Wallet* wallet = m_world.IsValid(_session.entity)
+                              ? m_world.TryGet<GameLogic::Wallet>(_session.entity) : nullptr;
+    GameLogic::DockState* dock = m_world.IsValid(_session.entity)
+                              ? m_world.TryGet<GameLogic::DockState>(_session.entity) : nullptr;
+    if (wallet == nullptr || dock == nullptr)
+    {
+      resp.status = Net::StationStatus::BadCommodity;   // not a commerce-capable ship
+      _session.events.Send(resp);
+      return;
+    }
+
+    // Escorts already owned = every owned entity minus the primary ship.
+    const int owned = static_cast<int>(m_sessions.Ownership().OwnedCount(_session.playerId));
+    const int currentEscorts = owned > 0 ? owned - 1 : 0;
+
+    const GameLogic::EquipResult r =
+        GameLogic::BuyEscort(*wallet, *dock, currentEscorts, Cfg::MAX_ESCORTS);
+    resp.status = r.status;
+    resp.credits = r.credits;
+
+    if (r.status == Net::StationStatus::Ok)
+    {
+      const ECS::EntityId esc = GameLogic::SpawnEscort(m_world, _session.entity, currentEscorts);
+      m_sessions.GrantOwnership(m_world, _session.playerId, esc);
+      printf("[tick %u] player %u bought escort %u (now %d escorts)\n",
+             m_tick, _session.playerId, esc.index, currentEscorts + 1);
+    }
+
     _session.events.Send(resp);   // Gameplay lane
   }
 
@@ -556,14 +628,15 @@ namespace DSOServer
       // Crime at ORDER time (interaction.md): committing an Attack on a PROTECTED
       // victim (station/police/trader/clean player) makes you wanted the moment you
       // order it - even if the target dodges - closing the "order the hit, dodge the
-      // blame" loophole. Attributed to the ordered unit (== the owner's own ship for
-      // I1) through the same FlagIfCrime path firing uses; fire-time flagging still
-      // applies on the shots that land.
+      // blame" loophole. Attributed to the OWNER's own ship (_session.entity), not the
+      // ordered unit: F1 makes ordering an ESCORT to attack a protected victim make
+      // YOU wanted, not the drone - true owner attribution (I1 noted this follow-up).
+      // Fire-time flagging still applies on the shots the player's own ship lands.
       if (_req.order == Msg::OrderKind::Attack)
       {
         const ECS::EntityId tgt = m_world.LiveEntity(_req.target);
         if (const GameLogic::Combatant* tc = m_world.TryGet<GameLogic::Combatant>(tgt))
-          GameLogic::FlagIfCrime(m_world, m_bus, plan.unit, tgt, tc->team);
+          GameLogic::FlagIfCrime(m_world, m_bus, _session.entity, tgt, tc->team);
         m_bus.Dispatch();   // publish the Crime fact (police dispatch + roster refresh)
       }
 
@@ -693,6 +766,10 @@ namespace DSOServer
       kills.push_back(k);
     for (const GameLogic::Kill& k : GameLogic::StepCollisions(m_world, &m_candidatePairsThisTick, m_scratch))
       kills.push_back(k);
+    // G4: sun-proximity cabin heat cooks a hull held at the maximum; a scoop-fitted
+    // ship skimming the band tops its fuel instead. Deaths join the same pipeline.
+    for (const GameLogic::Kill& k : GameLogic::StepCabinHeat(m_world))
+      kills.push_back(k);
     for (const GameLogic::Kill& kill : kills)
       m_bus.Publish(GameLogic::EntityKilled{ kill.victim, kill.killer });
     m_bus.Dispatch();
@@ -778,6 +855,7 @@ namespace DSOServer
         if (const auto* wnt = m_world.TryGet<GameLogic::Wanted>(s.entity)) ps.wantedLevel = wnt->level;
         ps.score = s.score;   // the session's per-player record (C2)
         if (const auto* g = m_world.TryGet<GameLogic::ShipGear>(s.entity)) ps.laserTemp = g->laserHeat;
+        if (const auto* ch = m_world.TryGet<GameLogic::CabinHeat>(s.entity)) ps.cabinTemp = ch->temp;   // G4
         if (m_lastStatus.Changed(key, ps))
           s.events.Send(ps);
 
@@ -948,7 +1026,14 @@ namespace DSOServer
       // respawn. If no station is reachable, RespawnAtNearestStation falls back
       // to leaving them put.
       if (const GameLogic::WorldTransform* pt = m_world.TryGet<GameLogic::WorldTransform>(_k.victim))
+      {
+        // G1: broadcast the kill VFX at the death spot BEFORE the respawn teleports
+        // the hull away. The victim only got a private EntityDeath (so nobody drops
+        // its respawned ship); this world-anchored pop is how the KILLER and
+        // bystanders finally see the kill.
+        m_sessions.Broadcast(Msg::ExplosionAt{ pt->position.x, pt->position.y, pt->position.z, /*scale*/ 2 });
         GameLogic::DropPlayerCargo(m_world, _k.victim, pt->position, m_lootRng);
+      }
       GameLogic::RespawnAtNearestStation(m_world, _k.victim);
       m_world.Remove<GameLogic::ActiveOrder>(_k.victim);   // I1: respawn clean of any standing order
 

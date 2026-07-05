@@ -19,6 +19,7 @@
 #include "Renderer.h"
 #include "GraphicsCore.h"
 #include "Scene3D.h"
+#include "SceneGlow.h"
 #include "Camera.h"
 
 #include "GameScene.h"
@@ -116,9 +117,21 @@ void gfx_canvas_size(int* w, int* h)
 void gfx_render_3d_scene(void)
 {
 	using Neuron::Graphics::Core;
+	using Neuron::Graphics::SceneGlow;
 
 	const CanvasPlacement cp = canvasPlacement();
-	Neuron::Graphics::Scene3D::RenderModels(Core::GetRenderTargetView(), Core::GetDepthStencilView(),
+
+	// H4 (opt-in): when glow is on, redirect the scene into SceneGlow's offscreen target,
+	// then blur + composite it onto the back buffer. When off, Begin() returns nullptr and
+	// the scene renders straight to the back buffer exactly as before.
+	ID3D11RenderTargetView* backRtv = Core::GetRenderTargetView();
+	ID3D11RenderTargetView* sceneRtv = SceneGlow::Begin();
+	ID3D11RenderTargetView* target = sceneRtv ? sceneRtv : backRtv;
+
+	Neuron::Graphics::Scene3D::RenderModels(target, Core::GetDepthStencilView(),
 											Neuron::Client::MainCamera(), cp.dstX, cp.dstY,
 											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
+
+	if (sceneRtv)
+		SceneGlow::Composite(backRtv);
 }

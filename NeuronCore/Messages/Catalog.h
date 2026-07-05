@@ -21,4 +21,5 @@
 #include "Messages/Defs/GalaxyChunks.h"     // GalaxyChunkRequest / GalaxyChunk
 #include "Messages/Defs/TimeSync.h"         // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"        // StrategicSummary (E3 strategic tier)
+#include "Messages/Defs/ExplosionAt.h"      // ExplosionAt (G1 kill VFX broadcast)
 #include "StationProtocol.h"   // StationRequest / StationResponse (REGISTER_MESSAGE'd)

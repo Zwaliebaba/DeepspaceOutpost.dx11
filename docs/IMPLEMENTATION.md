@@ -107,7 +107,7 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `NeuronCore/ClientInput.h` | `Net::ClientInput` alias | S7: one catalog name — `Msg::InputCommand` | **Delete alias**, mechanical rename at call sites (keep `NO_MISSILE_TARGET`, moved next to `InputCommand`) |
 | `DeepspaceOutpost/alg_main.h`, `menu.h` | whole headers | Included nowhere | **Delete** |
 | `AGENTS.md:247-248` | trailing `</content></invoke>` XML | Copy-paste artifact | **Delete** |
-| `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H) |
+| `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H). *Confirmed 2026-07-05 when scoping H2/H4: they instance and glow the **solid** meshes, not a wireframe — the earlier "instanced wireframe" plan wording is superseded (Track H).* |
 | `DeepspaceOutpost/SceneMeshes.cpp`, `threed.cpp` + the `planet_render_style` global (`elite.*`, options window, `newkind.cfg`) and `ModelDraw::style`/`colour2` | Multi-style planet renderer (Wireframe/Green/SNES/Fractal) | Only the classic green ever shipped; `ModelDraw::style`/`colour2` had no reader | ✅ **Removed 2026-07-04** (planet is one lit green sphere) |
 | `DeepspaceOutpost/config.h`, `alg_data.h` | whole headers | `alg_data.h` = retired Allegro datafile indexes (unused); `config.h` = the `GFX_ALLEGRO` (dead) + `RES_800_600` macros, the latter still selecting `gfx.h`'s `GFX_SCALE=2` block | ✅ **Removed 2026-07-04** (`RES_800_600` moved to a DeepspaceOutpost target compile definition; every `#include` deleted) |
 | `DeepspaceOutpost/file.cpp`, `file.h` + `GameData/newkind.cfg`, `newscan.cfg` | the local config subsystem (`read/write_config_file`, `read_scanner_config_file`, `get_filename`) | The MMO client keeps no on-disk settings; `write_config_file`/`get_filename` callers were the Save-Settings row and the dead `set_commander_name` | ✅ **Removed 2026-07-04** — the load-bearing values it read (scanner/compass HUD positions, frame-speed default) are baked into `elite.cpp`; the startup `read_config_file()` and the Save-Settings row are gone |
@@ -1143,7 +1143,7 @@ pipeline" thesis. C (identity) is a hard prerequisite; B4 (persistence) is
 required by F2–F4 to be meaningful; **Track I (I1–I3) precedes F1**, which
 reuses its `UnitOrder` protocol and selection/command UX.
 
-### F1 — First ordered unit: the escort (#12) — **M**
+### F1 — First ordered unit: the escort (#12) — **M** — ✅ **core done 2026-07-05** (server + tests; persistence deferred)
 
 *Note (2026-07-04): the order infrastructure this item originally carried —
 `UnitOrder`/`UnitOrderAck`, the validation rules, the `OrderSystem`
@@ -1165,6 +1165,48 @@ itself, reusing all of it.*
   handles "select escort, right-click/tap a target".
 - Escorts replicate, fight, die and drop loot through every existing path;
   they persist (B4) as owned entities.
+
+*As built (2026-07-05) — ✅ core, headless-tested (GameLogic verified locally on
+Linux; the Server wiring reuses the tested helpers and rides CI):*
+
+- **Purchase.** `Net::EquipItem::EscortFighter = 7` (`StationProtocol.h`). Because an
+  escort is a UNIT, not a fitted boolean, it does NOT go through `EquipPlayer`;
+  `GameServer::HandleStationRequest` intercepts `Equip{EscortFighter}` and calls
+  `HandleBuyEscort`, which validates through the pure `GameLogic::BuyEscort` (docked +
+  the per-player `Cfg::MAX_ESCORTS = 4` cap + `ESCORT_FIGHTER_PRICE = 50000` (5000.0
+  Cr), charging on success), then `GameLogic::SpawnEscort` + `m_sessions.GrantOwnership`
+  so the escort is `Owner`-stamped, indexed, and **reaps with the session** (the C
+  ownership path). The reply reuses the `Equip` `StationResponse`.
+- **Spawn (`GameLogic/EscortSpawn.h`, pure/tested).** A Viper NPC with `Team::Player`,
+  `autoEngage = true`, `NpcFlightCaps`, `Combatant`/`ShipGear`, and a default
+  `ActiveOrder{Escort → owner}` — but **no `AiPilot`**, so `StepOrders` (not `StepAi`)
+  drives it: no new steering, exactly the §13.2.3-2 promise.
+- **Orders.** I1's `UnitOrder` unchanged: the validator already accepts `Escort` (a
+  `WorldTransform` target) and any owned unit, and `StepOrders`' Escort case already
+  follows the owner's live position without arrive-stopping. The client needs zero new
+  UX — I2/I3 select-and-order the escort as another owned unit.
+- **Engagement discipline.** `StepCombat` gained `DisciplinedShooter` (Police **and**
+  Player teams) so an auto-engaging escort fires only on legitimate hostiles
+  (`PoliceMayEngage`: pirates + wanted) — without it a `Team::Player` auto-shooter would
+  open up on police, traders and the station. `StepOrders`' "wants to fire" list is now
+  gated on `!autoEngage`, so the escort fires via the NPC `StepCombat` path (its Attack
+  order just sets `focus`) while the player's own ship keeps the command-fire path — no
+  double-fire.
+- **Crime.** Order-time `FlagIfCrime` now attributes to `_session.entity` (the owner's
+  ship), not the ordered unit — so ordering an escort to attack a protected victim makes
+  **you** wanted, not the drone (the "true owner attribution" I1 flagged).
+- **Tests** (`Tests/GameLogic/EscortTests.cpp`, 11 cases; the full affected-system suite
+  — 172 tests — stays green): purchase gate (undocked / broke / at-cap / success+charge),
+  spawn loadout (owned, `Team::Player`, auto-engage, Escort order, no `AiPilot`), follow
+  + hold-when-owner-gone, engages pirates but **not** traders/police, and the
+  wantsFire-gating both ways.
+- **Deferred (documented):** (a) **persistence** of escorts — `PlayerPersistState` is
+  single-ship today, so surviving-escort save/load is a net-new B4 extension (an owned-
+  units list + re-grant on load); until then an escort reaps on disconnect and is
+  re-bought. (b) **Respawn re-target** — after the owner dies its escorts hold (their
+  Escort target is the dead hull) until re-ordered; they still auto-defend. (c) Escorts
+  can't help against **wanted players** (same `Team::Player`, so allies) — cross-owner
+  PvP assistance waits on F5 factions. (d) The BotClient escort-fleet load script.
 
 ### F2 — Fog of war (#14) — **M**
 
@@ -1222,21 +1264,49 @@ Wire: `PlayerInfo` successor already carries `playerId` (C); add
 
 ## 9. Track G — MMO polish & deferred gameplay
 
-### G1 — Kill VFX broadcast (#18a) — **XS**
+### G1 — Kill VFX broadcast (#18a) — **XS** — ✅ **done 2026-07-05**
+
+*As built: `Msg::ExplosionAt` (`0x1005`, Wire/Event/Gameplay, S→C broadcast:
+`x,y,z i64` + `scale u8`), broadcast by `GameServer::OnEntityKilled` at a player's
+death position BEFORE the respawn teleports the hull — so the killer/bystanders
+finally see the kill (the victim still gets its private `EntityDeath`). The client
+plays the existing world-anchored debris burst (`spawn_explosion_at`, a Viper-hull
+pop) + explosion cue. Round-trip + catalog-governance tested headless.*
+
 
 New `ExplosionAt` (`0x1005`, Wire/Event/Gameplay/S→C broadcast:
 `x,y,z i64`, `scale u8`) published on *player* deaths (NPC deaths already
 broadcast `EntityDeath`). The killer finally sees the kill. Client plays
 the existing debris VFX world-anchored.
 
-### G2 — Missile-lock validation (#18b, closes D6) — **XS**
+### G2 — Missile-lock validation (#18b, closes D6) — **XS** — ✅ **done 2026-07-05**
+
+*As built: `ResolveFireWeapon`'s Missile case now gates on `MissileTargetValid`
+(the locked index must be a live, distinct COMBATANT within `MISSILE_LOCK_RANGE`
+6000 and the forward hemisphere — spoofed/dead/out-of-range/behind/self refused)
+and `SpendMissile` (consumes an `Equipment` rack round; refuses when empty) BEFORE
+spawning. A refused launch spends nothing, silently — the client's optimistic
+decrement is corrected by `PlayerStatus`. Also closed a second hole: the server
+never checked the rack at all before. Unit-tested (the validation matrix + rack
+spend). NPC missiles are unchanged.*
+
 
 At launch, validate `missileTarget` with the same gates the laser has:
 live entity (`LiveEntity`), within a lock range (6000) and a generous
 forward cone at *lock time*; otherwise the launch is refused silently
 (missile not spent). Headless tests for spoofed indices.
 
-### G3 — Chat (#18c, §14 preamble) — **S–M**
+### G3 — Chat (#18c, §14 preamble) — **S–M** — ✅ **core done 2026-07-05** (server-persisted mute deferred)
+
+*As built: `GameLogic/ChatModeration.h` (pure/tested) — a per-session `ChatLimiter`
+(≤6 lines / ~10 s window) + `SanitizeChat` (strip control bytes, keep UTF-8, cap,
+trim). `GameServer::HandleChat` rate-limits (drop + a system "too fast" warning),
+sanitises, stamps the authenticated `sender = playerId`, and rebroadcasts to the
+roster. Client: an 8-line scrollback (muted senders dropped), Enter-opened one-line
+input off the WM_CHAR ring, and a client-side `/mute <id>` / `/unmute <id>` set;
+a playerId→name map from `PlayerInfo`. Deferred: server-persisted mute list (B4),
+AOI-scoped delivery (roster-wide is a superset).*
+
 
 Server: relay `Chat{sender, text}` (already registered, `0x0300`) from a
 session to AOI-plus-roster recipients, with server-side rate limit
@@ -1246,7 +1316,18 @@ HUD, and a client-side **mute list** (by `PlayerId` — designed in from day
 one per §13.2.2, persisted server-side with the player record; the client
 keeps no local config file).
 
-### G4 — Suns & cabin heat (§14 preamble; deferred G8+ payoff) — **M**
+### G4 — Suns & cabin heat (§14 preamble; deferred G8+ payoff) — **M** — ✅ **done 2026-07-05**
+
+*As built: `GameLogic/CabinHeatSystem.h` (pure/tested) — a `Sun` body per system
+(placed by `WorldBuilder`, offset from the planet) + a per-ship `CabinHeat`.
+`StepCabinHeat` warms a ship in a star's Chebyshev heat band, cools it outside, and
+— held at max — drains the energy bank directly (heat bypasses shields, the legacy
+zero-altitude analogue) until it dies; a fuel-scoop ship skimming the band tops its
+tank (the scoop's long-missing payoff). Spawn grace respected. `PlayerStatus` gains
+`cabinTemp` (pre-launch field add); the client mirrors it into `PlayerCaps().cabTemp`,
+reviving the cabin-temp HUD dial `A1` deleted. Unit-tested (rise/fall/clamp,
+cook-to-death, spawn-grace, scoop gains/limits/no-scoop/out-of-band, no-suns).*
+
 
 Server-side: each system gains a sun entity (`NetType −2` already reserved,
 rendered today by the billboard path) placed by `GalaxyGen`; a
@@ -1271,6 +1352,40 @@ the ARCHITECTURE.md change-control rule.
 
 ## 10. Track H — Rendering (#13) — **M**, parallel any time
 
+*Status 2026-07-05: **H1 ✅**, **H3 (LOD decision) ✅ core**, and **H2 / H4 ✅ built
+(opt-in, in-app visual verification pending)**.*
+
+- *H1 / H3: `DeepspaceOutpost/RenderTable.h` is the `NetType → {kind, glyphId,
+  paletteRow}` table (`RenderFor`), consumed by `draw_ship` in place of the type
+  if-chain, plus the iconic-LOD range decision (`ShouldDrawAsGlyph`); both
+  unit-tested in `Tests/NeuronClient/RenderTableTests.cpp`. A distant hull now
+  draws as a contact glyph (a deferred blip; a 2–6-line vector glyph is the
+  refinement).*
+- ***H2 — solid-mesh instancing.*** *Reframed from "wireframe" to match the settled
+  art direction: the retro-vector look is the **solid low-poly meshes** (the CPU
+  wireframe was removed 2026-07-04), so H2 instances **those** — identical pixels,
+  fewer draw calls, not a new look. `Scene3D` groups each frame's ship models by
+  hull type and issues one `DrawIndexedInstanced` per type from the existing
+  immutable per-type mesh, feeding a per-instance stream (world matrix + tint) built
+  by the pure `graphics/InstanceData.h` packer. Opt-in (`SetInstancingEnabled`,
+  default off → the proven per-model path); the "Ship Instancing" option toggles it.
+  The instance packer is unit-tested (`Tests/NeuronClient/InstanceDataTests.cpp`);
+  the DX11 draw path is CI-compile-verified and needs one in-app look to confirm
+  ships render identically.*
+- ***H4 — emissive glow over the solids.*** *`graphics/SceneGlow.h/.cpp`: the scene
+  renders into an offscreen target, a separable Gaussian (the `GaussianKernel`
+  weights in `LineExpand.h`, baked into `blurPS.hlsl` and unit-tested) blurs it, and
+  `compositePS.hlsl` adds sharp + glow·intensity onto the back buffer. Opt-in
+  (`SetEnabled`, default off); the "Ship Glow" option toggles it. Full-screen post
+  passes reuse `postVS.hlsl`. CI-compile-verified; the glow strength/look wants one
+  in-app tuning pass. **GPU-side explosion debris (the third H4 bullet) stays
+  deferred** — it needs an in-app particle session.*
+
+*The DX11/HLSL glue for H2/H4 has no CI oracle beyond "it compiles" (the sandbox
+can't run the client), so both ship default-off behind their own options — the
+default frame is byte-for-byte the pre-H2/H4 path. The H1 table remains the seam the
+render descriptors plug into.*
+
 Per §13.2.1, in order:
 
 1. **NetType indirection table** first (it is the seam everything else
@@ -1280,21 +1395,24 @@ Per §13.2.1, in order:
    data row. (The `draw_ship` seam is already simpler: the Solid/Wireframe
    toggle and the multi-style planet branch were removed 2026-07-04 — ships
    take the single solid mesh path and the planet is one green sphere.)
-2. **Batched instanced wireframe:** one persistent line-list vertex buffer
-   per hull type, one per-frame instance buffer (transform + palette tint),
-   one `DrawIndexedInstanced` per hull type. This work converts
-   `ReplicatedScene`/`SceneProjection`/`Scene3D` to DirectXMath as it goes
-   — the S6 math-stack retirement rides this track for the live path.
+2. **Batched instanced solid meshes ✅ (opt-in):** the immutable per-hull
+   solid mesh already lives in `Scene3D` (from the GPU migration); H2 adds a
+   per-frame per-instance stream (world matrix + tint) and one
+   `DrawIndexedInstanced` per hull type instead of one `DrawIndexed` per ship.
+   Same solid geometry, same pixels — a draw-call win, not a new look. (The
+   original "line-list wireframe" framing is retired with the CPU wireframe;
+   see the H2 status note above.)
 3. **Client-side culling + iconic LOD:** grid/range cull (client may reuse
    `Spatial::Grid`), and beyond a range threshold draw the 2–6-line glyph
    from the NetType table instead of the mesh — the tactical-digital look
    *and* the LOD strategy; also the render path for E3's strategic
    contacts.
-4. **Post chain:** lines to an emissive target, blur, composite; screen-
-   space quad expansion in the vertex shader (4 verts/segment via
-   `SV_VertexID`) so line weight is a style parameter. GPU-side explosion
-   debris seeded by `EntityDeath` (E6: client GPU only — the server stays
-   headless).
+4. **Post chain ✅ (opt-in, glow):** the solid scene to an emissive target,
+   separable Gaussian blur, additive composite (`SceneGlow` + `postVS` /
+   `blurPS` / `compositePS`). The screen-space line-expansion sub-step is moot
+   now the look is solid, not wireframe. **GPU-side explosion debris seeded by
+   `EntityDeath` (E6: client GPU only — the server stays headless) stays
+   deferred** to an in-app particle session.
 
 *Acceptance:* draw calls O(hull types) at any entity count (D5's 100-bot
 soak doubles as the render stress scene); legacy screens (charts, station
@@ -1437,7 +1555,7 @@ card shows kind+range, not name/legal-status yet (needs the roster join — I3/I
 Behaviour needs an in-app run to verify pixel-accuracy of picking and card
 placement (CI compiles it but cannot exercise the DX11 client).
 
-### I3 — Command UX: contextual orders, move gizmo, radial menu — **M**
+### I3 — Command UX: contextual orders, move gizmo, radial menu — **M** — ✅ **done** (core 2026-07-04; residues 2026-07-05)
 
 - RMB click = contextual default order per `docs/interaction.md` §3.3
   (empty space → Move gizmo; enemy → Attack; station → Dock; canister →
@@ -1479,7 +1597,7 @@ ship currently defaults to Attack and the server enforces the crime rules. Needs
 in-app run to verify unproject pixel-accuracy and marker placement (CI compiles the
 client but cannot exercise it).
 
-### I4 — Ability bar & HUD restructure — **S**
+### I4 — Ability bar & HUD restructure — **S** — ✅ **done** (core 2026-07-04; nav strip 2026-07-05)
 
 Persistent non-modal GuiOverlay bar (the overlay must stop suppressing game
 input for non-modal elements): Stop / Missile / ECM / Energy bomb / Escape
@@ -1510,7 +1628,7 @@ navigate); (c) **Launch/undock** stays on the docked screen's own UI (the flight
 is flight-only). Needs an in-app run to verify bar placement/coordinate-space and
 that click regions line up with the drawn boxes.
 
-### I5 — Touch & gesture layer — **M**
+### I5 — Touch & gesture layer — **M** — 🟡 **core done** (2026-07-04; recognizer + gestures 2026-07-05; camera pan pending)
 
 Full `WM_POINTER` multi-pointer tracking (replacing the single-pointer→LMB
 stub) + a recognizer emitting device-neutral events: tap, double-tap,
@@ -1540,7 +1658,7 @@ plumbing the controller doesn't expose yet), **long-press** → radial menu / gi
 device-neutral recognizer these need is the follow-up; this increment lands the one
 gesture (pinch) with a clean, existing mapping.
 
-### I6 — Pointer charts — **S–M**
+### I6 — Pointer charts — **S–M** — ✅ **done** (core 2026-07-04/05; pan/zoom + info card 2026-07-05; name-search field pending)
 
 Charts become pick surfaces: tap/click a system selects it (info card:
 economy/government/distance/fuel cost/in-range), a **Hyperspace** button on
@@ -1668,6 +1786,52 @@ alongside the RMB Dock order). The `in.fire`/`s_frameFire` command-builder path 
 vestigial (always false); harmless, left in place. Doc truth pass done (this note, M6,
 ARCHITECTURE.md §7).
 
+### Track I residue closure (2026-07-05)
+
+The I2–I6 "core" increments left a documented residue list (the full move gizmo,
+the radial menu, clean-player friction, the nav strip, the touch gesture recognizer,
+and the chart pan/zoom + info card). Those are now landed. Because the Linux CI
+sandbox cannot compile or run the DX11 client (MSVC/DX11/WinRT), the strategy was
+**headless-tested cores + carefully pattern-matched glue**: every piece of logic that
+*could* be tested was extracted into pure, dependency-free headers under
+`NeuronClient/input/` and pinned by the NeuronClient test suite; the DX11/Win32 glue
+that wires them into the client is **compile-verified via the core seam only** and
+still needs an in-app run to confirm pixel-accuracy and gesture feel.
+
+- **Pure cores (headless GoogleTest, 30 cases — verified locally on Linux + CI):**
+  `input/GestureRecognizer.h` (device-neutral multi-pointer state machine: tap,
+  double-tap, long-press, drag, two-finger pan, pinch — the I5 piece the plan flagged
+  as "CI never runs"), `input/OrderMenu.h` (contextual default order + radial-menu
+  legal set + clean-player Attack-friction, over the wire `OrderKind`), and
+  `input/MoveGizmo.h` (ray∩plane on the camera-up command plane, grazing/too-far
+  clamp, elevation along the normal, Chebyshev clamp to the server Move reach).
+- **I3:** the full move gizmo (camera-up plane; a vertical RMB drag sets the elevation
+  stem; `draw_move_gizmo` renders the depth-faded plane ring + route line + stem +
+  marker), the RMB-hold **radial menu** (`open_radial_menu`/`radial_slice_at`/
+  `radial_commit` + `draw_radial_menu`), and **clean-player Attack-friction** (dispatch
+  routes through `OrderMenu::DefaultContextOrder`, so a click on a lawful player is
+  Approach; Attack is menu-only, crime still owner-attributed server-side). The I2 info
+  card is enriched via the roster join (player name + CLEAN/WANTED).
+- **I4:** the top-right **screen-nav strip** (Chart/Status/Inventory) opening the GUI
+  windows by pointer, non-modal, camera-select-safe (`nav_strip_button_at` gates both
+  CameraRig branches); F-keys stay as accelerators.
+- **I5:** the recognizer is wired into `input_win.cpp`'s `WM_POINTER` path (one clock
+  for Push+Tick); the proven one-finger→mouse + pinch→wheel synthesis stays, and the
+  new gestures are surfaced — **long-press → touch radial menu**, **double-tap → focus**,
+  **two-finger pan** exposed via `input_take_pan`. Widget ergonomics: taller touch rows
+  in Market/Equip. *Still open:* the two-finger camera **pan** is exposed but not
+  consumed (the Orbit controller has no translate axis — a camera-math change to verify
+  in-app), and the full widget drag-scroll / hold-repeat steppers.
+- **I6:** chart **wheel/pinch zoom** (`ChartWindow::Update`; CameraRig yields the wheel
+  when a GUI window owns input) and **drag-pan** (release-applied), plus an **info card**
+  with distance / fuel / IN RANGE from new render-free `ChartData` helpers. *Still open:*
+  the pointer find-by-name **search field** (the F-key name search is the accelerator).
+
+Net: the mouse command loop (select → order via gizmo/menu/ability-bar/nav-strip, jump
+from the chart) is complete in code; the touch loop has its gestures; the remaining
+residues (camera pan, widget drag-scroll/steppers, chart name-search) are the ones whose
+correctness genuinely depends on an in-app run and are called out above.
+
 ---
 
 ## 12. New message-id allocation (summary)
@@ -1726,18 +1890,21 @@ Three items are genuinely open and block only their own bullets:
 5. **M5 "Command of one"** — 🟡 I1–I4 core ✅: the order protocol + `OrderSystem`
    restore ship movement (I1, CI-green), pointer selection/picking (I2), the RMB
    command UX + move-plane + ack feedback (I3), and the non-modal ability bar (I4).
-   Mouse-playable end to end. Residues folded forward: the full move gizmo +
-   RMB-hold radial menu, clean-player Attack-friction, and the screen-nav strip
-   (I3/I4 deferrals); formal keyboard retirement is I7. The I2–I4 client UX is
-   compile-verified only — it needs an in-app run to confirm pixel-accuracy.
-6. **M6 "Touch-complete"** — 🟡 I5–I7 core ✅: pointer charts (I6, click-select +
-   on-chart hyperspace), the touch layer (I5, multi-pointer + pinch-zoom; two-finger
-   pan / long-press / double-tap deferred), and the I7 doc pass (key DELETION held
-   until the pointer UX is verified in-app — the keys are the safety net). Mouse
-   path complete; touch is compile-verified/inspection-only. Track I's remaining
-   residues: the full move gizmo + radial menu (I3), the widget ergonomics pass and
-   full gesture recognizer (I5), chart pan/zoom + info card (I6), and the actual
-   key-handler removal (I7).
+   Mouse-playable end to end. **Residues now landed (2026-07-05):** the full move
+   gizmo + RMB-hold radial menu + clean-player Attack-friction (I3) and the screen-nav
+   strip (I4), on headless-tested cores (`NeuronClient/input/*`); formal keyboard
+   retirement was already I7. The I2–I4 client GLUE is compile-verified via the core
+   seam — it needs an in-app run to confirm pixel-accuracy.
+6. **M6 "Touch-complete"** — 🟡 I5–I7 ✅ (core + residues): pointer charts (I6,
+   click-select + on-chart hyperspace + **wheel-zoom + drag-pan + distance/fuel info
+   card**), the touch layer (I5, multi-pointer + pinch-zoom + the **device-neutral
+   gesture recognizer** driving **long-press → radial menu**, **double-tap → focus**,
+   two-finger pan exposed), and the I7 key deletion (done). Mouse path complete; the
+   touch path has its gestures but is inspection-only. **Genuinely-remaining residues**
+   (correctness depends on an in-app run): two-finger camera **pan** consumption (the
+   Orbit controller needs a translate axis), widget **drag-scroll / hold-repeat
+   steppers**, and the chart **find-by-name search field** (F-key search is the
+   accelerator).
 7. **M7 "The 4X turn"** — F1–F5, G4, with H landing in parallel (F1 reuses
    I1's protocol and I2/I3's UX verbatim).
 8. **M8 "Missions"** — G5, after M2 has soaked in production.

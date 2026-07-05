@@ -11,6 +11,7 @@
 #include "input_win.h"      // input_mouse_state for chart click hit-testing
 #include "ChartData.h"      // render-free galactic-chart data source
 
+#include <cmath>        // std::exp for the chart zoom
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -22,6 +23,8 @@
 // (which define macros that don't mix with the GUI headers).
 extern int anti_alias_gfx;
 extern int scene_shading;
+extern int scene_instancing;
+extern int scene_glow;
 extern int hoopy_casinos;
 extern int instant_dock;
 
@@ -138,6 +141,8 @@ namespace
         // these toggles apply for the session only.
         addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
+        addCycle("Ship Instancing", &scene_instancing, {"Off", "On"});
+        addCycle("Ship Glow", &scene_glow, {"Off", "On"});
         addCycle("Planet Desc.", &hoopy_casinos, {"BBC", "MSX"});
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});
 
@@ -298,7 +303,7 @@ namespace
         : GuiWindow("Market")
       {
         SetTitle("Market Prices");
-        Centre(this, 560, 360);
+        Centre(this, 560, 480);   // I5: taller for the 22px touch rows (auto-grows to fit)
       }
 
       void Create() override
@@ -312,7 +317,11 @@ namespace
         const int buyX = infoX + infoW + 6;   // 376
         const int sellX = buyX + 86;           // 462
         const int actW = 80;
-        const int rowH = 16;
+        // I5 ergonomics: taller rows / action buttons for touch spacing. The window
+        // auto-grows to fit the buttons (RegisterButton), so the extra height is
+        // absorbed; the Centre() below seeds a matching size.
+        const int rowH = 22;
+        const int rowBtnH = 20;
 
         char hdr[128];
         snprintf(hdr, sizeof(hdr), "%-15s %-2s %7s %6s %6s", "PRODUCT", "U", "PRICE", "SALE", "HOLD");
@@ -325,17 +334,17 @@ namespace
         for (int i = 0; i < count; ++i)
         {
           auto* info = NEW LabelButton();
-          info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, 14, "");
+          info->SetProperties("MktRow" + std::to_string(i), infoX, y, infoW, rowBtnH, "");
           RegisterButton(info);
           m_rows.push_back(info);
 
           auto* buy = NEW TradeButton(i, true);
-          buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, 14, "Buy");
+          buy->SetProperties("Buy" + std::to_string(i), buyX, y, actW, rowBtnH, "Buy");
           RegisterButton(buy);
           m_buttonOrder.push_back(buy);
 
           auto* sell = NEW TradeButton(i, false);
-          sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, 14, "Sell");
+          sell->SetProperties("Sell" + std::to_string(i), sellX, y, actW, rowBtnH, "Sell");
           RegisterButton(sell);
           m_buttonOrder.push_back(sell);
 
@@ -540,11 +549,11 @@ namespace
           m_shownIndices.push_back(idx);
 
           auto* row = NEW EquipButton(idx);
-          row->SetProperties("Eq" + std::to_string(idx), x, y, w, 14, "");
+          row->SetProperties("Eq" + std::to_string(idx), x, y, w, 20, "");   // I5: taller touch row
           RegisterButton(row);
           m_rows.push_back(row);
           m_buttonOrder.push_back(row);
-          y += 16;
+          y += 24;   // I5 ergonomics: 24px row pitch for touch spacing
         }
 
         y += 6;
@@ -662,7 +671,23 @@ namespace
         SetTitle(_kind == ChartData::SHORT_RANGE ? "Short Range Chart" : "Galactic Chart");
         if (GuiButton* b = GetButton("ChartMode"))
           b->SetCaption(ToggleCaption());
+        m_zoom = 1.0f; m_panX = m_panY = 0.0f;   // I6: reset the view on a preset switch
         ParkCursorOnCurrent();
+      }
+
+      // I6 wheel/pinch zoom: the chart consumes the wheel while it is the open window
+      // (CameraRig leaves it alone when a GUI window owns input). Exponential so each
+      // notch is a constant ratio; clamped to a sane range.
+      void Update() override
+      {
+        const float w = input_take_mouse_wheel();
+        if (w != 0.0f)
+        {
+          m_zoom *= std::exp(0.12f * w);
+          if (m_zoom < 0.6f) m_zoom = 0.6f;
+          if (m_zoom > 6.0f) m_zoom = 6.0f;
+        }
+        GuiWindow::Update();
       }
 
       void ToggleKind()
@@ -676,18 +701,35 @@ namespace
         Canvas::EclRemoveWindow(m_name);   // let the break-pattern jump animation show
       }
 
-      void MouseEvent(bool /*lmb*/, bool /*rmb*/, bool up, bool /*down*/) override
+      void MouseEvent(bool /*lmb*/, bool /*rmb*/, bool up, bool down) override
       {
-        if (!up)
-          return;   // act on the click release, like the old chart pointer
-
         int mx = 0, my = 0;
         bool l = false, r = false;
         input_mouse_state(mx, my, l, r);
-
         const Xform x = MapTransform();
-        if (mx < x.l || mx > x.r || my < x.t || my > x.b)
-          return;   // outside the map area (e.g. the data panel) - ignore
+        const bool inMap = (mx >= x.l && mx <= x.r && my >= x.t && my <= x.b);
+
+        if (down)
+        {
+          // Record the press so the release can tell a click (select) from a drag
+          // (pan). Only presses that begin on the map arm pan/select.
+          m_downMx = mx; m_downMy = my; m_haveDown = inMap;
+          return;
+        }
+        if (!up || !m_haveDown)
+          return;
+        m_haveDown = false;
+
+        int ddx = mx - m_downMx; if (ddx < 0) ddx = -ddx;
+        int ddy = my - m_downMy; if (ddy < 0) ddy = -ddy;
+        if (ddx > 6 || ddy > 6)
+        {
+          m_panX += static_cast<float>(mx - m_downMx);   // I6 drag-pan (release-applied)
+          m_panY += static_cast<float>(my - m_downMy);
+          return;
+        }
+        if (!inMap)
+          return;   // a click that ended off the map (e.g. on the data panel)
 
         const int cx = static_cast<int>((mx - x.ox) / x.scale);
         const int cy = static_cast<int>((my - x.oy) / x.scale);
@@ -810,9 +852,29 @@ namespace
           py += 16;
         }
 
+        // I6 info card: distance + fuel cost + reachability (the fuel gauge unit is
+        // tenths of a light year; show it as N.N LY).
+        const int distTenths = ChartData::SelectedDistanceTenthsLy();
+        if (distTenths >= 0)
+        {
+          py += 6;
+          g_gameFont.SetColor(210, 210, 210, 255);
+          snprintf(line, sizeof(line), "Distance: %d.%d LY", distTenths / 10, distTenths % 10);
+          g_gameFont.DrawText2D(px, py, 11, line); py += 16;
+          const int fuel = ChartData::FuelTenths();
+          snprintf(line, sizeof(line), "Fuel:     %d.%d LY", fuel / 10, fuel % 10);
+          g_gameFont.DrawText2D(px, py, 11, line); py += 16;
+          if (ChartData::SelectedInRange())
+            g_gameFont.SetColor(120, 220, 120, 255);
+          else
+            g_gameFont.SetColor(230, 110, 110, 255);
+          g_gameFont.DrawText2D(px, py, 11, ChartData::SelectedInRange() ? "IN RANGE" : "OUT OF RANGE");
+        }
+
         // A short hint under the data panel.
         g_gameFont.SetColor(150, 160, 180, 255);
-        g_gameFont.DrawText2D(px, m_y + m_h - 54, 10, "Click a system to select");
+        g_gameFont.DrawText2D(px, m_y + m_h - 68, 10, "Click a system to select");
+        g_gameFont.DrawText2D(px, m_y + m_h - 54, 10, "Drag to pan, wheel to zoom");
         g_gameFont.DrawText2D(px, m_y + m_h - 40, 10, "HYPERSPACE to jump");
       }
 
@@ -838,11 +900,13 @@ namespace
           b = t + 40.0f;
         const float sx = (rr - l) / static_cast<float>(ChartData::PLOT_W);
         const float sy = (b - t) / static_cast<float>(ChartData::PLOT_H);
-        const float s = sx < sy ? sx : sy;
+        const float fit = sx < sy ? sx : sy;
+        const float s = fit * m_zoom;   // I6 zoom
         Xform x;
         x.scale = s;
-        x.ox = l + ((rr - l) - ChartData::PLOT_W * s) * 0.5f;
-        x.oy = t + ((b - t) - ChartData::PLOT_H * s) * 0.5f;
+        // Centre the (zoomed) canvas in the map area, then offset by the pan (I6).
+        x.ox = l + ((rr - l) - ChartData::PLOT_W * s) * 0.5f + m_panX;
+        x.oy = t + ((b - t) - ChartData::PLOT_H * s) * 0.5f + m_panY;
         x.l = l;
         x.t = t;
         x.r = rr;
@@ -866,6 +930,13 @@ namespace
       }
 
       int m_kind;
+
+      // I6 pointer pan/zoom: a zoom factor and a pan offset (window px) layered onto
+      // the fit transform; the down-point lets a body drag pan while a click selects.
+      float m_zoom = 1.0f;
+      float m_panX = 0.0f, m_panY = 0.0f;
+      int   m_downMx = 0, m_downMy = 0;
+      bool  m_haveDown = false;
   };
 
   void ChartActionButton::MouseUp()

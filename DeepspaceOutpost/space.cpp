@@ -35,6 +35,7 @@
 #include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers
 #include "CameraRig.h"   // the free camera: origin, world->camera transforms
 #include "ReplicationClient.h"
+#include "Vector3i64.h"             // Neuron::Math::Vector3i64 (spawn_explosion_at full def)
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
 #include "Render2D.h"       // native 2D pass the flight HUD now draws straight into
@@ -466,6 +467,22 @@ void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap)
 	memset (&ex.obj, 0, sizeof (ex.obj));
 	ex.obj.type = type;
 	ex.obj.flags = FLG_DEAD;          // draw_ship promotes this to an animated explosion
+	set_init_matrix (ex.obj.rotmat);
+	s_explosions.push_back (ex);
+}
+
+// G1: start a world-anchored explosion at an absolute point, from an ExplosionAt
+// broadcast (a player kill the killer/bystanders should see, decoupled from the
+// respawned victim entity). Uses a fighter hull for the debris mesh; the server's
+// `scale` is a size hint the legacy animation doesn't parameterise, so it is unused
+// for now beyond gating a sane minimum.
+void spawn_explosion_at (const Neuron::Math::Vector3i64& world_pos, int /*scale*/)
+{
+	ReplicatedExplosion ex;
+	ex.worldPos = world_pos;
+	memset (&ex.obj, 0, sizeof (ex.obj));
+	ex.obj.type = SHIP_VIPER;          // player hulls are Vipers; a fighter-sized pop
+	ex.obj.flags = FLG_DEAD;
 	set_init_matrix (ex.obj.rotmat);
 	s_explosions.push_back (ex);
 }
@@ -1256,10 +1273,10 @@ void display_missiles (void)
 
 
 // I2 info card: a compact readout for the currently SELECTED entity
-// (g_missile_lock_target) - its kind and range - drawn top-left of the flight
-// view. Nothing shows when nothing is selected or the selection is off-screen
-// (out of the AOI); it clears automatically the frame the entity despawns because
-// Sample() then fails. (A richer card - name/legal status - rides I3/I4.)
+// (g_missile_lock_target) - its name (players), kind, legal status and range -
+// drawn top-left of the flight view. Nothing shows when nothing is selected or the
+// selection is off-screen (out of the AOI); it clears automatically the frame the
+// entity despawns because Sample() then fails.
 static void display_selection_info (void)
 {
 	if (g_missile_lock_target == 0xFFFFFFFFu)
@@ -1283,10 +1300,135 @@ static void display_selection_info (void)
 	else if (ts.type < 0)                                   kind = "OBJECT";   // sun etc.
 	else                                                    kind = "SHIP";
 
-	char line[64];
-	snprintf (line, sizeof (line), "TARGET %s  %ld", kind, dist);
 	hud_set_origin (0, 0);
+
+	// Line 1: name (players) or kind; line 2: legal status + range. The roster join
+	// (I3) supplies the player name/wanted; NPCs and objects show their kind only.
+	const char* name = roster_name (g_missile_lock_target);
+	const int   wanted = roster_wanted (g_missile_lock_target);
+
+	char line[64];
+	if (name != nullptr)
+		snprintf (line, sizeof (line), "TARGET %s", name);
+	else
+		snprintf (line, sizeof (line), "TARGET %s", kind);
 	hud_text (16, 16, line, GFX_COL_YELLOW_2);
+
+	const char* legal = (wanted < 0) ? "" : (wanted > 0 ? "WANTED " : "CLEAN ");
+	char line2[64];
+	snprintf (line2, sizeof (line2), "%s%s  %ld", legal, name != nullptr ? kind : "", dist);
+	hud_text (16, 28, line2, (wanted > 0) ? GFX_COL_RED : GFX_COL_GREY_1);
+}
+
+
+// I3 move gizmo (interaction.md §3.4): while an RMB move drag is in progress, draw
+// the command plane through the ship (a depth-faded ring + cross on the camera-up
+// plane), the route line from the ship to the marker, the vertical elevation stem,
+// and the destination marker. State (relative-frame ship / plane normal / base /
+// marker) is set in main.cpp; this only projects and draws it.
+static bool project_relative (double _rx, double _ry, double _rz, double& _sx, double& _sy)
+{
+	struct vector p; p.x = _rx; p.y = _ry; p.z = _rz;
+	camera_view_point (&p);
+	if (p.z <= 0.0)
+		return false;
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	return Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera(),
+		p.x, p.y, p.z, static_cast<int>(sz.Width), static_cast<int>(sz.Height), _sx, _sy);
+}
+
+void draw_move_gizmo (void)
+{
+	if (!g_gizmo_active || !camera_rig_ready())
+		return;
+
+	hud_set_origin (0, 0);
+
+	// Two in-plane axes perpendicular to the plane normal, for the grid.
+	struct vector n; n.x = g_gizmo_normal[0]; n.y = g_gizmo_normal[1]; n.z = g_gizmo_normal[2];
+	struct vector ref; ref.x = 0; ref.y = 0; ref.z = 0;
+	if (fabs (n.y) < 0.9) ref.y = 1.0; else ref.x = 1.0;
+	struct vector e1, e2;
+	// e1 = normalize(ref x n); e2 = n x e1
+	e1.x = ref.y * n.z - ref.z * n.y;
+	e1.y = ref.z * n.x - ref.x * n.z;
+	e1.z = ref.x * n.y - ref.y * n.x;
+	double e1len = sqrt (e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+	if (e1len < 1e-6) return;
+	e1.x /= e1len; e1.y /= e1len; e1.z /= e1len;
+	e2.x = n.y * e1.z - n.z * e1.y;
+	e2.y = n.z * e1.x - n.x * e1.z;
+	e2.z = n.x * e1.y - n.y * e1.x;
+
+	// Grid radius ~ 18% of the ship->base distance (a readable tactical patch).
+	const double bx = g_gizmo_base[0] - g_gizmo_ship[0];
+	const double by = g_gizmo_base[1] - g_gizmo_ship[1];
+	const double bz = g_gizmo_base[2] - g_gizmo_ship[2];
+	double r = 0.18 * sqrt (bx * bx + by * by + bz * bz);
+	if (r < 200.0) r = 200.0;
+
+	// A ring on the plane around the base (16 segments), depth-faded (dim blue).
+	double px = 0.0, py = 0.0, first_x = 0.0, first_y = 0.0;
+	bool have_prev = false, have_first = false;
+	for (int i = 0; i <= 16; ++i)
+	{
+		const double a = (2.0 * 3.14159265 * i) / 16.0;
+		const double ox = cos (a) * r, oy = sin (a) * r;
+		const double wx = g_gizmo_base[0] + e1.x * ox + e2.x * oy;
+		const double wy = g_gizmo_base[1] + e1.y * ox + e2.y * oy;
+		const double wz = g_gizmo_base[2] + e1.z * ox + e2.z * oy;
+		double sx = 0.0, sy = 0.0;
+		if (project_relative (wx, wy, wz, sx, sy))
+		{
+			if (have_prev)
+				hud_line ((int) px, (int) py, (int) sx, (int) sy, GFX_COL_BLUE_2);
+			px = sx; py = sy; have_prev = true;
+			if (!have_first) { first_x = sx; first_y = sy; have_first = true; }
+		}
+		else
+			have_prev = false;
+	}
+	(void) first_x; (void) first_y;
+
+	// Route line ship -> marker, and the vertical elevation stem base -> marker.
+	double shipSx = 0.0, shipSy = 0.0, baseSx = 0.0, baseSy = 0.0, markSx = 0.0, markSy = 0.0;
+	const bool shipOk = project_relative (g_gizmo_ship[0], g_gizmo_ship[1], g_gizmo_ship[2], shipSx, shipSy);
+	const bool baseOk = project_relative (g_gizmo_base[0], g_gizmo_base[1], g_gizmo_base[2], baseSx, baseSy);
+	const bool markOk = project_relative (g_gizmo_point[0], g_gizmo_point[1], g_gizmo_point[2], markSx, markSy);
+
+	if (shipOk && markOk)
+		hud_line ((int) shipSx, (int) shipSy, (int) markSx, (int) markSy, GFX_COL_CYAN);
+	if (baseOk && markOk)
+		hud_line ((int) baseSx, (int) baseSy, (int) markSx, (int) markSy, GFX_COL_WHITE);
+
+	if (markOk)
+	{
+		const int box = 24;
+		hud_sprite_scaled (IMG_TARGET_LOCK, (int) markSx - box / 2, (int) markSy - box / 2, box, box);
+	}
+}
+
+
+// I3 radial context menu (interaction.md §3.3): a ring of order labels around the
+// press point; the highlighted slice (g_radial_hot) draws bright. State is laid out
+// in main.cpp; this only draws it.
+void draw_radial_menu (void)
+{
+	if (!g_radial_open)
+		return;
+
+	hud_set_origin (0, 0);
+	for (int i = 0; i < g_radial_count; ++i)
+	{
+		const bool hot = (i == g_radial_hot);
+		const int w = 64, h = 18;
+		const int x = g_radial_cx[i] - w / 2;
+		const int y = g_radial_cy[i] - h / 2;
+		hud_rect (x, y, x + w, y + h, hot ? GFX_COL_YELLOW_2 : GFX_COL_GREY_1);
+		const char* label = g_radial_labels[i] ? g_radial_labels[i] : "";
+		const int len = (int) strlen (label);
+		hud_text (x + (w - len * 8) / 2, y + 5, label, hot ? GFX_COL_WHITE : GFX_COL_GREY_3);
+	}
 }
 
 
@@ -1380,7 +1522,11 @@ void update_console (void)
 	// full-view placement, so they must run after the dashboard-anchored draws.
 	display_selection_info();
 	display_order_feedback();
+	draw_move_gizmo();
+	draw_radial_menu();
 	draw_ability_bar();
+	draw_nav_strip();
+	draw_chat();
 
 	hud_set_origin (0, 0);
 }

@@ -37,6 +37,8 @@ int compass_centre_x = 382;
 int compass_centre_y = 407;    /* 22 + 385 */
 
 int scene_shading = 0;   /* 0 = flat (faithful), 1 = lit (opt-in directional shading) */
+int scene_instancing = 0; /* 0 = per-model draw (default), 1 = instanced solid meshes (H2) */
+int scene_glow = 0;      /* 0 = no glow (default), 1 = emissive glow post over the solids (H4) */
 
 int game_over;
 int docked;

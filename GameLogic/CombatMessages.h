@@ -210,6 +210,14 @@ namespace Neuron::GameLogic
 
       case Weapon::Missile:
       {
+        // G2 (closes D6): only launch at a validly locked target (live combatant, in
+        // lock range + forward cone) AND when a round is in the rack. A refused
+        // launch spends NOTHING - no projectile, no rack - and does so silently, as
+        // the client's optimistic decrement expects to be corrected by PlayerStatus.
+        if (!MissileTargetValid(_world, _fw.shooter, _fw.target))
+          return;
+        if (!SpendMissile(_world, _fw.shooter))
+          return;
         // Spawn the homing projectile (its detonation kill is resolved later by
         // StepMissiles). Launching at the Station/Police is a crime at launch,
         // just as the laser hit is.

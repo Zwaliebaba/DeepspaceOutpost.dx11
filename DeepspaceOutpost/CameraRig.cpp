@@ -194,30 +194,37 @@ void camera_rig_update(void)
 	/* Gather this frame's camera input. The GUI overlay owns the pointer and the
 	 * keys while a window is up, and on the non-flight screens (charts, status)
 	 * the arrows belong to the chart crosshair - the camera goes quiet in both
-	 * cases (the wheel is still consumed so notches don't burst through later). */
+	 * cases, and it leaves the wheel unconsumed so an open window (the chart) can
+	 * zoom with it (I6). */
 	Client::CameraInput in{};
 	in.dt = static_cast<float>(dt);
 
 	int mx = 0, my = 0;
 	bool lmb = false, rmb = false;
 	input_mouse_state(mx, my, lmb, rmb);
-	const float wheel = input_take_mouse_wheel();
 
-	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW);
+	/* The camera also goes quiet while a radial command menu is open (I3/I5): the
+	 * finger driving the menu highlight must not orbit or select underneath it. */
+	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW) || g_radial_open;
 	if (!uiOwns)
 	{
+		/* Consume the wheel only when the camera owns input; when a GUI window is up
+		 * (e.g. the chart) it leaves the wheel for that window to zoom with (I6). */
+		in.wheelSteps = input_take_mouse_wheel();
+
 		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
 		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
 		 * once the press has crossed the slop, so a click never nudges the view. A
 		 * press that began on the I4 ability bar belongs to the bar, not the camera. */
-		const bool lmbDrag = lmb && s_lmbMoved && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0;
+		const bool lmbDrag = lmb && s_lmbMoved
+		                  && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0
+		                  && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0;
 		if (lmbDrag && s_prevLmb)
 		{
 			in.lookDX = static_cast<float>(mx - s_prevMouseX);
 			in.lookDY = static_cast<float>(my - s_prevMouseY);
 		}
 		in.looking = lmbDrag;
-		in.wheelSteps = wheel;
 
 		/* Camera movement keys: the arrows + PgUp/PgDn, freed by the piloting
 		 * removal (WASD stays with the combat bindings: A fires, D is chart
@@ -246,7 +253,8 @@ void camera_rig_update(void)
 			s_lmbMoved = true;
 	}
 	else if (s_prevLmb && !s_lmbMoved && !uiOwns
-	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0)   // not a bar click (I4)
+	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0     // not a bar click (I4)
+	         && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0)      // not a nav-strip click (I4)
 	{
 		g_missile_lock_target = pick_entity_at_screen(mx, my);
 	}

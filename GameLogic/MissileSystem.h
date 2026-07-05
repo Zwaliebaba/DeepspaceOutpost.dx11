@@ -40,6 +40,56 @@ namespace Neuron::GameLogic
   // 6.25% per tick - a homing run rarely survives a fitted target).
   inline constexpr uint32_t MISSILE_ECM_JAM_CHANCE = 16;
 
+  // G2 (closes D6): the server-side lock gate. A player may only launch at a target
+  // that is close enough to lock and roughly ahead - the same shape the laser uses -
+  // so a hostile client can't missile an arbitrary live index across the map or
+  // behind its back. Range mirrors the laser reach; the cone is GENEROUS (the
+  // forward hemisphere) because the pointer picks the target, not the nose.
+  inline constexpr int64_t MISSILE_LOCK_RANGE = 6000;
+  inline constexpr double  MISSILE_LOCK_CONE  = 0.0;
+
+  // Is `_targetIndex` a legitimate missile lock for `_shooter`? True only for a live,
+  // distinct COMBATANT within lock range and the forward cone; the shooter itself
+  // must be able to fire (transform + flight + combatant). Pure - unit-tested as the
+  // anti-cheat matrix. A false here means the launch is refused (nothing spent).
+  [[nodiscard]] inline bool MissileTargetValid(ECS::Registry& _world, ECS::EntityId _shooter, uint32_t _targetIndex)
+  {
+    const WorldTransform* st = _world.TryGet<WorldTransform>(_shooter);
+    const Flight* sf = _world.TryGet<Flight>(_shooter);
+    if (st == nullptr || sf == nullptr || !_world.Has<Combatant>(_shooter))
+      return false;
+
+    const ECS::EntityId lock = _world.LiveEntity(_targetIndex);
+    if (!_world.IsValid(lock) || lock == _shooter || !_world.Has<Combatant>(lock))
+      return false;
+    const WorldTransform* tt = _world.TryGet<WorldTransform>(lock);
+    if (tt == nullptr)
+      return false;
+
+    const double dx = static_cast<double>(tt->position.x - st->position.x);
+    const double dy = static_cast<double>(tt->position.y - st->position.y);
+    const double dz = static_cast<double>(tt->position.z - st->position.z);
+    const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (len > static_cast<double>(MISSILE_LOCK_RANGE))
+      return false;
+    if (len <= 0.0)
+      return true;   // right on top of the target: in cone by definition
+    const double ahead = (dx * sf->nose.x + dy * sf->nose.y + dz * sf->nose.z) / len;
+    return ahead >= MISSILE_LOCK_CONE;
+  }
+
+  // Consume one round from a player's missile rack; false (launch refused, nothing
+  // spent) when the shooter has no rack or it is empty. Players own an Equipment
+  // rack; NPCs decrement their own AiPilot.missiles on their separate launch path.
+  [[nodiscard]] inline bool SpendMissile(ECS::Registry& _world, ECS::EntityId _shooter)
+  {
+    Equipment* eq = _world.TryGet<Equipment>(_shooter);
+    if (eq == nullptr || eq->missiles <= 0)
+      return false;
+    --eq->missiles;
+    return true;
+  }
+
   // Launch a homing missile from `_shooter` at the target the player locked (its
   // entity index, as identified from the replicated view; resolved here to a live
   // handle). The missile is a real entity (drawn as SHIP_MISSILE) that chases that

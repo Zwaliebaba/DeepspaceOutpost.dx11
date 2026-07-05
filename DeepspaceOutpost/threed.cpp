@@ -18,6 +18,7 @@
 #include "shipface.h"
 #include "threed.h"
 #include "space.h"
+#include "RenderTable.h"   // H1: NetType -> render descriptor table
 #include "random.h"
 
 
@@ -320,17 +321,21 @@ void draw_ship (struct local_object *ship)
 	if (cam.location.z <= 0)	/* Only display objects in front of the camera. */
 		return;
 
-	if (ship->type == SHIP_PLANET)
+	/* H1: the NetType -> render descriptor table replaces the hand-written type
+	 * if-chain, so a new hull is a data row (RenderTable.h), not an edit here. */
+	const RenderDescriptor rd = RenderFor (ship->type);
+	if (rd.kind == RenderKind::Planet)
 	{
 		draw_planet (ship);
 		return;
 	}
-
-	if (ship->type == SHIP_SUN)
+	if (rd.kind == RenderKind::Sun)
 	{
 		draw_sun (ship);
 		return;
 	}
+	if (rd.kind == RenderKind::Hidden)
+		return;   /* not drawn by the mesh path */
 
 	/* Field-of-vision cull against the camera's real frustum (|x| <= z*tan(fovX/2),
 	 * |y| <= z*tan(fovY/2)), so ships at the edges of a wide window are not
@@ -342,6 +347,20 @@ void draw_ship (struct local_object *ship)
 		if ((fabs(cam.location.x) > cam.location.z * tx) ||
 			(fabs(cam.location.y) > cam.location.z * ty))
 			return;
+	}
+
+	/* H3 iconic LOD: a hull too distant to read as a mesh draws as a cheap contact
+	 * glyph at its projected position instead (the tactical-digital look + the LOD
+	 * cull in one). The mesh path handles everything nearer. */
+	if (ShouldDrawAsGlyph (cam.location.z))
+	{
+		int vw = 0, vh = 0;
+		gfx_scene_size (&vw, &vh);
+		double sx = 0.0, sy = 0.0;
+		if (Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera (),
+				cam.location.x, cam.location.y, cam.location.z, vw, vh, sx, sy))
+			hud_sprite_scaled_deferred (IMG_GREEN_DOT, (int) sx - 3, (int) sy - 3, 6, 6);
+		return;
 	}
 
 	draw_solid_ship (ship);       // world-frame mesh; Scene3D applies the view + projection

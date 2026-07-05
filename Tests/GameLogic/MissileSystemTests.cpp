@@ -129,3 +129,67 @@ TEST(MissileSys, DetonatesOnTheStationWithoutDestroyingIt)
   EXPECT_TRUE(!w.IsValid(missile));      // ...and is gone
   EXPECT_TRUE(w.Get<GameLogic::Combatant>(station).energy == 1000000 - GameLogic::MISSILE_HIT_DAMAGE);
 }
+
+// --- G2: the server-side lock gate (closes D6) ----------------------------------
+
+TEST(MissileValidation, AcceptsALiveCombatantInRangeAndAhead)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);
+  const ECS::EntityId pirate = SpawnTarget(w, 3000, GameLogic::Team::Pirate, 100);   // ahead, in range
+  EXPECT_TRUE(GameLogic::MissileTargetValid(w, shooter, pirate.index));
+}
+
+TEST(MissileValidation, RejectsASpoofedOrDeadIndex)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, 0xFFFFFFFFu));   // sentinel
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, 9999u));         // never existed
+  const ECS::EntityId pirate = SpawnTarget(w, 3000, GameLogic::Team::Pirate, 100);
+  w.Destroy(pirate);
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, pirate.index));  // dead
+}
+
+TEST(MissileValidation, RejectsOutOfLockRange)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);
+  const ECS::EntityId far = SpawnTarget(w, GameLogic::MISSILE_LOCK_RANGE + 1000, GameLogic::Team::Pirate, 100);
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, far.index));
+}
+
+TEST(MissileValidation, RejectsATargetBehindTheShooter)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);   // faces +z
+  const ECS::EntityId behind = SpawnTarget(w, -3000, GameLogic::Team::Pirate, 100);   // at -z
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, behind.index));
+}
+
+TEST(MissileValidation, RejectsTargetingYourself)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);
+  EXPECT_FALSE(GameLogic::MissileTargetValid(w, shooter, shooter.index));
+}
+
+TEST(MissileValidation, SpendMissileDecrementsTheRackAndEmptiesOut)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);
+  w.Add<GameLogic::Equipment>(shooter, GameLogic::Equipment{});   // default rack = 3
+  EXPECT_TRUE(GameLogic::SpendMissile(w, shooter));
+  EXPECT_EQ(w.Get<GameLogic::Equipment>(shooter).missiles, 2);
+  EXPECT_TRUE(GameLogic::SpendMissile(w, shooter));
+  EXPECT_TRUE(GameLogic::SpendMissile(w, shooter));
+  EXPECT_EQ(w.Get<GameLogic::Equipment>(shooter).missiles, 0);
+  EXPECT_FALSE(GameLogic::SpendMissile(w, shooter));   // empty: refused
+}
+
+TEST(MissileValidation, SpendMissileRefusesWithNoRack)
+{
+  ECS::Registry w;
+  const ECS::EntityId shooter = SpawnShooter(w);   // no Equipment component
+  EXPECT_FALSE(GameLogic::SpendMissile(w, shooter));
+}

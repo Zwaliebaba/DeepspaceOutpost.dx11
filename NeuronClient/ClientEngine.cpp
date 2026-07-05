@@ -5,6 +5,7 @@
 #include "GuiOverlay.h"
 #include "Render2D.h"
 #include "Scene3D.h"
+#include "SceneGlow.h"
 #include "Strings.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
@@ -132,6 +133,7 @@ namespace Neuron::Client
     Graphics::Core::CreateWindowSizeDependentResources();
     Graphics::Render2D::Startup();
     Graphics::Scene3D::Startup();
+    Graphics::SceneGlow::Startup();
 
     Canvas::Startup();
     g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
@@ -270,6 +272,7 @@ namespace Neuron::Client
     g_gameFont.Shutdown();
     Graphics::TextureManager::Shutdown();
     Canvas::Shutdown();
+    Graphics::SceneGlow::Shutdown();
     Graphics::Scene3D::Shutdown();
     Graphics::Render2D::Shutdown();
     Graphics::Core::Shutdown();

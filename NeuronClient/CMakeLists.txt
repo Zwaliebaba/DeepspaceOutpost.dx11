@@ -28,6 +28,7 @@ set(NEURONCLIENT_SOURCES
     graphics/GraphicsCore.cpp
     graphics/Render2D.cpp
     graphics/Scene3D.cpp
+    graphics/SceneGlow.cpp
     graphics/TextureManager.cpp
     graphics/DDSTextureLoader.cpp
 
@@ -57,8 +58,11 @@ set(NEURONCLIENT_HEADERS
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h
+    graphics/InstanceData.h
+    graphics/LineExpand.h
     graphics/Render2D.h
     graphics/Scene3D.h
+    graphics/SceneGlow.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 
@@ -84,6 +88,12 @@ set(NEURONCLIENT_HEADERS
     GamePalette.h
     sound.h
     keyboard.h
+
+    # Device-neutral pointer/gesture + order-command cores (Track I; header-only,
+    # pure C++ - the CI-testable half of the touch/command UX).
+    input/GestureRecognizer.h
+    input/OrderMenu.h
+    input/MoveGizmo.h
 
     # Platform backend headers.
     platform/Renderer.h

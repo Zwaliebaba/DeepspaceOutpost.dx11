@@ -17,6 +17,7 @@
 
 #include "keyboard.h"
 #include "EventManager.h"
+#include "input/GestureRecognizer.h"   // I5 device-neutral gesture recognizer (tested core)
 
 #include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
 #include <cmath>      // std::sqrt (I5 pinch distance)
@@ -49,6 +50,38 @@ float g_wheelSteps = 0.0f;
 struct TouchPt { UINT32 id = 0; int x = 0; int y = 0; bool active = false; };
 TouchPt g_touch[2];
 float   g_pinchPrevDist = -1.0f;   /* < 0 = no pinch in progress */
+
+/* I5 gesture recognizer: fed every WM_POINTER sample (both fingers) as the tested
+ * source of the gestures the ad-hoc mapping above lacks. The one-finger->mouse and
+ * two-finger->pinch synthesis above stays (proven), so from the recognizer we
+ * consume ONLY the new gestures: LONG-PRESS (touch radial menu), DOUBLE-TAP (focus
+ * camera) and two-finger PAN (exposed for a camera-pan follow-up). Its Tap/Drag/
+ * Pinch events are ignored here. All timestamps use one clock (GetTickCount). */
+Neuron::Input::GestureRecognizer g_gestures;
+float g_panDX = 0.0f, g_panDY = 0.0f;                  /* accumulated two-finger pan */
+bool  g_longPress = false; int g_longPressX = 0, g_longPressY = 0;  /* one-shot */
+bool  g_doubleTap = false; int g_doubleTapX = 0, g_doubleTapY = 0;  /* one-shot */
+bool  g_touchSuppress = false;   /* a long-press fired this contact: no synth select */
+
+void handle_gesture(const Neuron::Input::GestureEvent& e)
+{
+	using GT = Neuron::Input::GestureType;
+	switch (e.type)
+	{
+		case GT::LongPress:
+			g_longPress = true; g_longPressX = static_cast<int>(e.x); g_longPressY = static_cast<int>(e.y);
+			g_touchSuppress = true; g_lmb = false;   // long-press owns the contact, not a tap
+			break;
+		case GT::DoubleTap:
+			g_doubleTap = true; g_doubleTapX = static_cast<int>(e.x); g_doubleTapY = static_cast<int>(e.y);
+			break;
+		case GT::PanMove:
+			g_panDX += e.dx; g_panDY += e.dy;
+			break;
+		default:
+			break;   // Tap/Drag/Pinch are handled by the synthesis path above
+	}
+}
 
 /* WM_CHAR ring queue */
 constexpr int QN = 64;
@@ -110,9 +143,11 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 
 		// I5 multi-touch: track up to two pointers. One finger maps to the mouse
-		// (tap = select, drag = orbit); two fingers PINCH to zoom (fed into the same
-		// wheel accumulator as the mouse wheel). Two-finger PAN and long-press
-		// (radial menu / gizmo) are deferred - see IMPLEMENTATION.md I5.
+		// (tap = select, drag = orbit); two fingers PINCH to zoom (into the same wheel
+		// accumulator as the mouse wheel). In parallel every sample feeds the tested
+		// gesture recognizer, which adds LONG-PRESS (touch radial menu), DOUBLE-TAP
+		// (focus) and two-finger PAN (exposed via input_take_pan; the Orbit controller
+		// has no translate axis yet, so pan awaits that camera-math follow-up).
 		case WM_POINTERDOWN:
 		case WM_POINTERUPDATE:
 		case WM_POINTERUP:
@@ -125,6 +160,22 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			ScreenToClient(hwnd, &pt);
 			const bool inContact = (msg != WM_POINTERUP)
 			                    && (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
+
+			// Feed the tested recognizer (one clock for Push + Tick); consume only its
+			// long-press / double-tap / pan events (handle_gesture). Tap/drag/pinch stay
+			// on the synthesis path below.
+			{
+				Neuron::Input::PointerSample gs;
+				gs.id = pid; gs.x = static_cast<float>(pt.x); gs.y = static_cast<float>(pt.y);
+				gs.timeMs = static_cast<uint32_t>(GetTickCount());
+				gs.phase = (msg == WM_POINTERDOWN) ? Neuron::Input::PointerPhase::Down
+				         : (!inContact)            ? Neuron::Input::PointerPhase::Up
+				         :                           Neuron::Input::PointerPhase::Move;
+				if ((pi.pointerFlags & POINTER_FLAG_CANCELED) != 0)
+					gs.phase = Neuron::Input::PointerPhase::Cancel;
+				for (const auto& e : g_gestures.Push(gs))
+					handle_gesture(e);
+			}
 
 			// Assign this pointer id to a slot (reuse its slot, else a free one).
 			int slot = -1;
@@ -160,11 +211,12 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 					const TouchPt& p = g_touch[0].active ? g_touch[0] : g_touch[1];
 					g_mouseX = p.x;
 					g_mouseY = p.y;
-					g_lmb = true;
+					g_lmb = !g_touchSuppress;   // long-press owns the contact -> no synth select
 				}
 				else
 				{
-					g_lmb = false;   // all fingers lifted
+					g_lmb = false;           // all fingers lifted
+					g_touchSuppress = false; // contact ended: re-arm select
 				}
 			}
 			return 0;
@@ -227,6 +279,44 @@ float input_take_mouse_wheel(void)
 	const float steps = g_wheelSteps;
 	g_wheelSteps = 0.0f;
 	return steps;
+}
+
+/* I5 per-frame tick: drive the recognizer's time-based transitions (long-press
+ * fires without a pointer message). One clock with the WM_POINTER samples. */
+void input_pointer_tick(void)
+{
+	for (const auto& e : g_gestures.Tick(static_cast<uint32_t>(GetTickCount())))
+		handle_gesture(e);
+}
+
+/* I5 two-finger pan delta since the last poll (accumulated, then cleared). */
+void input_take_pan(float& dx, float& dy)
+{
+	dx = g_panDX; dy = g_panDY;
+	g_panDX = g_panDY = 0.0f;
+}
+
+/* I5 one-shot touch long-press (opens the radial menu / gizmo at x,y). */
+bool input_take_long_press(int& x, int& y)
+{
+	if (!g_longPress) return false;
+	x = g_longPressX; y = g_longPressY; g_longPress = false;
+	return true;
+}
+
+/* I5 one-shot touch double-tap (focus the camera on whatever is at x,y). */
+bool input_take_double_tap(int& x, int& y)
+{
+	if (!g_doubleTap) return false;
+	x = g_doubleTapX; y = g_doubleTapY; g_doubleTap = false;
+	return true;
+}
+
+/* I5 number of touch pointers currently in contact (0-2). The game uses the
+ * finger lift (count -> 0) to commit a touch-opened radial menu. */
+int input_touch_count(void)
+{
+	return (g_touch[0].active ? 1 : 0) + (g_touch[1].active ? 1 : 0);
 }
 
 /* ---- keyboard.h contract ---- */

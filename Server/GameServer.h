@@ -31,6 +31,7 @@
 #include "Messages/Defs/UnitOrder.h"      // UnitOrder / UnitOrderAck / AbilityRequest (I1)
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
+#include "Messages/Defs/ExplosionAt.h"    // ExplosionAt (G1 kill VFX broadcast)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
@@ -116,11 +117,13 @@ namespace DSOServer
     void OnCrime(const Neuron::GameLogic::Crime& _c);
     void OnEntityKilled(const Neuron::GameLogic::EntityKilled& _k);
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
+    void HandleBuyEscort(Neuron::GameLogic::Session& _session);   // F1: purchase + spawn an owned escort
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
     // I1: order a unit (validate ownership/target/range, record the ActiveOrder, ack)
     // and route a discrete equipment activation to the combat bus.
     void HandleUnitOrder(Neuron::GameLogic::Session& _session, const Neuron::Msg::UnitOrder& _req);
     void HandleAbilityRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::AbilityRequest& _req);
+    void HandleChat(Neuron::GameLogic::Session& _session, const Neuron::Msg::Chat& _in);   // G3 chat relay
     // I1: auto-complete a Dock order when the ordered ship reaches dock range
     // (reuses the tested station dock path and clears the order).
     void CompleteDockOrders();

@@ -50,6 +50,12 @@ namespace Neuron::Graphics
       // unaffected. The game toggles this from its "Ship Shading" setting.
       static void SetLightingEnabled(bool _enabled) { s_lit = _enabled; }
 
+      // Opt-in solid-mesh instancing (H2). Off by default, which keeps the proven
+      // one-DrawIndexed-per-model path. When on, every ship of a hull type is drawn in a
+      // single DrawIndexedInstanced from the SAME solid geometry (identical look, fewer
+      // draw calls). Suns still render as individual billboards. Lighting composes with it.
+      static void SetInstancingEnabled(bool _enabled) { s_instancing = _enabled; }
+
       // Dust points for this frame: the streaming starfield rendered in the scene pass (behind
       // the ships) instead of the legacy 2D batch. The game projects the stars with the scene
       // optics and hands over small clip-space quads (6 verts each); Scene3D draws them every
@@ -94,6 +100,12 @@ namespace Neuron::Graphics
       // Draw this frame's dust quads (SetDust) as the background, behind the depth-tested ships.
       static void renderDust();
 
+      // Instanced ship pass (H2): group this frame's ship models by hull type and draw each
+      // group with one DrawIndexedInstanced. `_view` / `_viewProj` are the pass matrices
+      // (row-vector). Suns are handled by the caller (still per-billboard). No-op if the
+      // instanced resources failed to build.
+      static void renderModelsInstanced(const DirectX::XMMATRIX& _view, const DirectX::XMMATRIX& _viewProj);
+
       inline static winrt::com_ptr<ID3D11VertexShader> s_vs;
       inline static winrt::com_ptr<ID3D11PixelShader> s_ps;
       inline static winrt::com_ptr<ID3D11InputLayout> s_layout;
@@ -103,6 +115,17 @@ namespace Neuron::Graphics
       inline static winrt::com_ptr<ID3D11DepthStencilState> s_depth;
       inline static winrt::com_ptr<ID3D11RasterizerState> s_raster;
       inline static winrt::com_ptr<ID3D11BlendState> s_blend;
+
+      // Instanced ship program (H2, opt-in). A second VS/PS + a two-stream input layout
+      // (per-vertex mesh + per-instance world/tint), a per-frame view/projection/light
+      // cbuffer, and a dynamic per-instance vertex buffer grown lazily in the pass.
+      inline static winrt::com_ptr<ID3D11VertexShader> s_instVs;
+      inline static winrt::com_ptr<ID3D11PixelShader> s_instPs;
+      inline static winrt::com_ptr<ID3D11InputLayout> s_instLayout;
+      inline static winrt::com_ptr<ID3D11Buffer> s_instFrameCb;
+      inline static winrt::com_ptr<ID3D11Buffer> s_instVb;
+      inline static size_t s_instCapacity = 0;
+      inline static bool s_instancing = false;   // opt-in solid instancing (default per-model)
 
       // Billboard (planet / sun) program + its dynamic 6-vertex quad and b1 params.
       inline static winrt::com_ptr<ID3D11VertexShader> s_bbVs;

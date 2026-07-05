@@ -266,6 +266,41 @@ namespace Neuron::GameLogic
     return r;
   }
 
+  // F1: the escort is a steep purchase (5000.0 Cr, tenths). A unit, not a fitted
+  // upgrade, so it has its own price + buy path rather than EquipPrice/EquipPlayer.
+  inline constexpr int ESCORT_FIGHTER_PRICE = 50000;
+
+  // Validate an escort purchase and charge for it (server-authoritative, pure). The
+  // caller spawns the escort + grants ownership on Ok; this only gates docking, the
+  // per-player escort cap, and credits, and deducts on success. `_currentEscorts` is
+  // how many the player already owns; `_maxEscorts` the cap (bounds entity growth,
+  // roadmap #20). AlreadyOwned doubles as "at the escort limit".
+  [[nodiscard]] inline EquipResult BuyEscort(Wallet& _wallet, const DockState& _dock,
+                                             int _currentEscorts, int _maxEscorts)
+  {
+    EquipResult r;
+    r.credits = _wallet.credits;
+    if (!_dock.docked)
+    {
+      r.status = Net::StationStatus::NotDocked;
+      return r;
+    }
+    if (_currentEscorts >= _maxEscorts)
+    {
+      r.status = Net::StationStatus::AlreadyOwned;   // at the escort limit
+      return r;
+    }
+    if (_wallet.credits < ESCORT_FIGHTER_PRICE)
+    {
+      r.status = Net::StationStatus::NotEnoughCredits;
+      return r;
+    }
+    _wallet.credits -= ESCORT_FIGHTER_PRICE;
+    r.status = Net::StationStatus::Ok;
+    r.credits = _wallet.credits;
+    return r;
+  }
+
   // Buy hyperspace fuel (legacy buy_fuel). Fills the tank as far as the wallet
   // allows, up to full, and charges for what was actually pumped. Docked-only.
   // Returns Ok on any purchase (or an already-full tank); NotEnoughCredits only

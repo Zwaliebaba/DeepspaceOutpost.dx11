@@ -30,6 +30,7 @@ namespace DSOServer::Cfg
   inline constexpr int64_t FIRE_RANGE = 6000;               // player front-laser reach
   inline constexpr double AIM_CONE = 0.9;                   // ~25deg aiming cone for a hit
   inline constexpr int64_t ORDER_MAX_MOVE_DIST = 1'000'000; // I1: max Move-order reach from a unit (anti-fling)
+  inline constexpr int      MAX_ESCORTS = 4;                // F1: per-player escort cap (bounds entity growth, #20)
 
   // How far a system's landmarks (planet + station) stay visible, independent of
   // the per-ship AOI radius. A planet/station is a huge, static body you fly

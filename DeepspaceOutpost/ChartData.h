@@ -59,4 +59,12 @@ namespace ChartData
   // population / productivity). Empty when nothing is selected.
   int  DataLineCount();
   void DataLine(int i, char* buf, int buflen);
+
+  // I6 info card: distance from the current system to the selected one and whether it
+  // is reachable, in the tenths-of-a-light-year unit the fuel gauge uses. Distance is
+  // -1 when nothing is selected (or it is the current system). FuelTenths is the
+  // ship's current fuel; SelectedInRange() is Distance <= FuelTenths.
+  int  SelectedDistanceTenthsLy();
+  int  FuelTenths();
+  bool SelectedInRange();
 }
