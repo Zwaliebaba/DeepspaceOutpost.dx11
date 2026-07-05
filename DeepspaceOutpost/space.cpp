@@ -35,6 +35,7 @@
 #include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers
 #include "CameraRig.h"   // the free camera: origin, world->camera transforms
 #include "ReplicationClient.h"
+#include "Vector3i64.h"             // Neuron::Math::Vector3i64 (spawn_explosion_at full def)
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
 #include "Render2D.h"       // native 2D pass the flight HUD now draws straight into
