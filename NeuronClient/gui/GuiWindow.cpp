@@ -111,7 +111,10 @@ void GuiWindow::Render(bool hasFocus)
   Render2D::DrawLine(m_x - 2, m_y + m_h + 1, m_x - 2, m_y - 2, frame);
 
   g_gameFont.SetRenderShadow(true);
-  g_gameFont.SetColor(255, 255, 255, 255);   // white title, matching the reference scheme
+  // Dark navy title (the frame colour), NOT white: the title bar's top is near-white
+  // (199,214,220), so white text washes out. Dark navy reads crisply on the light bar,
+  // matching the reference.
+  g_gameFont.SetColor(42, 56, 82, 255);
   int y = m_y + 9;
   int fontSize = 14;
   g_gameFont.DrawText2DCenter(m_x + m_w / 2, y, fontSize, m_title.c_str());
