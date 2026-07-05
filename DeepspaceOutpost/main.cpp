@@ -676,11 +676,20 @@ static void enter_intro2(void)
   s_state = GameState::Intro2;
 }
 
-// Enter live flight (and the docked menus); start on the commander status screen.
+// The docked "home": the camera-space 3D view of the station (current_screen stays the
+// front view so the scene renders full-window) with the native station menu window
+// floating over it - replacing the legacy 512x514 commander-status screen.
+static void enter_station(void)
+{
+  current_screen = SCR_FRONT_VIEW;
+  OpenStationMenu();
+}
+
+// Enter live flight (and the docked menus); start docked at the station.
 static void enter_flight(void)
 {
   dock_player();
-  display_commander_status();
+  enter_station();
   s_state = GameState::Flight;
 }
 
@@ -741,7 +750,7 @@ static void respawn_after_death(void)
   // authoritative hold is already empty server-side).
   memset(cmdr.current_cargo, 0, sizeof(cmdr.current_cargo));
   dock_player();
-  display_commander_status();
+  enter_station();
   s_state = GameState::Flight;
 }
 
@@ -764,10 +773,7 @@ void display_break_pattern(void)
   }
 
   if (docked)
-  {
-    display_commander_status();
-    update_console();
-  }
+    enter_station();          // arrive at the station: camera-space view + station menu
   else
     current_screen = SCR_FRONT_VIEW;
 }
@@ -1219,55 +1225,40 @@ static void game_update_flight(void)
 // loop body emitted (with the simulation-and-draw steps that are still fused).
 static void game_render_flight(void)
 {
-  // The charts are a native GUI overlay window now (ChartWindow) - it draws itself over
-  // the flight/docked view, so there is no chart branch here. System data lives in that
-  // window's panel too, so the old SCR_PLANET_DATA screen is gone as well.
+  // The charts and the docked station menu are native GUI overlay windows now - they
+  // draw themselves over the camera-space view below. There is no retro chart / commander
+  // -status branch here; system data lives in the chart window's panel.
 
-  // Docked commander status still redraws every frame (idempotent). Skipped while a GUI
-  // overlay window is up: it draws + presents on top, so the legacy screen underneath
-  // would only be occluded. (The break pattern is handled at the end.)
-  if (docked && !GuiOverlay::IsShown())
+  // No offline mode: without a connection there is no world to render (docked or in
+  // flight). ensure_connection keeps retrying; show the connection-lost state meanwhile.
+  if (!Client::ReplicationClientInstance().IsOpen())
   {
-    if (current_screen == SCR_CMDR_STATUS)
-    {
-      display_commander_status();
-      return;
-    }
+    gfx_clear_display();
+    int ch;
+    gfx_canvas_size(nullptr, &ch);
+    gfx_display_centre_text(ch / 2 - 10, "CONNECTION LOST - RECONNECTING", 140, GFX_COL_GOLD);
+    return;
   }
 
+  // The camera-space 3D scene renders in BOTH docked and flight: docked shows the station
+  // in view with the StationMenuWindow floating over it (current_screen stays the front
+  // view so this is full-window); in flight it is the live world.
+  if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
+      (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+  {
+    gfx_clear_display();
+    update_starfield();
+  }
+
+  // The server owns the world: render the replicated, interpolated state.
+  render_replicated_objects();
+
+  // The flight HUD + display-only upkeep run only in flight; docked, the station menu
+  // window is the UI (no dashboard).
   if (!docked)
   {
-    // No offline mode: without a connection there is no world to render. Show
-    // the connection-lost state (ensure_connection keeps retrying) instead of
-    // simulated vitals.
-    if (!Client::ReplicationClientInstance().IsOpen())
-    {
-      gfx_clear_display();
-      int ch;
-      gfx_canvas_size(nullptr, &ch);
-      gfx_display_centre_text(ch / 2 - 10, "CONNECTION LOST - RECONNECTING", 140, GFX_COL_GOLD);
-      return;
-    }
-
-    if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
-        (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
-    {
-      gfx_clear_display();
-      update_starfield();
-    }
-
-    // The server owns the world: render the replicated, interpolated state.
-    render_replicated_objects();
-
-    if (docked)
-    {
-      update_console();
-      return;
-    }
-
-    // The local hull's beam visual: while armed (fire_laser), the own ship's
-    // render record carries FLG_FIRING and the muzzle bolt draws with the ship
-    // (render_replicated_objects). Count the frames down here.
+    // The local hull's beam visual: while armed (fire_laser), the own ship's render
+    // record carries FLG_FIRING and the muzzle bolt draws with the ship. Count down here.
     if ((current_screen == SCR_FRONT_VIEW) && draw_lasers)
       draw_lasers--;
 
@@ -1279,8 +1270,8 @@ static void game_render_flight(void)
       mcount = 255;
 
     // Display-only upkeep: the energy-low warning and the altitude dial read the
-    // server-mirrored vitals and the replicated planet; the laser/ECM steps pace
-    // the beam visual and the E indicator. No game rule runs client-side.
+    // server-mirrored vitals; the laser/ECM steps pace the beam visual and the E
+    // indicator. No game rule runs client-side.
     if ((mcount & 31) == 10)
     {
       if (PlayerDefense().energy < 50)
