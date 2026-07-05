@@ -54,7 +54,6 @@ int gfx_graphics_startup (void);
 void gfx_graphics_shutdown (void);
 void gfx_update_screen (void);
 void gfx_plot_pixel (int x, int y, int col);
-void gfx_display_text (int x, int y, const char *txt);
 void gfx_display_centre_text (int y, const char *str, int psize, int col);
 void gfx_clear_display (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);

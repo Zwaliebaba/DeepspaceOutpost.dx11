@@ -365,10 +365,6 @@ void gfx_set_scene_clip(void)
 }
 
 /* ---- text ---- */
-void gfx_display_text(int x, int y, const char* txt)
-{
-	drawString(BODY_FONT, x, y, txt, col_rgba(GFX_COL_WHITE));
-}
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
 	/* Centre on the live client window (the 3D fills the screen; the letterbox is retired). */

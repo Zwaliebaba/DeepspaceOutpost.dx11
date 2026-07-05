@@ -86,22 +86,6 @@ int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed 
 }
 
 
-void show_distance (int ypos, struct galaxy_seed from_planet, struct galaxy_seed to_planet)
-{
-	char str[100];
-	int light_years;
-
-	light_years = calc_distance_to_planet (from_planet, to_planet);
-	
-	if (light_years > 0)
-		sprintf (str, "Distance: %2d.%d Light Years ", light_years / 10, light_years % 10);
-	else
-		strcpy (str,"                                                     ");
-
-	gfx_display_text (16, ypos, str);
-}
-
-
 
 // ===== Thin-client galactic chart (driven by the server's galaxy manifest) =====
 //
