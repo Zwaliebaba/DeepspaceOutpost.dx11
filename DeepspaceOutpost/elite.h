@@ -7,9 +7,8 @@
 
 #define SCR_INTRO_ONE		1
 #define SCR_INTRO_TWO		2
-#define SCR_GALACTIC_CHART	3
-#define SCR_SHORT_RANGE		4
-#define	SCR_PLANET_DATA		5
+// (SCR_GALACTIC_CHART 3, SCR_SHORT_RANGE 4, SCR_PLANET_DATA 5 retired: the charts
+//  and system-data panel are the native ChartWindow now, not current_screen modes.)
 #define SCR_CMDR_STATUS		7
 #define SCR_FRONT_VIEW		8
 // (SCR_REAR_VIEW 9, SCR_LEFT_VIEW 10, SCR_RIGHT_VIEW 11 retired: the cockpit

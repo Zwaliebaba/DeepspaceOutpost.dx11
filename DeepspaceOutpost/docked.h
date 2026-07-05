@@ -1,13 +1,8 @@
 #ifndef DOCKED_H
 #define DOCKED_H
 
-void display_short_range_chart (void);
-void display_galactic_chart (void);
-void display_data_on_planet (void);
-void show_distance_to_planet (void);
-void teleport_to_cursor (void);   // thin-client: teleport to the system at the chart crosshair
-void move_cursor_to_origin (void);
-void find_planet_by_name (char *find_name);
+// The galactic / short-range / planet-data chart screens moved to the native
+// ChartWindow (GameWindows.cpp), driven by the render-free ChartData API (ChartData.h).
 void display_commander_status (void);
 int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed to_planet);
 
