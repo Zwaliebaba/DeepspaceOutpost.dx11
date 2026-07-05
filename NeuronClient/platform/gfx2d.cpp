@@ -59,7 +59,6 @@ struct Cmd
 	uint32_t                  count;
 	D3D11_RECT                scissor;
 	ID3D11ShaderResourceView* srv;     /* Tex only */
-	bool                      xorop;   /* Color: draw via XOR logic op (cross-hairs) */
 };
 
 struct Texture
@@ -78,7 +77,6 @@ std::vector<Cmd>         g_cmds;
  * directly at the end of its world draw - even with no models in view (staring at empty space
  * still shows the stars). Models live in Scene3D, not here. */
 D3D11_RECT               g_scissor  = { 0, 0, Renderer::CANVAS_WIDTH, Renderer::CANVAS_HEIGHT };
-bool                     g_xor_mode = false;
 
 /* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
  * is set for the frame and (g_scene_w, g_scene_h) is the live client size; the
@@ -158,7 +156,7 @@ void pushColor(Topo topo, const ColorVertex* v, int n)
 	if (!g_cmds.empty())
 	{
 		Cmd& b = g_cmds.back();
-		if (b.kind == Kind::Color && b.topo == topo && b.xorop == g_xor_mode && sameRect(b.scissor, g_scissor))
+		if (b.kind == Kind::Color && b.topo == topo && sameRect(b.scissor, g_scissor))
 		{
 			b.count += n;
 			g_cverts.insert(g_cverts.end(), v, v + n);
@@ -166,7 +164,7 @@ void pushColor(Topo topo, const ColorVertex* v, int n)
 		}
 	}
 	g_cmds.push_back({ Kind::Color, topo, static_cast<uint32_t>(g_cverts.size()),
-					   static_cast<uint32_t>(n), g_scissor, nullptr, g_xor_mode });
+					   static_cast<uint32_t>(n), g_scissor, nullptr });
 	g_cverts.insert(g_cverts.end(), v, v + n);
 }
 
@@ -191,7 +189,7 @@ void pushTexQuad(ID3D11ShaderResourceView* srv,
 		}
 	}
 	g_cmds.push_back({ Kind::Tex, Topo::Tris, static_cast<uint32_t>(g_tverts.size()),
-					   6, g_scissor, srv, false });
+					   6, g_scissor, srv });
 	g_tverts.insert(g_tverts.end(), q, q + 6);
 }
 
@@ -337,7 +335,6 @@ void drawString(const FontSize& fs, int x, int y, const char* s, uint32_t tint)
 void gfx_plot_pixel(int x, int y, int col)      { addPoint(x, y, col_rgba(col)); }
 void gfx_draw_line(int x1, int y1, int x2, int y2)               { drawLine(x1, y1, x2, y2, col_rgba(GFX_COL_WHITE)); }
 void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int c) { drawLine(x1, y1, x2, y2, col_rgba(c)); }
-void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int c) { addTri(x1,y1,x2,y2,x3,y3,col_rgba(c)); }
 void gfx_draw_rectangle(int tx, int ty, int bx, int by, int c)   { addRect(tx, ty, bx, by, col_rgba(c)); }
 void gfx_clear_display(void)
 {
@@ -350,7 +347,6 @@ void gfx_clear_display(void)
 		addRect(1, 1, 510, 383, col_rgba(GFX_COL_BLACK));
 }
 void gfx_clear_text_area(void) { addRect(1, 340, 510, 383, col_rgba(GFX_COL_BLACK)); }
-void gfx_clear_area(int tx, int ty, int bx, int by) { addRect(tx, ty, bx, by, col_rgba(GFX_COL_BLACK)); }
 
 void gfx_draw_circle(int cx, int cy, int radius, int col)
 {
@@ -392,8 +388,6 @@ void gfx_set_clip_region(int tx, int ty, int bx, int by)
 	if (b > canvasH()) b = canvasH();
 	g_scissor = { l, t, r, b };
 }
-
-void xor_mode(int on) { g_xor_mode = (on != 0); }
 
 /* ---- full-window scene / floating HUD ---- */
 

@@ -1,58 +1,28 @@
 #ifndef GFX_H
 #define GFX_H
 
-#ifdef RES_512_512
-
-#define GFX_SCALE		(2)
-#define GFX_X_OFFSET	(0)
-#define GFX_Y_OFFSET	(0)
-#define GFX_X_CENTRE	(256)
-#define GFX_Y_CENTRE	(192)
-
-#define GFX_VIEW_TX		1
-#define GFX_VIEW_TY		1
-#define GFX_VIEW_BX		509
-#define GFX_VIEW_BY		381
-
-#endif
-
 #ifdef RES_800_600
 
 /*
  * The DX11 port renders into a fixed 512x514 logical canvas and the present
- * step centres/letterboxes it in the window, so the historical pixel offsets
- * that centred the canvas within an 800x600 Allegro surface are now zero. The
- * game logic (and threed.c) add these to coordinates; keeping them at 0 makes
- * every coordinate canvas-local and consistent across all primitives.
+ * step centres/letterboxes it in the window. The only retro metrics still used
+ * are the drawing scale and the chart centre; the historical Allegro pixel
+ * offsets (X/Y_OFFSET) and view-rect bounds (VIEW_*) are gone - every
+ * coordinate is canvas-local now.
  */
 #define GFX_SCALE		(2)
-#define GFX_X_OFFSET	(0)
-#define GFX_Y_OFFSET	(0)
 #define GFX_X_CENTRE	(256)
 #define GFX_Y_CENTRE	(192)
-
-#define GFX_VIEW_TX		1
-#define GFX_VIEW_TY		1
-#define GFX_VIEW_BX		509
-#define GFX_VIEW_BY		381
 
 #endif
 
 #ifndef GFX_SCALE
 
 #define GFX_SCALE		(1)
-#define GFX_X_OFFSET	(0)
-#define GFX_Y_OFFSET	(0)
 #define GFX_X_CENTRE	(128)
 #define GFX_Y_CENTRE	(96)
 
-#define GFX_VIEW_TX		1
-#define GFX_VIEW_TY		1
-#define GFX_VIEW_BX		253
-#define GFX_VIEW_BY		191
-
 #endif
- 
 
 
 #define GFX_COL_BLACK		0
@@ -79,13 +49,7 @@
 
 #define GFX_COL_YELLOW_1	37
 #define GFX_COL_YELLOW_2	39
-#define GFX_COL_YELLOW_3	89
-#define GFX_COL_YELLOW_4	160
 #define GFX_COL_YELLOW_5	251
-
-#define GFX_ORANGE_1		76
-#define GFX_ORANGE_2		77
-#define GFX_ORANGE_3		122
 
 #define GFX_COL_GREEN_1		2
 #define GFX_COL_GREEN_2		17
@@ -98,7 +62,6 @@
 #define IMG_BIG_S			3
 #define IMG_ELITE_TXT		4
 #define IMG_BIG_E			5
-#define IMG_DICE			6
 #define IMG_MISSILE_GREEN	7
 #define IMG_MISSILE_YELLOW	8
 #define IMG_MISSILE_RED		9
@@ -115,14 +78,12 @@ void gfx_draw_filled_circle (int cx, int cy, int radius, int circle_colour);
 void gfx_draw_circle (int cx, int cy, int radius, int circle_colour);
 void gfx_draw_line (int x1, int y1, int x2, int y2);
 void gfx_draw_colour_line (int x1, int y1, int x2, int y2, int line_colour);
-void gfx_draw_triangle (int x1, int y1, int x2, int y2, int x3, int y3, int col);
 void gfx_draw_rectangle (int tx, int ty, int bx, int by, int col);
 void gfx_display_text (int x, int y, const char *txt);
 void gfx_display_colour_text (int x, int y, const char *txt, int col);
 void gfx_display_centre_text (int y, const char *str, int psize, int col);
 void gfx_clear_display (void);
 void gfx_clear_text_area (void);
-void gfx_clear_area (int tx, int ty, int bx, int by);
 void gfx_display_pretty_text (int tx, int ty, int bx, int by, const char *txt);
 void gfx_draw_scanner (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
@@ -139,13 +100,6 @@ void gfx_render_line (int x1, int y1, int x2, int y2, int dist, int col);
  * gfx_finish_render() + g_haveScene flag handshake: the game now drives the pass directly.
  */
 void gfx_render_3d_scene (void);
-
-/*
- * Toggle XOR drawing mode for subsequent line draws (used to draw/erase the
- * chart cross-hairs). Provided by the platform graphics layer; replaces the
- * Allegro xor_mode() the game previously pulled in via allegro.h.
- */
-void xor_mode (int on);
 
 /*
  * Full-window 3D scene + floating HUD (client modernization).
