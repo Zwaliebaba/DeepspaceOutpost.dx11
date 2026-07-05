@@ -42,7 +42,7 @@ bool Renderer::loadPalette()
 	/* The master 256-colour palette is baked into the engine (scanner_palette.h):
 	 * entries are already in paletteColour()'s 0xAABBGGRR byte order; index 0 is the
 	 * transparent colour key. */
-	std::memcpy(palette_, kScannerPalette, sizeof(palette_));
+	std::memcpy(palette_, SCANNER_PALETTE, sizeof(palette_));
 	return true;
 }
 

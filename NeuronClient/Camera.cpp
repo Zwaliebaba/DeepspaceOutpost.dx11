@@ -14,7 +14,7 @@ namespace Neuron::Client
     // legacy Elite optics at the retro 4:3 aspect. gfx_set_scene_fullwindow
     // re-issues SetProjParams with the live aspect every frame.
     SetViewParams(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f));
-    SetProjParams(kLegacySceneFovY, 4.0f / 3.0f, kSceneNearZ, kSceneFarZ);
+    SetProjParams(LEGACY_SCENE_FOV_Y, 4.0f / 3.0f, SCENE_NEAR_Z, SCENE_FAR_Z);
   }
 
   void Camera::SetViewParams(XMFLOAT3 eye, XMFLOAT3 lookAt, XMFLOAT3 up)

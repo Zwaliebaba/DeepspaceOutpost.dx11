@@ -13,19 +13,19 @@ namespace Neuron::Client
   {
     // Feel constants. World scale for reference: ships fly ~3000 units/s, a
     // station is ~1000 units across, the AOI spans a few hundred thousand.
-    constexpr float kLookSensitivity = 0.0035f; // radians per pixel of mouse drag
-    constexpr float kPitchLimit = 1.55f;        // just short of straight up/down
-    constexpr double kMoveSpeed = 2500.0;       // units per second
-    constexpr double kBoostFactor = 8.0;        // Shift multiplier
-    constexpr double kWheelDolly = 400.0;       // units per wheel notch (first person)
-    constexpr double kOrbitKeyRate = 1.2;       // radians per second on the key axes
-    constexpr double kOrbitWheelFactor = 0.85;  // distance multiplier per wheel notch
-    constexpr double kOrbitMinDistance = 150.0;
-    constexpr double kOrbitMaxDistance = 60000.0;
+    constexpr float LOOK_SENSITIVITY = 0.0035f; // radians per pixel of mouse drag
+    constexpr float PITCH_LIMIT = 1.55f;        // just short of straight up/down
+    constexpr double MOVE_SPEED = 2500.0;       // units per second
+    constexpr double BOOST_FACTOR = 8.0;        // Shift multiplier
+    constexpr double WHEEL_DOLLY = 400.0;       // units per wheel notch (first person)
+    constexpr double ORBIT_KEY_RATE = 1.2;       // radians per second on the key axes
+    constexpr double ORBIT_WHEEL_FACTOR = 0.85;  // distance multiplier per wheel notch
+    constexpr double ORBIT_MIN_DISTANCE = 150.0;
+    constexpr double ORBIT_MAX_DISTANCE = 60000.0;
 
     float ClampPitch(float _pitch)
     {
-      return std::max(-kPitchLimit, std::min(kPitchLimit, _pitch));
+      return std::max(-PITCH_LIMIT, std::min(PITCH_LIMIT, _pitch));
     }
 
     // Unit look vector for a yaw/pitch pair in the engine's left-handed frame
@@ -62,8 +62,8 @@ namespace Neuron::Client
   {
     if (_input.looking)
     {
-      m_yaw += _input.lookDX * kLookSensitivity;
-      m_pitch = ClampPitch(m_pitch - _input.lookDY * kLookSensitivity);
+      m_yaw += _input.lookDX * LOOK_SENSITIVITY;
+      m_pitch = ClampPitch(m_pitch - _input.lookDY * LOOK_SENSITIVITY);
     }
 
     float look[3];
@@ -72,8 +72,8 @@ namespace Neuron::Client
     // Strafe axis: look x worldUp, flattened (fly like an editor camera).
     const float right[3] = {cosf(m_yaw), 0.0f, -sinf(m_yaw)};
 
-    const double step = kMoveSpeed * (_input.boost ? kBoostFactor : 1.0) * static_cast<double>(_input.dt);
-    const double dolly = static_cast<double>(_input.wheelSteps) * kWheelDolly;
+    const double step = MOVE_SPEED * (_input.boost ? BOOST_FACTOR : 1.0) * static_cast<double>(_input.dt);
+    const double dolly = static_cast<double>(_input.wheelSteps) * WHEEL_DOLLY;
 
     for (int i = 0; i < 3; ++i)
     {
@@ -110,7 +110,7 @@ namespace Neuron::Client
   {
     m_yaw = _yaw;
     m_pitch = ClampPitch(_pitch);
-    m_distance = std::max(kOrbitMinDistance, std::min(kOrbitMaxDistance, _distance));
+    m_distance = std::max(ORBIT_MIN_DISTANCE, std::min(ORBIT_MAX_DISTANCE, _distance));
     RecomputeEye();
   }
 
@@ -128,23 +128,23 @@ namespace Neuron::Client
   {
     if (_input.looking)
     {
-      m_yaw += _input.lookDX * kLookSensitivity;
-      m_pitch = ClampPitch(m_pitch + _input.lookDY * kLookSensitivity);
+      m_yaw += _input.lookDX * LOOK_SENSITIVITY;
+      m_pitch = ClampPitch(m_pitch + _input.lookDY * LOOK_SENSITIVITY);
     }
 
     // Key axes orbit too (left/right yaw, up/down pitch); the wheel dollies the
     // orbit distance multiplicatively so it feels the same at any scale.
-    m_yaw += static_cast<float>(static_cast<double>(_input.moveRight) * kOrbitKeyRate * _input.dt);
+    m_yaw += static_cast<float>(static_cast<double>(_input.moveRight) * ORBIT_KEY_RATE * _input.dt);
     m_pitch = ClampPitch(m_pitch +
-                         static_cast<float>(static_cast<double>(_input.moveUp) * kOrbitKeyRate * _input.dt));
+                         static_cast<float>(static_cast<double>(_input.moveUp) * ORBIT_KEY_RATE * _input.dt));
 
     double dist = m_distance;
     if (_input.wheelSteps != 0.0f)
-      dist *= std::pow(kOrbitWheelFactor, static_cast<double>(_input.wheelSteps));
+      dist *= std::pow(ORBIT_WHEEL_FACTOR, static_cast<double>(_input.wheelSteps));
     // Forward/back keys dolly as well (exponential, frame-rate independent).
     if (_input.moveForward != 0.0f)
       dist *= std::exp(-static_cast<double>(_input.moveForward) * _input.dt);
-    m_distance = std::max(kOrbitMinDistance, std::min(kOrbitMaxDistance, dist));
+    m_distance = std::max(ORBIT_MIN_DISTANCE, std::min(ORBIT_MAX_DISTANCE, dist));
 
     RecomputeEye();
   }

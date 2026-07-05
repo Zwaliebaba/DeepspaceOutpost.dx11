@@ -25,8 +25,8 @@ public:
 	 * against: a 512x384 play area plus the 512x129 HUD strip at y=385 (=514 tall).
 	 * gfx2d draws in this virtual space (or the client area when the in-flight 3D
 	 * fills the window) and letterboxes it straight onto the back buffer. */
-	static constexpr int kCanvasWidth  = 512;
-	static constexpr int kCanvasHeight = 514;
+	static constexpr int CANVAS_WIDTH  = 512;
+	static constexpr int CANVAS_HEIGHT = 514;
 
 	/* Confirm Core's device is up and load the palette + cache the client size.
 	 * (Core, owned by ClientEngine, created the device/swap chain already.) */

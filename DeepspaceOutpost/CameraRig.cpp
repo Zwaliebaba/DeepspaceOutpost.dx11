@@ -40,7 +40,7 @@ namespace
 	int  s_lmbDownX = 0;
 	int  s_lmbDownY = 0;
 	bool s_lmbMoved = false;
-	constexpr int kClickSlop = 6;   // pixels of travel that still counts as a click
+	constexpr int CLICK_SLOP = 6;   // pixels of travel that still counts as a click
 
 	/* Starfield motion cue state: the previous look angles + eye, so the dust can
 	 * stream/pan with the camera the way it used to with the ship. */
@@ -53,9 +53,9 @@ namespace
 
 	/* Snap the rig behind the ship again when it teleports out from under us
 	 * (hyperspace, in-system jump, respawn at a distant station). */
-	constexpr double kReanchorDistance = 200000.0;
-	constexpr double kAnchorBack = 700.0;   // behind the hull, along -nose
-	constexpr double kAnchorUp = 180.0;     // above it, along +roof
+	constexpr double REANCHOR_DISTANCE = 200000.0;
+	constexpr double ANCHOR_BACK = 700.0;   // behind the hull, along -nose
+	constexpr double ANCHOR_UP = 180.0;     // above it, along +roof
 
 	double FrameDt(void)
 	{
@@ -89,9 +89,9 @@ namespace
 	{
 		const double ship[3] = {static_cast<double>(_me.x), static_cast<double>(_me.y), static_cast<double>(_me.z)};
 
-		s_fpv.SetEyeWorld(ship[0] - _me.noseX * kAnchorBack + _me.roofX * kAnchorUp,
-						  ship[1] - _me.noseY * kAnchorBack + _me.roofY * kAnchorUp,
-						  ship[2] - _me.noseZ * kAnchorBack + _me.roofZ * kAnchorUp);
+		s_fpv.SetEyeWorld(ship[0] - _me.noseX * ANCHOR_BACK + _me.roofX * ANCHOR_UP,
+						  ship[1] - _me.noseY * ANCHOR_BACK + _me.roofY * ANCHOR_UP,
+						  ship[2] - _me.noseZ * ANCHOR_BACK + _me.roofZ * ANCHOR_UP);
 		s_fpv.LookTowards(ship);
 
 		s_orbit.SetTarget(ship);
@@ -164,7 +164,7 @@ void camera_rig_update(void)
 		const double dy = static_cast<double>(me.y) - eye[1];
 		const double dz = static_cast<double>(me.z) - eye[2];
 		const double shipDist = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if (!s_ready || shipDist > kReanchorDistance)
+		if (!s_ready || shipDist > REANCHOR_DISTANCE)
 		{
 			AnchorBehindShip(me);
 			s_ready = true;
@@ -237,7 +237,7 @@ void camera_rig_update(void)
 	{
 		int ddx = mx - s_lmbDownX; if (ddx < 0) ddx = -ddx;
 		int ddy = my - s_lmbDownY; if (ddy < 0) ddy = -ddy;
-		if (ddx > kClickSlop || ddy > kClickSlop)
+		if (ddx > CLICK_SLOP || ddy > CLICK_SLOP)
 			s_lmbMoved = true;
 	}
 	else if (s_prevLmb && !s_lmbMoved && !uiOwns)

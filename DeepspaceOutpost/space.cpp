@@ -439,7 +439,7 @@ namespace
 		int frames = 0;
 	};
 	std::vector<ReplicatedExplosion> s_explosions;
-	constexpr int kMaxExplosionFrames = 120;   // ~2s safety cap if it never faces us
+	constexpr int MAX_EXPLOSION_FRAMES = 120;   // ~2s safety cap if it never faces us
 }
 
 // Start an explosion for a dying replicated ship, from its last snapshot (captured
@@ -651,7 +651,7 @@ void render_replicated_objects (void)
 			ex.frames++;
 		std::erase_if (s_explosions, [](const ReplicatedExplosion& e)
 		{
-			return (e.obj.flags & FLG_REMOVE) || e.frames > kMaxExplosionFrames;
+			return (e.obj.flags & FLG_REMOVE) || e.frames > MAX_EXPLOSION_FRAMES;
 		});
 	}
 

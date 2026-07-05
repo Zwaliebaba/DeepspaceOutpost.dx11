@@ -88,9 +88,9 @@ namespace Neuron::Client
   // mapping produced. Near/far bracket the flight scene: near just in front of
   // the eye (the legacy path clamped z <= 0 to 1); far past the display cull
   // range (space.cpp removes local objects beyond 57344).
-  inline constexpr float kLegacySceneFovY = 0.71754134f; // 2 * atan(0.375)
-  inline constexpr float kSceneNearZ = 1.0f;
-  inline constexpr float kSceneFarZ = 131072.0f;
+  inline constexpr float LEGACY_SCENE_FOV_Y = 0.71754134f; // 2 * atan(0.375)
+  inline constexpr float SCENE_NEAR_Z = 1.0f;
+  inline constexpr float SCENE_FAR_Z = 131072.0f;
 
   // ---- CPU projection helpers (the single camera path) ------------------------
   //

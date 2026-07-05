@@ -83,16 +83,16 @@ namespace Neuron::Net
 
   void UdpSocket::Close()
   {
-    if (m_handle != kInvalid)
+    if (m_handle != INVALID_HANDLE)
     {
       closesocket(static_cast<SOCKET>(m_handle));
-      m_handle = kInvalid;
+      m_handle = INVALID_HANDLE;
     }
   }
 
   int UdpSocket::SendTo(const Endpoint& _to, const void* _data, std::size_t _size)
   {
-    if (m_handle == kInvalid)
+    if (m_handle == INVALID_HANDLE)
       return -1;
 
     sockaddr_in addr{};
@@ -108,7 +108,7 @@ namespace Neuron::Net
 
   int UdpSocket::RecvFrom(void* _buffer, std::size_t _capacity, Endpoint& _from)
   {
-    if (m_handle == kInvalid)
+    if (m_handle == INVALID_HANDLE)
       return -1;
 
     sockaddr_in addr{};

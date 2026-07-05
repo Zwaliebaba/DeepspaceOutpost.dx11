@@ -77,7 +77,7 @@ std::vector<Cmd>         g_cmds;
  * Scene3D via Scene3D::SubmitModel) is drawn by gfx_render_3d_scene(), which the game calls
  * directly at the end of its world draw - even with no models in view (staring at empty space
  * still shows the stars). Models live in Scene3D, not here. */
-D3D11_RECT               g_scissor  = { 0, 0, Renderer::kCanvasWidth, Renderer::kCanvasHeight };
+D3D11_RECT               g_scissor  = { 0, 0, Renderer::CANVAS_WIDTH, Renderer::CANVAS_HEIGHT };
 bool                     g_xor_mode = false;
 
 /* Full-window scene state. When the in-flight 3D fills the window, g_scene_full
@@ -96,8 +96,8 @@ int                        g_scene_h = 384;
  * or the live client area when the in-flight 3D fills the window. (Formerly the size of
  * an off-screen canvas texture; now just the projection space that gfx2d_flush
  * letterboxes straight onto the back buffer.) */
-int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::kCanvasWidth;  }
-int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::kCanvasHeight; }
+int canvasW() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientWidth()  : Renderer::CANVAS_WIDTH;  }
+int canvasH() { Renderer* r = platform_renderer(); return (r && g_scene_full) ? r->clientHeight() : Renderer::CANVAS_HEIGHT; }
 
 /* Placement of the authored 2D canvas onto the back buffer: the single source of the
  * virtual size + destination offset + scale that both the 2D replay and the 3D scene
@@ -138,8 +138,8 @@ std::shared_ptr<Neuron::Graphics::Texture> g_font_sheet;
  * and the ~0.6 w:h ratio matches TextRenderer so the sheet looks the same here and
  * in the menus. The title size is the larger heading font (psize 140). */
 struct FontSize { float charW, charH; };
-constexpr FontSize kBodyFont  { 8.0f, 13.0f };
-constexpr FontSize kTitleFont { 12.0f, 20.0f };
+constexpr FontSize BODY_FONT  { 8.0f, 13.0f };
+constexpr FontSize TITLE_FONT { 12.0f, 20.0f };
 
 inline uint32_t col_rgba(int index)
 {
@@ -419,8 +419,8 @@ void gfx_set_scene_fullwindow(int on)
 	}
 
 	const float aspect = (g_scene_h > 0) ? static_cast<float>(g_scene_w) / static_cast<float>(g_scene_h) : 4.0f / 3.0f;
-	Neuron::Client::MainCamera().SetProjParams(Neuron::Client::kLegacySceneFovY, aspect,
-											   Neuron::Client::kSceneNearZ, Neuron::Client::kSceneFarZ);
+	Neuron::Client::MainCamera().SetProjParams(Neuron::Client::LEGACY_SCENE_FOV_Y, aspect,
+											   Neuron::Client::SCENE_NEAR_Z, Neuron::Client::SCENE_FAR_Z);
 }
 
 // The scene canvas size for the current frame, in logical pixels (the space the
@@ -496,11 +496,11 @@ void gfx_set_scene_clip(void)
 /* ---- text ---- */
 void gfx_display_text(int x, int y, const char* txt)
 {
-	drawString(kBodyFont, x, y, txt, col_rgba(GFX_COL_WHITE));
+	drawString(BODY_FONT, x, y, txt, col_rgba(GFX_COL_WHITE));
 }
 void gfx_display_colour_text(int x, int y, const char* txt, int col)
 {
-	drawString(kBodyFont, x, y, txt, col_rgba(col));
+	drawString(BODY_FONT, x, y, txt, col_rgba(col));
 }
 void gfx_display_centre_text(int y, const char* str, int psize, int col)
 {
@@ -510,7 +510,7 @@ void gfx_display_centre_text(int y, const char* str, int psize, int col)
 	/* psize 140 selects the larger heading font; both are the one .dds sheet now
 	 * (the old ELITE_2 multicolour title sheet is gone), tinted by the caller's
 	 * colour. Monospaced, so the width is simply chars * cell width. */
-	const FontSize& fs = (psize == 140) ? kTitleFont : kBodyFont;
+	const FontSize& fs = (psize == 140) ? TITLE_FONT : BODY_FONT;
 	const int w = static_cast<int>(std::strlen(str) * fs.charW);
 	drawString(fs, mid - w / 2, y, str, col_rgba(col));
 }
@@ -541,7 +541,7 @@ void gfx_display_pretty_text(int tx, int ty, int bx, int /*by*/, const char* txt
 			*bp++ = *str++;
 		*bp = '\0';
 
-		drawString(kBodyFont, tx, ty, strbuf, col_rgba(GFX_COL_WHITE));
+		drawString(BODY_FONT, tx, ty, strbuf, col_rgba(GFX_COL_WHITE));
 		ty += 8 * GFX_SCALE;
 	}
 }
