@@ -1567,18 +1567,21 @@ marked done).
 *Acceptance:* grep for retired `kbd_*` names returns nothing; every
 remaining key has a pointer equivalent; docs match code.
 
-*As built (2026-07-04) — 🟡 doc pass done; key DELETION deliberately deferred:*
-the doc truth pass ran (this section + the M6 milestone; the Track I items carry
-their as-built notes; ARCHITECTURE.md §7's input bullet describes the
-order/pointer model). The actual retirement of the combat/chart key handlers
-(T/U/A/E/Tab/M/C/J/H, the arrow crosshair) is **held until the I2–I6 pointer UX is
-verified in an in-app run** — those keys are the safety net, and removing them
-before the un-CI-exercisable pointer path is confirmed working would leave no way
-to play if a pointer path has a bug. Every retired-key verb ALREADY has its pointer
-equivalent (I2 select, I3 orders, I4 ability bar, I6 chart click), so the deletion
-is a pure, low-risk cleanup to run once the UX is confirmed; the keys work in
-parallel until then (which also satisfies "keep the accelerator table"). The dead
-speed keys were already removed with the free-camera migration.
+*As built — ✅ done (2026-07-05, after the pointer UX was verified in-app):* the
+nine combat keys with exact pointer equivalents are **retired** — their kbd_*
+globals, key mappings (`input_win.cpp`), `keyboard.h` decls, `handle_flight_keys`
+handlers, and now-orphaned functions (`lock_missile_target`, `unlock_missile_target`,
+the centre-cone `find_lock_target`) all deleted: **A**=fire (→ the Attack order fires
+server-side), **E**/**Tab**/**M**/**pod**/**J** (→ the I4 ability bar),
+**T**/**U** (→ I2 pointer select), **H** (→ the I6 chart HYPERSPACE button). `grep`
+for the retired `kbd_*` names returns nothing. **Kept as accelerators** (the
+`docs/interaction.md` §3.9 table): the F1–F12 screen/nav keys, **Esc** (window-close,
+now its sole duty), the camera-fly arrows, the chart crosshair arrows + **D**/**O**,
+and **F** (name search — I6's pointer search field is still deferred, so F is the
+only by-name search). **C**/docking-computer is kept (a purchased-equipment auto-dock
+alongside the RMB Dock order). The `in.fire`/`s_frameFire` command-builder path is now
+vestigial (always false); harmless, left in place. Doc truth pass done (this note, M6,
+ARCHITECTURE.md §7).
 
 ---
 

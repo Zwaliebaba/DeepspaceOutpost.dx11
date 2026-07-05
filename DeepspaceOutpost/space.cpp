@@ -661,50 +661,8 @@ void render_replicated_objects (void)
 }
 
 
-// Pick the missile lock target / camera selection (T key): the nearest ship near
-// the CENTRE OF THE VIEW. The server then homes a missile at exactly this entity,
-// so we return its replicated entity index (0xFFFFFFFF when nothing suitable is
-// ahead); the orbit camera also treats it as its selected object. Planets, the
-// sun, other missiles, and the player's own hull are not lockable.
-unsigned int find_lock_target (void)
-{
-	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
-	if (!rc.IsOpen() || !camera_rig_ready())
-		return 0xFFFFFFFFu;
-
-	const long long* org = camera_rig_origin();
-	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
-	std::vector<Neuron::Client::RenderRecord> records =
-		Neuron::Client::BuildRenderRecords (ents, org[0], org[1], org[2]);
-
-	unsigned int best = 0xFFFFFFFFu;
-	double bestDist = 1.0e18;
-
-	for (const Neuron::Client::RenderRecord& rec : records)
-	{
-		// Lockable = a ship (not the planet/sun, not another missile, not us)...
-		if (rec.type < 0 || rec.type == SHIP_MISSILE)
-			continue;
-		if (rec.id == rc.LocalPlayer())
-			continue;
-
-		// ...in front of the camera and inside the central cone of the view.
-		struct vector camPos = rec.location;
-		camera_view_point (&camPos);
-		if (camPos.z <= 0.0)
-			continue;
-		if (fabs (camPos.x) > camPos.z || fabs (camPos.y) > camPos.z)
-			continue;
-
-		if (rec.distance < bestDist)
-		{
-			bestDist = rec.distance;
-			best = rec.id;
-		}
-	}
-
-	return best;
-}
+// (I7: find_lock_target - the legacy centre-of-view cone lock behind the retired
+//  T key - is gone. Selection is the cursor pick below (pick_entity_at_screen).)
 
 
 // I2 (interaction.md): pick the replicated entity nearest the SCREEN CURSOR

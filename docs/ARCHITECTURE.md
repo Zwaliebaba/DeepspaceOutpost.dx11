@@ -947,11 +947,13 @@ The client is deliberately dumb. It keeps:
   heartbeat that carries the delta-stream ack, with **zero flight axes**.
   Equipment activations flow `ActionTriggered` (LocalOnly bus) → the ability
   handlers / `AbilityRequest`; station screens send `StationRequest`s.
-  The combat/chart **keys are retained as accelerators** in parallel (their
-  formal retirement, I7, waits until the pointer UX is verified in an in-app
-  run — they are the safety net). Residues still folded forward: the full
-  move gizmo + RMB-hold radial menu (I3), the full gesture recognizer +
-  widget ergonomics (I5), chart pan/zoom (I6); see IMPLEMENTATION.md Track I.
+  The nine combat keys with exact pointer equivalents are **retired** (I7,
+  2026-07-05): A/E/Tab/M/T/U/pod/J/H are gone; the accelerator table that
+  stays is F1–F12, Esc (window-close), the camera-fly + chart-crosshair
+  arrows, and D/F/O (F is still the only by-name chart search). Residues
+  folded forward: the full move gizmo + RMB-hold radial menu (I3), the full
+  gesture recognizer + widget ergonomics (I5), chart pan/zoom + name-search
+  field (I6); see IMPLEMENTATION.md Track I.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.

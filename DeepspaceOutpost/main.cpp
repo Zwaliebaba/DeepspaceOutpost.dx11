@@ -314,40 +314,16 @@ void o_pressed()
 static bool s_fire_missile_intent = false;
 static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 
-// The entity the missile is currently locked onto (picked from the replicated view
-// with the target key), or 0xFFFFFFFF for none. Drives the HUD lock indicator and
-// the on-target reticle (drawn in render_replicated_objects), and is the target M
-// launches at. Global so the renderer can read it.
+// The entity the missile is aimed at (0xFFFFFFFF = none). Since I2 this is the
+// SELECTED entity (set by a pointer click, not the retired T/U lock keys): it drives
+// the on-target reticle (render_replicated_objects), the orbit-camera subject, and
+// the target the ability bar's Missile button launches at. Global so the renderer
+// reads it.
 unsigned int g_missile_lock_target = 0xFFFFFFFFu;
 
-// Lock the missile onto the ship in the crosshairs (T key). The server is
-// authoritative, so we pick the target from the replicated view and remember its
-// id; M then launches a homing missile at exactly that target. With nothing in the
-// sights, nothing locks.
-static void lock_missile_target(void)
-{
-  if (cmdr.missiles == 0)
-    return;
-
-  const unsigned int tgt = find_lock_target();
-  if (tgt == 0xFFFFFFFFu)
-    return; // nothing in the sights to lock
-
-  g_missile_lock_target = tgt;
-  missile_target = 0; // HUD: a missile is locked (red indicator)
-}
-
-// Clear the missile lock (U key).
-static void unlock_missile_target(void)
-{
-  g_missile_lock_target = 0xFFFFFFFFu;
-  missile_target = MISSILE_UNARMED; // HUD: no lock
-  snd_play_sample(SND_BOOP);
-}
-
-// Launch a missile (M key): only when a target is locked (T) and a round is in
-// the rack; the server spawns a projectile that homes that specific locked
-// target and the rack count comes back on PlayerStatus. No lock -> nothing fires.
+// Launch a missile at the current SELECTION (the ability bar Missile button / A1
+// residue path): only when something is selected and a round is in the rack; the
+// server spawns a homing projectile and the rack count comes back on PlayerStatus.
 static void launch_missile(void)
 {
   if ((g_missile_lock_target == 0xFFFFFFFFu) || (cmdr.missiles == 0))
@@ -907,11 +883,8 @@ void handle_flight_keys(void)
     return;
   }
 
-  if (kbd_fire_pressed)
-  {
-    if ((!docked) && (draw_lasers == 0))
-      draw_lasers = fire_laser();
-  }
+  // (I7: A=fire retired -> the Attack order fires; E/Tab/M/pod/J = ability bar;
+  //  T/U = pointer select; H = the chart HYPERSPACE button.)
 
   if (kbd_dock_pressed)
   {
@@ -925,50 +898,15 @@ void handle_flight_keys(void)
   if (kbd_d_pressed)
     d_pressed();
 
-  if (kbd_ecm_pressed)
-  {
-    // Thin client: the server owns the burst (validation, energy, cooldown, the
-    // downed missiles); the EcmPulse event coming back plays the classic buzz.
-    if (!docked && cmdr.ecm)
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
-  }
-
   if (kbd_find_pressed)
     f_pressed();
-
-  // The hyperspace key on either chart jumps to the system under the crosshair
-  // (server-validated fuel/range; works docked or in flight, per the protocol).
-  // teleport_to_cursor() is a no-op without a replicated galaxy. The legacy
-  // local countdown/witchspace jump was retired with the single-player fallback.
-  if (kbd_hyperspace_pressed && ((current_screen == SCR_GALACTIC_CHART) || (current_screen == SCR_SHORT_RANGE)))
-    teleport_to_cursor();
-
-  if (kbd_jump_pressed && (!docked) && (!witchspace))
-    jump_warp();
-
-  if (kbd_fire_missile_pressed)
-  {
-    if (!docked)
-      launch_missile();
-  }
 
   if (kbd_origin_pressed)
     o_pressed();
 
-  if (kbd_target_missile_pressed)
-  {
-    if (!docked)
-      lock_missile_target();
-  }
-
-  if (kbd_unarm_missile_pressed)
-  {
-    if (!docked)
-      unlock_missile_target();
-  }
-
   /* (The speed keys went with piloting: the hull idles and the CAMERA moves -
-   * see CameraRig. The arrow keys below only steer the chart crosshair now.) */
+   * see CameraRig. The arrow keys below only steer the chart crosshair - kept as
+   * an accelerator alongside the I6 chart click.) */
 
   if (kbd_up_pressed)
     arrow_up();
@@ -981,28 +919,6 @@ void handle_flight_keys(void)
 
   if (kbd_right_pressed)
     arrow_right();
-
-  if (kbd_energy_bomb_pressed)
-  {
-    // The server validates ownership and applies the blast. The local flag is
-    // cleared optimistically because no wire message mirrors equipment consumption
-    // yet (PlayerStatus carries no equipment bits) - a known residue, documented
-    // in IMPLEMENTATION.md; the server ignores duplicate detonate intents anyway.
-    if ((!docked) && (cmdr.energy_bomb))
-    {
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
-      cmdr.energy_bomb = 0;
-    }
-  }
-
-  if (kbd_escape_pressed)
-  {
-    // Thin client: the server consumes the pod, clears the record, refuels and
-    // respawns us docked; the EscapePodUsed event coming back flips the client
-    // into the docked flow (replacing the legacy local escape sequence).
-    if ((!docked) && (cmdr.escape_pod) && (!witchspace))
-      g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
-  }
 }
 
 // ---- Top-level game flow: the GameMain lifecycle state machine ----------------------
@@ -1497,8 +1413,9 @@ static void send_player_input(void)
   s_frameEcm = false;
   s_frameEnergyBomb = false;
   s_frameEscapePod = false;
-  if (kbd_fire_pressed)
-    g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Fire, 0 });
+  // (I7: manual A=fire is retired - the Attack order drives the ship's laser
+  //  server-side now. in.fire therefore stays false; the ability bar / orders own
+  //  the other actions.)
   if (s_fire_missile_intent)
   {
     g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::LaunchMissile, s_fire_missile_target });

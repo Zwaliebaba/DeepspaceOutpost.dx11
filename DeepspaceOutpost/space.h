@@ -69,7 +69,6 @@ void remove_ship (int un);
 void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
-unsigned int find_lock_target (void);
 unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
 
 // I4 ability bar (defined in main.cpp): draw the flight ability strip, and report

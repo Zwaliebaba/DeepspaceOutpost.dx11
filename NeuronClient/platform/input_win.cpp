@@ -235,10 +235,12 @@ int kbd_F1_pressed, kbd_F2_pressed, kbd_F3_pressed, kbd_F4_pressed;
 int kbd_F5_pressed, kbd_F6_pressed, kbd_F7_pressed, kbd_F8_pressed;
 int kbd_F9_pressed, kbd_F10_pressed, kbd_F11_pressed, kbd_F12_pressed;
 int kbd_y_pressed, kbd_n_pressed;
-int kbd_fire_pressed, kbd_ecm_pressed, kbd_energy_bomb_pressed;
-int kbd_hyperspace_pressed, kbd_ctrl_pressed, kbd_jump_pressed, kbd_escape_pressed;
+// I7: the combat keys (A/E/Tab/M/T/U/pod/J/H) retired into the pointer UX (I2 select,
+// I3 orders, I4 ability bar, I6 chart button); their kbd_* globals + mappings are
+// gone. kbd_ctrl stays (a modifier), and the chart D/F/O keys + the crosshair arrows
+// stay as accelerators.
+int kbd_ctrl_pressed;
 int kbd_dock_pressed, kbd_d_pressed, kbd_origin_pressed, kbd_find_pressed;
-int kbd_fire_missile_pressed, kbd_target_missile_pressed, kbd_unarm_missile_pressed;
 int kbd_inc_speed_pressed, kbd_dec_speed_pressed;
 int kbd_up_pressed, kbd_down_pressed, kbd_left_pressed, kbd_right_pressed;
 int kbd_enter_pressed, kbd_backspace_pressed, kbd_space_pressed;
@@ -258,22 +260,12 @@ void kbd_poll_keyboard(void)
 	kbd_y_pressed = down('Y');
 	kbd_n_pressed = down('N');
 
-	kbd_fire_pressed        = down('A');
-	kbd_ecm_pressed         = down('E');
-	kbd_energy_bomb_pressed = down(VK_TAB);
-	kbd_hyperspace_pressed  = down('H');
-	kbd_ctrl_pressed        = down(VK_CONTROL) || down(VK_LCONTROL) || down(VK_RCONTROL);
-	kbd_jump_pressed        = down('J');
-	kbd_escape_pressed      = down(VK_ESCAPE);
+	kbd_ctrl_pressed = down(VK_CONTROL) || down(VK_LCONTROL) || down(VK_RCONTROL);
 
 	kbd_dock_pressed   = down('C');
 	kbd_d_pressed      = down('D');
 	kbd_origin_pressed = down('O');
 	kbd_find_pressed   = down('F');
-
-	kbd_fire_missile_pressed   = down('M');
-	kbd_target_missile_pressed = down('T');
-	kbd_unarm_missile_pressed  = down('U');
 
 	kbd_inc_speed_pressed = down(VK_SPACE);
 	kbd_dec_speed_pressed = down(VK_OEM_2);   /* '/' */
