@@ -1163,6 +1163,9 @@ static void enter_intro2(void)
 static void enter_station(void)
 {
   current_screen = SCR_FRONT_VIEW;
+  // No combat target while docked: the orbit camera (RMB-drag around the station)
+  // centres on the player's own ship, not a stale lock from before docking.
+  g_missile_lock_target = 0xFFFFFFFFu;
   OpenStationMenu();
 }
 

@@ -58,9 +58,11 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
 
     g_editorFont.SetRenderShadow(true);
     if (m_disabled)
-      g_editorFont.SetColor(128, 128, 75, 255);
+      g_editorFont.SetColor(128, 128, 128, 255);
     else
-      g_editorFont.SetColor(255, 255, 150, 255);
+      // Selected buttons have the LIGHT blue gradient fill, so the label is dark navy
+      // (the frame colour) - white washes out on it, same reason the window title is navy.
+      g_editorFont.SetColor(42, 56, 82, 255);
 
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
@@ -85,10 +87,16 @@ void GuiButton::Render(int realX, int realY, bool highlighted, bool clicked)
     else
       g_editorFont.SetColor(255, 255, 255, 255);
 
+    // Draw the label through the shader outline (a crisp 1px black edge), the same as
+    // the highlighted state. Without it the anti-aliased white glyphs bleed into the
+    // textured red panel and read blurry / dull-grey; the outline makes them sharp and
+    // white, matching the reference menu.
+    g_editorFont.SetRenderShadow(true);
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, y, m_fontSize, m_caption);
     else
       g_editorFont.DrawText2D(realX + 5, y, m_fontSize, m_caption);
+    g_editorFont.SetRenderShadow(false);
   }
 }
 
@@ -147,7 +155,7 @@ void BorderlessButton::Render(int realX, int realY, bool highlighted, bool click
                              top, bottom, bottom);
 
     g_editorFont.SetRenderShadow(true);
-    g_editorFont.SetColor(255, 255, 150, 255);
+    g_editorFont.SetColor(42, 56, 82, 255);   // dark navy on the light blue selected gradient
     if (m_centered)
       g_editorFont.DrawText2DCenter(realX + m_bounds.Width / 2, realY + 10, m_fontSize, m_caption);
     else

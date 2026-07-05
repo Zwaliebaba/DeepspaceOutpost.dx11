@@ -78,11 +78,14 @@ namespace Neuron::GameLogic
       return _rng;
     }
 
-    // A small per-axis drift (world units per tick) so canisters scatter off the
-    // wreck instead of stacking in one exact spot. Range [-24, 24) per axis.
-    [[nodiscard]] inline Math::Vector3i64 LootDrift(uint32_t& _rng)
+    // A one-time positional scatter (world units) applied at spawn so canisters
+    // separate off the wreck instead of stacking in one exact spot. Range roughly
+    // [-192, 192) per axis (well inside the LOOT_SCOOP_RANGE of 600). This is a
+    // POSITION offset, not a velocity: canisters carry no motion and stay put, so a
+    // dead ship's cargo hangs at the wreck rather than coasting off at the ship's speed.
+    [[nodiscard]] inline Math::Vector3i64 LootScatter(uint32_t& _rng)
     {
-      auto axis = [&]() -> int64_t { return static_cast<int64_t>(LootNext(_rng) % 48u) - 24; };
+      auto axis = [&]() -> int64_t { return (static_cast<int64_t>(LootNext(_rng) % 48u) - 24) * 8; };
       return { axis(), axis(), axis() };
     }
   }
@@ -118,7 +121,9 @@ namespace Neuron::GameLogic
         const int commodity = (_commodity >= 0)
           ? _commodity
           : static_cast<int>(LootNext(_rng) & static_cast<uint32_t>(CARGO_COMMODITY_MASK));
-        SpawnCanister(_world, _origin, LootDrift(_rng), commodity, /*units*/ 1, LootMeshFor(commodity));
+        // Static canister (zero velocity), scattered by a one-time position offset.
+        const Math::Vector3i64 pos = _origin + LootScatter(_rng);
+        SpawnCanister(_world, pos, Math::Vector3i64{ 0, 0, 0 }, commodity, /*units*/ 1, LootMeshFor(commodity));
       }
       return count;
     }
@@ -157,7 +162,8 @@ namespace Neuron::GameLogic
       const int units = hold->units[c];
       if (units <= 0)
         continue;
-      SpawnCanister(_world, _pos, Detail::LootDrift(_rng), c, units, LootMeshFor(c));
+      // Static canister (zero velocity), scattered by a one-time position offset.
+      SpawnCanister(_world, _pos + Detail::LootScatter(_rng), Math::Vector3i64{ 0, 0, 0 }, c, units, LootMeshFor(c));
       ++spawned;
     }
     return spawned;

@@ -30,7 +30,13 @@ namespace Neuron::Graphics
       sd.Filter = filter;
       sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
       sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
-      sd.MaxLOD = D3D11_FLOAT32_MAX;
+      // Clamp to mip 0. This is a 2D UI/font renderer and the font sheet carries an
+      // auto-generated mip chain; the bitmap glyphs are drawn MINIFIED (a 16px cell drawn
+      // ~8px wide for the 0.6 aspect), so an unclamped LOD selects mip 1 - a pre-blurred
+      // half-res glyph - even under POINT sampling. That was the "anti-aliased/blurry" text.
+      // Forcing mip 0 samples the native glyph pixels, so the text stays crisp.
+      sd.MinLOD = 0.0f;
+      sd.MaxLOD = 0.0f;
       com_ptr<ID3D11SamplerState> s;
       check_hresult(device->CreateSamplerState(&sd, s.put()));
       return s;

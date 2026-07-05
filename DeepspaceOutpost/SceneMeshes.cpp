@@ -13,12 +13,14 @@
 #include "shipdata.h"
 #include "shipface.h"
 
-// World-space radius of the 3D planet sphere. Chosen so the sphere projects to the same
-// on-screen size the old billboard did: that disk's world half-size worked out to a constant
-// 6291456/256 = 24576 units regardless of distance (see the retired Scene3D::renderBillboard
-// radius formula), so matching it here makes the billboard->mesh switch size-preserving. Tune
-// here if the planet should read larger/smaller.
-static constexpr float PLANET_RADIUS = 24576.0f;
+// World-space radius of the 3D planet sphere. Sized to the planet's PHYSICAL extent - the
+// server's PLANET_KILL_RADIUS of 4000 (GameLogic/CollisionSystem.h), i.e. the visible
+// surface is the deadly surface. The old value (24576, inherited from the retired billboard's
+// artificial on-screen size) was 3x the station's 8000-unit orbit, so the planet sphere
+// ENCLOSED the station and any ship near it - the camera sat inside it and the whole view
+// flooded green on launch. At 4000 the planet is a sphere sitting below the station and the
+// space around the station reads as open space again.
+static constexpr float PLANET_RADIUS = 4000.0f;
 
 // Build a GPU-ready mesh for one legacy ship type from its point table + solid faces.
 // Returns false if the type is not a real ship (planet/sun and out-of-range types have

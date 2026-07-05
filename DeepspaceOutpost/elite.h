@@ -105,7 +105,6 @@ extern int current_screen;
 
 extern struct ship_data *ship_list[];
 
-extern int anti_alias_gfx;
 extern char scanner_filename[256];
 extern int hoopy_casinos;
 extern int instant_dock;

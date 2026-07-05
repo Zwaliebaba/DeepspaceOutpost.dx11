@@ -191,6 +191,30 @@ void camera_rig_update(void)
 		s_orbit.SetTarget(target);
 	}
 
+	/* Docked, the camera orbits the station-parked ship so the player can look
+	 * around the station while the menu window is up (the RMB-drag that drives it
+	 * is fed below, even though the GUI owns the pointer). Force orbit mode for the
+	 * whole docked stay; on launch, drop back to the free camera anchored behind
+	 * the hull as it heads into space. */
+	static bool s_prevDocked = false;
+	if (docked)
+	{
+		if (!s_prevDocked && haveMe)
+		{
+			const double t[3] = {static_cast<double>(me.x), static_cast<double>(me.y), static_cast<double>(me.z)};
+			s_orbit.SetTarget(t);
+			s_orbit.SetOrbit(s_fpv.YawAngle() + 3.14159265f, -0.30f, 3000.0);
+		}
+		s_orbitMode = true;
+	}
+	else if (s_prevDocked)
+	{
+		s_orbitMode = false;
+		if (haveMe)
+			AnchorBehindShip(me);
+	}
+	s_prevDocked = (docked != 0);
+
 	/* Gather this frame's camera input. The GUI overlay owns the pointer and the
 	 * keys while a window is up, and on the non-flight screens (charts, status)
 	 * the arrows belong to the chart crosshair - the camera goes quiet in both
@@ -234,6 +258,21 @@ void camera_rig_update(void)
 		in.moveUp = KeyAxis(VK_PRIOR, VK_NEXT);
 		in.boost = input_key_down(VK_SHIFT);
 	}
+
+	/* Docked exception: the station menu window owns the pointer (uiOwns is true),
+	 * but a RIGHT-mouse drag still orbits the camera around the station - RMB is
+	 * unused at a station, so it is bound to the view here. The wheel is left alone
+	 * so an open chart/market window can still zoom with it. */
+	if (docked)
+	{
+		if (rmb && s_prevRmb)
+		{
+			in.lookDX = static_cast<float>(mx - s_prevMouseX);
+			in.lookDY = static_cast<float>(my - s_prevMouseY);
+		}
+		in.looking = rmb;
+	}
+
 	/* I2 pointer selection: track the LMB press so a release inside the slop is a
 	 * click. On the flight screen with no UI in front, a click selects the entity
 	 * under the cursor (empty space clears) - the reticle, orbit subject and missile
