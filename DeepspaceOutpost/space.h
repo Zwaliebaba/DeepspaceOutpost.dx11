@@ -84,6 +84,10 @@ int  ability_bar_button_at (int mx, int my);
 void draw_nav_strip (void);
 int  nav_strip_button_at (int mx, int my);
 
+// G3 chat: draw the scrollback + input line (defined in main.cpp), called from the
+// HUD pass.
+void draw_chat (void);
+
 // Native flight-HUD primitives (defined in space.cpp). The cockpit dashboard and the
 // I2/I3/I4 overlays draw straight into the Render2D pass RenderGameHud brackets during
 // RenderCanvas, replacing the gfx2d deferred batch. Colours are palette indices (the

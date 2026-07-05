@@ -43,6 +43,7 @@ set(GAMELOGIC_HEADERS
     OrderSystem.h
     EscortSpawn.h
     CabinHeatSystem.h
+    ChatModeration.h
 )
 
 add_library(GameLogic STATIC ${GAMELOGIC_SOURCES} ${GAMELOGIC_HEADERS})

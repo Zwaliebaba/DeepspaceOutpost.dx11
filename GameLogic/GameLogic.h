@@ -42,6 +42,7 @@
 #include "OrderSystem.h"     // I1: ActiveOrder + StepOrders (order -> intent execution)
 #include "EscortSpawn.h"     // F1: player-owned escort NPC (SpawnEscort)
 #include "CabinHeatSystem.h" // G4: suns + cabin heat + fuel scooping (StepCabinHeat)
+#include "ChatModeration.h"  // G3: chat rate limit + sanitisation
 
 namespace Neuron::GameLogic
 {

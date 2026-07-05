@@ -48,7 +48,10 @@
 #include <DirectXMath.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -897,6 +900,111 @@ void handle_nav_strip(void)
   s_prevLmb = lmb;
 }
 
+// ---- G3 chat: a rate-limited relay with a client-side mute list -----------------
+//
+// The server rate-limits + sanitises + stamps the sender (playerId); the client
+// keeps a small scrollback, a per-playerId mute set, and a one-line input opened
+// with Enter. "/mute <id>" / "/unmute <id>" manage the mute set locally (the
+// server-persisted mute list is a B4 follow-up).
+
+namespace
+{
+  std::deque<std::string>                   g_chatLog;      // recent lines (name: text)
+  std::unordered_map<uint32_t, std::string> g_chatNames;    // playerId -> name (from PlayerInfo)
+  std::set<uint32_t>                        g_chatMutes;     // muted playerIds
+  bool                                      g_chatInputActive = false;
+  std::string                               g_chatInput;
+  constexpr std::size_t CHAT_SCROLLBACK = 8;
+}
+
+const char* chat_name_for(uint32_t _pid)
+{
+  if (_pid == 0) return "SYSTEM";
+  const auto it = g_chatNames.find(_pid);
+  return it == g_chatNames.end() ? "???" : it->second.c_str();
+}
+
+static void chat_submit(const std::string& _s)
+{
+  if (_s.empty())
+    return;
+  // Local mute commands never hit the wire.
+  if (_s.rfind("/mute ", 0) == 0)
+  {
+    const uint32_t pid = static_cast<uint32_t>(atoi(_s.c_str() + 6));
+    if (pid != 0) g_chatMutes.insert(pid);
+    return;
+  }
+  if (_s.rfind("/unmute ", 0) == 0)
+  {
+    const uint32_t pid = static_cast<uint32_t>(atoi(_s.c_str() + 8));
+    if (pid != 0) g_chatMutes.erase(pid);
+    return;
+  }
+  Neuron::Msg::Chat msg;
+  msg.sender = 0;   // the server stamps the authenticated sender; this is ignored
+  msg.text = _s;
+  Client::ReplicationClientInstance().Send(msg);
+}
+
+// Per-frame chat text entry: drain the WM_CHAR ring. Enter opens the input (or
+// submits it when open); Backspace edits; printable chars append while open.
+void handle_chat_input(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  {
+    g_chatInputActive = false;
+    return;
+  }
+
+  for (;;)
+  {
+    const int ch = kbd_read_key();
+    if (kbd_enter_pressed)
+    {
+      kbd_enter_pressed = 0;
+      if (!g_chatInputActive) { g_chatInputActive = true; g_chatInput.clear(); }
+      else { chat_submit(g_chatInput); g_chatInput.clear(); g_chatInputActive = false; }
+      continue;
+    }
+    if (kbd_backspace_pressed)
+    {
+      kbd_backspace_pressed = 0;
+      if (g_chatInputActive && !g_chatInput.empty()) g_chatInput.pop_back();
+      continue;
+    }
+    if (ch == 0)
+      break;   // ring drained
+    if (g_chatInputActive && ch >= 0x20 && ch < 0x7F && g_chatInput.size() < 160)
+      g_chatInput.push_back(static_cast<char>(ch));
+  }
+}
+
+// Draw the chat scrollback (and the input line while typing) bottom-left of the
+// flight view. Called from the HUD pass.
+void draw_chat(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+  if (g_chatLog.empty() && !g_chatInputActive)
+    return;
+
+  hud_set_origin(0, 0);
+  const int vh = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Height);
+  int y = vh - 60 - static_cast<int>(g_chatLog.size()) * 11;
+  for (const std::string& line : g_chatLog)
+  {
+    hud_text(12, y, line.c_str(), GFX_COL_GREY_1);
+    y += 11;
+  }
+  if (g_chatInputActive)
+  {
+    char buf[200];
+    snprintf(buf, sizeof(buf), "> %s_", g_chatInput.c_str());
+    hud_text(12, vh - 46, buf, GFX_COL_YELLOW_2);
+  }
+}
+
 // The charts moved to a native GUI overlay window (ChartWindow, GameWindows.cpp):
 // F5/F6/F7 open it, a click on its map selects the nearest system, and its own
 // HYPERSPACE button jumps. The old on-canvas pointer handler and the letterboxed
@@ -1327,6 +1435,20 @@ static void register_client_event_handlers(void)
   g_clientBus.Subscribe<Neuron::Msg::PlayerInfo>([](const Neuron::Msg::PlayerInfo& _pi)
   {
     g_playerRoster[_pi.entityId] = PlayerRosterEntry{ _pi.name, _pi.wantedLevel };
+    g_chatNames[_pi.playerId] = _pi.name;   // G3: chat is keyed by playerId, not hull
+  });
+
+  // G3 chat: a relayed line (sender = playerId, or 0 = system). Drop muted senders;
+  // format "name: text" and push to the scrollback ring.
+  g_clientBus.Subscribe<Neuron::Msg::Chat>([](const Neuron::Msg::Chat& _c)
+  {
+    if (_c.sender != 0 && g_chatMutes.count(_c.sender) != 0)
+      return;   // muted
+    char line[220];
+    snprintf(line, sizeof(line), "%s: %s", chat_name_for(_c.sender), _c.text.c_str());
+    g_chatLog.push_back(line);
+    while (g_chatLog.size() > CHAT_SCROLLBACK)
+      g_chatLog.pop_front();
   });
 
   // Status: our own authoritative vitals for the HUD. The server owns shields and
@@ -1456,6 +1578,7 @@ static void process_server_events(void)
     Neuron::Msg::EscapePodUsed pod;
     Neuron::Msg::UnitOrderAck oack;
     Neuron::Msg::ExplosionAt boom;
+    Neuron::Msg::Chat chat;
 
     if (Neuron::Msg::TryDecode(msg, resp))
       g_clientBus.Publish(resp);
@@ -1463,6 +1586,8 @@ static void process_server_events(void)
       g_clientBus.Publish(oack);
     else if (Neuron::Msg::TryDecode(msg, boom))
       g_clientBus.Publish(boom);
+    else if (Neuron::Msg::TryDecode(msg, chat))
+      g_clientBus.Publish(chat);
     else if (Neuron::Msg::TryDecode(msg, travel))
       g_clientBus.Publish(travel);
     else if (Neuron::Msg::TryDecode(msg, death))
@@ -1597,6 +1722,7 @@ static void game_update_flight(void)
   handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
                                //     click is consumed instead of selecting behind it)
   handle_nav_strip();          // I4: screen-nav strip clicks (same, top-right)
+  handle_chat_input();         // G3: chat text entry (Enter opens/sends)
 
   camera_rig_update();
 

@@ -1525,6 +1525,7 @@ void update_console (void)
 	draw_radial_menu();
 	draw_ability_bar();
 	draw_nav_strip();
+	draw_chat();
 
 	hud_set_origin (0, 0);
 }

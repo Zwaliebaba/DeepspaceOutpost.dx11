@@ -57,6 +57,7 @@
 #include "CombatSystem.h"
 #include "EquipmentSystem.h"   // ShipGear (laser heat + ECM recharge, G8)
 #include "CabinHeatSystem.h"   // CabinHeat (sun proximity heat, G4)
+#include "ChatModeration.h"    // ChatLimiter (per-session chat rate limit, G3)
 
 namespace Neuron::GameLogic
 {
@@ -107,6 +108,7 @@ namespace Neuron::GameLogic
                                        //   compensated fire. Raw here; the consumer clamps.
     uint32_t inputWindowTick = 0;      // D4: tick the input-cadence window opened
     uint16_t inputsThisWindow = 0;     // D4: inputs applied this tick (capped)
+    ChatLimiter chat;                  // G3: per-session chat rate-limit window
     bool loading = false;              // B4: version-checked, awaiting a persistence load before spawn
     uint32_t ackedSnapshotTick = 0;    // E2b: latest snapshot tick this client holds as a baseline
     Net::SnapshotStreamEncoder snapshotEncoder;   // E2b: per-session delta/keyframe snapshot stream

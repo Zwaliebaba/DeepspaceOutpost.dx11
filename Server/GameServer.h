@@ -123,6 +123,7 @@ namespace DSOServer
     // and route a discrete equipment activation to the combat bus.
     void HandleUnitOrder(Neuron::GameLogic::Session& _session, const Neuron::Msg::UnitOrder& _req);
     void HandleAbilityRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::AbilityRequest& _req);
+    void HandleChat(Neuron::GameLogic::Session& _session, const Neuron::Msg::Chat& _in);   // G3 chat relay
     // I1: auto-complete a Dock order when the ordered ship reaches dock range
     // (reuses the tested station dock path and clears the order).
     void CompleteDockOrders();

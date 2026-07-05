@@ -339,6 +339,7 @@ namespace DSOServer
         Msg::AbilityRequest ability;
         Msg::GalaxyChunkRequest chunkReq;
         Msg::Ping ping;
+        Msg::Chat chat;
         if (Msg::TryDecode(msg, req))
         {
           LogCommand(s, msg);   // audit/replay (before the mutation it authorizes)
@@ -367,8 +368,27 @@ namespace DSOServer
           s.rttMs = ping.rttMs;
           s.events.Send(Msg::Pong{ ping.clientTimeMs, m_tick });
         }
+        else if (Msg::TryDecode(msg, chat))
+          HandleChat(s, chat);   // G3: rate-limited, sanitised relay
       }
     }
+  }
+
+  // G3: relay a chat line. Rate-limit per session (drop + warn over cap), sanitise
+  // the text server-side, stamp the AUTHENTICATED sender (playerId, so clients can
+  // mute by it), and rebroadcast to the roster. AOI-scoped delivery is a refinement;
+  // roster-wide is a superset for now.
+  void GameServer::HandleChat(GameLogic::Session& _session, const Msg::Chat& _in)
+  {
+    if (!GameLogic::ChatAllowed(_session.chat, m_tick))
+    {
+      _session.events.Send(Msg::Chat{ 0, "You are chatting too fast." });   // sender 0 = system
+      return;
+    }
+    const std::string text = GameLogic::SanitizeChat(_in.text);
+    if (text.empty())
+      return;
+    m_sessions.Broadcast(Msg::Chat{ _session.playerId, text });
   }
 
   void GameServer::ApplyCompletedLoads()
