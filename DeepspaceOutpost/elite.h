@@ -8,8 +8,8 @@
 #define SCR_INTRO_ONE		1
 #define SCR_INTRO_TWO		2
 // (SCR_GALACTIC_CHART 3, SCR_SHORT_RANGE 4, SCR_PLANET_DATA 5 retired: the charts
-//  and system-data panel are the native ChartWindow now, not current_screen modes.)
-#define SCR_CMDR_STATUS		7
+//  and system-data panel are the native ChartWindow now. SCR_CMDR_STATUS 7 retired:
+//  the docked view is the camera-space scene + the native StationMenuWindow.)
 #define SCR_FRONT_VIEW		8
 // (SCR_REAR_VIEW 9, SCR_LEFT_VIEW 10, SCR_RIGHT_VIEW 11 retired: the cockpit
 //  has a single fixed forward view now; F2-F4 no longer switch views.)

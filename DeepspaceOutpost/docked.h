@@ -2,8 +2,9 @@
 #define DOCKED_H
 
 // The galactic / short-range / planet-data chart screens moved to the native
-// ChartWindow (GameWindows.cpp), driven by the render-free ChartData API (ChartData.h).
-void display_commander_status (void);
+// ChartWindow, and the docked commander-status screen to the StationMenuWindow +
+// camera-space view (GameWindows.cpp); the render-free data those windows show lives
+// in the ChartData API (ChartData.h) and the *_line accessors below.
 int calc_distance_to_planet (struct galaxy_seed from_planet, struct galaxy_seed to_planet);
 
 /* Render-free market accessors / actions, used by the GUI market window so it can
