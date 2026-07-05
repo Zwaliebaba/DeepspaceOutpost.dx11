@@ -43,6 +43,10 @@ extern int planet_data_line_count(void);
 extern void planet_data_line(int i, char* buf, int buflen);
 extern void planet_data_title(char* buf, int buflen);
 
+// Launch from the station back into flight (space.h / space.cpp), declared here to keep
+// this TU off the legacy game headers. Bound to the station menu's Launch button.
+extern void launch_player(void);
+
 // Equip-ship screen (docked.h / docked.cpp).
 extern int equip_do(int index);
 extern void equip_reset(void);
@@ -873,6 +877,71 @@ namespace
     else
       m_win->ToggleKind();
   }
+
+  // ----- Station menu (the docked home) -------------------------------------
+
+  // A button that fires a plain void() action (launch, or one of the Open*Window
+  // entry points). The docked view is the camera-space 3D scene; this small menu window
+  // floats over it as the station hub, replacing the legacy 512x514 commander-status
+  // screen (the first screen off the letterbox on the docked side).
+  class MenuActionButton : public GuiButton
+  {
+    public:
+      explicit MenuActionButton(void (*_fn)())
+        : m_fn(_fn)
+      {
+        m_centered = true;
+      }
+      void MouseUp() override
+      {
+        if (m_fn)
+          m_fn();
+      }
+
+    private:
+      void (*m_fn)();
+  };
+
+  class StationMenuWindow : public GuiWindow
+  {
+    public:
+      StationMenuWindow()
+        : GuiWindow("Station")
+      {
+        SetTitle("Station");
+        Centre(this, 200, 250);
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create();
+        m_buttonOrder.clear();
+
+        const int x = 12;
+        const int w = static_cast<int>(m_w) - 24;
+        const int h = 22;
+        int y = 30;
+
+        auto add = [&](const char* _name, const char* _caption, void (*_fn)()) {
+          auto* b = NEW MenuActionButton(_fn);
+          b->SetProperties(_name, x, y, w, h, _caption);
+          RegisterButton(b);
+          m_buttonOrder.push_back(b);
+          y += 28;
+        };
+
+        // Launch leaves the station (and closes this hub so the overlay hands input back
+        // to flight); the rest open the existing native screens.
+        add("Launch", "Launch", []() { launch_player(); Canvas::EclRemoveWindow(std::string_view("Station")); });
+        add("Market", "Market", OpenMarketWindow);
+        add("Equip", "Equip Ship", OpenEquipWindow);
+        add("Commander", "Commander", OpenCommanderWindow);
+        add("Inventory", "Inventory", OpenInventoryWindow);
+        add("Options", "Options", []() { GuiOverlay::Open(); });
+
+        m_currentButton = 0;
+      }
+  };
 }
 
 void RegisterGameWindows()
@@ -918,4 +987,9 @@ void OpenChartWindow(int kind)
   GuiOverlay::ShowWindow(std::string_view("Chart"), [kind]() -> GuiWindow* { return NEW ChartWindow(kind); });
   if (GuiWindow* w = Canvas::EclGetWindow(std::string_view("Chart")))
     static_cast<ChartWindow*>(w)->SetKind(kind);
+}
+
+void OpenStationMenu()
+{
+  GuiOverlay::ShowWindow(std::string_view("Station"), []() -> GuiWindow* { return NEW StationMenuWindow(); });
 }
