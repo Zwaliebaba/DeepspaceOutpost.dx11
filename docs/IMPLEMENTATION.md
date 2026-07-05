@@ -107,6 +107,7 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | The ship-fused camera/projection stack: `NeuronClient/ViewMetrics.h`, `SceneProjection.h`, `CameraFollow.h`, `DeepspaceOutpost/Camera.h/.cpp` (+ their tests) and the piloting keys (roll/climb ramps, speed keys, the cockpit corner-beam `draw_laser_lines`) | the implicit "camera == ship" view, the focal-pixel software projection, and hull piloting | Replaced by the free camera: `NeuronClient/Camera` (view+projection, DirectXMath) + `CameraController` (first-person / orbit) + the game's `CameraRig`; the renderer consumes `View()`/`Projection()`; records are world-frame; the active ship renders on screen; flight intent is always zero (camera-only control) | ✅ **Replaced 2026-07-04** — see ARCHITECTURE.md §7 "The free camera" |
 | `NeuronClient/graphics/Render2D` runtime-HLSL path: `CompileHLSL` (`D3DCompile`), `AddProgram`, the public `RegisterProgram`, `#include <d3dcompiler.h>`, and the `d3dcompiler` link (`NeuronClient/CMakeLists.txt`) | runtime compilation of caller-supplied 2D shader programs | Every program the renderer uses (default + text outline) is compiled offline by fxc into `shaders/CompiledShaders/*.h` byte arrays; `RegisterProgram` had no callers, so the whole runtime-compile chain was dead | ✅ **Removed 2026-07-05** (`SetProgram`/`SetShaderParams`/`TextOutlineProgram` for the built-in programs stay) |
 | Stale `NeuronClient/gfx.h` definitions: the unreachable `RES_512_512` metrics block (its guard is never defined in any TU that includes gfx.h), the unused `GFX_X_OFFSET`/`GFX_Y_OFFSET` and `GFX_VIEW_TX/TY/BX/BY` macros, the unreferenced palette entries `GFX_COL_YELLOW_3/4` + `GFX_ORANGE_1/2/3`, the `IMG_DICE` sprite id, and the never-called `gfx_draw_triangle`/`gfx_clear_area`/`xor_mode` (+ their `gfx2d.cpp` definitions and the vestigial `g_xor_mode`/`Cmd::xorop` XOR plumbing, which was never read at flush) | legacy Allegro-era graphics constants and dead 2D entry points | Zero references anywhere (`git grep`); the XOR path existed for the old chart cross-hairs that I6 replaced | ✅ **Removed 2026-07-05** (live metrics `GFX_SCALE`/`GFX_X_CENTRE`/`GFX_Y_CENTRE`, the used palette/`IMG_*` entries, and every called `gfx_*` entry point stay) |
+| The letterboxed chart screens: `docked.cpp` `display_galactic_chart`/`display_short_range_chart`/`display_data_on_planet` + their `display_replicated_*` draw helpers, `draw_fuel_limit_circle`, `show_distance_to_planet`, `move_cursor_to_origin`, `find_planet_by_name`, `teleport_to_cursor`, `chart_nearest_to_cursor`, `chart_project_current`; `main.cpp` `handle_chart_pointer`/`draw_chart_hyperspace_button`/`draw_cross`/`move_cross`/`arrow_*`/`d_pressed`/`f_pressed`/`o_pressed`/name-search; the `SCR_GALACTIC_CHART`/`SCR_SHORT_RANGE`/`SCR_PLANET_DATA` modes | the galactic / short-range / planet-data screens drawn in the 512×514 canvas + their keyboard crosshair controls | Replaced by the native `ChartWindow` (`GameWindows.cpp`) on the GUI overlay, fed by the render-free `ChartData` API (`ChartData.h`); the projection/selection helpers it reuses (`chart_project_all`/`chart_project_short_range`/`chart_current_system`/`current_system_name`/`hyperspace_system_name`) stay | ✅ **Removed 2026-07-05** — first screen migrated off the letterbox toward retiring it |
 
 Not dead, do not remove: `Messages/Catalog.h`, `CatalogTools.h`,
 `PacketInspect.h` (test/tooling infrastructure the governance and fuzz suites
@@ -1556,6 +1557,21 @@ hyperspace key are RETAINED as accelerators (formal retirement is I7). **Deferre
 separate zoom presets) and find-by-name as a pointer search field (the F-key name
 search still works); the full economy/fuel-cost **info card** rides the same readout
 follow-up as I2's card.
+
+*Superseded (2026-07-05) — charts moved to a native GUI window off the letterbox:*
+the letterboxed chart described above was replaced by a native `ChartWindow`
+(`GameWindows.cpp`) on the GUI overlay, fed by a render-free `ChartData` API
+(`ChartData.h` / `docked.cpp`). The window draws the map through `Render2D` (new
+native `DrawCircle`/`FillCircle` primitives) with a selected-system data panel, a
+click selects the nearest system (`MouseEvent` → `ChartData::SetCursor`), and its
+own **HYPERSPACE** button jumps; F5/F6/F7 open it and F5/F6 switch galactic/short-
+range. The whole letterboxed path is gone: `handle_chart_pointer`,
+`gfx_window_to_canvas` usage, `draw_cross`/`move_cross`, the D/F/O + name-search
+keys, `display_*_chart`/`display_data_on_planet` and their replicated draw helpers,
+and the `SCR_GALACTIC_CHART/SHORT_RANGE/PLANET_DATA` modes were all deleted. The
+selected-system data panel replaced the separate F7 screen. Name-search-by-pointer
+remains deferred. This is the first screen off the 512×514 letterbox toward
+retiring it (the flight HUD dashboard is the remaining long pole).
 
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 

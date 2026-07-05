@@ -948,19 +948,22 @@ The client is deliberately dumb. It keeps:
   (I3) — sent as a reliable `UnitOrder` the server validates (ownership /
   legality / range / crime), acked by `UnitOrderAck`. A non-modal **ability
   bar** (I4) puts Stop/Missile/ECM/Bomb/Pod/Jump one click away (Bomb/Pod
-  hold-to-confirm); the **charts** are pick surfaces (I6: click a system,
-  click HYPERSPACE → `TravelRequest`); **touch** maps one finger to the mouse
-  and pinches to zoom (I5). The per-frame `InputCommand` continues as the
-  heartbeat that carries the delta-stream ack, with **zero flight axes**.
-  Equipment activations flow `ActionTriggered` (LocalOnly bus) → the ability
-  handlers / `AbilityRequest`; station screens send `StationRequest`s.
+  hold-to-confirm); the **charts** are a native GUI window (2026-07-05: the
+  `ChartWindow` overlay — a native `GuiWindow` like market/equip, drawn through
+  `Render2D` off the 512×514 letterbox; click a system to select, its own HYPERSPACE
+  button → `TravelRequest`; F5/F6 switch galactic/short-range); **touch** maps one
+  finger to the mouse and pinches to zoom (I5). The per-frame `InputCommand`
+  continues as the heartbeat that carries the delta-stream ack, with **zero
+  flight axes**. Equipment activations flow `ActionTriggered` (LocalOnly bus) →
+  the ability handlers / `AbilityRequest`; station screens send `StationRequest`s.
   The nine combat keys with exact pointer equivalents are **retired** (I7,
   2026-07-05): A/E/Tab/M/T/U/pod/J/H are gone; the accelerator table that
-  stays is F1–F12, Esc (window-close), the camera-fly + chart-crosshair
-  arrows, and D/F/O (F is still the only by-name chart search). Residues
-  folded forward: the full move gizmo + RMB-hold radial menu (I3), the full
-  gesture recognizer + widget ergonomics (I5), chart pan/zoom + name-search
-  field (I6); see IMPLEMENTATION.md Track I.
+  stays is F1–F12, Esc (window-close), and the camera-fly arrows. The chart
+  keyboard controls (the crosshair arrows, D/F/O, and the planet name search)
+  retired with the letterboxed charts — the chart window is mouse-driven.
+  Residues folded forward: the full move gizmo + RMB-hold radial menu (I3), the
+  full gesture recognizer + widget ergonomics (I5), and chart drag-pan / zoom +
+  pointer name-search (charts, now the native window); see IMPLEMENTATION.md Track I.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
   hyperspace, scoop beep), the break-pattern screen transitions.
