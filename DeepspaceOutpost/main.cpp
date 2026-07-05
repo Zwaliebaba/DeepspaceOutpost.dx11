@@ -788,6 +788,114 @@ void handle_ability_bar(void)
   s_prevLmb = lmb;
 }
 
+// ---- I4 screen-nav strip (interaction.md §3.8): screens reachable by pointer -----
+//
+// A compact strip of screen icons in the top-RIGHT of the flight view - Chart /
+// Status / Inventory - so the F-key screens are one tap away without the keyboard.
+// Same non-modal discipline as the ability bar: it does not raise GuiOverlay; the
+// camera's select ignores a click that began on it (nav_strip_button_at), and a
+// click opens the matching GUI overlay window (which the F-keys still open too).
+// Market/Equip stay on the docked station UI (they need docking), so the flight
+// strip carries the always-available screens.
+
+namespace
+{
+  enum NavAct { NAV_CHART, NAV_STATUS, NAV_INV, NAV_COUNT };
+  struct NavButton { const char* label; int act; };
+  const NavButton s_nav[NAV_COUNT] = {
+    { "CHART", NAV_CHART }, { "STATUS", NAV_STATUS }, { "INV", NAV_INV },
+  };
+  constexpr int NAV_SLOT_W = 64;
+  constexpr int NAV_SLOT_H = 20;
+  constexpr int NAV_GAP    = 4;
+  constexpr int NAV_TOP_Y  = 8;
+  constexpr int NAV_MARGIN = 8;   // gap from the right edge
+
+  int s_nav_down_btn = -1;
+}
+
+static int nav_strip_origin_x(int _vw)
+{
+  const int total = NAV_COUNT * NAV_SLOT_W + (NAV_COUNT - 1) * NAV_GAP;
+  int x0 = _vw - NAV_MARGIN - total;
+  if (x0 < 4) x0 = 4;
+  return x0;
+}
+
+// The nav button under (mx,my), or -1. Exposed so the camera's select ignores a
+// click that landed on the strip. Flight view only.
+int nav_strip_button_at(int _mx, int _my)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return -1;
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
+  const int x0 = nav_strip_origin_x(vw);
+  for (int i = 0; i < NAV_COUNT; ++i)
+  {
+    const int x = x0 + i * (NAV_SLOT_W + NAV_GAP);
+    if (_mx >= x && _mx < x + NAV_SLOT_W && _my >= NAV_TOP_Y && _my < NAV_TOP_Y + NAV_SLOT_H)
+      return i;
+  }
+  return -1;
+}
+
+static void nav_trigger(int _act)
+{
+  switch (_act)
+  {
+    case NAV_CHART:  OpenChartWindow(ChartData::GALACTIC); break;
+    case NAV_STATUS: OpenCommanderWindow(); break;
+    case NAV_INV:    OpenInventoryWindow(); break;
+    default: break;
+  }
+}
+
+void draw_nav_strip(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+
+  const int vw = static_cast<int>(Neuron::Graphics::Core::GetOutputSize().Width);
+  hud_set_origin(0, 0);
+  const int x0 = nav_strip_origin_x(vw);
+  for (int i = 0; i < NAV_COUNT; ++i)
+  {
+    const int x = x0 + i * (NAV_SLOT_W + NAV_GAP);
+    hud_rect(x, NAV_TOP_Y, x + NAV_SLOT_W, NAV_TOP_Y + NAV_SLOT_H, GFX_COL_GREY_1);
+    const int len = static_cast<int>(strlen(s_nav[i].label));
+    hud_text(x + (NAV_SLOT_W - len * 8) / 2, NAV_TOP_Y + 6, s_nav[i].label, GFX_COL_CYAN);
+  }
+}
+
+// Per-frame nav-strip input: an LMB press-release on the same button opens its
+// screen. Runs before the camera (like the ability bar) so a strip click is
+// consumed, not treated as a world select.
+void handle_nav_strip(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  {
+    s_nav_down_btn = -1;
+    return;
+  }
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+
+  static bool s_prevLmb = false;
+  if (lmb && !s_prevLmb)
+  {
+    s_nav_down_btn = nav_strip_button_at(mx, my);
+  }
+  else if (!lmb && s_prevLmb && s_nav_down_btn >= 0)
+  {
+    if (nav_strip_button_at(mx, my) == s_nav_down_btn)
+      nav_trigger(s_nav[s_nav_down_btn].act);
+    s_nav_down_btn = -1;
+  }
+  s_prevLmb = lmb;
+}
+
 // The charts moved to a native GUI overlay window (ChartWindow, GameWindows.cpp):
 // F5/F6/F7 open it, a click on its map selects the nearest system, and its own
 // HYPERSPACE button jumps. The old on-canvas pointer handler and the letterboxed
@@ -1474,6 +1582,7 @@ static void game_update_flight(void)
   // handler so a fresh missile lock orbits from the next frame.
   handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
                                //     click is consumed instead of selecting behind it)
+  handle_nav_strip();          // I4: screen-nav strip clicks (same, top-right)
 
   camera_rig_update();
 

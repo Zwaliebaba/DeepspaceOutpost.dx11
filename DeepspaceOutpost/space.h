@@ -77,6 +77,13 @@ unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity 
 void draw_ability_bar (void);
 int  ability_bar_button_at (int mx, int my);
 
+// I4 screen-nav icon strip (defined in main.cpp): a compact top-right strip that
+// opens the chart / status / inventory windows by pointer (F-keys stay as
+// accelerators). Like the ability bar it is non-modal, so the camera's select
+// ignores a click that landed on it (nav_strip_button_at >= 0).
+void draw_nav_strip (void);
+int  nav_strip_button_at (int mx, int my);
+
 // Native flight-HUD primitives (defined in space.cpp). The cockpit dashboard and the
 // I2/I3/I4 overlays draw straight into the Render2D pass RenderGameHud brackets during
 // RenderCanvas, replacing the gfx2d deferred batch. Colours are palette indices (the

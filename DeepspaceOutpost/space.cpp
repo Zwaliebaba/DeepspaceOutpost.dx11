@@ -1508,6 +1508,7 @@ void update_console (void)
 	draw_move_gizmo();
 	draw_radial_menu();
 	draw_ability_bar();
+	draw_nav_strip();
 
 	hud_set_origin (0, 0);
 }

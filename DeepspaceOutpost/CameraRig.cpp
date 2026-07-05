@@ -212,7 +212,9 @@ void camera_rig_update(void)
 		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
 		 * once the press has crossed the slop, so a click never nudges the view. A
 		 * press that began on the I4 ability bar belongs to the bar, not the camera. */
-		const bool lmbDrag = lmb && s_lmbMoved && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0;
+		const bool lmbDrag = lmb && s_lmbMoved
+		                  && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0
+		                  && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0;
 		if (lmbDrag && s_prevLmb)
 		{
 			in.lookDX = static_cast<float>(mx - s_prevMouseX);
@@ -248,7 +250,8 @@ void camera_rig_update(void)
 			s_lmbMoved = true;
 	}
 	else if (s_prevLmb && !s_lmbMoved && !uiOwns
-	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0)   // not a bar click (I4)
+	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0     // not a bar click (I4)
+	         && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0)      // not a nav-strip click (I4)
 	{
 		g_missile_lock_target = pick_entity_at_screen(mx, my);
 	}
