@@ -1601,11 +1601,25 @@ from `RenderGameHud`, then clears) bridges them into the HUD pass. gfx2d's whole
 layer (`drawString`/`emitGlyphs`/`fontSheetSRV`/the shared sheet) and the text-outline branch
 in `gfx2d_flush` went with it — the batch now replays sprites and pixels only.
 
-**Still on gfx2d:** `gfx_plot_pixel` (starfield + ship-death debris), `gfx_draw_sprite`/
-`_scaled` (the per-ship target reticle and the intro ship art), the `gfx_render_3d_scene`
-pass, and the `gfx_scene_size`/clip/`gfx_canvas_size` plumbing. gfx2d/gfx.h are much smaller
-but not yet gone — the starfield/debris pixels and the reticle/intro sprites are the last
-2D-batch consumers.
+*Follow-up (2026-07-05) — the gfx2d 2D batch is deleted (endgame Phase 1):* the last three
+batch producers moved native — the ship-death debris (`gfx_plot_pixel`, `threed.cpp`), the
+per-ship target reticle (`gfx_draw_sprite_scaled`, `space.cpp`) and the intro title sprite
+(`gfx_draw_sprite`, `intro.cpp`). Like the centred text they are emitted from RenderScene, so
+they queue in `space.cpp` (`hud_plot_pixel`/`hud_sprite_deferred`/`hud_sprite_scaled_deferred`)
+and `RenderSceneOverlays` draws them via `Render2D::PlotPoint`/`TexQuad` from `RenderGameHud` —
+first, under the dashboard and text, matching the old batch-flush-under-HUD order. With no
+producers left, the entire gfx2d vertex batch is gone: `gfx2d_flush` (and its `RenderCanvas`
+call), the `ColorVertex`/`TexVertex`/`Cmd` streams, `pushColor`/`pushTexQuad`/`addPoint`, the
+`getTexture`/`spriteFile` sprite plumbing, `col_rgba`, and the batch's scissor. `gfx2d.cpp` is
+now just the scene/viewport seam (`gfx_render_3d_scene` → `Scene3D`, `gfx_set_scene_fullwindow`/
+`gfx_scene_size`/`gfx_canvas_size`, and vestigial clip/clear no-ops).
+
+**What's left of gfx.h/gfx2d (endgame Phase 2):** no 2D drawing at all — only the engine seam:
+lifecycle (`gfx_graphics_startup`/`shutdown`/`gfx_update_screen`), the 3D scene pass
+(`gfx_render_3d_scene`), the viewport/projection (`gfx_set_scene_fullwindow`/`gfx_scene_size`/
+`gfx_canvas_size`), the clip/clear no-ops, and the `GFX_COL_*`/`IMG_*` macros. Phase 2 rehomes
+those into a native header (fold into `GraphicsCore`/`ClientEngine`) and replaces the macros,
+after which `gfx.h`/`gfx2d.*` are deleted.
 
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 

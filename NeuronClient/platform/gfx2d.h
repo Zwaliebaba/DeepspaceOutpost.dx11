@@ -3,24 +3,15 @@
  *
  * gfx2d.h
  *
- * Hook for the platform layer to flush the accumulated 2D primitive batch to the
- * back buffer once per frame (called from gfx_update_screen, before Core::Present()).
- * The batch is replayed through Neuron::Graphics::Render2D.
+ * The 2D primitive batch this header used to drive is gone - all 2D drawing is native now
+ * (Neuron::Graphics::Render2D via RenderGameHud / the GUI overlay), so there is no
+ * gfx2d_flush() any more. The scene/viewport seam that remains in gfx2d.cpp is declared in
+ * gfx.h. This header now only re-exports ModelDraw for its transitive consumers.
  */
 
 #ifndef GFX2D_H
 #define GFX2D_H
 
 #include "ModelDraw.h" // Neuron::Render::ModelDraw (kept for transitive consumers)
-
-// Replay this frame's 2D batch (HUD / menus) to the back buffer, over the 3D scene pass.
-//
-// The 3D scene pass itself is driven by the game via gfx_render_3d_scene() (declared in gfx.h),
-// called at the end of its world draw - not from here.
-//
-// Every screen redraws every frame now (flight HUD, charts, docked legacy screens, the 3D
-// scene pass), so the batch is never empty during normal play and this always clears +
-// draws + is present-ready; the caller always presents. There is no idle-frame gate here.
-void gfx2d_flush(void);
 
 #endif /* GFX2D_H */

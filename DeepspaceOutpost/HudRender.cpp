@@ -22,6 +22,11 @@ extern void update_console();
 // message, GAME OVER). Drawn natively here; the queue is empty in states that emit none.
 extern void RenderOverlayText();
 
+// Scene overlays queued during RenderScene: the ship-death debris points, the target
+// reticle and the intro title sprite. Drawn first (under the dashboard + text), matching
+// the old batch-flush-under-HUD order.
+extern void RenderSceneOverlays();
+
 void RenderGameHud()
 {
   ID3D11RenderTargetView* rtv = Neuron::Graphics::Core::GetRenderTargetView();
@@ -45,6 +50,9 @@ void RenderGameHud()
     g_gameFont.DrawText2DCenter(w / 2.0f, h / 2.0f - 10.0f, 14, "CONNECTION LOST - RECONNECTING");
     g_gameFont.SetRenderShadow(false);
   }
+
+  // Scene overlays (debris / reticle / intro sprite) go under the dashboard and text.
+  RenderSceneOverlays();
 
   // The cockpit dashboard + flight overlays (self-gated: draws only while flying).
   update_console();

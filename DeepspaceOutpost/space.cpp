@@ -601,7 +601,7 @@ void render_replicated_objects (void)
 				if (half > 80.0 * clampScale) half = 80.0 * clampScale;
 
 				const int box = (int)(half * 2.0);
-				gfx_draw_sprite_scaled (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
+				hud_sprite_scaled_deferred (IMG_TARGET_LOCK, sx - (int)half, sy - (int)half, box, box);
 			}
 		}
 
@@ -798,6 +798,7 @@ const char* hud_sprite_file (int sprite_no)
 		case IMG_MISSILE_YELLOW: return "missyell.dds";
 		case IMG_MISSILE_RED:    return "missred.dds";
 		case IMG_TARGET_LOCK:    return "Textures/TargetLock.dds";
+		case IMG_ELITE_TXT:      return "elitetx3.dds";
 		default:                 return nullptr;
 	}
 }
@@ -920,6 +921,57 @@ void RenderOverlayText (void)
 		g_gameFont.SetRenderShadow(false);
 	}
 	s_overlay_text.clear();
+}
+
+// ---- Deferred scene overlays (points + sprites) -----------------------------
+//
+// The last drawing that still went through the gfx2d batch: the ship-death debris spray
+// (screen-projected points, threed.cpp), the per-ship target reticle and the intro title
+// art (sprites, space.cpp / intro.cpp). Like the centred text they are emitted from the
+// RenderScene phase, so they queue here and RenderSceneOverlays draws them natively from
+// RenderGameHud - BEFORE the dashboard and the overlay text, matching the old order where
+// the batch flushed under the HUD. With this the gfx2d 2D batch has no producers left.
+
+namespace {
+struct OverlayPoint  { int x, y, col; };
+struct OverlaySprite { int img, x, y, w, h; };   // w <= 0 -> the sprite's native size
+std::vector<OverlayPoint>  s_overlay_points;
+std::vector<OverlaySprite> s_overlay_sprites;
+}
+
+void hud_plot_pixel (int x, int y, int col) { s_overlay_points.push_back({ x, y, col }); }
+void hud_sprite_deferred (int img, int x, int y) { s_overlay_sprites.push_back({ img, x, y, 0, 0 }); }
+void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h)
+{
+	s_overlay_sprites.push_back({ img, x, y, w, h });
+}
+
+void RenderSceneOverlays (void)
+{
+	for (const OverlayPoint& p : s_overlay_points)
+		Render2D::PlotPoint((float)p.x + 0.5f, (float)p.y + 0.5f, hud_col(p.col));
+
+	if (!s_overlay_sprites.empty())
+	{
+		const auto sz = Neuron::Graphics::Core::GetOutputSize();
+		for (const OverlaySprite& s : s_overlay_sprites)
+		{
+			const char* fn = hud_sprite_file(s.img);
+			if (!fn) continue;
+			float tw = 0.0f, th = 0.0f;
+			ID3D11ShaderResourceView* srv = hud_tex(fn, &tw, &th);
+			if (!srv) continue;
+			const float w = (s.w > 0) ? (float)s.w : tw;
+			const float h = (s.h > 0) ? (float)s.h : th;
+			// x == -1 centres on the window (the intro title sprite), matching gfx_draw_sprite.
+			const float x = (s.x == -1) ? (static_cast<int>(sz.Width) - tw) * 0.5f : (float)s.x;
+			const float y = (float)s.y;
+			Render2D::TexQuad(srv, x, y, x + w, y + h, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+		}
+	}
+
+	s_overlay_points.clear();
+	s_overlay_sprites.clear();
 }
 
 

@@ -53,11 +53,8 @@
 int gfx_graphics_startup (void);
 void gfx_graphics_shutdown (void);
 void gfx_update_screen (void);
-void gfx_plot_pixel (int x, int y, int col);
 void gfx_clear_display (void);
 void gfx_set_clip_region (int tx, int ty, int bx, int by);
-void gfx_draw_sprite (int sprite_no, int x, int y);
-void gfx_draw_sprite_scaled (int sprite_no, int x, int y, int w, int h);
 
 /*
  * Render the fully-submitted 3D scene (dust starfield background -> depth-tested models) onto

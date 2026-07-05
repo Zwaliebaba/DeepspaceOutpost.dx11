@@ -16,8 +16,7 @@
 
 #include "GuiOverlay.h"
 #include "Renderer.h"
-#include "gfx2d.h" // gfx2d_flush - the game's 2D batch replay
-#include "HudRender.h" // RenderGameHud - the native Render2D HUD pass (replacing gfx2d)
+#include "HudRender.h" // RenderGameHud - the native Render2D HUD pass (replaced the gfx2d batch)
 
 class GameApp : public Neuron::GameMain
 {
@@ -43,17 +42,15 @@ class GameApp : public Neuron::GameMain
     // there is no scene-marker flag or separate render-scene hook.
     void RenderScene() override { game_render_scene(); }
 
-    // The whole 2D phase: refresh the GUI overlay (input / auto-hide), replay the game's
-    // 2D batch (HUD + menus, letterboxed) to the back buffer, then draw the GUI overlay
-    // (windows/menus, client-space) on top. Every screen redraws every frame, so this always
-    // paints and the caller always presents (FLIP_DISCARD keeps no retained content). The two
-    // 2D layers are separate Canvas passes (the game HUD is native-centred 512x514; the overlay
-    // is full-window pixels).
+    // The whole 2D phase: refresh the GUI overlay (input / auto-hide), draw the native HUD
+    // pass (flight dashboard, overlays, scene overlays, centred text), then draw the GUI
+    // overlay (windows/menus) on top. Every screen redraws every frame, so this always paints
+    // and the caller always presents (FLIP_DISCARD keeps no retained content). The gfx2d 2D
+    // batch is gone - all 2D is native Render2D now.
     void RenderCanvas() override
     {
       GuiOverlay::Update();
-      gfx2d_flush();       // the legacy 2D batch (shrinking as the HUD moves to RenderGameHud)
-      RenderGameHud();     // the native Render2D HUD pass, on top of the batch
+      RenderGameHud();     // the native Render2D HUD pass (replaced the gfx2d batch)
       if (Renderer* r = platform_renderer())
         GuiOverlay::Render(r->clientWidth(), r->clientHeight());
     }

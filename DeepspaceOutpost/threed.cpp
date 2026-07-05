@@ -270,7 +270,7 @@ void draw_explosion (struct local_object *obj)
 
 			for (psy = 0; psy < sizey; psy++)
 				for (psx = 0; psx < sizex; psx++)		
-					gfx_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
+					hud_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
 		}
 	}
 

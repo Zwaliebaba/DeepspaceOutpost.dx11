@@ -79,7 +79,7 @@ void update_intro1 (void)
 	PlayerFlight().roll = 1;
 	update_local_objects();
 
-	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
+	hud_sprite_deferred(IMG_ELITE_TXT, -1, 10);
 
 	hud_centre_text (ch - 194, "DEEPSPACE OUTPOST", 120, GFX_COL_WHITE);
 	hud_centre_text (ch - 154, "Press Space to Begin, Commander.", 140, GFX_COL_GOLD);
@@ -128,7 +128,7 @@ void update_intro2 (void)
 	update_starfield();
 	update_local_objects();
 
-	gfx_draw_sprite (IMG_ELITE_TXT, -1, 10);
+	hud_sprite_deferred(IMG_ELITE_TXT, -1, 10);
 
 	hud_centre_text (ch - 184, ship_list[ship_no]->name, 120, GFX_COL_WHITE);
 	hud_centre_text (ch - 154, "Press Fire or Space, Commander.", 140, GFX_COL_GOLD);

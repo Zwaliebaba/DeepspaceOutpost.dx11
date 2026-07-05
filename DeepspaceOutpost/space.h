@@ -93,6 +93,16 @@ void hud_text (int x, int y, const char *str, int col);
 void hud_centre_text (int y, const char *str, int psize, int col);
 void RenderOverlayText (void);
 
+// Deferred scene overlays: the ship-death debris points (threed.cpp), the target reticle
+// (space.cpp) and the intro title sprite (intro.cpp). Recorded during RenderScene; drawn by
+// RenderSceneOverlays from RenderGameHud, replacing the last gfx2d batch draws (gfx_plot_pixel
+// / gfx_draw_sprite / gfx_draw_sprite_scaled). x == -1 centres a sprite on the window; a
+// sprite w <= 0 uses its native size.
+void hud_plot_pixel (int x, int y, int col);
+void hud_sprite_deferred (int img, int x, int y);
+void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h);
+void RenderSceneOverlays (void);
+
 // I3 pointer-command feedback (state defined in main.cpp): the active order's kind
 // (0 = none), an optional world Move point, and a short-lived toast. Drawn each
 // frame by display_order_feedback() (space.cpp).
