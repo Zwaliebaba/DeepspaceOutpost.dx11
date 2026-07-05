@@ -1478,6 +1478,24 @@ the bar (Esc keeps window-close duty).
 *Acceptance:* every retired key's verb reachable by pointer alone; abilities
 grey correctly from mirrors; bomb/pod cannot fire on a stray tap.
 
+*As built (2026-07-04) — ✅ core, compile-verified (client UX not CI-exercisable):*
+a persistent, **non-modal** ability strip across the top of the flight view
+(`draw_ability_bar` / `handle_ability_bar`, main.cpp): **Stop / Missile / ECM / Bomb
+/ Pod / Jump**. Non-modal by design — it does NOT raise `GuiOverlay` (which would
+suppress game input); instead the camera's LMB select/orbit ignores any click whose
+press began over a button (`ability_bar_button_at`, gating CameraRig), and the bar's
+own handler triggers it. Each button greys from the equipment/`PlayerStatus` mirrors
+(`ability_enabled`: Missile needs a selection + rack, ECM/Bomb/Pod need the fitting,
+Jump needs undocked+not-witchspace); **Bomb/Pod require a ~0.6 s hold-to-confirm**
+(a stray tap can't fire them; the button flashes red while confirming). Actions
+reuse the exact key paths (`UnitOrder{Stop}`, `launch_missile`, the `ActionTriggered`
+equipment publishes, `jump_warp`). **Deferred (documented):** (a) the combat keys
+(A/E/Tab/M/C/J) are KEPT working in parallel — formal key retirement is I7; (b) the
+screen-nav icon strip (charts/market/status/equip) is not added (the F-keys still
+navigate); (c) **Launch/undock** stays on the docked screen's own UI (the flight bar
+is flight-only). Needs an in-app run to verify bar placement/coordinate-space and
+that click regions line up with the drawn boxes.
+
 ### I5 — Touch & gesture layer — **M**
 
 Full `WM_POINTER` multi-pointer tracking (replacing the single-pointer→LMB
@@ -1575,9 +1593,13 @@ Three items are genuinely open and block only their own bullets:
    lag-compensated fire; snapshot quantization + per-session delta/keyframes +
    send budget; strategic per-system tier), validated in unit tests and pending
    the 100-bot bandwidth soak; G1–G3 remain.
-5. **M5 "Command of one"** — I1–I4: the order protocol + `OrderSystem`
-   restore ship movement (urgent — the game has no movement verb today),
-   selection/picking, the command UX, and the ability bar. Mouse-complete.
+5. **M5 "Command of one"** — 🟡 I1–I4 core ✅: the order protocol + `OrderSystem`
+   restore ship movement (I1, CI-green), pointer selection/picking (I2), the RMB
+   command UX + move-plane + ack feedback (I3), and the non-modal ability bar (I4).
+   Mouse-playable end to end. Residues folded forward: the full move gizmo +
+   RMB-hold radial menu, clean-player Attack-friction, and the screen-nav strip
+   (I3/I4 deferrals); formal keyboard retirement is I7. The I2–I4 client UX is
+   compile-verified only — it needs an in-app run to confirm pixel-accuracy.
 6. **M6 "Touch-complete"** — I5–I7: the gesture layer, pointer charts,
    keyboard reduced to accelerators. The full loop plays with touch only.
 7. **M7 "The 4X turn"** — F1–F5, G4, with H landing in parallel (F1 reuses

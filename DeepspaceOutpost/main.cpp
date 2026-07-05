@@ -43,6 +43,7 @@
 #include <DirectXMath.h>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 
@@ -536,6 +537,193 @@ void handle_pointer_commands(void)
     dispatch_context_order(mx, my);   // RMB click -> contextual order
   }
   s_prevRmb = rmb;
+}
+
+// ---- I4 ability bar (interaction.md 3.7): abilities reachable by pointer --------
+//
+// A persistent, NON-MODAL strip of ability buttons across the top of the flight
+// view - Stop / Missile / ECM / Bomb / Pod / Jump - so every combat verb is a click,
+// not a key. It is non-modal: it does not raise GuiOverlay (which suppresses game
+// input); instead the camera's LMB select skips a click whose press began over a
+// button (ability_bar_button_at), and this handler triggers it. Availability greys
+// each button from the PlayerStatus / equipment mirrors, and Bomb/Pod need a HOLD so
+// a stray tap can't fire them.
+//
+// Deferred (documented): the screen-nav icon strip (charts/market/status/equip) and
+// the FORMAL retirement of the A/E/Tab/M/C/J keys (they still work in parallel -
+// key retirement is I7); "Launch"/undock stays on the docked screen's own UI.
+
+namespace
+{
+  enum AbilityAct { ACT_STOP, ACT_MISSILE, ACT_ECM, ACT_BOMB, ACT_POD, ACT_JUMP, ACT_COUNT };
+  struct AbilityButton { const char* label; int act; };
+  const AbilityButton s_bar[ACT_COUNT] = {
+    { "STOP", ACT_STOP }, { "MISSILE", ACT_MISSILE }, { "ECM", ACT_ECM },
+    { "BOMB", ACT_BOMB }, { "POD", ACT_POD }, { "JUMP", ACT_JUMP },
+  };
+  constexpr int BAR_SLOT_W = 80;
+  constexpr int BAR_SLOT_H = 20;
+  constexpr int BAR_GAP    = 4;
+  constexpr int BAR_TOP_Y  = 8;
+  constexpr int BOMB_POD_HOLD_FRAMES = 18;   // ~0.6 s hold-to-confirm
+
+  int  s_ability_down_btn = -1;   // button the current LMB press started on (-1 = none)
+  int  s_ability_held_frames = 0; // frames that press has been held
+}
+
+// The left edge of the button row for the current window (centred, clamped on-screen).
+static int ability_bar_origin_x(int _vw)
+{
+  const int total = ACT_COUNT * BAR_SLOT_W + (ACT_COUNT - 1) * BAR_GAP;
+  int x0 = (_vw - total) / 2;
+  if (x0 < 4) x0 = 4;
+  return x0;
+}
+
+// The bar button under (mx,my), or -1. Exposed so the camera's select can ignore a
+// click that landed on the bar. Only live on the flight view (not docked).
+int ability_bar_button_at(int _mx, int _my)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return -1;
+  int vw = 0, vh = 0;
+  gfx_scene_size(&vw, &vh);
+  (void)vh;
+  const int x0 = ability_bar_origin_x(vw);
+  for (int i = 0; i < ACT_COUNT; ++i)
+  {
+    const int x = x0 + i * (BAR_SLOT_W + BAR_GAP);
+    if (_mx >= x && _mx < x + BAR_SLOT_W && _my >= BAR_TOP_Y && _my < BAR_TOP_Y + BAR_SLOT_H)
+      return i;
+  }
+  return -1;
+}
+
+static bool ability_enabled(int _act)
+{
+  switch (_act)
+  {
+    case ACT_STOP:    return true;
+    case ACT_MISSILE: return g_missile_lock_target != 0xFFFFFFFFu && cmdr.missiles > 0;
+    case ACT_ECM:     return cmdr.ecm != 0;
+    case ACT_BOMB:    return cmdr.energy_bomb != 0;
+    case ACT_POD:     return cmdr.escape_pod != 0;
+    case ACT_JUMP:    return !docked && !witchspace;
+    default:          return false;
+  }
+}
+
+static void ability_trigger(int _act)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  switch (_act)
+  {
+    case ACT_STOP:
+    {
+      Neuron::Msg::UnitOrder ord;
+      ord.unitId = rc.LocalPlayer();
+      ord.order = Neuron::Msg::OrderKind::Stop;
+      rc.SendUnitOrder(ord);
+      g_order_kind = static_cast<unsigned int>(Neuron::Msg::OrderKind::Stop);
+      g_order_has_point = false;
+      set_order_toast("STOP", GFX_COL_YELLOW_2);
+      break;
+    }
+    case ACT_MISSILE: launch_missile(); break;   // fires at the selection (rack-gated)
+    case ACT_ECM:
+      if (cmdr.ecm)
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::Ecm, 0 });
+      break;
+    case ACT_BOMB:
+      if (cmdr.energy_bomb)
+      {
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EnergyBomb, 0 });
+        cmdr.energy_bomb = 0;   // optimistic (no equipment mirror yet - see A1 residue)
+      }
+      break;
+    case ACT_POD:
+      if (cmdr.escape_pod)
+        g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::EscapePod, 0 });
+      break;
+    case ACT_JUMP:
+      if (!docked && !witchspace)
+        jump_warp();
+      break;
+    default: break;
+  }
+}
+
+// Draw the ability bar (called from the HUD pass in space.cpp). A box per button,
+// its label greyed when unavailable and flashed red while a Bomb/Pod hold-to-confirm
+// is in progress.
+void draw_ability_bar(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+    return;
+
+  int vw = 0, vh = 0;
+  gfx_scene_size(&vw, &vh);
+  (void)vh;
+  gfx_set_draw_origin(0, 0);
+  const int x0 = ability_bar_origin_x(vw);
+
+  for (int i = 0; i < ACT_COUNT; ++i)
+  {
+    const int x = x0 + i * (BAR_SLOT_W + BAR_GAP);
+    const bool en = ability_enabled(s_bar[i].act);
+    const bool confirming = (i == s_ability_down_btn)
+                         && (s_bar[i].act == ACT_BOMB || s_bar[i].act == ACT_POD);
+
+    const int frameCol = confirming ? GFX_COL_RED : (en ? GFX_COL_GREY_1 : GFX_COL_GREY_3);
+    const int textCol  = confirming ? GFX_COL_RED : (en ? GFX_COL_WHITE  : GFX_COL_GREY_3);
+    gfx_draw_rectangle(x, BAR_TOP_Y, x + BAR_SLOT_W, BAR_TOP_Y + BAR_SLOT_H, frameCol);
+
+    const int len = static_cast<int>(strlen(s_bar[i].label));
+    const int tx = x + (BAR_SLOT_W - len * 8) / 2;
+    gfx_display_colour_text(tx, BAR_TOP_Y + 6, s_bar[i].label, textCol);
+  }
+}
+
+// Per-frame ability-bar input: an LMB press-release on the same button triggers it
+// (Bomb/Pod require the press be HELD past the confirm threshold). Runs before the
+// camera; the camera's select ignores a click whose press began on the bar.
+void handle_ability_bar(void)
+{
+  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  {
+    s_ability_down_btn = -1;
+    return;
+  }
+
+  int mx = 0, my = 0;
+  bool lmb = false, rmb = false;
+  input_mouse_state(mx, my, lmb, rmb);
+
+  static bool s_prevLmb = false;
+  if (lmb && !s_prevLmb)
+  {
+    s_ability_down_btn = ability_bar_button_at(mx, my);
+    s_ability_held_frames = 0;
+  }
+  else if (lmb && s_ability_down_btn >= 0)
+  {
+    ++s_ability_held_frames;
+  }
+  else if (!lmb && s_prevLmb && s_ability_down_btn >= 0)
+  {
+    // Release: fire only if it landed back on the same button and it is available;
+    // Bomb/Pod additionally need the hold-to-confirm dwell.
+    if (ability_bar_button_at(mx, my) == s_ability_down_btn
+        && ability_enabled(s_bar[s_ability_down_btn].act))
+    {
+      const int act = s_bar[s_ability_down_btn].act;
+      const bool holdReq = (act == ACT_BOMB || act == ACT_POD);
+      if (!holdReq || s_ability_held_frames >= BOMB_POD_HOLD_FRAMES)
+        ability_trigger(act);
+    }
+    s_ability_down_btn = -1;
+  }
+  s_prevLmb = lmb;
 }
 
 void handle_flight_keys(void)
@@ -1313,6 +1501,9 @@ static void game_update_flight(void)
   // The free camera: gather mouse/wheel/key input, advance the active controller
   // (first-person or orbit), and write this frame's view. Runs before the key
   // handler so a fresh missile lock orbits from the next frame.
+  handle_ability_bar();        // I4: ability-bar clicks (before the camera, so a bar
+                               //     click is consumed instead of selecting behind it)
+
   camera_rig_update();
 
   handle_pointer_commands();   // I3: RMB contextual orders (after the camera reads input)

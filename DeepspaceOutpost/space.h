@@ -72,6 +72,12 @@ void render_replicated_objects (void);
 unsigned int find_lock_target (void);
 unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
 
+// I4 ability bar (defined in main.cpp): draw the flight ability strip, and report
+// which bar button (if any) is under the cursor so the camera's select can ignore
+// a click that landed on the bar.
+void draw_ability_bar (void);
+int  ability_bar_button_at (int mx, int my);
+
 // I3 pointer-command feedback (state defined in main.cpp): the active order's kind
 // (0 = none), an optional world Move point, and a short-lived toast. Drawn each
 // frame by display_order_feedback() (space.cpp).

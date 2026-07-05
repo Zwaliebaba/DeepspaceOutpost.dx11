@@ -208,8 +208,9 @@ void camera_rig_update(void)
 	{
 		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
 		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
-		 * once the press has crossed the slop, so a click never nudges the view. */
-		const bool lmbDrag = lmb && s_lmbMoved;
+		 * once the press has crossed the slop, so a click never nudges the view. A
+		 * press that began on the I4 ability bar belongs to the bar, not the camera. */
+		const bool lmbDrag = lmb && s_lmbMoved && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0;
 		if (lmbDrag && s_prevLmb)
 		{
 			in.lookDX = static_cast<float>(mx - s_prevMouseX);
@@ -244,7 +245,8 @@ void camera_rig_update(void)
 		if (ddx > CLICK_SLOP || ddy > CLICK_SLOP)
 			s_lmbMoved = true;
 	}
-	else if (s_prevLmb && !s_lmbMoved && !uiOwns)
+	else if (s_prevLmb && !s_lmbMoved && !uiOwns
+	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0)   // not a bar click (I4)
 	{
 		g_missile_lock_target = pick_entity_at_screen(mx, my);
 	}

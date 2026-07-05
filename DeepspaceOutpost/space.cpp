@@ -1163,10 +1163,11 @@ void update_console (void)
 	if (ecm_active)
 		gfx_draw_sprite (IMG_BIG_E, 115, 490);
 
-	// I2/I3 overlays LAST: they reset the draw origin to (0,0) for their own
-	// top-of-view placement, so they must run after the dashboard-anchored draws.
+	// I2/I3/I4 overlays LAST: they reset the draw origin to (0,0) for their own
+	// full-view placement, so they must run after the dashboard-anchored draws.
 	display_selection_info();
 	display_order_feedback();
+	draw_ability_bar();
 
 	gfx_set_draw_origin (0, 0);
 }
