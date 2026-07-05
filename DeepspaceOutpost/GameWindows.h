@@ -20,3 +20,7 @@ void OpenCommanderWindow();
 void OpenInventoryWindow();
 void OpenPlanetDataWindow();
 void OpenEquipWindow();
+
+// Open (or focus) the native galactic / short-range chart window. `kind` is a
+// ChartData::Kind (ChartData.h): GALACTIC or SHORT_RANGE. Routed from F5/F6.
+void OpenChartWindow(int kind);

@@ -6,6 +6,10 @@
 #include "Canvas.h"
 #include "GuiOverlay.h"
 #include "GraphicsCore.h"
+#include "Render2D.h"       // native 2D primitives for the chart map
+#include "TextRenderer.h"   // g_gameFont for chart labels / data panel
+#include "input_win.h"      // input_mouse_state for chart click hit-testing
+#include "ChartData.h"      // render-free galactic-chart data source
 
 #include <cstdio>
 #include <string>
@@ -587,6 +591,288 @@ namespace
       std::vector<int> m_shownIndices;
       LabelButton* m_cash = nullptr;
   };
+
+  // ----- Charts (galactic / short-range) ------------------------------------
+
+  // The galactic + short-range charts as one native window. Unlike the text screens
+  // above, the chart body is custom vector graphics (system dots, the fuel ring, the
+  // crosshair), so this overrides Render() and draws through Render2D directly, and
+  // overrides MouseEvent() so a click on the map selects the nearest system. All the
+  // galaxy data comes from the render-free ChartData API (no legacy gfx_* / game
+  // headers). Coordinates from ChartData live in a fixed PLOT_W x PLOT_H chart-canvas
+  // that MapTransform() fits uniformly into the window's map area.
+  class ChartWindow;
+
+  class ChartActionButton : public GuiButton
+  {
+    public:
+      enum Action { Jump, Toggle };
+      ChartActionButton(ChartWindow* _win, Action _action)
+        : m_win(_win), m_action(_action)
+      {
+        m_centered = true;
+      }
+      void MouseUp() override;   // defined out-of-line once ChartWindow is complete
+
+    private:
+      ChartWindow* m_win;
+      Action m_action;
+  };
+
+  class ChartWindow : public GuiWindow
+  {
+    public:
+      explicit ChartWindow(int _kind)
+        : GuiWindow("Chart"), m_kind(_kind)
+      {
+        SetTitle(_kind == ChartData::SHORT_RANGE ? "Short Range Chart" : "Galactic Chart");
+        Centre(this, 680, 480);
+        SetMovable(false);   // the whole body is a click-to-select surface, so don't drag it
+      }
+
+      void Create() override
+      {
+        GuiWindow::Create();   // iconised close button (top-right)
+        m_buttonOrder.clear();
+
+        const int bw = 130, bh = 20;
+        const int by = static_cast<int>(m_h) - 32;
+
+        auto* hyp = NEW ChartActionButton(this, ChartActionButton::Jump);
+        hyp->SetProperties("Hyperspace", 12, by, bw, bh, "HYPERSPACE");
+        RegisterButton(hyp);
+        m_buttonOrder.push_back(hyp);
+
+        auto* toggle = NEW ChartActionButton(this, ChartActionButton::Toggle);
+        toggle->SetProperties("ChartMode", 12 + bw + 8, by, bw, bh, ToggleCaption());
+        RegisterButton(toggle);
+        m_buttonOrder.push_back(toggle);
+
+        m_currentButton = 0;
+        ParkCursorOnCurrent();
+      }
+
+      void SetKind(int _kind)
+      {
+        m_kind = _kind;
+        SetTitle(_kind == ChartData::SHORT_RANGE ? "Short Range Chart" : "Galactic Chart");
+        if (GuiButton* b = GetButton("ChartMode"))
+          b->SetCaption(ToggleCaption());
+        ParkCursorOnCurrent();
+      }
+
+      void ToggleKind()
+      {
+        SetKind(m_kind == ChartData::SHORT_RANGE ? ChartData::GALACTIC : ChartData::SHORT_RANGE);
+      }
+
+      void DoJump()
+      {
+        ChartData::Jump(m_kind);
+        Canvas::EclRemoveWindow(m_name);   // let the break-pattern jump animation show
+      }
+
+      void MouseEvent(bool /*lmb*/, bool /*rmb*/, bool up, bool /*down*/) override
+      {
+        if (!up)
+          return;   // act on the click release, like the old chart pointer
+
+        int mx = 0, my = 0;
+        bool l = false, r = false;
+        input_mouse_state(mx, my, l, r);
+
+        const Xform x = MapTransform();
+        if (mx < x.l || mx > x.r || my < x.t || my > x.b)
+          return;   // outside the map area (e.g. the data panel) - ignore
+
+        const int cx = static_cast<int>((mx - x.ox) / x.scale);
+        const int cy = static_cast<int>((my - x.oy) / x.scale);
+        ChartData::SetCursor(m_kind, cx, cy);
+      }
+
+      void Render(bool hasFocus) override
+      {
+        GuiWindow::Render(hasFocus);   // panel frame, title, buttons
+
+        using R = Neuron::Graphics::Render2D;
+        const Xform x = MapTransform();
+
+        // Map backdrop + border.
+        R::FillRect(x.l, x.t, x.r, x.b, R::Rgba(6, 8, 16, 235));
+        const auto edge = R::Rgba(60, 80, 110, 255);
+        R::DrawLine(x.l, x.t, x.r, x.t, edge);
+        R::DrawLine(x.l, x.b, x.r, x.b, edge);
+        R::DrawLine(x.l, x.t, x.l, x.b, edge);
+        R::DrawLine(x.r, x.t, x.r, x.b, edge);
+
+        if (!ChartData::Ready())
+        {
+          g_gameFont.SetColor(230, 180, 40, 255);
+          g_gameFont.DrawText2DCenter((x.l + x.r) / 2, (x.t + x.b) / 2, 14, "GALAXY DATA UNAVAILABLE");
+          return;
+        }
+
+        ChartData::Begin(m_kind);
+        const int n = ChartData::Count();
+        const int cur = ChartData::CurrentIndex();
+        const int sel = ChartData::SelectedIndex();
+
+        // Clip the plotted dots / labels to the map area so they can't spill into the
+        // data panel or over the window frame.
+        R::SetClip(static_cast<int>(x.l), static_cast<int>(x.t), static_cast<int>(x.r - x.l),
+                   static_cast<int>(x.b - x.t));
+
+        // Fuel-range ring (short-range only) + its centre cross.
+        int fcx = 0, fcy = 0, fr = 0;
+        if (ChartData::FuelCircle(m_kind, &fcx, &fcy, &fr) && fr > 0)
+        {
+          const auto green = R::Rgba(64, 200, 64, 255);
+          const float gx = x.ox + fcx * x.scale, gy = x.oy + fcy * x.scale, gc = 7.0f * x.scale;
+          R::DrawCircle(gx, gy, fr * x.scale, green);
+          R::DrawLine(gx, gy - gc, gx, gy + gc, green);
+          R::DrawLine(gx - gc, gy, gx + gc, gy, green);
+        }
+
+        // System dots: short-range draws sized gold blobs, galactic small white dots.
+        for (int i = 0; i < n; ++i)
+        {
+          if (!ChartData::Visible(i))
+            continue;
+          const float sx = x.ox + ChartData::X(i) * x.scale;
+          const float sy = x.oy + ChartData::Y(i) * x.scale;
+          if (m_kind == ChartData::SHORT_RANGE)
+          {
+            float br = ChartData::Blob(i) * x.scale;
+            if (br < 1.5f)
+              br = 1.5f;
+            R::FillCircle(sx, sy, br, R::Rgba(230, 180, 40, 255));
+          }
+          else
+          {
+            R::FillRect(sx - 1.0f, sy - 1.0f, sx + 1.5f, sy + 1.5f, R::Rgba(235, 235, 235, 255));
+          }
+        }
+
+        // Ring the current system (cyan) and the selected system (red).
+        if (cur >= 0 && ChartData::Visible(cur))
+          R::DrawCircle(x.ox + ChartData::X(cur) * x.scale, x.oy + ChartData::Y(cur) * x.scale, 6.0f,
+                        R::Rgba(80, 220, 255, 255));
+        if (sel >= 0 && ChartData::Visible(sel))
+          R::DrawCircle(x.ox + ChartData::X(sel) * x.scale, x.oy + ChartData::Y(sel) * x.scale, 8.0f,
+                        R::Rgba(255, 90, 90, 255));
+
+        // Labels for the current + selected systems (drawing every system would clutter
+        // at arbitrary window sizes).
+        char nm[32];
+        if (cur >= 0 && ChartData::Visible(cur))
+        {
+          ChartData::Name(cur, nm, sizeof(nm));
+          g_gameFont.SetColor(200, 220, 255, 255);
+          g_gameFont.DrawText2D(x.ox + ChartData::X(cur) * x.scale + 6, x.oy + ChartData::Y(cur) * x.scale - 6, 11, nm);
+        }
+        if (sel >= 0 && sel != cur && ChartData::Visible(sel))
+        {
+          ChartData::Name(sel, nm, sizeof(nm));
+          g_gameFont.SetColor(255, 150, 150, 255);
+          g_gameFont.DrawText2D(x.ox + ChartData::X(sel) * x.scale + 6, x.oy + ChartData::Y(sel) * x.scale - 6, 11, nm);
+        }
+
+        // Crosshair at the cursor.
+        int hcx = 0, hcy = 0;
+        ChartData::GetCursor(&hcx, &hcy);
+        const float hx = x.ox + hcx * x.scale, hy = x.oy + hcy * x.scale;
+        const auto cross = R::Rgba(255, 80, 80, 255);
+        R::DrawLine(hx - 8, hy, hx - 2, hy, cross);
+        R::DrawLine(hx + 2, hy, hx + 8, hy, cross);
+        R::DrawLine(hx, hy - 8, hx, hy - 2, cross);
+        R::DrawLine(hx, hy + 2, hx, hy + 8, cross);
+
+        R::ClearClip();
+
+        // Selected-system data panel (right column, outside the map clip).
+        const float px = x.r + 12.0f;
+        float py = m_y + 26.0f;
+        ChartData::Name(sel >= 0 ? sel : cur, nm, sizeof(nm));
+        g_gameFont.SetColor(255, 209, 64, 255);
+        g_gameFont.DrawText2D(px, py, 13, nm[0] ? nm : "---");
+        py += 22;
+        g_gameFont.SetColor(210, 210, 210, 255);
+        const int lines = ChartData::DataLineCount();
+        char line[80];
+        for (int i = 0; i < lines; ++i)
+        {
+          ChartData::DataLine(i, line, sizeof(line));
+          g_gameFont.DrawText2D(px, py, 11, line);
+          py += 16;
+        }
+
+        // A short hint under the data panel.
+        g_gameFont.SetColor(150, 160, 180, 255);
+        g_gameFont.DrawText2D(px, m_y + m_h - 54, 10, "Click a system to select");
+        g_gameFont.DrawText2D(px, m_y + m_h - 40, 10, "HYPERSPACE to jump");
+      }
+
+    private:
+      // Uniform fit of the fixed PLOT_W x PLOT_H chart-canvas into the window's map area
+      // (the client rect minus the right data-panel column and the button strip).
+      struct Xform
+      {
+        float ox, oy, scale;   // chart px -> screen: screen = o + chartPx * scale
+        float l, t, r, b;      // the map area in absolute window pixels
+      };
+
+      Xform MapTransform() const
+      {
+        const float panelW = 210.0f;
+        float l = m_x + 8.0f;
+        float t = m_y + 22.0f;
+        float rr = m_x + m_w - panelW - 8.0f;
+        float b = m_y + m_h - 40.0f;
+        if (rr < l + 40.0f)
+          rr = l + 40.0f;
+        if (b < t + 40.0f)
+          b = t + 40.0f;
+        const float sx = (rr - l) / static_cast<float>(ChartData::PLOT_W);
+        const float sy = (b - t) / static_cast<float>(ChartData::PLOT_H);
+        const float s = sx < sy ? sx : sy;
+        Xform x;
+        x.scale = s;
+        x.ox = l + ((rr - l) - ChartData::PLOT_W * s) * 0.5f;
+        x.oy = t + ((b - t) - ChartData::PLOT_H * s) * 0.5f;
+        x.l = l;
+        x.t = t;
+        x.r = rr;
+        x.b = b;
+        return x;
+      }
+
+      const char* ToggleCaption() const
+      {
+        return m_kind == ChartData::SHORT_RANGE ? "Galactic Chart" : "Short Range";
+      }
+
+      void ParkCursorOnCurrent()
+      {
+        ChartData::Begin(m_kind);
+        const int cur = ChartData::CurrentIndex();
+        if (cur >= 0 && ChartData::Visible(cur))
+          ChartData::SetCursor(m_kind, ChartData::X(cur), ChartData::Y(cur));
+        else
+          ChartData::SetCursor(m_kind, ChartData::PLOT_W / 2, ChartData::PLOT_H / 2);
+      }
+
+      int m_kind;
+  };
+
+  void ChartActionButton::MouseUp()
+  {
+    if (!m_win)
+      return;
+    if (m_action == Jump)
+      m_win->DoJump();
+    else
+      m_win->ToggleKind();
+  }
 }
 
 void RegisterGameWindows()
@@ -623,4 +909,13 @@ void OpenPlanetDataWindow()
 void OpenEquipWindow()
 {
   GuiOverlay::ShowWindow(std::string_view("Equip"), []() -> GuiWindow* { return NEW EquipWindow(); });
+}
+
+void OpenChartWindow(int kind)
+{
+  // Open (or focus) the single chart window, then apply the requested zoom preset so
+  // F5/F6 switch an already-open chart between galactic and short-range.
+  GuiOverlay::ShowWindow(std::string_view("Chart"), [kind]() -> GuiWindow* { return NEW ChartWindow(kind); });
+  if (GuiWindow* w = Canvas::EclGetWindow(std::string_view("Chart")))
+    static_cast<ChartWindow*>(w)->SetKind(kind);
 }
