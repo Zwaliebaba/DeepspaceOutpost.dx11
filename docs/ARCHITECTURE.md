@@ -964,9 +964,21 @@ The client is deliberately dumb. It keeps:
   Residues folded forward: the full move gizmo + RMB-hold radial menu (I3), the
   full gesture recognizer + widget ergonomics (I5), and chart drag-pan / zoom +
   pointer name-search (charts, now the native window); see IMPLEMENTATION.md Track I.
+- **Docked view (2026-07-05):** docking shows the **camera-space 3D scene** (your
+  ship at the station) with a small native **`StationMenuWindow`** floating over it
+  (Launch + Market/Equip/Commander/Inventory/Options) — replacing the legacy
+  512×514 commander-status screen. Launch / F1 / hyperspace close the hub and drop
+  you straight into flight; the ship appears in space via the server's snapshots.
+  The first-person **break-pattern** transition (concentric rings) is retired — a
+  cockpit effect with no meaning in third person.
+- **No letterbox (2026-07-05):** every screen is a native GUI window or the
+  full-window camera-space scene, so the fixed 512×514 retro canvas and its
+  centering/scaling present path (`canvasPlacement`, `g_scene_full`, the
+  `gfx_*` scene-anchor API) are **decommissioned** — the 2D batch and the 3D
+  scene fill the client window 1:1. `gfx.h` is legacy and shrinking toward removal.
 - **Presentation effects:** death/explosion VFX (a world-anchored replicated
   explosion re-using the legacy debris animation), sounds (launch, hits, ECM,
-  hyperspace, scoop beep), the break-pattern screen transitions.
+  hyperspace, scoop beep).
 - **Scene background: the streaming "dust" starfield.** The flight scene pass
   (`Scene3D`) draws the projected star quads (`SetDust`, fed from `stars.cpp`)
   as the depth-disabled background behind the ships — the classic Elite
