@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "elite.h"
-#include "gfx.h"
+#include "GameScene.h"
 #include "Scene3D.h"
 #include "Camera.h"
 #include "stars.h"

@@ -1,30 +1,27 @@
 /*
  * DeepspaceOutpost - DirectX 11 / XAudio2.
  *
- * gfx2d.cpp
+ * GameScene.cpp
  *
- * What used to be a submission-order 2D batch renderer for the gfx.h contract. All 2D
- * drawing is native now: the HUD, charts, menus and text draw through
- * Neuron::Graphics::Render2D (RenderGameHud / the GUI overlay), and the last batch draws -
- * the ship-death debris, the target reticle and the intro title sprite - moved to the
- * native deferred overlays in space.cpp. So the vertex batch, the sprite/font plumbing and
- * gfx2d_flush() are gone.
+ * The thin game<->engine scene/viewport seam (declared in GameScene.h). This is what
+ * survived the retirement of the old gfx2d 2D batch renderer: all 2D drawing is native now
+ * (Neuron::Graphics::Render2D via RenderGameHud / the GUI overlay), so the vertex batch, the
+ * sprite/font plumbing and gfx2d_flush() are gone.
  *
- * What remains here is the thin scene/viewport seam the ported game still calls through
- * gfx.h: the 3D scene pass (gfx_render_3d_scene -> Scene3D), the live scene/canvas size and
- * projection (gfx_set_scene_fullwindow / gfx_scene_size / gfx_canvas_size), and the vestigial
- * clip / clear no-ops. (Slated to be rehomed into the native engine seam, retiring gfx.h.)
+ * What remains: the 3D scene pass (gfx_render_3d_scene -> Scene3D), the live scene/canvas size
+ * and projection (gfx_set_scene_fullwindow / gfx_scene_size / gfx_canvas_size), and the
+ * vestigial clip / clear no-ops the legacy screens still call. (The platform lifecycle
+ * gfx_graphics_* lives in platform_win.cpp.)
  */
 
 #include "pch.h"
 
 #include "Renderer.h"
-#include "gfx2d.h"
 #include "GraphicsCore.h"
 #include "Scene3D.h"
-
-#include "gfx.h"
 #include "Camera.h"
+
+#include "GameScene.h"
 
 #include <algorithm>
 

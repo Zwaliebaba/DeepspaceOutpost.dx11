@@ -1621,6 +1621,17 @@ lifecycle (`gfx_graphics_startup`/`shutdown`/`gfx_update_screen`), the 3D scene 
 those into a native header (fold into `GraphicsCore`/`ClientEngine`) and replaces the macros,
 after which `gfx.h`/`gfx2d.*` are deleted.
 
+*Follow-up (2026-07-05) — endgame Phase 2 done: `gfx.h`/`gfx2d.*` are deleted.* The seam moved
+into native modules, keeping the identifiers (a 431-site rename of the mostly-static ship
+geometry tables was not worth it): the scene/viewport functions now live in
+`platform/GameScene.h` + `platform/GameScene.cpp` (renamed from `gfx2d.cpp`), the platform
+lifecycle stays in `platform_win.cpp` (declared in `GameScene.h`), and the `GFX_COL_*`/`IMG_*`
+palette-index and sprite-id macros moved to `GamePalette.h` (still index-based — the 3D
+renderer resolves the index once via `paletteColour`). The 12 `#include "gfx.h"` sites were
+redirected (or dropped where stale), `gfx2d.h`/`gfx2d_flush` are gone, and CMake tracks the new
+files. **`gfx.h`, `gfx2d.h` and `gfx2d.cpp` no longer exist** — the legacy 2D layer is fully
+retired and all client rendering is native (`Render2D`/`Scene3D`).
+
 ### I7 — Keyboard reduction & cleanup — **XS–S**
 
 Retire the dead `kbd_*` globals and bindings (speed keys are already dead;

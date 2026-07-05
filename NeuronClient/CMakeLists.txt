@@ -44,7 +44,7 @@ set(NEURONCLIENT_SOURCES
     # Win32 / Direct3D 11 / XAudio2 platform backend.
     platform/platform_win.cpp
     platform/Renderer.cpp
-    platform/gfx2d.cpp
+    platform/GameScene.cpp
     platform/audio_xa2.cpp
     platform/input_win.cpp
 )
@@ -81,13 +81,13 @@ set(NEURONCLIENT_HEADERS
     vector.h
 
     # Presentation contracts the game draws/plays/reads through.
-    gfx.h
+    GamePalette.h
     sound.h
     keyboard.h
 
     # Platform backend headers.
     platform/Renderer.h
-    platform/gfx2d.h
+    platform/GameScene.h
     platform/scanner_palette.h
     platform/audio_win.h
     platform/input_win.h

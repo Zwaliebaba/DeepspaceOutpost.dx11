@@ -8,7 +8,7 @@
 #include "Scene3D.h"
 
 #include "Renderer.h" // master palette (palette index -> RGBA)
-#include "gfx.h"      // GFX_COL_* palette indices
+#include "GamePalette.h"      // GFX_COL_* palette indices
 #include "elite.h"    // ship_list
 #include "shipdata.h"
 #include "shipface.h"

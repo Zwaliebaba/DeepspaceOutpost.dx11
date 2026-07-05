@@ -18,7 +18,8 @@
 #include "vector.h"
 
 #include "elite.h"
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "GameUniverse.h"
 #include "docked.h"
 #include "intro.h"

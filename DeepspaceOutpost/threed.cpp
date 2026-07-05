@@ -7,7 +7,8 @@
 #include <ctype.h>
 
 #include "elite.h"
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "Scene3D.h" // Neuron::Graphics::Scene3D::SubmitModel - 3D models straight to the scene pass
 #include "Camera.h"  // MainCamera() - the CPU paths project through the same optics as the GPU
 #include "CameraRig.h"

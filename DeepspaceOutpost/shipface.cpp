@@ -13,7 +13,7 @@
 
 #include "elite.h"
 #include "shipface.h"
-#include "gfx.h"
+#include "GamePalette.h"
 
 
 

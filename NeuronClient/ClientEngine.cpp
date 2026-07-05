@@ -14,7 +14,7 @@
 #include "input_win.h"
 #include "platform_win.h" // platform_pump_messages
 
-#include "gfx.h"    // gfx_set_scene_fullwindow
+#include "GameScene.h"    // gfx_set_scene_fullwindow
 
 namespace
 {

@@ -13,7 +13,8 @@
 #include <stdlib.h>
 
 #include "elite.h"
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "GameUniverse.h"
 #include "vector.h"
 #include "shipdata.h"

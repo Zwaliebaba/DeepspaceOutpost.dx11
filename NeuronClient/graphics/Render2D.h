@@ -11,8 +11,8 @@
 // Native Direct3D 11 batched 2D layer (Neuron::Graphics).
 //
 // This is the shared foundation for all client 2D drawing - the GUI overlay
-// (GuiOverlay::Render) and the in-game HUD batch (gfx2d_flush) - replacing the
-// retired immediate-mode renderer each previously drove.
+// (GuiOverlay::Render) and the in-game HUD pass (RenderGameHud) - replacing the
+// retired immediate-mode renderer / gfx2d batch each previously drove.
 //
 // A frame's 2D work happens inside a Begin/End scope:
 //

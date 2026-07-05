@@ -19,6 +19,7 @@
 #include "Renderer.h"
 #include "audio_win.h"
 #include "sound.h"
+#include "GameScene.h"   // gfx_graphics_startup / gfx_graphics_shutdown / gfx_update_screen (defined here)
 
 #include "ClientEngine.h"
 #include "EventManager.h"

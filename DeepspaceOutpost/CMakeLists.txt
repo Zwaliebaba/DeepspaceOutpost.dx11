@@ -54,8 +54,8 @@ target_compile_features(DeepspaceOutpost PRIVATE cxx_std_23)
 target_precompile_headers(DeepspaceOutpost PRIVATE pch.h)
 
 # Only this target's own (game) headers live here; the engine + presentation
-# contracts (gfx.h, sound.h, Renderer.h, ...) come from NeuronClient's public
-# include dirs via the link below.
+# contracts (GamePalette.h, GameScene.h, sound.h, Renderer.h, ...) come from
+# NeuronClient's public include dirs via the link below.
 target_include_directories(DeepspaceOutpost PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

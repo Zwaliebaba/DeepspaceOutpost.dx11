@@ -10,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "gfx.h"
 #include "GameUniverse.h"
 #include "elite.h"
 #include "planet.h"

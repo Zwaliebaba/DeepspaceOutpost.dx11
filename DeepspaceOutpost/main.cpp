@@ -10,7 +10,8 @@
 
 #include "pch.h"
 
-#include "gfx.h"
+#include "GamePalette.h"
+#include "GameScene.h"
 #include "GameUniverse.h"
 #include "GameComponents.h"
 #include "main.h"
@@ -40,7 +41,6 @@
 #include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
 #include "input_win.h"                        // input_mouse_state (I3 pointer commands)
 #include "GraphicsCore.h"                     // Graphics::Core::GetOutputSize (viewport size)
-#include "gfx.h"                              // GFX_COL_* + 2D draw primitives (legacy)
 
 #include <DirectXMath.h>
 #include <cmath>

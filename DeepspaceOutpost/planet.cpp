@@ -10,7 +10,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "gfx.h"
 #include "elite.h"
 #include "planet.h"
 
