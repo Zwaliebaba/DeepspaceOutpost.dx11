@@ -113,6 +113,32 @@ extern char         g_order_toast[40];
 extern int          g_order_toast_timer;
 extern int          g_order_toast_col;
 
+// I3 move-gizmo live state (defined in main.cpp, drawn by draw_move_gizmo()):
+// the command plane (ship + camera-up normal), its in-plane base point and the
+// elevated marker, all in the render (origin-relative) frame.
+extern bool   g_gizmo_active;
+extern double g_gizmo_ship[3];
+extern double g_gizmo_normal[3];
+extern double g_gizmo_base[3];
+extern double g_gizmo_point[3];
+void draw_move_gizmo (void);
+
+// I3 radial context menu state (defined in main.cpp, drawn by draw_radial_menu()):
+// open flag, slot count, highlighted slice, and each slot's precomputed screen
+// centre + label.
+extern bool        g_radial_open;
+extern int         g_radial_count;
+extern int         g_radial_hot;
+extern int         g_radial_cx[];
+extern int         g_radial_cy[];
+extern const char* g_radial_labels[];
+void draw_radial_menu (void);
+
+// I3 roster join for the I2 info card: the player name behind an entity id, or
+// nullptr for an NPC / unknown (defined in main.cpp).
+const char* roster_name (unsigned int id);
+int         roster_wanted (unsigned int id);   // wanted level, or -1 if not a player
+
 // Entity index of the SELECTED / targeted entity (0xFFFFFFFF = none). Set by a
 // pointer click (pick_entity_at_screen) or the centre-cone lock key; read by
 // render_replicated_objects to draw the target reticle, by the camera rig as the

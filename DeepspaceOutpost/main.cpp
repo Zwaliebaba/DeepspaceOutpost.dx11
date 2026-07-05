@@ -34,6 +34,8 @@
 #include "Messages/Defs/EquipmentEvents.h"   // EcmPulse / EscapePodUsed (G8)
 #include "Messages/Defs/Travel.h"            // TravelRequest / TravelResponse
 #include "Messages/Defs/UnitOrder.h"         // UnitOrder / UnitOrderAck (I1/I3 command protocol)
+#include "input/OrderMenu.h"                  // contextual orders + radial-menu legality (I3 core)
+#include "input/MoveGizmo.h"                  // move-gizmo geometry (I3 core)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
@@ -166,15 +168,25 @@ static void launch_missile(void)
 //
 // The order half of Track I's UX. An RMB CLICK on the flight view issues a
 // contextual default order to the player's own ship (the only unit today): an
-// entity under the cursor -> Attack/Dock/Collect/Approach by its kind; empty space
-// -> Move to where the cursor ray meets a horizontal plane through the ship. The
-// order rides the reliable UnitOrder lane (I1); an optimistic toast shows what was
-// asked and a rejecting UnitOrderAck flashes it red. Camera orbit moved to LMB-drag
-// (CameraRig) so RMB is free for commands.
+// entity under the cursor -> its default order (Attack/Dock/Collect/Approach) by
+// OrderMenu::DefaultContextOrder; empty space -> the MOVE GIZMO (interaction.md
+// §3.4). The order rides the reliable UnitOrder lane (I1); an optimistic toast
+// shows what was asked and a rejecting UnitOrderAck flashes it red. Camera orbit
+// moved to LMB-drag (CameraRig) so RMB is free for commands.
 //
-// Deferred (documented in IMPLEMENTATION.md): the full move gizmo (elevation-drag
-// stem + depth-faded grid), the RMB-hold radial menu, and clean-player Attack-
-// friction (default Approach) - this increment lands the playable core.
+// The full model now (the classification / geometry / legality lives in the
+// headless-tested NeuronClient/input cores; this file is the DX11 glue):
+//   * MOVE GIZMO - RMB press on empty space drops a marker where the cursor ray
+//     meets the CAMERA-UP command plane through the ship; a vertical RMB drag
+//     before release slides it along the plane normal (the elevation stem);
+//     release sends UnitOrder{Move}. A plain click is a zero-elevation move.
+//   * RADIAL MENU - RMB HOLD >= ~0.35 s over an entity opens a radial of all the
+//     legal orders for that target (OrderMenu::LegalOrders) + Info; drag to a
+//     slice and release to issue it. This is where Attack on a CLEAN player lives
+//     (the deliberate friction - a plain click on a clean player is Approach).
+//   * ATTACK-FRICTION - DefaultContextOrder never returns Attack for a clean
+//     player; the crime is still validated + owner-attributed server-side.
+// The same long-press opens the menu on touch (I5 feeds this path).
 
 // Optimistic order feedback, drawn by space.cpp's display_order_feedback().
 unsigned int g_order_kind = 0;           // active order's OrderKind (0 = none)
@@ -183,6 +195,26 @@ long long    g_order_point[3] = {0, 0, 0};
 char         g_order_toast[40] = {0};
 int          g_order_toast_timer = 0;    // frames the toast stays up
 int          g_order_toast_col = 0;
+
+// Move-gizmo live state (interaction.md §3.4), read by space.cpp's draw_move_gizmo().
+// All points are in the render (origin-relative) frame so the projector draws them
+// directly. Active only during an in-progress RMB move drag.
+bool         g_gizmo_active = false;
+double       g_gizmo_ship[3]   = {0, 0, 0};   // plane origin (ship)
+double       g_gizmo_normal[3] = {0, 1, 0};   // plane normal (camera up)
+double       g_gizmo_base[3]   = {0, 0, 0};   // in-plane point (elevation 0) - stem foot
+double       g_gizmo_point[3]  = {0, 0, 0};   // marker (base + elevation) - stem head
+double       g_gizmo_scale     = 1.0;         // world units per screen pixel at the marker depth
+
+// Radial context menu state (interaction.md §3.3), read by space.cpp's
+// draw_radial_menu(). Option screen positions are precomputed at open so the
+// hit-test (here) and the render (space.cpp) never diverge.
+bool         g_radial_open = false;
+int          g_radial_count = 0;
+int          g_radial_hot = -1;               // highlighted slice (-1 = none/cancel)
+int          g_radial_cx[Neuron::Input::MAX_MENU_OPTIONS] = {0};
+int          g_radial_cy[Neuron::Input::MAX_MENU_OPTIONS] = {0};
+const char*  g_radial_labels[Neuron::Input::MAX_MENU_OPTIONS] = {nullptr};
 
 static const char* order_kind_name(unsigned int _k)
 {
@@ -206,16 +238,19 @@ static void set_order_toast(const char* _text, int _col)
   g_order_toast_col = _col;
 }
 
-// Cursor ray -> the point where it meets a horizontal plane through the ship, in
-// absolute world coords, clamped to the server's Move reach. Returns false when the
-// ship isn't visible or the ray is parallel to / behind the plane.
-static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
+// Radial menu internals that space.cpp does not need to read.
+namespace
 {
-  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
-  Neuron::Net::EntitySnapshot me{};
-  if (!rc.IsOpen() || !rc.Sample(rc.LocalPlayer(), 1.0, me))
-    return false;
+  unsigned int          s_radial_target = 0xFFFFFFFFu;
+  Neuron::Msg::OrderKind s_radial_orders[Neuron::Input::MAX_MENU_OPTIONS] = {};
+  bool                  s_radial_isinfo[Neuron::Input::MAX_MENU_OPTIONS] = {};
+}
 
+// Unproject the cursor to a world RAY in the render (origin-relative) frame: the
+// same View*Projection inverse the retired cursor_to_move_point used, but split so
+// the plane math lives in the headless-tested MoveGizmo core.
+static bool cursor_ray(int _mx, int _my, Neuron::Input::GVec3& _ro, Neuron::Input::GVec3& _rd)
+{
   const auto sz = Neuron::Graphics::Core::GetOutputSize();
   const int vw = static_cast<int>(sz.Width);
   const int vh = static_cast<int>(sz.Height);
@@ -224,8 +259,7 @@ static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
 
   using namespace DirectX;
   Client::Camera& cam = Client::MainCamera();
-  const XMMATRIX vp = XMMatrixMultiply(cam.View(), cam.Projection());
-  const XMMATRIX invVP = XMMatrixInverse(nullptr, vp);
+  const XMMATRIX invVP = XMMatrixInverse(nullptr, XMMatrixMultiply(cam.View(), cam.Projection()));
 
   const float ndcx = 2.0f * static_cast<float>(_mx) / static_cast<float>(vw) - 1.0f;
   const float ndcy = 1.0f - 2.0f * static_cast<float>(_my) / static_cast<float>(vh);
@@ -234,42 +268,112 @@ static bool cursor_to_move_point(int _mx, int _my, long long _out[3])
   pNear = XMVectorScale(pNear, 1.0f / XMVectorGetW(pNear));
   pFar  = XMVectorScale(pFar,  1.0f / XMVectorGetW(pFar));
 
-  // Ray + ship live in origin-relative space (the camera eye is the floating-origin
-  // remainder), so the plane point is the ship minus the render origin.
-  const long long* org = camera_rig_origin();
-  const XMVECTOR ro = pNear;
-  const XMVECTOR rd = XMVectorSubtract(pFar, pNear);
-  const XMVECTOR planePt = XMVectorSet(
-      static_cast<float>(static_cast<double>(me.x) - static_cast<double>(org[0])),
-      static_cast<float>(static_cast<double>(me.y) - static_cast<double>(org[1])),
-      static_cast<float>(static_cast<double>(me.z) - static_cast<double>(org[2])), 0.0f);
-  const XMVECTOR n = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);   // horizontal plane through the ship
-
-  const float denom = XMVectorGetX(XMVector3Dot(rd, n));
-  if (std::fabs(denom) < 1e-4f)
-    return false;
-  const float t = XMVectorGetX(XMVector3Dot(XMVectorSubtract(planePt, ro), n)) / denom;
-  if (t < 0.0f)
-    return false;
-  const XMVECTOR hit = XMVectorAdd(ro, XMVectorScale(rd, t));
-
-  // Back to absolute world, clamped to the server's per-order Move reach so the
-  // client's request matches what the server will accept.
-  auto clampAxis = [](double _from, double _to) -> long long
-  {
-    double d = _to - _from;
-    if (d >  1.0e6) d =  1.0e6;
-    if (d < -1.0e6) d = -1.0e6;
-    return static_cast<long long>(_from + d);
-  };
-  _out[0] = clampAxis(static_cast<double>(me.x), static_cast<double>(org[0]) + XMVectorGetX(hit));
-  _out[1] = clampAxis(static_cast<double>(me.y), static_cast<double>(org[1]) + XMVectorGetY(hit));
-  _out[2] = clampAxis(static_cast<double>(me.z), static_cast<double>(org[2]) + XMVectorGetZ(hit));
+  _ro = { XMVectorGetX(pNear), XMVectorGetY(pNear), XMVectorGetZ(pNear) };
+  const XMVECTOR d = XMVectorSubtract(pFar, pNear);
+  _rd = { XMVectorGetX(d), XMVectorGetY(d), XMVectorGetZ(d) };
   return true;
 }
 
-// Issue the contextual default order for an RMB click at (mx,my).
-static void dispatch_context_order(int _mx, int _my)
+// The camera's up vector (a direction, so origin-independent - the render frame and
+// world frame agree on it). This is the move-gizmo's command-plane normal.
+static Neuron::Input::GVec3 camera_up_vec(void)
+{
+  const DirectX::XMFLOAT3 u = Client::MainCamera().Up();
+  return { static_cast<double>(u.x), static_cast<double>(u.y), static_cast<double>(u.z) };
+}
+
+// The player's own ship position in the render (origin-relative) frame.
+static bool ship_relative(Neuron::Input::GVec3& _out)
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  Neuron::Net::EntitySnapshot me{};
+  if (!rc.IsOpen() || !rc.Sample(rc.LocalPlayer(), 1.0, me))
+    return false;
+  const long long* org = camera_rig_origin();
+  _out = { static_cast<double>(me.x) - static_cast<double>(org[0]),
+           static_cast<double>(me.y) - static_cast<double>(org[1]),
+           static_cast<double>(me.z) - static_cast<double>(org[2]) };
+  return true;
+}
+
+// Begin a move gizmo at cursor (mx,my): fix the command plane (ship + camera-up)
+// and its in-plane base point, and derive the elevation-per-pixel scale from the
+// base's depth so a vertical drag tracks the pointer 1:1 on screen. False if the
+// ship is not currently sampleable.
+static bool gizmo_begin(int _mx, int _my)
+{
+  using namespace Neuron::Input;
+  GVec3 ro, rd, ship;
+  const GVec3 up = camera_up_vec();
+  if (!cursor_ray(_mx, _my, ro, rd) || !ship_relative(ship))
+    return false;
+
+  const PlaneHit hit = RayPlanePoint(ro, rd, ship, up);
+  g_gizmo_ship[0] = ship.x;   g_gizmo_ship[1] = ship.y;   g_gizmo_ship[2] = ship.z;
+  g_gizmo_normal[0] = up.x;   g_gizmo_normal[1] = up.y;   g_gizmo_normal[2] = up.z;
+  g_gizmo_base[0] = hit.point.x; g_gizmo_base[1] = hit.point.y; g_gizmo_base[2] = hit.point.z;
+
+  struct vector bp; bp.x = hit.point.x; bp.y = hit.point.y; bp.z = hit.point.z;
+  camera_view_point(&bp);
+  const auto sz = Neuron::Graphics::Core::GetOutputSize();
+  const double focal = Neuron::Client::CameraFocalPixels(Client::MainCamera(),
+                                                         static_cast<float>(sz.Height));
+  g_gizmo_scale = (bp.z > 1.0 && focal > 1.0) ? bp.z / focal : 50.0;
+  return true;
+}
+
+// Apply an elevation (world units, along the plane normal) to the gizmo base, clamp
+// to the server Move reach, update the marker for rendering, and return the ABSOLUTE
+// world point for the order.
+static void gizmo_apply(double _elev, long long _out[3])
+{
+  using namespace Neuron::Input;
+  const GVec3 base{g_gizmo_base[0], g_gizmo_base[1], g_gizmo_base[2]};
+  const GVec3 up  {g_gizmo_normal[0], g_gizmo_normal[1], g_gizmo_normal[2]};
+  const GVec3 ship{g_gizmo_ship[0], g_gizmo_ship[1], g_gizmo_ship[2]};
+  const GVec3 clamped = ClampReach(ApplyElevation(base, up, _elev), ship);
+
+  g_gizmo_point[0] = clamped.x; g_gizmo_point[1] = clamped.y; g_gizmo_point[2] = clamped.z;
+  const long long* org = camera_rig_origin();
+  _out[0] = static_cast<long long>(clamped.x + static_cast<double>(org[0]));
+  _out[1] = static_cast<long long>(clamped.y + static_cast<double>(org[1]));
+  _out[2] = static_cast<long long>(clamped.z + static_cast<double>(org[2]));
+}
+
+// Map a replicated entity's net type to the OrderMenu EntityClass (the raw-type
+// switch stays here; the semantics live in the tested core).
+static Neuron::Input::EntityClass entity_class_of(int _netType)
+{
+  using EC = Neuron::Input::EntityClass;
+  if (_netType == SHIP_PLANET)                              return EC::Planet;
+  if (_netType == SHIP_CORIOLIS || _netType == SHIP_DODEC)  return EC::Station;
+  if (_netType == SHIP_CARGO)                               return EC::Canister;
+  if (_netType < 0)                                         return EC::Sun;   // sun/object
+  return EC::Ship;
+}
+
+// Look up whether a picked entity is a known player and its wanted level (the roster
+// join). Defined after g_playerRoster.
+static bool pick_player_wanted(unsigned int _id, int& _wanted);
+
+// Classify a pick into a command TargetKind (empty when nothing is hit).
+static Neuron::Input::TargetKind classify_pick(unsigned int _tgt, int _netType)
+{
+  using namespace Neuron::Input;
+  if (_tgt == 0xFFFFFFFFu)
+    return TargetKind::Empty;
+  const EntityClass cls = entity_class_of(_netType);
+  bool isPlayer = false; int wanted = 0;
+  if (cls == EntityClass::Ship)
+    isPlayer = pick_player_wanted(_tgt, wanted);
+  // Pre-F1 the only owned unit is your own ship, which picking already excludes,
+  // so isSelf / isOwnUnit are both false here.
+  return ClassifyTarget(cls, /*isSelf*/ false, /*isOwnUnit*/ false, isPlayer, wanted > 0);
+}
+
+// Send a UnitOrder and set the optimistic feedback. `_pt` is the absolute world
+// point for Move (nullptr otherwise).
+static void send_order(Neuron::Msg::OrderKind _kind, unsigned int _target, const long long* _pt)
 {
   Client::ReplicationClient& rc = Client::ReplicationClientInstance();
   const unsigned int self = rc.LocalPlayer();
@@ -278,66 +382,194 @@ static void dispatch_context_order(int _mx, int _my)
 
   Neuron::Msg::UnitOrder ord;
   ord.unitId = self;
-
-  const unsigned int tgt = pick_entity_at_screen(_mx, _my);
-  if (tgt != 0xFFFFFFFFu)
+  ord.order  = _kind;
+  ord.target = _target;
+  if (_kind == Neuron::Msg::OrderKind::Move && _pt)
   {
-    Neuron::Net::EntitySnapshot ts{};
-    if (!rc.Sample(tgt, 1.0, ts))
-      return;
-    ord.target = tgt;
-    if (ts.type == SHIP_PLANET || ts.type < 0)                 ord.order = Neuron::Msg::OrderKind::Approach;
-    else if (ts.type == SHIP_CORIOLIS || ts.type == SHIP_DODEC) ord.order = Neuron::Msg::OrderKind::Dock;
-    else if (ts.type == SHIP_CARGO)                            ord.order = Neuron::Msg::OrderKind::Collect;
-    else                                                       ord.order = Neuron::Msg::OrderKind::Attack;
-    g_order_has_point = false;
-    g_missile_lock_target = tgt;   // command-as-you-select: reticle + orbit follow it
+    ord.targetX = _pt[0]; ord.targetY = _pt[1]; ord.targetZ = _pt[2];
+    g_order_has_point = true;
+    g_order_point[0] = _pt[0]; g_order_point[1] = _pt[1]; g_order_point[2] = _pt[2];
   }
   else
   {
-    long long pt[3];
-    if (!cursor_to_move_point(_mx, _my, pt))
-      return;
-    ord.order = Neuron::Msg::OrderKind::Move;
-    ord.targetX = pt[0]; ord.targetY = pt[1]; ord.targetZ = pt[2];
-    g_order_has_point = true;
-    g_order_point[0] = pt[0]; g_order_point[1] = pt[1]; g_order_point[2] = pt[2];
+    g_order_has_point = false;
   }
 
-  g_order_kind = static_cast<unsigned int>(ord.order);
+  g_order_kind = static_cast<unsigned int>(_kind);
   rc.SendUnitOrder(ord);
   set_order_toast(order_kind_name(g_order_kind), GFX_COL_YELLOW_2);   // optimistic
 }
 
+// Issue the contextual default order for an RMB click at (mx,my): an entity under
+// the cursor gets its OrderMenu default (clean players resolve to Approach - the
+// friction); empty space is a zero-elevation move.
+static void dispatch_context_order(int _mx, int _my)
+{
+  const unsigned int tgt = pick_entity_at_screen(_mx, _my);
+  if (tgt != 0xFFFFFFFFu)
+  {
+    Neuron::Net::EntitySnapshot ts{};
+    if (!Client::ReplicationClientInstance().Sample(tgt, 1.0, ts))
+      return;
+    const Neuron::Input::TargetKind tk = classify_pick(tgt, ts.type);
+    g_missile_lock_target = tgt;   // command-as-you-select: reticle + orbit follow it
+    send_order(Neuron::Input::DefaultContextOrder(tk), tgt, nullptr);
+  }
+  else
+  {
+    if (!gizmo_begin(_mx, _my))
+      return;
+    long long pt[3];
+    gizmo_apply(0.0, pt);
+    send_order(Neuron::Msg::OrderKind::Move, 0xFFFFFFFFu, pt);
+  }
+}
+
+// The radial slice count / anchor is laid out at open; a slice center sits on a
+// ring around the anchor, first at the top then clockwise.
+static void radial_layout(int _ax, int _ay, int _count)
+{
+  const double R = 72.0;
+  for (int i = 0; i < _count; ++i)
+  {
+    const double a = -1.5707963 + (2.0 * 3.14159265 * i) / static_cast<double>(_count);
+    g_radial_cx[i] = _ax + static_cast<int>(R * std::cos(a));
+    g_radial_cy[i] = _ay + static_cast<int>(R * std::sin(a));
+  }
+}
+
+// The radial slice under (mx,my), or -1 (center / outside = cancel).
+static int radial_slice_at(int _mx, int _my)
+{
+  for (int i = 0; i < g_radial_count; ++i)
+  {
+    const int dx = _mx - g_radial_cx[i];
+    const int dy = _my - g_radial_cy[i];
+    if (dx * dx + dy * dy <= 32 * 32)
+      return i;
+  }
+  return -1;
+}
+
+// Open the radial context menu for whatever is under (mx,my). Empty space has no
+// menu (it is the move gizmo), so this no-ops there.
+static void open_radial_menu(int _mx, int _my)
+{
+  const unsigned int tgt = pick_entity_at_screen(_mx, _my);
+  Neuron::Input::TargetKind tk = Neuron::Input::TargetKind::Empty;
+  s_radial_target = 0xFFFFFFFFu;
+  if (tgt != 0xFFFFFFFFu)
+  {
+    Neuron::Net::EntitySnapshot ts{};
+    if (Client::ReplicationClientInstance().Sample(tgt, 1.0, ts))
+    {
+      tk = classify_pick(tgt, ts.type);
+      s_radial_target = tgt;
+      g_missile_lock_target = tgt;   // opening a menu also selects the target
+    }
+  }
+  if (tk == Neuron::Input::TargetKind::Empty)
+    return;
+
+  const Neuron::Input::MenuOptions opts = Neuron::Input::LegalOrders(tk);
+  g_radial_count = static_cast<int>(opts.count);
+  for (int i = 0; i < g_radial_count; ++i)
+  {
+    g_radial_labels[i] = opts.items[i].label;
+    s_radial_orders[i] = opts.items[i].order;
+    s_radial_isinfo[i] = opts.items[i].isInfo;
+  }
+  radial_layout(_mx, _my, g_radial_count);
+  g_radial_hot = -1;
+  g_radial_open = true;
+}
+
+// Issue the highlighted slice's order and close the menu (Info just keeps the
+// selection, whose card is already shown).
+static void radial_commit(void)
+{
+  if (g_radial_hot >= 0 && g_radial_hot < g_radial_count && !s_radial_isinfo[g_radial_hot])
+    send_order(s_radial_orders[g_radial_hot], s_radial_target, nullptr);
+  g_radial_open = false;
+  g_radial_hot = -1;
+}
+
 // Per-frame pointer-command polling (called from the flight update, after the
-// camera). An RMB press-release inside the slop is a CLICK -> contextual order.
-// Camera orbit (LMB-drag) and selection (LMB click, I2) live in CameraRig.
+// camera). RMB drives the command grammar: a click issues the contextual default,
+// a HOLD over an entity opens the radial menu, and a press on empty space is the
+// move gizmo (vertical drag = elevation). Camera orbit (LMB-drag) and selection
+// (LMB click, I2) live in CameraRig.
 void handle_pointer_commands(void)
 {
   if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  {
+    g_gizmo_active = false;
+    g_radial_open  = false;
     return;
+  }
 
   int mx = 0, my = 0;
   bool lmb = false, rmb = false;
   input_mouse_state(mx, my, lmb, rmb);
 
   static bool s_prevRmb = false;
-  static int  s_rmbDownX = 0, s_rmbDownY = 0;
-  static bool s_rmbMoved = false;
+  static int  s_downX = 0, s_downY = 0;
+  static bool s_moved = false;
+  static int  s_downFrames = 0;
+  static bool s_overEntity = false;   // press began over an entity (menu) vs empty (gizmo)
+
+  constexpr int LONGPRESS_FRAMES = 11; // ~0.35 s at the 30 Hz command tick
+  constexpr int SLOP = 6;
 
   if (rmb && !s_prevRmb)
   {
-    s_rmbDownX = mx; s_rmbDownY = my; s_rmbMoved = false;
+    s_downX = mx; s_downY = my; s_moved = false; s_downFrames = 0;
+    g_radial_open = false;
+    s_overEntity = (pick_entity_at_screen(mx, my) != 0xFFFFFFFFu);
+    if (!s_overEntity)
+      g_gizmo_active = gizmo_begin(mx, my);   // empty space: arm the move gizmo
   }
-  else if (rmb)
+  else if (rmb)   // held
   {
-    int ddx = mx - s_rmbDownX; if (ddx < 0) ddx = -ddx;
-    int ddy = my - s_rmbDownY; if (ddy < 0) ddy = -ddy;
-    if (ddx > 6 || ddy > 6) s_rmbMoved = true;
+    ++s_downFrames;
+    int ddx = mx - s_downX; if (ddx < 0) ddx = -ddx;
+    int ddy = my - s_downY; if (ddy < 0) ddy = -ddy;
+    if (ddx > SLOP || ddy > SLOP) s_moved = true;
+
+    if (g_radial_open)
+    {
+      g_radial_hot = radial_slice_at(mx, my);
+    }
+    else if (s_overEntity)
+    {
+      if (s_downFrames >= LONGPRESS_FRAMES && !s_moved)
+        open_radial_menu(s_downX, s_downY);
+    }
+    else if (g_gizmo_active)
+    {
+      // Vertical drag past the initial press slides the marker along the plane
+      // normal: dragging UP (smaller y) raises it. The in-plane point stays put.
+      long long pt[3];
+      gizmo_apply(static_cast<double>(s_downY - my) * g_gizmo_scale, pt);
+    }
   }
-  else if (s_prevRmb && !s_rmbMoved)
+  else if (s_prevRmb)   // release
   {
-    dispatch_context_order(mx, my);   // RMB click -> contextual order
+    if (g_radial_open)
+    {
+      radial_commit();
+    }
+    else if (g_gizmo_active)
+    {
+      long long pt[3];
+      gizmo_apply(static_cast<double>(s_downY - my) * g_gizmo_scale, pt);
+      send_order(Neuron::Msg::OrderKind::Move, 0xFFFFFFFFu, pt);
+      g_gizmo_active = false;
+    }
+    else if (!s_moved)
+    {
+      dispatch_context_order(mx, my);   // a plain click over an entity
+    }
   }
   s_prevRmb = rmb;
 }
@@ -794,6 +1026,31 @@ struct PlayerRosterEntry
   int wanted = 0;
 };
 static std::unordered_map<uint32_t, PlayerRosterEntry> g_playerRoster;
+
+// I3 roster join: is this entity a known player, and if so how wanted? Used by the
+// command classifier for clean-player Attack-friction and by the I2 info card.
+static bool pick_player_wanted(unsigned int _id, int& _wanted)
+{
+  const auto it = g_playerRoster.find(_id);
+  if (it == g_playerRoster.end())
+    return false;
+  _wanted = it->second.wanted;
+  return true;
+}
+
+// The roster name for an entity, or nullptr if it is not a known player.
+const char* roster_name(unsigned int _id)
+{
+  const auto it = g_playerRoster.find(_id);
+  return it == g_playerRoster.end() ? nullptr : it->second.name.c_str();
+}
+
+// The wanted level for a known player entity, or -1 if it is not a known player.
+int roster_wanted(unsigned int _id)
+{
+  const auto it = g_playerRoster.find(_id);
+  return it == g_playerRoster.end() ? -1 : it->second.wanted;
+}
 
 static void register_client_event_handlers(void)
 {
