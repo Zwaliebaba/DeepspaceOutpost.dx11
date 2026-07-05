@@ -349,6 +349,20 @@ void draw_ship (struct local_object *ship)
 			return;
 	}
 
+	/* H3 iconic LOD: a hull too distant to read as a mesh draws as a cheap contact
+	 * glyph at its projected position instead (the tactical-digital look + the LOD
+	 * cull in one). The mesh path handles everything nearer. */
+	if (ShouldDrawAsGlyph (cam.location.z))
+	{
+		int vw = 0, vh = 0;
+		gfx_scene_size (&vw, &vh);
+		double sx = 0.0, sy = 0.0;
+		if (Neuron::Client::CameraSpaceToPixels (Neuron::Client::MainCamera (),
+				cam.location.x, cam.location.y, cam.location.z, vw, vh, sx, sy))
+			hud_sprite_scaled_deferred (IMG_GREEN_DOT, (int) sx - 3, (int) sy - 3, 6, 6);
+		return;
+	}
+
 	draw_solid_ship (ship);       // world-frame mesh; Scene3D applies the view + projection
 }
 

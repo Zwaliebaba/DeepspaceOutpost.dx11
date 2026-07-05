@@ -38,6 +38,17 @@ struct RenderDescriptor
   RenderDescriptor d;
   if (_netType == SHIP_PLANET) { d.kind = RenderKind::Planet; return d; }
   if (_netType == SHIP_SUN)    { d.kind = RenderKind::Sun;    return d; }
-  if (_netType >= 1 && _netType <= NO_OF_SHIPS) { d.kind = RenderKind::Mesh; return d; }
+  if (_netType >= 1 && _netType <= NO_OF_SHIPS) { d.kind = RenderKind::Mesh; d.glyphId = 1; return d; }
   return d;   // Hidden
+}
+
+// H3 iconic LOD: beyond this camera-space depth a hull is too small to read as a
+// mesh, so it is drawn as a cheap iconic glyph instead (the tactical-digital look
+// and the culling strategy in one). Pure decision, unit-tested; the glyph draw
+// itself is the un-CI-testable client path.
+inline constexpr double ICONIC_LOD_RANGE = 40000.0;
+
+[[nodiscard]] inline bool ShouldDrawAsGlyph(double _camDepth, double _range = ICONIC_LOD_RANGE)
+{
+  return _camDepth > _range;
 }
