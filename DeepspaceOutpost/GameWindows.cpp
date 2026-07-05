@@ -21,7 +21,6 @@
 // Game config globals (declared in elite.h), re-declared here so this
 // winrt/widget-based translation unit stays free of the legacy game headers
 // (which define macros that don't mix with the GUI headers).
-extern int anti_alias_gfx;
 extern int scene_shading;
 extern int scene_instancing;
 extern int scene_glow;
@@ -139,7 +138,6 @@ namespace
         // In-session settings (name + value labels) mapped to their globals. The
         // MMO client keeps no local config file, so there is nothing to persist -
         // these toggles apply for the session only.
-        addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
         addCycle("Ship Instancing", &scene_instancing, {"Off", "On"});
         addCycle("Ship Glow", &scene_glow, {"Off", "On"});
@@ -639,7 +637,9 @@ namespace
         : GuiWindow("Chart"), m_kind(_kind)
       {
         SetTitle(_kind == ChartData::SHORT_RANGE ? "Short Range Chart" : "Galactic Chart");
-        Centre(this, 680, 480);
+        // Widened from 680x480 so the data panel fits 13px text (the min readable size);
+        // the map area stays about the same, the extra width goes to the right column.
+        Centre(this, 730, 500);
         SetMovable(false);   // the whole body is a click-to-select surface, so don't drag it
       }
 
@@ -814,13 +814,13 @@ namespace
         {
           ChartData::Name(cur, nm, sizeof(nm));
           g_gameFont.SetColor(200, 220, 255, 255);
-          g_gameFont.DrawText2D(x.ox + ChartData::X(cur) * x.scale + 6, x.oy + ChartData::Y(cur) * x.scale - 6, 11, nm);
+          g_gameFont.DrawText2D(x.ox + ChartData::X(cur) * x.scale + 6, x.oy + ChartData::Y(cur) * x.scale - 7, 13, nm);
         }
         if (sel >= 0 && sel != cur && ChartData::Visible(sel))
         {
           ChartData::Name(sel, nm, sizeof(nm));
           g_gameFont.SetColor(255, 150, 150, 255);
-          g_gameFont.DrawText2D(x.ox + ChartData::X(sel) * x.scale + 6, x.oy + ChartData::Y(sel) * x.scale - 6, 11, nm);
+          g_gameFont.DrawText2D(x.ox + ChartData::X(sel) * x.scale + 6, x.oy + ChartData::Y(sel) * x.scale - 7, 13, nm);
         }
 
         // Crosshair at the cursor.
@@ -848,8 +848,8 @@ namespace
         for (int i = 0; i < lines; ++i)
         {
           ChartData::DataLine(i, line, sizeof(line));
-          g_gameFont.DrawText2D(px, py, 11, line);
-          py += 16;
+          g_gameFont.DrawText2D(px, py, 13, line);
+          py += 18;
         }
 
         // I6 info card: distance + fuel cost + reachability (the fuel gauge unit is
@@ -860,22 +860,22 @@ namespace
           py += 6;
           g_gameFont.SetColor(210, 210, 210, 255);
           snprintf(line, sizeof(line), "Distance: %d.%d LY", distTenths / 10, distTenths % 10);
-          g_gameFont.DrawText2D(px, py, 11, line); py += 16;
+          g_gameFont.DrawText2D(px, py, 13, line); py += 18;
           const int fuel = ChartData::FuelTenths();
           snprintf(line, sizeof(line), "Fuel:     %d.%d LY", fuel / 10, fuel % 10);
-          g_gameFont.DrawText2D(px, py, 11, line); py += 16;
+          g_gameFont.DrawText2D(px, py, 13, line); py += 18;
           if (ChartData::SelectedInRange())
             g_gameFont.SetColor(120, 220, 120, 255);
           else
             g_gameFont.SetColor(230, 110, 110, 255);
-          g_gameFont.DrawText2D(px, py, 11, ChartData::SelectedInRange() ? "IN RANGE" : "OUT OF RANGE");
+          g_gameFont.DrawText2D(px, py, 13, ChartData::SelectedInRange() ? "IN RANGE" : "OUT OF RANGE");
         }
 
-        // A short hint under the data panel.
+        // A short hint under the data panel (13px, spaced 18px so the lines don't touch).
         g_gameFont.SetColor(150, 160, 180, 255);
-        g_gameFont.DrawText2D(px, m_y + m_h - 68, 10, "Click a system to select");
-        g_gameFont.DrawText2D(px, m_y + m_h - 54, 10, "Drag to pan, wheel to zoom");
-        g_gameFont.DrawText2D(px, m_y + m_h - 40, 10, "HYPERSPACE to jump");
+        g_gameFont.DrawText2D(px, m_y + m_h - 82, 13, "Click a system to select");
+        g_gameFont.DrawText2D(px, m_y + m_h - 64, 13, "Drag to pan, wheel to zoom");
+        g_gameFont.DrawText2D(px, m_y + m_h - 46, 13, "HYPERSPACE to jump");
       }
 
     private:
@@ -889,7 +889,7 @@ namespace
 
       Xform MapTransform() const
       {
-        const float panelW = 210.0f;
+        const float panelW = 260.0f;   // wide enough for 13px data-panel / hint text
         float l = m_x + 8.0f;
         float t = m_y + 22.0f;
         float rr = m_x + m_w - panelW - 8.0f;
@@ -979,8 +979,8 @@ namespace
       StationMenuWindow()
         : GuiWindow("Station")
       {
-        SetTitle("Station");
-        Centre(this, 200, 250);
+        SetTitle("STATION");
+        Centre(this, 200, 262);
       }
 
       void Create() override
@@ -1006,6 +1006,11 @@ namespace
         add("Launch", "Launch", launch_player);
         add("Market", "Market", OpenMarketWindow);
         add("Equip", "Equip Ship", OpenEquipWindow);
+        // Charts are reachable straight from the docked hub (they are always available
+        // while docked): the galactic map and the short-range local map, the same
+        // windows F5/F6 open in flight.
+        add("Galaxy", "Galaxy Map", []() { OpenChartWindow(ChartData::GALACTIC); });
+        add("Local", "Local Map", []() { OpenChartWindow(ChartData::SHORT_RANGE); });
         add("Commander", "Commander", OpenCommanderWindow);
         add("Inventory", "Inventory", OpenInventoryWindow);
         add("Options", "Options", []() { GuiOverlay::Open(); });

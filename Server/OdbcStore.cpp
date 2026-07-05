@@ -460,7 +460,12 @@ namespace DSOServer
         arena.lens.reserve(8);
         m_arena = &arena;
         _bind(h);
-        if (!Ok(SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(_sql)), SQL_NTS)))
+        const SQLRETURN r = SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(_sql)), SQL_NTS);
+        // SQL_NO_DATA (100) is what a searched UPDATE/DELETE returns when it matched no
+        // rows - e.g. clearing cargo for a commander who has none yet. That is success, not
+        // a failure (and it carries no diagnostic, hence the bare "(no diagnostic)" line);
+        // only a genuine error still gets logged.
+        if (!Ok(r) && r != SQL_NO_DATA)
           Diag("Exec", SQL_HANDLE_STMT, h);
         m_arena = nullptr;
       }

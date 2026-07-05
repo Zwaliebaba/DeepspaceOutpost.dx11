@@ -589,7 +589,14 @@ void render_replicated_objects (void)
 				local_objects[slot] = camObj;
 		}
 
-		draw_ship (&obj);
+		// Docked, the station hub should read as the station against black space
+		// and the streaming starfield. The planet's visual sphere (radius 24576) is
+		// far larger than the station's 8000-unit orbit, so the docked camera sits
+		// INSIDE it and the whole view floods green; the sun billboard would likewise
+		// hang behind the menu. Skip both while docked (the scanner/compass mirror
+		// above still records them); in flight they draw as normal.
+		if (!(docked && (obj.type == SHIP_PLANET || obj.type == SHIP_SUN)))
+			draw_ship (&obj);
 		++drawn;
 
 		// Target reticle: overlay the lock marker (Textures/TargetLock.dds) on the
@@ -623,23 +630,11 @@ void render_replicated_objects (void)
 			}
 		}
 
-		// Docking. Authentic Elite demands a precise slot alignment, but with a
-		// static (non-spinning) station and network lag that is punishing. So we
-		// dock forgivingly: when the SHIP is near the station (within ~600 units),
-		// station roughly off its nose, at low speed, a dock REQUEST goes to the
-		// server. Ship-relative on purpose - the camera floats freely and has no
-		// bearing on where the hull is. The docked flow starts only when the
-		// server's StationResponse{Dock, Ok} arrives (see main.cpp).
-		const int dockSpeedLimit = (PlayerCaps().maxSpeed > 0) ? (PlayerCaps().maxSpeed / 4) : 10;
-		if (haveMe && (obj.type == SHIP_CORIOLIS || obj.type == SHIP_DODEC) &&
-			shipDist < 600 && PlayerFlight().speed <= dockSpeedLimit)
-		{
-			const double ahead = (shipDist > 1.0)
-				? (sdx * meSnap.noseX + sdy * meSnap.noseY + sdz * meSnap.noseZ) / shipDist
-				: 1.0;
-			if (ahead > 0.5)   // station roughly off the ship's nose -> ask to dock
-				request_dock ();
-		}
+		// Docking is a player ORDER now: right-click the station and pick "Dock". The
+		// client no longer auto-docks on proximity (that bounced a freshly launched ship
+		// straight back into the station menu). The server steers the ship in on the Dock
+		// order and, on reaching dock range, sends the StationResponse{Dock, Ok} that
+		// opens the docked menu (OrderSystem / CompleteDockOrders -> see main.cpp).
 	}
 
 	// Replicated explosions: draw each dying ship's debris burst, world-anchored via
