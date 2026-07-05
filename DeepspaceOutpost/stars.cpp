@@ -34,13 +34,30 @@ struct star
 
 star stars[20];
 
-// (Re)seed one star: scattered position, fresh depth, a power-law magnitude (u^2 -> most
-// stars faint, a few brilliant, like a real magnitude distribution) and a spectral tint.
-static inline void star_spawn(star& s, double hx, double hy)
+// A uniform [0,1) draw from the shared 8-bit RNG.
+static inline double rand01(void) { return static_cast<double>(rand255()) / 255.0; }
+
+// Pick a spectral colour weighted toward white, with occasional cool/warm accents so a field
+// reads like a real sky rather than a wall of identical white dots. Low saturation - tasteful
+// tint, not a disco. Shared by the near layer and the distant backdrop.
+static inline void pick_spectral(float& r, float& g, float& b)
 {
-  s.x = star_rand_span(hx);
-  s.y = star_rand_span(hy);
-  s.z = rand255() | 0x90;
+  const int t = rand255();
+  if (t < 26)       { r = 0.75f; g = 0.83f; b = 1.00f; } // blue-white (hot)
+  else if (t < 64)  { r = 0.86f; g = 0.91f; b = 1.00f; } // white-blue
+  else if (t < 186) { r = 1.00f; g = 1.00f; b = 1.00f; } // white (majority)
+  else if (t < 226) { r = 1.00f; g = 0.95f; b = 0.82f; } // yellow
+  else if (t < 246) { r = 1.00f; g = 0.83f; b = 0.63f; } // orange
+  else              { r = 1.00f; g = 0.72f; b = 0.60f; } // red (cool)
+}
+
+static inline void star_pick_color(star& s) { pick_spectral(s.r, s.g, s.b); }
+
+// Assign a star's intrinsic look: a power-law magnitude (u^2 -> most stars faint, a few
+// brilliant, like a real magnitude distribution) and a spectral tint. Call after seeding
+// its position/depth so the field isn't a wall of identical white dots.
+static inline void star_appearance(star& s)
+{
   const double u = rand01();
   s.mag = 0.30f + 0.70f * static_cast<float>(u * u);
   star_pick_color(s);
@@ -101,6 +118,87 @@ static void push_dust(int sx, int sy, float sizePx, float r, float g, float b, f
     s_dustQuads.push_back(v);
 }
 
+// Star-space half-extents that cover the current window through star_to_screen (scale =
+// focal/256), so the backdrop fills the whole window at any size/aspect - unlike the near
+// layer's fixed +-120 central box.
+static inline void star_window_half(double* hx, double* hy)
+{
+  int w, h;
+  gfx_scene_size(&w, &h);
+  const double focal = Client::CameraFocalPixels(Client::MainCamera(), static_cast<float>(h > 0 ? h : 1));
+  const double scale = (focal > 1e-6) ? focal / 256.0 : 2.0;
+  *hx = (w > 0 ? w : 512) * 0.5 / scale;
+  *hy = (h > 0 ? h : 384) * 0.5 / scale;
+}
+
+// The distant backdrop layer. Where the near stars[] stream past to cue speed, this dense
+// field of faint far stars barely moves: it pans with the camera's look but never dollies
+// (infinitely far, so no z-streaming). Those two rates apart give the field genuine depth
+// (motion parallax) and the vastness of deep space behind the streaming near layer. Built
+// once to fill the window and wrapped at the edges so the constellation persists.
+struct backstar
+{
+  double x, y;
+  float mag, r, g, b;
+};
+static std::vector<backstar> s_backdrop;
+static double s_backdropHalfX = 0.0; // window half-extent the current backdrop was built for
+
+static inline int backdrop_count(void) { return witchspace ? 70 : 240; }
+
+static void build_backdrop(void)
+{
+  double hx, hy;
+  star_window_half(&hx, &hy);
+  hx *= 1.15; // a little past the window so a pan doesn't reveal a bare margin before the wrap
+  hy *= 1.15;
+
+  s_backdrop.resize(backdrop_count());
+  for (backstar& s : s_backdrop)
+  {
+    s.x = (rand01() * 2.0 - 1.0) * hx;
+    s.y = (rand01() * 2.0 - 1.0) * hy;
+    const double u = rand01();
+    s.mag = 0.18f + 0.32f * static_cast<float>(u * u); // fainter + tighter than the near layer
+    pick_spectral(s.r, s.g, s.b);
+  }
+  s_backdropHalfX = hx;
+}
+
+static void draw_backdrop(void)
+{
+  double hx, hy;
+  star_window_half(&hx, &hy);
+  hx *= 1.15;
+  hy *= 1.15;
+
+  // Rebuild on a count change (witchspace) or a window resize (else the field would cluster
+  // centrally until it slowly panned out).
+  const double dHalf = (hx > s_backdropHalfX) ? hx - s_backdropHalfX : s_backdropHalfX - hx;
+  if (static_cast<int>(s_backdrop.size()) != backdrop_count() || dHalf > 1.0)
+    build_backdrop(); // rebuilds against this same window; hx/hy above stay valid
+
+  int sx, sy;
+  for (backstar& s : s_backdrop)
+  {
+    // Pan fully with the camera's look (distant stars slide with a turn just like near ones),
+    // but never stream in z - that missing dolly parallax is exactly what reads as "far".
+    s.x += s_cuePanX;
+    s.y += s_cuePanY;
+    if (s.x > hx) s.x -= 2.0 * hx; else if (s.x < -hx) s.x += 2.0 * hx;
+    if (s.y > hy) s.y -= 2.0 * hy; else if (s.y < -hy) s.y += 2.0 * hy;
+
+    star_to_screen(s.x, s.y, &sx, &sy);
+    if (star_on_screen(sx, sy))
+    {
+      // Keep a >=5px floor: below that the 128px glow sprite minifies to near-transparent
+      // (see push_dust). Faint + small, but never averaged out of existence.
+      const float sizePx = 5.0f + 4.0f * s.mag; // small, soft points (near layer is 7..23px)
+      push_dust(sx, sy, sizePx, s.r, s.g, s.b, s.mag);
+    }
+  }
+}
+
 void create_new_stars(void)
 {
   int nstars = witchspace ? 3 : 12;
@@ -110,7 +208,10 @@ void create_new_stars(void)
     stars[i].x = (rand255() - 128) | 8;
     stars[i].y = (rand255() - 128) | 4;
     stars[i].z = rand255() | 0x90;
+    star_appearance(stars[i]);
   }
+
+  s_backdrop.clear(); // fresh field (e.g. a jump) -> rebuild the distant layer next frame
 
   warp_stars = 0;
 }
@@ -121,6 +222,11 @@ void front_starfield(void)
   int sy;
 
   int nstars = witchspace ? 3 : 12;
+
+  /* The distant backdrop first: a dense, near-static deep field behind the streaming near
+   * stars. Additive blending makes draw order irrelevant, but drawing it first matches its
+   * role as the background the near layer parallaxes across. */
+  draw_backdrop();
 
   /* The streaming/panning inputs come from the CAMERA's motion (set by the rig
    * each frame): delta streams the stars toward/away from the eye as the camera
@@ -147,7 +253,11 @@ void front_starfield(void)
       float distF = 1.2f - static_cast<float>(zz / 320.0);
       distF = (distF < 0.0f) ? 0.0f : (distF > 1.0f ? 1.0f : distF);
       const float intensity = stars[i].mag * distF;
-      const float sizePx = 1.0f + 2.5f * intensity; /* continuous: bright = larger soft disc */
+      /* The Starburst sprite is a 128px soft glow whose energy sits in the centre. Drawn at a
+         1-2px point it minifies to near-transparent (the top mips average the glow into the
+         vast transparent surround), so a star needs real screen size to read: a small soft
+         point for faint stars, a wider halo for bright ones. */
+      const float sizePx = 5.0f + 18.0f * intensity;
       push_dust(sx, sy, sizePx, stars[i].r, stars[i].g, stars[i].b, intensity);
     }
 
@@ -174,6 +284,7 @@ void front_starfield(void)
       stars[i].x = (rand255() - 128) | 8;
       stars[i].y = (rand255() - 128) | 4;
       stars[i].z = rand255() | 0x90;
+      star_appearance(stars[i]);
     }
   }
 

@@ -50,12 +50,19 @@ if errorlevel 1 goto :fail
 cmake --build --preset %DSO_PRESET% --target Server dbseed
 if errorlevel 1 goto :fail
 
-rem Locate the freshly built executables (the Ninja layout places them under the
-rem per-target build subdirectory; search so a layout change does not break us).
-set "SERVER_EXE="
-set "DBSEED_EXE="
-for /r "%BUILD_DIR%" %%F in (Server.exe) do set "SERVER_EXE=%%F"
-for /r "%BUILD_DIR%" %%F in (dbseed.exe) do set "DBSEED_EXE=%%F"
+rem Locate the freshly built executables. Prefer the expected CMake/Ninja target
+rem paths, then fall back to searching for real files only.
+set "SERVER_EXE=%BUILD_DIR%\Server\Server.exe"
+set "DBSEED_EXE=%BUILD_DIR%\tools\dbseed\dbseed.exe"
+
+if not exist "%SERVER_EXE%" (
+  set "SERVER_EXE="
+  for /f "delims=" %%F in ('where /r "%BUILD_DIR%" Server.exe 2^>nul') do if not defined SERVER_EXE set "SERVER_EXE=%%F"
+)
+if not exist "%DBSEED_EXE%" (
+  set "DBSEED_EXE="
+  for /f "delims=" %%F in ('where /r "%BUILD_DIR%" dbseed.exe 2^>nul') do if not defined DBSEED_EXE set "DBSEED_EXE=%%F"
+)
 
 if not defined SERVER_EXE (
   echo ERROR: Server.exe not found under "%BUILD_DIR%" after the build.
