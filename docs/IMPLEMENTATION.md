@@ -107,7 +107,7 @@ These are ordered by severity. D1 is the headline finding of the audit.
 | `NeuronCore/ClientInput.h` | `Net::ClientInput` alias | S7: one catalog name — `Msg::InputCommand` | **Delete alias**, mechanical rename at call sites (keep `NO_MISSILE_TARGET`, moved next to `InputCommand`) |
 | `DeepspaceOutpost/alg_main.h`, `menu.h` | whole headers | Included nowhere | **Delete** |
 | `AGENTS.md:247-248` | trailing `</content></invoke>` XML | Copy-paste artifact | **Delete** |
-| `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H) |
+| `DeepspaceOutpost/threed.cpp` `draw_wireframe_ship` + the `wireframe` global (`elite.*`, `space.cpp` laser lines, options window, `newkind.cfg`) | Solid/Wireframe graphics toggle | Ships always render the solid GPU mesh; the CPU line path was never selected in production | ✅ **Removed 2026-07-04** (the retro-vector *art direction* is the low-poly meshes, unaffected — Track H). *Confirmed 2026-07-05 when scoping H2/H4: they instance and glow the **solid** meshes, not a wireframe — the earlier "instanced wireframe" plan wording is superseded (Track H).* |
 | `DeepspaceOutpost/SceneMeshes.cpp`, `threed.cpp` + the `planet_render_style` global (`elite.*`, options window, `newkind.cfg`) and `ModelDraw::style`/`colour2` | Multi-style planet renderer (Wireframe/Green/SNES/Fractal) | Only the classic green ever shipped; `ModelDraw::style`/`colour2` had no reader | ✅ **Removed 2026-07-04** (planet is one lit green sphere) |
 | `DeepspaceOutpost/config.h`, `alg_data.h` | whole headers | `alg_data.h` = retired Allegro datafile indexes (unused); `config.h` = the `GFX_ALLEGRO` (dead) + `RES_800_600` macros, the latter still selecting `gfx.h`'s `GFX_SCALE=2` block | ✅ **Removed 2026-07-04** (`RES_800_600` moved to a DeepspaceOutpost target compile definition; every `#include` deleted) |
 | `DeepspaceOutpost/file.cpp`, `file.h` + `GameData/newkind.cfg`, `newscan.cfg` | the local config subsystem (`read/write_config_file`, `read_scanner_config_file`, `get_filename`) | The MMO client keeps no on-disk settings; `write_config_file`/`get_filename` callers were the Save-Settings row and the dead `set_commander_name` | ✅ **Removed 2026-07-04** — the load-bearing values it read (scanner/compass HUD positions, frame-speed default) are baked into `elite.cpp`; the startup `read_config_file()` and the Save-Settings row are gone |
@@ -1352,19 +1352,39 @@ the ARCHITECTURE.md change-control rule.
 
 ## 10. Track H — Rendering (#13) — **M**, parallel any time
 
-*Status 2026-07-05: **H1 ✅** and **H3 (LOD decision) ✅ core** done — the two
-pieces with a headless-testable core. `DeepspaceOutpost/RenderTable.h` is the
-`NetType → {kind, glyphId, paletteRow}` table (`RenderFor`), consumed by
-`draw_ship` in place of the type if-chain, plus the iconic-LOD range decision
-(`ShouldDrawAsGlyph`); both unit-tested in `Tests/NeuronClient/RenderTableTests.cpp`.
-A distant hull now draws as a contact glyph (a deferred blip; a 2-6-line vector
-glyph is the refinement). **H2 (batched instanced pipeline) and H4 (emissive post
-chain + GPU debris) are deferred**: they are large DX11/HLSL architecture rewrites
-(persistent per-hull line buffers + `DrawIndexedInstanced`; render targets + blur +
-`SV_VertexID` expansion) with **no CI oracle at all** — the sandbox can't compile or
-run the DX11 client, and these are new pipelines, not wiring over proven primitives.
-They should be built in an in-app session where each pass can be iterated visually.
-The H1 table + descriptor is the seam they plug into when that happens.*
+*Status 2026-07-05: **H1 ✅**, **H3 (LOD decision) ✅ core**, and **H2 / H4 ✅ built
+(opt-in, in-app visual verification pending)**.*
+
+- *H1 / H3: `DeepspaceOutpost/RenderTable.h` is the `NetType → {kind, glyphId,
+  paletteRow}` table (`RenderFor`), consumed by `draw_ship` in place of the type
+  if-chain, plus the iconic-LOD range decision (`ShouldDrawAsGlyph`); both
+  unit-tested in `Tests/NeuronClient/RenderTableTests.cpp`. A distant hull now
+  draws as a contact glyph (a deferred blip; a 2–6-line vector glyph is the
+  refinement).*
+- ***H2 — solid-mesh instancing.*** *Reframed from "wireframe" to match the settled
+  art direction: the retro-vector look is the **solid low-poly meshes** (the CPU
+  wireframe was removed 2026-07-04), so H2 instances **those** — identical pixels,
+  fewer draw calls, not a new look. `Scene3D` groups each frame's ship models by
+  hull type and issues one `DrawIndexedInstanced` per type from the existing
+  immutable per-type mesh, feeding a per-instance stream (world matrix + tint) built
+  by the pure `graphics/InstanceData.h` packer. Opt-in (`SetInstancingEnabled`,
+  default off → the proven per-model path); the "Ship Instancing" option toggles it.
+  The instance packer is unit-tested (`Tests/NeuronClient/InstanceDataTests.cpp`);
+  the DX11 draw path is CI-compile-verified and needs one in-app look to confirm
+  ships render identically.*
+- ***H4 — emissive glow over the solids.*** *`graphics/SceneGlow.h/.cpp`: the scene
+  renders into an offscreen target, a separable Gaussian (the `GaussianKernel`
+  weights in `LineExpand.h`, baked into `blurPS.hlsl` and unit-tested) blurs it, and
+  `compositePS.hlsl` adds sharp + glow·intensity onto the back buffer. Opt-in
+  (`SetEnabled`, default off); the "Ship Glow" option toggles it. Full-screen post
+  passes reuse `postVS.hlsl`. CI-compile-verified; the glow strength/look wants one
+  in-app tuning pass. **GPU-side explosion debris (the third H4 bullet) stays
+  deferred** — it needs an in-app particle session.*
+
+*The DX11/HLSL glue for H2/H4 has no CI oracle beyond "it compiles" (the sandbox
+can't run the client), so both ship default-off behind their own options — the
+default frame is byte-for-byte the pre-H2/H4 path. The H1 table remains the seam the
+render descriptors plug into.*
 
 Per §13.2.1, in order:
 
@@ -1375,21 +1395,24 @@ Per §13.2.1, in order:
    data row. (The `draw_ship` seam is already simpler: the Solid/Wireframe
    toggle and the multi-style planet branch were removed 2026-07-04 — ships
    take the single solid mesh path and the planet is one green sphere.)
-2. **Batched instanced wireframe:** one persistent line-list vertex buffer
-   per hull type, one per-frame instance buffer (transform + palette tint),
-   one `DrawIndexedInstanced` per hull type. This work converts
-   `ReplicatedScene`/`SceneProjection`/`Scene3D` to DirectXMath as it goes
-   — the S6 math-stack retirement rides this track for the live path.
+2. **Batched instanced solid meshes ✅ (opt-in):** the immutable per-hull
+   solid mesh already lives in `Scene3D` (from the GPU migration); H2 adds a
+   per-frame per-instance stream (world matrix + tint) and one
+   `DrawIndexedInstanced` per hull type instead of one `DrawIndexed` per ship.
+   Same solid geometry, same pixels — a draw-call win, not a new look. (The
+   original "line-list wireframe" framing is retired with the CPU wireframe;
+   see the H2 status note above.)
 3. **Client-side culling + iconic LOD:** grid/range cull (client may reuse
    `Spatial::Grid`), and beyond a range threshold draw the 2–6-line glyph
    from the NetType table instead of the mesh — the tactical-digital look
    *and* the LOD strategy; also the render path for E3's strategic
    contacts.
-4. **Post chain:** lines to an emissive target, blur, composite; screen-
-   space quad expansion in the vertex shader (4 verts/segment via
-   `SV_VertexID`) so line weight is a style parameter. GPU-side explosion
-   debris seeded by `EntityDeath` (E6: client GPU only — the server stays
-   headless).
+4. **Post chain ✅ (opt-in, glow):** the solid scene to an emissive target,
+   separable Gaussian blur, additive composite (`SceneGlow` + `postVS` /
+   `blurPS` / `compositePS`). The screen-space line-expansion sub-step is moot
+   now the look is solid, not wireframe. **GPU-side explosion debris seeded by
+   `EntityDeath` (E6: client GPU only — the server stays headless) stays
+   deferred** to an in-app particle session.
 
 *Acceptance:* draw calls O(hull types) at any entity count (D5's 100-bot
 soak doubles as the render stress scene); legacy screens (charts, station

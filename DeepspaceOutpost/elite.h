@@ -116,6 +116,8 @@ extern int compass_centre_x;
 extern int compass_centre_y;
 
 extern int scene_shading;
+extern int scene_instancing;
+extern int scene_glow;
 
 extern int game_over;
 extern int docked;

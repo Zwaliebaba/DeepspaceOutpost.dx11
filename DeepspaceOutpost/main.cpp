@@ -41,6 +41,7 @@
 #include "GameWindows.h"
 #include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
 #include "Scene3D.h"
+#include "SceneGlow.h"
 #include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
 #include "input_win.h"                        // input_mouse_state (I3 pointer commands)
 #include "GraphicsCore.h"                     // Graphics::Core::GetOutputSize (viewport size)
@@ -1853,6 +1854,10 @@ void game_render_scene(void)
   // Push the current "Ship Shading" setting to the 3D renderer (cheap; the flag may
   // change at runtime via the options window). Off = faithful flat per-face colour.
   Neuron::Graphics::Scene3D::SetLightingEnabled(scene_shading != 0);
+  // The two H2/H4 render options, likewise refreshed each frame. Both default off, so the
+  // proven per-model, no-glow path is unchanged unless the player opts in.
+  Neuron::Graphics::Scene3D::SetInstancingEnabled(scene_instancing != 0);
+  Neuron::Graphics::SceneGlow::SetEnabled(scene_glow != 0);
 
   switch (s_state)
   {

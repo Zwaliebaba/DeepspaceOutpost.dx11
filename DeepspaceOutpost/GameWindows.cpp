@@ -23,6 +23,8 @@
 // (which define macros that don't mix with the GUI headers).
 extern int anti_alias_gfx;
 extern int scene_shading;
+extern int scene_instancing;
+extern int scene_glow;
 extern int hoopy_casinos;
 extern int instant_dock;
 
@@ -139,6 +141,8 @@ namespace
         // these toggles apply for the session only.
         addCycle("Anti Alias", &anti_alias_gfx, {"Off", "On"});
         addCycle("Ship Shading", &scene_shading, {"Flat", "Lit"});
+        addCycle("Ship Instancing", &scene_instancing, {"Off", "On"});
+        addCycle("Ship Glow", &scene_glow, {"Off", "On"});
         addCycle("Planet Desc.", &hoopy_casinos, {"BBC", "MSX"});
         addCycle("Instant Dock", &instant_dock, {"Off", "On"});
 

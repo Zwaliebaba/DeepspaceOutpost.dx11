@@ -18,7 +18,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <unordered_set>
 #include <vector>
 
 namespace Neuron::Graphics
@@ -103,52 +102,6 @@ namespace Neuron::Graphics
         out.indices.push_back(base + static_cast<uint32_t>(i));
         out.indices.push_back(base + static_cast<uint32_t>(i + 1));
       }
-    }
-
-    return out;
-  }
-
-  // Build a WIREFRAME line-list mesh (H2): the unique undirected edges of every
-  // face perimeter, over the shared point table. Unlike BuildSolidMesh, vertices
-  // are shared (a wireframe needs no per-face split) and colour comes from the
-  // per-instance tint at draw time, so each vertex carries only its position (the
-  // rgba is a white placeholder, the normal unused). `indices` are EDGE PAIRS
-  // (line-list topology): index [2i], [2i+1] are the two ends of edge i. 2-point
-  // "line faces" the solid builder drops are kept here as edges. Pure + unit-tested;
-  // it is the per-hull geometry the instanced wireframe pass uploads once.
-  [[nodiscard]] inline MeshData BuildWireMesh(const MeshPoint* _points, int _numPoints,
-                                              const MeshFace* _faces, int _numFaces)
-  {
-    MeshData out;
-    if (_points == nullptr || _faces == nullptr || _numPoints <= 0 || _numFaces <= 0)
-      return out;
-
-    out.vertices.reserve(static_cast<size_t>(_numPoints));
-    for (int i = 0; i < _numPoints; ++i)
-      out.vertices.push_back(MeshVertex{_points[i].x, _points[i].y, _points[i].z, 0.0f, 0.0f, 0.0f, 0xFFFFFFFFu});
-
-    std::unordered_set<uint64_t> seen;
-    auto addEdge = [&](int _a, int _b)
-    {
-      if (_a == _b || _a < 0 || _b < 0 || _a >= _numPoints || _b >= _numPoints)
-        return;
-      const uint32_t lo = static_cast<uint32_t>(_a < _b ? _a : _b);
-      const uint32_t hi = static_cast<uint32_t>(_a < _b ? _b : _a);
-      const uint64_t key = (static_cast<uint64_t>(lo) << 32) | hi;
-      if (seen.insert(key).second)
-      {
-        out.indices.push_back(lo);
-        out.indices.push_back(hi);
-      }
-    };
-
-    for (int f = 0; f < _numFaces; ++f)
-    {
-      const MeshFace& face = _faces[f];
-      if (face.count < 2 || face.count > 8)
-        continue;   // need at least an edge; malformed faces skipped
-      for (int k = 0; k < face.count; ++k)
-        addEdge(face.idx[k], face.idx[(k + 1) % face.count]);
     }
 
     return out;
