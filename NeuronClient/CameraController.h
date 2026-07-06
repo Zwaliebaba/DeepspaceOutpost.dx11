@@ -34,10 +34,23 @@ namespace Neuron::Client
     float lookDY = 0.0f;
     bool looking = false;     // look/drag button held (RMB)
     float wheelSteps = 0.0f;  // wheel notches this frame (+ = wheel up)
-    float moveForward = 0.0f; // -1..1 key axes
+    float moveForward = 0.0f; // -1..1 key axes (first-person fly / orbit dolly)
     float moveRight = 0.0f;
     float moveUp = 0.0f;
     bool boost = false;       // speed modifier held (Shift)
+
+    // Homeworld camera additions (orbit controller): pan drags the focus point in
+    // the screen plane; the key-pan axes do the same from arrows/WASD. tanHalfFovY
+    // + viewportH let the orbit controller scale pan to world units per pixel at
+    // the focus depth (the rig fills them from the live projection/viewport).
+    float panDX = 0.0f;       // pan drag delta, pixels (chord / two-finger / MMB)
+    float panDY = 0.0f;
+    bool panning = false;
+    float keyPanRight = 0.0f; // -1..1 (arrows / WASD)
+    float keyPanUp = 0.0f;
+    float tanHalfFovY = 0.375f; // tan(fovY/2); default = the legacy scene fov
+    float viewportH = 720.0f;   // viewport height, pixels
+
     float dt = 1.0f / 60.0f;  // seconds since the previous update
   };
 
@@ -94,8 +107,18 @@ namespace Neuron::Client
     void Update(const CameraInput& _input) override;
     void ApplyView(Camera& _camera, const double _originWorld[3]) const override;
 
+    // Snap the focus point to an absolute world position (spawn/teleport anchor,
+    // or the frame-to-frame follow of a moving unit). Cancels any focus ease.
     void SetTarget(const double _targetWorld[3]);
     void SetOrbit(float _yaw, float _pitch, double _distance);
+
+    // Begin an animated re-centre of the focus point onto an absolute world
+    // position (the Homeworld F-key / double-tap focus). Update() eases it in.
+    void FocusOn(const double _targetWorld[3]);
+
+    // Settle any in-flight focus ease immediately (used by the rig's reset seam
+    // so no animation survives a scene change).
+    void CancelFocusAnim() { m_focusT = 1.0f; }
 
     [[nodiscard]] float YawAngle() const { return m_yaw; }
     [[nodiscard]] float PitchAngle() const { return m_pitch; }
@@ -105,9 +128,15 @@ namespace Neuron::Client
   private:
     void RecomputeEye();
 
-    double m_targetWorld[3] = {0.0, 0.0, 0.0};
+    double m_targetWorld[3] = {0.0, 0.0, 0.0}; // the live camera focus point
     float m_yaw = 3.14159265f; // start on the target's -z side
     float m_pitch = -0.35f;    // look direction tilts down -> the eye sits above
     double m_distance = 900.0;
+
+    // Focus-point ease (F-key / double-tap): m_targetWorld lerps from ...From to
+    // ...To as m_focusT climbs 0->1. Settled (==1) means no animation is running.
+    double m_focusFrom[3] = {0.0, 0.0, 0.0};
+    double m_focusTo[3] = {0.0, 0.0, 0.0};
+    float m_focusT = 1.0f;
   };
 }
