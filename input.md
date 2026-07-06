@@ -336,8 +336,11 @@ unchanged) — this step only re-plumbs.*
      letter — `kbd_find_pressed` is read on chart screens, the focus key is
      read on `SCR_FRONT_VIEW`. No conflict; document it in §3.9 of
      interaction.md.
-3. The docked exception and dust-cue code survive unchanged (the dust cue
-   reads eye motion, which pan/focus naturally feed).
+3. The dust-cue code survives unchanged (it reads eye motion, which
+   pan/focus naturally feed). The docked exception is **folded into** the
+   unified rotate path rather than kept as a parallel copy (§6.3), and
+   `camera_rig_reset` gains the new-state teardown (§6.2) so no focus
+   animation or latched chord survives a death→intro→flight transition.
 
 ### H4 — RMB grammar under the rebind (S)
 
@@ -641,7 +644,121 @@ slate.
 
 ---
 
-## 6. Migration sequencing & risk
+## 6. Game-state handling
+
+The plan above is written for the live flight loop; the client is a small
+state machine around it and each state constrains input differently. This
+section makes those constraints explicit — the first draft treated only
+`docked`, which is not enough.
+
+### 6.1 The states, and which input runs
+
+`GameState` (`main.cpp:1125`) is `{Intro1, Intro2, Flight, GameOver}`.
+`docked` is **not** a state — it is a sub-mode of `Flight` (`current_screen`
+stays `SCR_FRONT_VIEW`, the `StationMenuWindow` floats over the station
+view). Only `Flight` runs the input path this migration touches:
+
+| State | Input that runs | Camera | This migration's exposure |
+|---|---|---|---|
+| `Intro1` / `Intro2` | `kbd_poll_keyboard` only; **Space** advances. Scenes animate in **camera space** against the identity camera (`camera_rig_reset`). `camera_rig_update` / `handle_pointer_commands` **not called**. | Identity (reset) | Reset-on-entry only (§6.2); intro *advance* gesture (§6.4) |
+| `Flight` (in space) | `camera_rig_update` → `handle_pointer_commands` → `handle_flight_keys` → `send_player_input` (`main.cpp:1731-1740`) | Focus-orbit (new default) / FPV observer | The full plan (H1–H6) |
+| `Flight` (docked) | Same call chain, but every command handler early-returns on `docked`; `StationMenuWindow` (a `GuiOverlay`) owns LMB; the rig force-orbits the station | Forced orbit around own ship | §6.3 — converges with the new model |
+| `GameOver` | Frame counter only (100 frames) → `respawn_after_death` (docked). Scene animates in camera space against the identity camera. | Identity (reset) | Reset-on-entry only (§6.2) |
+
+Because the new selection / band / grid glue lives inside
+`handle_pointer_commands` and `camera_rig_update`, which run **only in
+`Flight`**, the intro and game-over states are automatically inert for the
+*active* verbs. The one thing they are **not** automatically safe against is
+**stale carried state** — that is §6.2.
+
+### 6.2 Reset-on-transition (the real new requirement)
+
+`camera_rig_reset()` (`CameraRig.cpp:102`) is the seam every non-flight
+state enters through (intro1/intro2/game-over). Today it clears `s_ready`,
+`s_orbitMode`, the origin, the timer, and the identity view. The new
+controller/selection state **must reset here too**, or a focus animation
+mid-flight when the player dies will keep easing through the game-over
+scene and into the next spawn:
+
+```cpp
+void camera_rig_reset(void)
+{
+  // ... existing resets (s_ready, s_orbitMode, s_origin, s_haveTime, view) ...
+  s_orbit.CancelFocusAnim();      // no in-flight ease survives a scene change
+  s_panChordActive = false;       // drop any latched LMB+RMB chord
+  selection_clear();              // s_selection + derived g_missile_lock_target
+  grid_cancel();                  // g_grid_mode = GRID_OFF, g_gizmo_active = false
+  g_band_active = false;          // no rubber-band across a transition
+}
+```
+
+`g_missile_lock_target` is already cleared on the docked entry
+(`enter_station`, `main.cpp:1168`) and on death/despawn events
+(`main.cpp:1359,1408,1432`); routing those through `selection_clear()`
+keeps the selection set and the derived global consistent (the H2 single-
+writer rule). The re-anchor on first ship sight after a reset
+(`AnchorBehindShip`) already re-seats the orbit — the focus point should be
+initialised to the ship there (`s_orbit.SetTarget(ship)` becomes the focus
+seed, snap not animated).
+
+### 6.3 Docked — the special case that converges
+
+Today docked is handled by two exceptions: the rig **forces orbit mode**
+for the whole docked stay and binds **RMB-drag to orbit the station**
+(`CameraRig.cpp:199-216, 266-274`), because the `StationMenuWindow` owns the
+pointer (`uiOwns` is true) yet RMB is otherwise unused at a station. Under
+the target model this stops being a special case:
+
+- Orbit is now the **default** camera everywhere, so "force orbit while
+  docked" is a no-op relative to the default — keep it only as a guard that
+  F12/observer-FPV can't be toggled on at the station.
+- RMB-drag is now the **global rotate** binding, so the docked RMB-orbit
+  exception is simply the normal rotate verb still being live while the menu
+  owns LMB. The dedicated docked RMB block can be deleted in favour of the
+  standard path, gated so it reads input even though `uiOwns` is true (the
+  one thing the docked branch does that the flight branch does not).
+- The **pan chord cannot form** docked (the station menu owns LMB, so
+  LMB+RMB never latches) — correct by construction; no extra guard needed.
+- **F (focus)** docked has no selection (`g_missile_lock_target` cleared on
+  entry), so it re-centres the own ship — the desired behaviour.
+- **Movement grid, band-select, contextual orders** stay disabled docked:
+  `handle_pointer_commands` already early-returns on `docked`
+  (`main.cpp:511`), and the H6 grid entry (M-key) must sit **behind that
+  same gate** so M is inert at the station. Ordering a docked ship to move
+  is meaningless — launch is the station-menu flow.
+
+Net: the docked path gets *simpler*, not more complex. The migration should
+fold the docked RMB exception into the unified rotate path rather than carry
+a parallel copy.
+
+### 6.4 Intro / game-over: the advance gesture
+
+interaction.md §3.8 wants "press Space" to become "tap/click anywhere"
+(Space kept as accelerator). That is the only pointer verb the intro states
+need, and it must **not** be routed through the H1 selection/band
+recognizer path (there is nothing to select in an intro). Keep it as a
+plain "any tap or Space this frame" check in the `Intro1`/`Intro2` arms of
+`game_update` (`main.cpp:1820-1836`), reading a lightweight
+`input_take_any_tap()` one-shot from the recognizer (a `Tap` on any button)
+rather than the selection glue. The gesture recognizer is fed regardless of
+game state (it lives in the window proc), so the one-shot is available; the
+selection/command consumers simply don't run outside `Flight`.
+
+### 6.5 Gate summary (what each new verb checks)
+
+Every new verb inherits the existing gates; stated once so no step drops one:
+
+| New verb | Runs only when |
+|---|---|
+| Band-select (LMB drag) | `Flight` && !`docked` && `current_screen == SCR_FRONT_VIEW` && !`GuiOverlay::IsShown()` |
+| Movement grid (M / RMB-empty) | same as band-select (the `handle_pointer_commands` gate at `main.cpp:511`) |
+| Focus (F) | `Flight` && `current_screen == SCR_FRONT_VIEW` (docked allowed — re-centres own ship) |
+| Camera rotate / pan / zoom | `Flight` && !`uiOwns` (the `CameraRig` gate), plus the docked RMB exception (§6.3) |
+| Intro advance (tap) | `Intro1` / `Intro2` only |
+
+---
+
+## 7. Migration sequencing & risk
 
 | Step | Ships alone? | Risk | Mitigation |
 |---|---|---|---|
