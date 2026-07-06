@@ -2048,7 +2048,9 @@ void game_update(void)
   {
     case GameState::Intro1:
       kbd_poll_keyboard();
-      if (kbd_space_pressed)
+      // Advance on Space or a tap/click anywhere (input.md §3.8/§6.4); the tap one-
+      // shot stays off the selection path (there is nothing to select in an intro).
+      if (kbd_space_pressed || PointerInput::TakeAnyTap())
       {
         snd_stop_midi();
         enter_intro2();
@@ -2057,7 +2059,7 @@ void game_update(void)
 
     case GameState::Intro2:
       kbd_poll_keyboard();
-      if (kbd_space_pressed)
+      if (kbd_space_pressed || PointerInput::TakeAnyTap())
       {
         snd_stop_midi();
         enter_flight();

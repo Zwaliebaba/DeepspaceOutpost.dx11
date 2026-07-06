@@ -168,13 +168,20 @@ void camera_rig_focus(void)
 {
 	/* Animate the focus point onto the current selection (else the own ship) and
 	 * re-attach the follow to it (input.md H3: F key / double-tap). */
+	const unsigned int want = g_missile_lock_target != 0xFFFFFFFFu
+	                        ? g_missile_lock_target
+	                        : Client::ReplicationClientInstance().LocalPlayer();
+
+	/* Already following that unit and settled on it: nothing to animate (avoids a
+	 * pointless half-second follow-pause when F re-targets the current subject). */
+	if (want == s_followEntity && s_orbit.FocusSettled())
+		return;
+
 	double target[3];
 	if (!SelectionFocusWorld(target))
 		return;
 	s_orbit.FocusOn(target);
-	s_followEntity = g_missile_lock_target != 0xFFFFFFFFu
-	               ? g_missile_lock_target
-	               : Client::ReplicationClientInstance().LocalPlayer();
+	s_followEntity = want;
 }
 
 void camera_rig_update(void)
@@ -264,6 +271,17 @@ void camera_rig_update(void)
 	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW) || g_radial_open;
 	const bool cameraLive = !uiOwns || docked;   // docked keeps RMB rotate live
 	bool panned = false;
+
+	/* Always DRAIN the recognizer's drag/chord/pan deltas (even when the camera is
+	 * not live), so nothing accumulates across a window/radial period and snaps the
+	 * view when input becomes live again. They are only APPLIED when cameraLive. */
+	float rdx = 0.f, rdy = 0.f;
+	const bool rDrag = PointerInput::DragState(PointerButton::Right, rdx, rdy);
+	float cdx = 0.f, cdy = 0.f;
+	const bool chord = PointerInput::ChordPan(cdx, cdy);
+	float tdx = 0.f, tdy = 0.f;
+	input_take_pan(tdx, tdy);                    // two-finger touch pan (finally consumed)
+
 	if (cameraLive)
 	{
 		if (!uiOwns)
@@ -271,8 +289,7 @@ void camera_rig_update(void)
 
 		/* RMB-drag = ROTATE (the global binding). A drag owned by an in-progress
 		 * move gizmo or an open radial menu is a command, not a camera rotate. */
-		float rdx = 0.f, rdy = 0.f;
-		if (PointerInput::DragState(PointerButton::Right, rdx, rdy) && !g_gizmo_active && !g_radial_open)
+		if (rDrag && !g_gizmo_active && !g_radial_open)
 		{
 			in.lookDX = rdx; in.lookDY = rdy; in.looking = true;
 		}
@@ -281,13 +298,10 @@ void camera_rig_update(void)
 		{
 			/* Pan: the LMB+RMB chord, the touch two-finger drag, and the arrow/WASD
 			 * key axes all slide the focus point in the screen plane. */
-			float cdx = 0.f, cdy = 0.f;
-			if (PointerInput::ChordPan(cdx, cdy) && (cdx != 0.f || cdy != 0.f))
+			if (chord && (cdx != 0.f || cdy != 0.f))
 			{
 				in.panDX += cdx; in.panDY += cdy; in.panning = true;
 			}
-			float tdx = 0.f, tdy = 0.f;
-			input_take_pan(tdx, tdy);                    // two-finger touch pan (finally consumed)
 			if (tdx != 0.f || tdy != 0.f) { in.panDX += tdx; in.panDY += tdy; in.panning = true; }
 
 			in.keyPanRight = KeyAxis(VK_RIGHT, VK_LEFT) + KeyAxis('D', 'A');
