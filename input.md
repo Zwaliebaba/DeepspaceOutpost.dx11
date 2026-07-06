@@ -4,12 +4,23 @@
 code (`docs/ARCHITECTURE.md` §7, `docs/interaction.md` Track I, all I1–I7
 residues verified in source). This document plans the transition of the
 client's interaction model from the current *pointer-first order grammar* to a
-**Homeworld-style interaction model**. It deliberately reuses the existing
-vocabulary and naming conventions: `Neuron::Client` PascalCase classes with
-`m_` members and `_param` arguments in `NeuronClient/`, snake_case free
-functions with `g_`/`s_` globals in `DeepspaceOutpost/`, headless-testable
-"pure cores" under `NeuronClient/input/`, and thin DX11 glue in `main.cpp` /
-`CameraRig.cpp`.
+**Homeworld-style interaction model**.
+
+**Naming.** All *new* identifiers proposed here follow the canonical project
+standard in [`.github/coding-standards.md`](.github/coding-standards.md):
+types and functions in `PascalCase`, locals in `camelCase`, private members
+`m_` + `camelCase`, constants and macros in `UPPER_SNAKE_CASE`, and enums as
+`enum class` with an explicit underlying type and `PascalCase` enumerators.
+File-scope statics/globals keep the project-universal `g_` / `s_` prefix (the
+standard is silent on globals; this prefix is the one convention both source
+tiers already share) with a `camelCase` body. New client-engine code lands in
+`Neuron::Client` with `_camelCase` parameters. The legacy `DeepspaceOutpost/`
+presentation tier still uses older snake_case patterns; per AGENTS.md
+("move legacy code toward the target style when you touch it") the new code
+this migration introduces adopts the target style. **Existing symbols are
+referenced by their real names** (e.g. `handle_pointer_commands`,
+`g_missile_lock_target`, `pick_entity_at_screen`) so the plan stays an
+accurate map of the current code.
 
 Nothing in this plan touches the server or the wire protocol's semantics: the
 anti-cheat boundary (`UnitOrder` validated server-side, the client cannot move
@@ -101,7 +112,7 @@ Input flows through five layers, bottom to top:
    (`handle_pointer_commands`, called from the flight update *after* the
    camera). It polls `input_mouse_state` **again** and owns the whole RMB
    grammar with a second hand-rolled slop/hold state machine
-   (`s_prevRmb/s_downX/s_moved/s_downFrames`, `LONGPRESS_FRAMES = 11` — a
+   (`s_prevRmb`/`s_downX`/`s_moved`/`s_downFrames`, `LONGPRESS_FRAMES = 11` — a
    frame-counted 0.35 s that silently assumes 30 fps): RMB click → contextual
    order, RMB hold → radial menu, RMB press on empty → move gizmo with
    vertical-drag elevation. Touch long-press/double-tap one-shots are consumed
@@ -128,10 +139,11 @@ calls (`ability_bar_button_at` / `nav_strip_button_at`) inside `CameraRig`.
 - Two controllers in `NeuronClient/CameraController.{h,cpp}`:
   `FirstPersonCameraController` (default: yaw/pitch look, key-axis fly, wheel
   dolly) and `OrbitCameraController` (yaw/pitch/distance around a target fed
-  every frame; wheel = multiplicative distance, `ORBIT_MIN/MAX_DISTANCE`
-  150–60 000). Both keep the **absolute eye in doubles** and render through
-  `ApplyView(camera, originWorld)` against the int64 floating origin — this
-  contract is exactly right for the target model and is kept unchanged.
+  every frame; wheel = multiplicative distance, `ORBIT_MIN_DISTANCE` /
+  `ORBIT_MAX_DISTANCE` 150–60 000). Both keep the **absolute eye in doubles**
+  and render through `ApplyView(camera, originWorld)` against the int64
+  floating origin — this contract is exactly right for the target model and is
+  kept unchanged.
 - The orbit **target is not a camera focus point**: it is slaved every frame
   to `g_missile_lock_target` (the selection) or the own ship
   (`CameraRig.cpp:179-192`). There is no free retargeting, no pan, and no
@@ -165,7 +177,7 @@ own hull), and there is no notion of a selected **set**.
   (`gizmo_begin`, `main.cpp:316` passes `camera_up_vec()`).
 - **Elevation & clamps:** `ApplyElevation` (slide along the normal) +
   `ClampReach` (server ±1e6 Chebyshev) + `ComputeMoveTarget` (full pipeline).
-  All reusable verbatim with `n = {0,1,0}`.
+  All reusable verbatim with the normal `{0, 1, 0}`.
 - **Project (world → screen):** `camera_view_point` +
   `CameraSpaceToPixels` — used by `pick_entity_at_screen` (nearest entity
   within a viewport-scaled hit radius) and by the gizmo's
@@ -178,8 +190,8 @@ own hull), and there is no notion of a selected **set**.
 | # | Coupling | Evidence | Why it blocks the target model |
 |---|---|---|---|
 | C1 | **Selection ≡ orbit subject ≡ missile target** via one global | `g_missile_lock_target`, fed to `s_orbit.SetTarget` every frame | The target model needs a camera focus point that is *sticky* (pan moves it, F re-centers it) and a selection that can be a set. One u32 cannot be both. |
-| C2 | **Camera input split across two frame-ordered pollers** with duplicated slop machines | `CameraRig.cpp` (LMB) + `main.cpp handle_pointer_commands` (RMB), each with private prev/slop state; recognizer unused for mouse | Rebinding rotate to RMB-drag while RMB-click stays the command verb requires click-vs-drag disambiguation in **one** place, or the two machines will fight over the same button. |
-| C3 | **No MMB, no chord detection** | `input_win.cpp` handles L/R only; `input_mouse_state(x,y,lmb,rmb)` has no mmb out-param | MMB zoom-drag and the LMB+RMB pan chord need capture-correct platform state. |
+| C2 | **Camera input split across two frame-ordered pollers** with duplicated slop machines | `CameraRig.cpp` (LMB) + `main.cpp` `handle_pointer_commands` (RMB), each with private prev/slop state; recognizer unused for mouse | Rebinding rotate to RMB-drag while RMB-click stays the command verb requires click-vs-drag disambiguation in **one** place, or the two machines will fight over the same button. |
+| C3 | **No MMB, no chord detection** | `input_win.cpp` handles L/R only; `input_mouse_state(x, y, lmb, rmb)` has no mmb out-param | MMB zoom-drag and the LMB+RMB pan chord need capture-correct platform state. |
 | C4 | **Pan input exists, pan camera doesn't** | `input_take_pan` uncalled; `OrbitCameraController` has no translate | Blocks both mouse pan and the touch two-finger pan (roadmap #8). |
 | C5 | **Frame-counted hold threshold** | `LONGPRESS_FRAMES = 11` "~0.35 s at the 30 Hz command tick" — but the flight update runs at display rate | RMB hold length varies with fps; the recognizer already solves this with real timestamps. |
 | C6 | **Command plane is camera-relative** | `gizmo_begin` uses `camera_up_vec()` per the interaction.md §3.4 design | Homeworld's grid is a *stable horizontal* plane; a camera-up plane re-orients when the view does, so a destination reads differently after every orbit. |
@@ -215,7 +227,7 @@ whole wire layer.
 
 ### 2.2 What gets refactored (kept, changed in place)
 
-- `OrbitCameraController` → gains `Pan(right,up)` translation of
+- `OrbitCameraController` → gains a `Pan(right, up)` translation of
   `m_targetWorld`, an animated `FocusOn(target)` (ease-out lerp, absolute
   doubles), and key-axis pan replacing its key-axis yaw/pitch. Rename to
   `FocusCameraController` only if desired; the class survives.
@@ -225,12 +237,14 @@ whole wire layer.
 - `handle_pointer_commands` (`main.cpp`) → drops its private RMB state
   machine; consumes recognizer gestures; hosts the movement-grid state
   machine (§4.2).
-- `gizmo_begin/gizmo_apply` → plane normal parameter becomes world-Y; the
+- `gizmo_begin` / `gizmo_apply` → plane normal parameter becomes world-Y; the
   render globals (`g_gizmo_*`) and `draw_move_gizmo` survive with the grid
   drawn horizontal.
 - `input_win.cpp` → routes **mouse** buttons through the same
   `GestureRecognizer` instance path as touch (per-button recognizers or a
-  button field on `PointerSample` — §3 step H1), adds MMB + chord state.
+  button field on `PointerSample` — §3 step H1), adds MMB + chord state; the
+  new accessors land on the `Neuron::Client::PointerInput` successor
+  interaction.md §5 already names.
 
 ### 2.3 What gets replaced outright
 
@@ -240,25 +254,26 @@ whole wire layer.
 - The **per-frame orbit-target slaving** block (`CameraRig.cpp:179-192`) —
   replaced by the sticky focus point + F/double-tap re-centering.
 - The **camera-up command plane** — replaced by the world-Y tactical plane.
-- `g_missile_lock_target` as *selection* — replaced by a selection module;
+- `g_missile_lock_target` as *selection* — replaced by a `Selection` module;
   the global survives (renamed in spirit) as the derived **target of
   interest** for the reticle/missile until those consumers migrate (§3 H2).
 
 ### 2.4 New state that must be introduced
 
-Named per the conventions of the file that owns them (`s_` file-locals in
-rig/glue, `g_` render-shared globals, `m_` members in `Neuron::Client`):
+Named per `.github/coding-standards.md` (see the Naming note above): types and
+functions `PascalCase`; `m_`-prefixed members; `g_` / `s_` file-scope state
+with a `camelCase` body; `enum class` with `PascalCase` enumerators.
 
 | State | Owner | Meaning |
 |---|---|---|
-| `m_focusWorld[3]` + `m_focusAnimFrom[3]/m_focusAnimT` | `OrbitCameraController` (extended) | The **camera focus point** (absolute doubles) and its in-flight ease. Replaces per-frame `SetTarget` slaving. |
+| `m_focusFrom[3]` / `m_focusTo[3]` / `m_focusT` | `OrbitCameraController` (extended) | The focus-point **ease** (absolute doubles). `m_targetWorld` (existing) becomes the live **camera focus point**, replacing per-frame `SetTarget` slaving. |
 | `s_panChordActive` | `CameraRig.cpp` | LMB+RMB chord latched: both buttons' other meanings suppressed until release. |
-| `g_mmb` (+ `input_mouse_state_ex`) | `input_win.cpp` | Middle button held, capture-correct. |
+| `g_mmb` (via `PointerInput::MouseState`) | `input_win.cpp` | Middle button held, capture-correct. |
 | `s_selection` (`Selection` core: fixed array ≤ `MAX_SELECTED`, count) | new `NeuronClient/input/Selection.h` + glue in `main.cpp` | The selected **set** of own units; primary-only today. |
-| `g_band_active, g_band_x0/y0/x1/y1` | `main.cpp` (drawn by `space.cpp`) | Live rubber-band rectangle. |
-| `g_grid_mode` (`GridMode { Off, PlacingXZ, AdjustingY }`) | `main.cpp` | The movement-grid state machine (spec's `movement_plane_active`). |
-| `s_gridShift` | `main.cpp` | **Shift held during grid** = the vertical modifier (spec's `vertical_modifier_active`). |
-| `g_grid_planeY` | `main.cpp` | The tactical plane's world-Y (the selected unit's Y at activation), so the grid doesn't swim if the ship drifts while placing. |
+| `g_bandActive`, `g_bandX0` / `g_bandY0` / `g_bandX1` / `g_bandY1` | `main.cpp` (drawn by `space.cpp`) | Live rubber-band rectangle. |
+| `g_gridMode` (`enum class GridMode : uint8_t { Off, PlacingXZ, AdjustingY }`) | `main.cpp` | The movement-grid state machine (the spec's `movement_plane_active`). |
+| `s_gridShift` | `main.cpp` | **Shift held during grid** = the vertical modifier (the spec's `vertical_modifier_active`). |
+| `g_gridPlaneY` | `main.cpp` | The tactical plane's world-Y (the selected unit's Y at activation), so the grid doesn't swim if the ship drifts while placing. |
 | *(optional, wire)* owned-units knowledge | `PlayerInfo`-adjacent | Band-select beyond the primary needs the client to know which entities it owns. Options: (a) new S→C Gameplay event `OwnedUnits{vector<u32>}` on change, or (b) piggyback on the F-track escort work. **Not required to ship this migration** — pre-F1 the selection set is `{primary}` and the band mechanism is still exercised. |
 
 ### 2.5 Explicitly out of scope
@@ -278,20 +293,23 @@ scale (XS ≤ hours, S ≤ a day-ish, M = days).
 
 *Goal: kill C2/C3/C5 before any rebinding, or the rebind becomes whack-a-mole.*
 
-1. `input_win.cpp`: handle `WM_MBUTTONDOWN/UP` (capture like L/R); add
-   `void input_mouse_state_ex(int& x, int& y, bool& lmb, bool& rmb, bool& mmb)`
-   (keep the old signature as a forwarding shim until H6).
-2. Extend `PointerSample` with a `button` field (`0 = touch/primary,
-   1 = LMB, 2 = RMB, 3 = MMB`) **or** instantiate one recognizer per mouse
-   button (`g_gesturesL/R`) — recommended: per-button instances, zero change
-   to the tested core. Feed synthetic samples from the mouse messages using
-   the same `GetTickCount()` clock.
+1. `input_win.cpp`: handle `WM_MBUTTONDOWN/UP` (capture like L/R); the new
+   pointer capability lands on the `Neuron::Client::PointerInput` successor
+   (interaction.md §5), e.g.
+   `void PointerInput::MouseState(int& _x, int& _y, bool& _lmb, bool& _rmb, bool& _mmb)`
+   (keep the existing `input_mouse_state` as a forwarding shim until H6).
+2. Extend `PointerSample` with a `button` field (`Primary`, `Left`, `Right`,
+   `Middle` — an `enum class PointerButton : uint8_t`) **or** instantiate one
+   recognizer per mouse button — recommended: per-button instances, zero
+   change to the tested core. Feed synthetic samples from the mouse messages
+   using the same `GetTickCount()` clock.
 3. New consumable accessors mirroring the touch one-shots:
-   `input_take_click(btn, x, y)` (tap), `input_take_hold(btn, x, y)`
-   (long-press), `input_drag_state(btn, …)` (active drag + frame delta).
-   `CameraRig` and `main.cpp` switch from raw `lmb/rmb` edges to these; the
+   `PointerInput::TakeClick(button, x, y)` (tap),
+   `PointerInput::TakeHold(button, x, y)` (long-press),
+   `PointerInput::DragState(button, dx, dy)` (active drag + frame delta).
+   `CameraRig` and `main.cpp` switch from raw `lmb`/`rmb` edges to these; the
    two private slop machines and `LONGPRESS_FRAMES` are deleted.
-4. Chord: in `input_win.cpp`, when LMB and RMB are down together, emit
+4. Chord: in `input_win.cpp`, when LMB and RMB are down together, emit a
    Cancel into both button recognizers and latch `s_panChordActive` until
    both release — a chord is never a click, a drag, or a hold.
 
@@ -301,13 +319,13 @@ unchanged) — this step only re-plumbs.*
 ### H2 — Selection decoupled from the lock target (S)
 
 1. New pure core `NeuronClient/input/Selection.h` (headless-tested):
-   fixed-capacity set of entity ids + `Primary()`, `Set/Add/Clear`,
-   `ContainsOwn` predicates taking an `IsOwnUnit` callback.
+   fixed-capacity set of entity ids + `Primary()`, `Set()` / `Add()` /
+   `Clear()`, and a `ContainsOwn()` predicate taking an `IsOwnUnit` callback.
 2. `main.cpp` glue: `s_selection`; LMB click routes here.
    `g_missile_lock_target` becomes **derived**: the selected *enemy* for
    reticle/missile, written by the selection glue (single writer). The five
    scattered writers collapse to selection ops + the death/despawn clears.
-3. `pick_entity_at_screen` gains an `_allowOwn` flag (the own hull must be
+3. `pick_entity_at_screen` gains an `allowOwn` flag (the own hull must be
    selectable now — it is the thing you command and focus).
 
 ### H3 — The focus camera (M) — *the largest single step*
@@ -320,12 +338,14 @@ unchanged) — this step only re-plumbs.*
    - `void FocusOn(const double _targetWorld[3])` — begin an ease-out lerp
      (`FOCUS_ANIM_SECONDS ≈ 0.5`) from the current focus; `Update` advances
      it. `SetTarget` (snap) survives for anchor/teleport.
+   - `void CancelFocusAnim()` — settle the ease immediately (used by the
+     reset seam, §6.2).
    - Key axes become pan (right/up in the screen plane), not yaw/pitch.
 2. `CameraRig.cpp` rebind (consuming H1 gestures):
    - **RMB drag** → `in.looking` (rotate). **LMB drag** → no longer camera
      (freed for H5's band). **Wheel** → unchanged. **MMB drag** vertical →
      `in.wheelSteps += dy * MMB_ZOOM_PER_PIXEL`. **Chord / two-finger pan /
-     arrows+WASD** → `in.panDX/panDY` (new `CameraInput` fields; finally
+     arrows+WASD** → `in.panDX` / `in.panDY` (new `CameraInput` fields; finally
      consumes `input_take_pan`).
    - Delete the per-frame orbit-slaving block; instead: **F key edge** (and
      selection double-click/tap) → `s_orbit.FocusOn(selected-or-own-ship)`.
@@ -347,10 +367,10 @@ unchanged) — this step only re-plumbs.*
 `handle_pointer_commands` re-expressed over H1 gestures — the grammar is
 unchanged, only the disambiguation source moves:
 
-- `input_take_click(RMB)` → contextual order / open grid (as today's
-  release-without-move branch).
-- `input_take_hold(RMB)` over an entity → radial menu (drag-to-slice
-  unchanged).
+- `PointerInput::TakeClick(PointerButton::Right, …)` → contextual order /
+  open grid (as today's release-without-move branch).
+- `PointerInput::TakeHold(PointerButton::Right, …)` over an entity → radial
+  menu (drag-to-slice unchanged).
 - `RMB drag` → **camera** (H3); an armed one-gesture gizmo on empty space
   still owns the drag if it began there (press-classification: entity →
   menu candidate, empty → gizmo, and now *drag from entity-or-nothing
@@ -359,23 +379,24 @@ unchanged, only the disambiguation source moves:
 
 ### H5 — Band select (S, degenerate today)
 
-- LMB drag (freed by H3) draws `g_band_*`; on release, project every
-  replicated entity (the `pick_entity_at_screen` loop body, factored into a
-  shared helper) and `s_selection.Set` those inside that are **own units**
-  (today: `rc.LocalPlayer()` only). A drag that never crossed the slop is
-  the H2 click.
+- LMB drag (freed by H3) draws the `g_band*` rectangle; on release, project
+  every replicated entity (the `pick_entity_at_screen` loop body, factored
+  into a shared helper) and `s_selection.Set()` those inside that are **own
+  units** (today: `rc.LocalPlayer()` only). A drag that never crossed the slop
+  is the H2 click.
 - The ownership wire gap (§2.4) is a follow-up, not a blocker.
 
 ### H6 — The movement grid (M) + cleanup (S–M)
 
-1. Plane change: `gizmo_begin` passes `GVec3{0,1,0}` and anchors the plane at
-   `g_grid_planeY` (ship Y at activation). `draw_move_gizmo`'s grid renders
-   in the XZ orientation (it already draws in the plane's frame).
-2. The `g_grid_mode` state machine (§4.2): M-key toggle + hover placement +
+1. Plane change: `gizmo_begin` passes the normal `{0, 1, 0}` and anchors the
+   plane at `g_gridPlaneY` (ship Y at activation). `draw_move_gizmo`'s grid
+   renders in the XZ orientation (it already draws in the plane's frame).
+2. The `g_gridMode` state machine (§4.2): M-key toggle + hover placement +
    Shift elevation + LMB confirm; the one-gesture RMB fast path routes
-   through the same states (press = enter `PlacingXZ`, drag = `AdjustingY`,
-   release = confirm) so there is exactly **one** implementation.
-3. Introduce `flight_input_active()` (§6.5) and route the grid, band, and
+   through the same states (press = enter `GridMode::PlacingXZ`, drag =
+   `GridMode::AdjustingY`, release = confirm) so there is exactly **one**
+   implementation.
+3. Introduce `FlightInputActive()` (§6.5) and route the grid, band, and
    contextual-order entries through it, replacing the ad-hoc
    `GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked`
    gate at `main.cpp:511` and its scattered siblings.
@@ -393,8 +414,8 @@ unchanged, only the disambiguation source moves:
   +Y; reach clamp) — parameter-only additions.
 - **Selection core**: set/add/clear, own-unit filtering, band membership.
 - **Grid state machine**: extract the transition table into a pure core
-  (`NeuronClient/input/MovePlan.h`, mirroring OrderMenu's pattern) and pin
-  Off→PlacingXZ→AdjustingY→confirm/cancel paths, Shift press/release
+  (`NeuronClient/input/MovePlan.h`, mirroring OrderMenu's pattern) and pin the
+  `Off → PlacingXZ → AdjustingY → confirm/cancel` paths, Shift press/release
   mid-gesture, and the drag fast path.
 - **Manual pass**: mouse + touch device, per interaction.md Track I practice.
 
@@ -402,8 +423,8 @@ unchanged, only the disambiguation source moves:
 
 ## 4. Code Implementation Details
 
-Concrete shapes in the codebase's own conventions. (Illustrative — final
-signatures land with the steps above.)
+Concrete shapes in the canonical style (`.github/coding-standards.md`).
+(Illustrative — final signatures land with the steps above.)
 
 ### 4.1 The camera state update loop
 
@@ -447,27 +468,27 @@ void OrbitCameraController::Update(const CameraInput& _input)
   if (m_focusT < 1.0f)
   {
     m_focusT = std::min(1.0f, m_focusT + _input.dt / FOCUS_ANIM_SECONDS);
-    const float e = 1.0f - (1.0f - m_focusT) * (1.0f - m_focusT);   // ease-out
+    const float ease = 1.0f - (1.0f - m_focusT) * (1.0f - m_focusT);   // ease-out
     for (int i = 0; i < 3; ++i)
-      m_targetWorld[i] = m_focusFrom[i] + (m_focusTo[i] - m_focusFrom[i]) * e;
+      m_targetWorld[i] = m_focusFrom[i] + (m_focusTo[i] - m_focusFrom[i]) * ease;
   }
 
   // 3) Pan: slide the focus point in the screen plane; world-units-per-pixel is
   //    derived from the orbit distance so panning feels the same at any zoom.
   const double perPixel = m_distance * m_tanHalfFovY * 2.0 / m_viewportH;
-  const double panR = -_input.panDX * perPixel
-                    + _input.keyPanRight * KEY_PAN_RATE * m_distance * _input.dt;
-  const double panU =  _input.panDY * perPixel
-                    + _input.keyPanUp * KEY_PAN_RATE * m_distance * _input.dt;
-  if (panR != 0.0 || panU != 0.0)
+  const double panRight = -_input.panDX * perPixel
+                        + _input.keyPanRight * KEY_PAN_RATE * m_distance * _input.dt;
+  const double panUp    =  _input.panDY * perPixel
+                        + _input.keyPanUp * KEY_PAN_RATE * m_distance * _input.dt;
+  if (panRight != 0.0 || panUp != 0.0)
   {
     float look[3];  YawPitchToLook(m_yaw, m_pitch, look);
     const float right[3] = {cosf(m_yaw), 0.0f, -sinf(m_yaw)};          // flat right
-    const float up[3]    = {right[1]*look[2] - right[2]*look[1],       // look x right
-                            right[2]*look[0] - right[0]*look[2],
-                            right[0]*look[1] - right[1]*look[0]};
+    const float up[3]    = {right[1] * look[2] - right[2] * look[1],   // look x right
+                            right[2] * look[0] - right[0] * look[2],
+                            right[0] * look[1] - right[1] * look[0]};
     for (int i = 0; i < 3; ++i)
-      m_targetWorld[i] += right[i] * panR + up[i] * panU;
+      m_targetWorld[i] += right[i] * panRight + up[i] * panUp;
     m_focusT = 1.0f;   // panning cancels an in-flight focus animation
   }
 
@@ -481,31 +502,34 @@ void OrbitCameraController::Update(const CameraInput& _input)
 }
 ```
 
-The rig side (`CameraRig.cpp`, gathering via the H1 accessors):
+The rig side (`CameraRig.cpp`, gathering via the H1 accessors). `KeyAxis` and
+`KeyEdge` are the rig's existing/added key helpers; `PointerInput` is the
+input successor:
 
 ```cpp
 Client::CameraInput in{};
 in.dt = static_cast<float>(dt);
 if (!uiOwns)
 {
-  in.wheelSteps = input_take_mouse_wheel();          // wheel + pinch, as today
+  in.wheelSteps = input_take_mouse_wheel();               // wheel + pinch, as today
 
   float dx = 0.f, dy = 0.f;
-  if (input_chord_pan(dx, dy))                       // LMB+RMB held together
+  if (PointerInput::ChordPan(dx, dy))                     // LMB+RMB held together
   { in.panDX = dx; in.panDY = dy; in.panning = true; }
-  else if (input_drag_state(MOUSE_BTN_RIGHT, dx, dy) && !g_gizmo_active && !g_radial_open)
-  { in.lookDX = dx; in.lookDY = dy; in.looking = true; }   // RMB-drag = rotate
+  else if (PointerInput::DragState(PointerButton::Right, dx, dy)
+           && !g_gizmo_active && !g_radial_open)
+  { in.lookDX = dx; in.lookDY = dy; in.looking = true; }  // RMB-drag = rotate
 
-  input_take_pan(dx, dy);                            // two-finger pan (touch)
+  input_take_pan(dx, dy);                                 // two-finger pan (touch)
   in.panDX += dx; in.panDY += dy;
 
   in.keyPanRight = KeyAxis(VK_RIGHT, VK_LEFT) + KeyAxis('D', 'A');
   in.keyPanUp    = KeyAxis(VK_UP, VK_DOWN)    + KeyAxis('W', 'S');
-  in.boost = input_key_down(VK_SHIFT) && g_grid_mode == GRID_OFF;   // Shift is the
-}                                                     // grid's vertical modifier
+  in.boost = input_key_down(VK_SHIFT) && g_gridMode == GridMode::Off;   // Shift is the
+}                                                          // grid's vertical modifier
 
-if (input_key_edge('F'))                              // Focus: animate onto selection
-  s_orbit.FocusOn(selection_focus_world());           // selection, else own ship
+if (KeyEdge('F'))                                          // Focus: animate onto selection
+  s_orbit.FocusOn(SelectionFocusWorld());                 // selection, else own ship
 ```
 
 ### 4.2 The movement-grid state machine (the two-step 3D move)
@@ -516,35 +540,35 @@ the enum/transition function is what moves into the tested core.
 
 ```cpp
 // Movement-grid state (interaction.md §3.4 successor; drawn by draw_move_gizmo).
-enum GridMode { GRID_OFF, GRID_PLACING_XZ, GRID_ADJUSTING_Y };
-GridMode  g_grid_mode = GRID_OFF;
-double    g_grid_planeY = 0.0;        // tactical plane height (ship Y at activation)
-static double s_grid_elev = 0.0;      // accumulated Y offset (world units)
-static int    s_grid_anchorY = 0;     // pointer y when Shift was pressed (px)
+enum class GridMode : uint8_t { Off, PlacingXZ, AdjustingY };
+GridMode g_gridMode  = GridMode::Off;
+double   g_gridPlaneY = 0.0;          // tactical plane height (ship Y at activation)
+static double s_gridElev = 0.0;       // accumulated Y offset (world units)
+static int    s_gridAnchorY = 0;      // pointer y when Shift was pressed (px)
 
-static void grid_enter(void)
+static void GridEnter(void)
 {
   Neuron::Input::GVec3 ship;
   if (!ship_relative(ship)) return;
-  g_grid_planeY = ship.y;             // the plane is HORIZONTAL: normal = world +Y
-  s_grid_elev = 0.0;
-  g_grid_mode = GRID_PLACING_XZ;
+  g_gridPlaneY = ship.y;              // the plane is HORIZONTAL: normal = world +Y
+  s_gridElev = 0.0;
+  g_gridMode = GridMode::PlacingXZ;
   g_gizmo_active = true;              // existing render path draws plane+marker+stem
 }
 
-static void grid_cancel(void)
+static void GridCancel(void)
 {
-  g_grid_mode = GRID_OFF;
+  g_gridMode = GridMode::Off;
   g_gizmo_active = false;
 }
 
 // Ray ∩ horizontal plane -> the XZ coordinate (MoveGizmo core, world-up normal).
-static bool grid_place_xz(int _mx, int _my)
+static bool GridPlaceXZ(int _mx, int _my)
 {
   using namespace Neuron::Input;
   GVec3 ro, rd, ship;
   if (!cursor_ray(_mx, _my, ro, rd) || !ship_relative(ship)) return false;
-  const GVec3 planeOrigin{ship.x, g_grid_planeY, ship.z};
+  const GVec3 planeOrigin{ship.x, g_gridPlaneY, ship.z};
   const PlaneHit hit = RayPlanePoint(ro, rd, planeOrigin, GVec3{0, 1, 0});
   g_gizmo_base[0] = hit.point.x; g_gizmo_base[1] = hit.point.y; g_gizmo_base[2] = hit.point.z;
   // 1:1 screen tracking for the later elevation drag (same derivation as today).
@@ -556,54 +580,55 @@ static bool grid_place_xz(int _mx, int _my)
   return true;
 }
 
-static void grid_confirm(void)
+static void GridConfirm(void)
 {
   long long pt[3];
-  gizmo_apply(s_grid_elev, pt);       // elevation along +Y, ClampReach, -> absolute
+  gizmo_apply(s_gridElev, pt);        // elevation along +Y, ClampReach, -> absolute
   send_order(Neuron::Msg::OrderKind::Move, 0xFFFFFFFFu, pt);
-  grid_cancel();
+  GridCancel();
 }
 
 // Per-frame, from handle_pointer_commands (after the camera has read input):
-void handle_movement_grid(int _mx, int _my)
+void HandleMovementGrid(int _mx, int _my)
 {
   const bool shift = input_key_down(VK_SHIFT);   // the VERTICAL MODIFIER
 
-  switch (g_grid_mode)
+  switch (g_gridMode)
   {
-  case GRID_OFF:
-    if (input_key_edge('M') && selection_has_own_unit())
-      grid_enter();                              // M spawns the grid...
+  case GridMode::Off:
+    if (KeyEdge('M') && SelectionHasOwnUnit())
+      GridEnter();                               // M spawns the grid...
     break;                                       // ...RMB-on-empty enters via H4 too
 
-  case GRID_PLACING_XZ:
-    if (input_key_edge('M') || input_key_edge(VK_ESCAPE) || input_take_click(MOUSE_BTN_RIGHT, _mx, _my))
-      { grid_cancel(); break; }
-    if (shift) { s_grid_anchorY = _my; g_grid_mode = GRID_ADJUSTING_Y; break; }
-    grid_place_xz(_mx, _my);                     // hover tracks the XZ point live
-    if (input_take_click(MOUSE_BTN_LEFT, _mx, _my))
-      grid_confirm();                            // click = zero-elevation move
+  case GridMode::PlacingXZ:
+    if (KeyEdge('M') || KeyEdge(VK_ESCAPE)
+        || PointerInput::TakeClick(PointerButton::Right, _mx, _my))
+      { GridCancel(); break; }
+    if (shift) { s_gridAnchorY = _my; g_gridMode = GridMode::AdjustingY; break; }
+    GridPlaceXZ(_mx, _my);                       // hover tracks the XZ point live
+    if (PointerInput::TakeClick(PointerButton::Left, _mx, _my))
+      GridConfirm();                             // click = zero-elevation move
     break;
 
-  case GRID_ADJUSTING_Y:
-    if (input_key_edge(VK_ESCAPE)) { grid_cancel(); break; }
-    if (!shift) { g_grid_mode = GRID_PLACING_XZ; break; }   // elevation kept
+  case GridMode::AdjustingY:
+    if (KeyEdge(VK_ESCAPE)) { GridCancel(); break; }
+    if (!shift) { g_gridMode = GridMode::PlacingXZ; break; }   // elevation kept
     // Vertical pointer motion slides the marker along +Y; dragging UP raises it.
-    s_grid_elev = static_cast<double>(s_grid_anchorY - _my) * g_gizmo_scale;
-    { long long pt[3]; gizmo_apply(s_grid_elev, pt); }      // marker preview only
-    if (input_take_click(MOUSE_BTN_LEFT, _mx, _my))
-      grid_confirm();
+    s_gridElev = static_cast<double>(s_gridAnchorY - _my) * g_gizmo_scale;
+    { long long pt[3]; gizmo_apply(s_gridElev, pt); }         // marker preview only
+    if (PointerInput::TakeClick(PointerButton::Left, _mx, _my))
+      GridConfirm();
     break;
   }
 }
 ```
 
 The existing one-gesture RMB fast path maps onto the same states: RMB press
-on empty space = `grid_enter()` + `grid_place_xz` (locked, not hover), drag
-= `GRID_ADJUSTING_Y` with the press point as anchor (no Shift needed — the
-button being held *is* the modifier there), release = `grid_confirm()`.
+on empty space = `GridEnter()` + `GridPlaceXZ` (locked, not hover), drag =
+`GridMode::AdjustingY` with the press point as anchor (no Shift needed — the
+button being held *is* the modifier there), release = `GridConfirm()`.
 `gizmo_apply` needs one change only: it already takes elevation and clamps —
-with the base on the world-Y plane, `ApplyElevation(base, {0,1,0}, elev)`
+with the base on the world-Y plane, `ApplyElevation(base, {0, 1, 0}, elev)`
 *is* the Y-axis modification.
 
 ### 4.3 Band-select projection (shared with picking)
@@ -615,10 +640,10 @@ share optics:
 // Project every replicated entity to pixels once; callers filter.
 // (space.cpp; the loop body is pick_entity_at_screen's, unchanged.)
 struct ScreenEntity { unsigned int id; double sx, sy; int type; };
-size_t project_entities_to_screen(ScreenEntity* _out, size_t _cap);
+std::size_t ProjectEntitiesToScreen(ScreenEntity* _out, std::size_t _cap);
 ```
 
-Band release then selects `IsOwnUnit(id) && inside(g_band_*)` — with
+Band release then selects `IsOwnUnit(id) && InsideBand(sx, sy)` — with
 `IsOwnUnit` = `id == rc.LocalPlayer()` until ownership replicates (§2.4).
 
 ---
@@ -638,7 +663,7 @@ mostly *consuming* what it emits. Mapping strategy, per target verb:
 | Band select | **Tap-then-drag is taken** (it must stay camera rotate). Provide band via a small **selection-mode chip** next to the selection chip (tap to arm; next drag bands), mirroring how the ✕-deselect chip already works. | New, low priority pre-F1 (single-unit selection makes band redundant on touch today). |
 | Command (RMB click) | **Tap with an own unit selected** (the interaction.md §3.2 collision rule, unchanged). | Exists. |
 | Radial menu (RMB hold) | **Long-press** | Exists — keep. |
-| Movement grid (M) | **Long-press on empty space** opens the grid in `GRID_PLACING_XZ`; drag = XZ placement; a **second finger down** while placing = the vertical modifier (`GRID_ADJUSTING_Y`, primary finger's vertical motion drives Y — the recognizer's second-finger pre-emption is suppressed while the grid owns the contact); lift = confirm. | New glue over the same state machine; no Shift key exists on touch, the second finger is its analogue. |
+| Movement grid (M) | **Long-press on empty space** opens the grid in `GridMode::PlacingXZ`; drag = XZ placement; a **second finger down** while placing = the vertical modifier (`GridMode::AdjustingY`, the primary finger's vertical motion drives Y — the recognizer's second-finger pre-emption is suppressed while the grid owns the contact); lift = confirm. | New glue over the same state machine; no Shift key exists on touch, the second finger is its analogue. |
 | Cancel | Tap the selection-chip ✕ / a grid "cancel" chip | New (XS). |
 
 Ergonomic guardrails already in place and kept: the long-press consumes the
@@ -690,15 +715,15 @@ void camera_rig_reset(void)
   // ... existing resets (s_ready, s_orbitMode, s_origin, s_haveTime, view) ...
   s_orbit.CancelFocusAnim();      // no in-flight ease survives a scene change
   s_panChordActive = false;       // drop any latched LMB+RMB chord
-  selection_clear();              // s_selection + derived g_missile_lock_target
-  grid_cancel();                  // g_grid_mode = GRID_OFF, g_gizmo_active = false
-  g_band_active = false;          // no rubber-band across a transition
+  SelectionClear();               // s_selection + derived g_missile_lock_target
+  GridCancel();                   // g_gridMode = GridMode::Off, g_gizmo_active = false
+  g_bandActive = false;           // no rubber-band across a transition
 }
 ```
 
 `g_missile_lock_target` is already cleared on the docked entry
 (`enter_station`, `main.cpp:1168`) and on death/despawn events
-(`main.cpp:1359,1408,1432`); routing those through `selection_clear()`
+(`main.cpp:1359,1408,1432`); routing those through `SelectionClear()`
 keeps the selection set and the derived global consistent (the H2 single-
 writer rule). The re-anchor on first ship sight after a reset
 (`AnchorBehindShip`) already re-seats the orbit — the focus point should be
@@ -743,10 +768,10 @@ need, and it must **not** be routed through the H1 selection/band
 recognizer path (there is nothing to select in an intro). Keep it as a
 plain "any tap or Space this frame" check in the `Intro1`/`Intro2` arms of
 `game_update` (`main.cpp:1820-1836`), reading a lightweight
-`input_take_any_tap()` one-shot from the recognizer (a `Tap` on any button)
-rather than the selection glue. The gesture recognizer is fed regardless of
-game state (it lives in the window proc), so the one-shot is available; the
-selection/command consumers simply don't run outside `Flight`.
+`PointerInput::TakeAnyTap()` one-shot from the recognizer (a `Tap` on any
+button) rather than the selection glue. The gesture recognizer is fed
+regardless of game state (it lives in the window proc), so the one-shot is
+available; the selection/command consumers simply don't run outside `Flight`.
 
 ### 6.5 Gate summary (what each new verb checks)
 
@@ -760,7 +785,7 @@ input":
 // true only in live flight with the world in front and no menu owning input.
 // The single gate every new command verb consults (replaces the ad-hoc
 // GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked copies).
-bool flight_input_active(void)
+bool FlightInputActive(void)
 {
   return s_state == GameState::Flight
       && !docked
@@ -773,14 +798,14 @@ Each verb then reads as one call:
 
 | New verb | Runs only when |
 |---|---|
-| Band-select (LMB drag) | `flight_input_active()` |
-| Movement grid (M / RMB-empty) | `flight_input_active()` (this replaces the `handle_pointer_commands` gate at `main.cpp:511`) |
-| Contextual order / radial menu (RMB) | `flight_input_active()` |
-| Focus (F) | `Flight` && `current_screen == SCR_FRONT_VIEW` (**docked allowed** — re-centres own ship; not `flight_input_active`) |
+| Band-select (LMB drag) | `FlightInputActive()` |
+| Movement grid (M / RMB-empty) | `FlightInputActive()` (this replaces the `handle_pointer_commands` gate at `main.cpp:511`) |
+| Contextual order / radial menu (RMB) | `FlightInputActive()` |
+| Focus (F) | `Flight` && `current_screen == SCR_FRONT_VIEW` (**docked allowed** — re-centres own ship; not `FlightInputActive`) |
 | Camera rotate / pan / zoom | `Flight` && !`uiOwns` (the `CameraRig` gate), plus the docked RMB exception (§6.3) |
 | Intro advance (tap) | `Intro1` / `Intro2` only |
 
-Focus and camera deliberately do **not** use `flight_input_active()`: both
+Focus and camera deliberately do **not** use `FlightInputActive()`: both
 stay live while docked (§6.3), so they keep their own, looser conditions.
 The predicate is exactly the "live flight, no station, no window" set the
 command verbs share.
@@ -812,7 +837,7 @@ the same functions and still branch on the flag internally; and (c) duplicate
 what is already modelled by the `StationMenuWindow` overlay
 (`OpenStationMenu`/`CloseStationMenu`). The render *forks* for intros/
 game-over but only *toggles a HUD* for docked — which is exactly why the
-first three are states and docked is a boolean. `flight_input_active()`
+first three are states and docked is a boolean. `FlightInputActive()`
 (§6.5) gives the centralization a `Docked` state would promise, without the
 authority-duplication cost.
 
