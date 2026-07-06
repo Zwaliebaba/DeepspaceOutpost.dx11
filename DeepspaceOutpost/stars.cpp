@@ -6,7 +6,13 @@
 #include "stars.h"
 #include "random.h"
 
+#include <cmath>
+
 int warp_stars;
+
+// Frame tick, advanced once per update_starfield. Drives the near layer's gentle twinkle;
+// a bare counter is enough since the effect is a slow, framerate-tolerant shimmer.
+static unsigned s_frame = 0;
 
 /* The camera's motion this frame, fed by the camera rig (set_starfield_motion):
  * forward speed along the look (legacy-speed scaled) and the frame's look deltas
@@ -287,12 +293,19 @@ void front_starfield(void)
       float distF = 1.2f - static_cast<float>(zz / 320.0);
       distF = (distF < 0.0f) ? 0.0f : (distF > 1.0f ? 1.0f : distF);
       const float intensity = stars[i].mag * distF;
-      /* The Starburst sprite is a 128px soft glow whose energy sits in the centre. Drawn at a
-         1-2px point it minifies to near-transparent (the top mips average the glow into the
-         vast transparent surround), so a star needs real screen size to read: a small soft
-         point for faint stars, a wider halo for bright ones. */
-      const float sizePx = 5.0f + 18.0f * intensity;
-      push_dust(sx, sy, sizePx, stars[i].r, stars[i].g, stars[i].b, intensity);
+      /* The Starburst sprite is a 128px soft glow (with faint diffraction spikes) whose energy
+         sits in the centre. Drawn at a 1-2px point it minifies to near-transparent (the top
+         mips average the glow into the vast transparent surround), so a star needs real screen
+         size to read: a small soft point for faint stars, a wider halo for bright ones. The
+         cubic term only kicks in near the top of the range, so the few brightest stars get big
+         enough for the sprite's spikes to show - the lens-sparkle on the standout stars. */
+      const float sizePx = 5.0f + 18.0f * intensity + 8.0f * intensity * intensity * intensity;
+      /* Subtle twinkle: brighter stars scintillate a touch (amplitude scales with brightness,
+         so the faint far field stays steady). Space has no atmosphere - keep it gentle, a hint
+         of life rather than christmas lights. Per-star golden-angle phase decorrelates them. */
+      const double ph = i * 2.3999632 + s_frame * 0.12;
+      const float twinkle = 1.0f + 0.12f * intensity * static_cast<float>(std::sin(ph));
+      push_dust(sx, sy, sizePx, stars[i].r, stars[i].g, stars[i].b, intensity * twinkle);
     }
 
     /* Move the stars to their new locations...*/
@@ -330,6 +343,7 @@ void front_starfield(void)
 void update_starfield(void)
 {
   s_dustQuads.clear();
+  ++s_frame;
 
   switch (current_screen)
   {

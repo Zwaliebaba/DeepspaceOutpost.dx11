@@ -35,7 +35,7 @@ namespace Neuron::GameLogic
   {
     double maxRollRate = 31.0 / 256.0;    // ~0.121, a Cobra-class roll rate
     double maxPitchRate = 31.0 / 256.0;
-    double maxSpeed = 100.0;
+    double maxSpeed = 60.0;               // manageable cruise; NPCs match this (AiSystem.h)
   };
 
   // Clamp `_v` into [_lo, _hi].

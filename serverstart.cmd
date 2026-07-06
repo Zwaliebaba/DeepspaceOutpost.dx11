@@ -115,7 +115,7 @@ rem ============================================================================
 rem  6. Start the server. DSO_DB is set, so persistence is live against Deepspace.
 rem ============================================================================
 echo(
-echo === [6/6] Starting the server (DSO_DB -> %DSO_DBNAME%) ===
+echo === [6/6] Starting the server (DSO_DB -^> %DSO_DBNAME%) ===
 echo Server: "%SERVER_EXE%"
 "%SERVER_EXE%" %*
 set "RC=%ERRORLEVEL%"

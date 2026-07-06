@@ -91,13 +91,26 @@ namespace Neuron::GameLogic
   inline constexpr double AI_MIN_THROTTLE = 1.0 / 32.0;
   inline constexpr double AI_CRUISE_THROTTLE = 6.0 / 32.0;
 
-  // A Viper outruns the default player hull by the legacy ratio (32 vs the
-  // Cobra's 28, scaled onto our 100-unit player cap): the police CAN catch you.
-  inline constexpr double NPC_MAX_SPEED = 114.0;
+  // NPCs are speed-matched to the player's 60-unit cap: fast enough to give chase
+  // (combined with collision avoidance below), slow enough to fight and flee. The
+  // legacy Viper-vs-Cobra speed edge is retired in favour of a manageable pace.
+  inline constexpr double NPC_MAX_SPEED = 60.0;
 
   // Beyond this Chebyshev range an NPC has no target and just cruises. Wider
   // than the 6000-9000 spawn spread, so a fresh pirate hunts immediately.
   inline constexpr int64_t AI_ENGAGE_RANGE = 16384;
+
+  // --- Collision avoidance ----------------------------------------------------
+  // How far ahead of the nose an NPC looks for something to steer around, and the
+  // clearance each obstacle type asks for (its contact/kill range plus a margin
+  // so the turn starts before the lethal band). Everything is well inside one
+  // broadphase cell, so a +/-1-cell query covers the whole lookahead. An NPC
+  // avoids every hull/landmark on its path EXCEPT its current combat target (so
+  // an attack run still presses home).
+  inline constexpr int64_t AVOID_LOOKAHEAD  = 6000;
+  inline constexpr int64_t AVOID_SHIP_R     = 1200;   // SHIP_CONTACT_RANGE (600) + berth
+  inline constexpr int64_t AVOID_STATION_R  = 2500;   // STATION_CONTACT_RANGE (1000) + berth
+  inline constexpr int64_t AVOID_PLANET_R   = 6000;   // PLANET_KILL_RADIUS (4000) + berth
 
   // --- Autopilot (trader lane) constants: the fly_to_vector() variant ---------
   // (pilot.cpp:33) - a wider deadzone than combat tracking, dropped entirely when
@@ -210,6 +223,91 @@ namespace Neuron::GameLogic
       else if (AiRand255(_rng) >= 200)       Nudge(_ai, -AI_BRAKE_STEP);
     }
 
+    // Snapshot every hull and landmark an NPC might have to avoid into `_out` and
+    // index them in `_grid`: ships and stations (WorldTransform + Combatant, a
+    // station asks for a wider berth) plus planets (the instant-kill landmarks).
+    // Built once per StepAi call; queried per thinking NPC.
+    inline void BuildAvoidGrid(ECS::Registry& _world, std::vector<AiObstacle>& _out, Spatial::Grid& _grid)
+    {
+      _out.clear();
+      _grid.Clear();
+      _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
+      {
+        const int64_t r = (_c.team == Team::Station) ? AVOID_STATION_R : AVOID_SHIP_R;
+        _out.push_back(AiObstacle{ _id, _t.position, r });
+      });
+      _world.Each<WorldTransform, NetType>([&](ECS::EntityId _id, WorldTransform& _t, NetType& _nt)
+      {
+        if (_nt.type == ShipType::Planet || _nt.type == ShipType::Sun)
+          _out.push_back(AiObstacle{ _id, _t.position, AVOID_PLANET_R });
+      });
+      for (std::size_t i = 0; i < _out.size(); ++i)
+        _grid.Insert(i, _out[i].pos);
+    }
+
+    // If a non-target obstacle lies on the ship's forward path within the
+    // lookahead, steer the nose away from it and return true (this think is spent
+    // avoiding). Excludes self and `_targetIndex` (the current combat focus), so
+    // an attack run still closes. Deterministic: no RNG, integer positions, a
+    // fixed side for the rare dead-ahead tie-break.
+    [[nodiscard]] inline bool AvoidObstacles(const std::vector<AiObstacle>& _obstacles,
+                                             const Spatial::Grid& _grid, std::vector<uint64_t>& _nearby,
+                                             ECS::EntityId _self, uint32_t _targetIndex,
+                                             const Math::Vector3i64& _pos, const Flight& _f, FlightIntent& _intent)
+    {
+      QuerySortedNeighbours(_grid, _pos, CellsForRange(AVOID_LOOKAHEAD), _nearby);
+
+      const AiObstacle* worst = nullptr;
+      double worstAhead = static_cast<double>(AVOID_LOOKAHEAD) + 1.0;
+      Math::Vector3d worstLateral{};
+
+      for (const uint64_t idx : _nearby)
+      {
+        const AiObstacle& o = _obstacles[idx];
+        if (o.id == _self || o.id.index == _targetIndex)
+          continue;
+
+        const Math::Vector3d to{ static_cast<double>(o.pos.x - _pos.x),
+                                 static_cast<double>(o.pos.y - _pos.y),
+                                 static_cast<double>(o.pos.z - _pos.z) };
+        const double ahead = Math::Dot(to, _f.nose);
+        if (ahead <= 0.0 || ahead > static_cast<double>(AVOID_LOOKAHEAD))
+          continue;   // behind, or beyond the lookahead
+
+        // Perpendicular offset from the flight path; if the nose already clears
+        // the clearance radius there is nothing to do.
+        const Math::Vector3d lateral{ to.x - ahead * _f.nose.x,
+                                      to.y - ahead * _f.nose.y,
+                                      to.z - ahead * _f.nose.z };
+        const double perp = Math::Length(lateral);
+        if (perp > static_cast<double>(o.radius))
+          continue;
+
+        if (ahead < worstAhead)   // react to the nearest threat on the path
+        {
+          worstAhead = ahead;
+          worst = &o;
+          worstLateral = lateral;
+        }
+      }
+
+      if (worst == nullptr)
+        return false;
+
+      // Want-vector: tilt the desired heading off the obstacle's side (subtract the
+      // unit lateral toward it). Dead-ahead (perp ~ 0): break toward -side, a fixed
+      // deterministic direction.
+      const double perp = Math::Length(worstLateral);
+      Math::Vector3d want = (perp > 1e-6)
+        ? Math::Vector3d{ _f.nose.x - worstLateral.x / perp,
+                          _f.nose.y - worstLateral.y / perp,
+                          _f.nose.z - worstLateral.z / perp }
+        : Math::Vector3d{ _f.nose.x - _f.side.x, _f.nose.y - _f.side.y, _f.nose.z - _f.side.z };
+      want = Math::Normalized(want);
+      SteerToward(_f, want, _intent, /*lockRoll*/ false, AP_DEADZONE);
+      return true;
+    }
+
     // The AI's chosen prey plus the target memory it maintains (stage 4).
     struct AiTarget
     {
@@ -308,6 +406,9 @@ namespace Neuron::GameLogic
         pilots.push_back(_id);
     });
 
+    // Build the obstacle broadphase once for this tick's avoidance queries.
+    Detail::BuildAvoidGrid(_world, _scratch.aiObstacles, _scratch.aiAvoidGrid);
+
     int missilesLaunched = 0;
 
     for (const ECS::EntityId self : pilots)
@@ -326,6 +427,17 @@ namespace Neuron::GameLogic
 
       if (ai->jinkTicks > 0)
         --ai->jinkTicks;
+
+      // Collision avoidance comes first: if a hull or landmark (that is not our
+      // prey) sits on the path ahead, spend this think steering clear rather than
+      // ramming it and dying on contact. Ease off the throttle while turning out.
+      if (Detail::AvoidObstacles(_scratch.aiObstacles, _scratch.aiAvoidGrid, _scratch.aiAvoidNearby,
+                                 self, c->focus, t->position, *f, *intent))
+      {
+        Detail::Nudge(*ai, -AI_BRAKE_STEP);
+        intent->throttle = ai->throttle;
+        continue;
+      }
 
       // Traders (stage 5): fly the lane, dock at the far end, and bolt the moment
       // they are hurt - no bravery rolls, no missiles, no attack runs.

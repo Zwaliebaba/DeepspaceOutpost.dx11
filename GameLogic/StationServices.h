@@ -529,17 +529,19 @@ namespace Neuron::GameLogic
 
       case Net::StationRequestKind::Undock:
       {
-        // Eject the player clear of the station and facing outward, so flying
-        // forward leaves rather than immediately re-docking. Launch a fixed
-        // distance along +z (well outside both the server dock range and the
-        // client's dock trigger) with a clean, level basis.
+        // Launch: place the hull at the station bay facing outward, then let it
+        // fly itself clear under a gentle cruise (StepLaunchCruise) instead of
+        // teleporting. The ship starts inside the station contact range, so grant
+        // launch immunity (invulnTicks) for the duration of the slow exit - this
+        // both stops the station hull grinding it and protects the vulnerable
+        // low-speed launch. The LaunchCruise component drops off (and control
+        // returns to the player) once it has travelled LAUNCH_OFFSET units out.
         const ECS::EntityId stn{ dock->stationId, 0 };
         WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
         const WorldTransform* st = _world.TryGet<WorldTransform>(stn);
         if (pt != nullptr && st != nullptr)
         {
           pt->position = st->position;
-          pt->position += Math::Vector3i64{ 0, 0, LAUNCH_OFFSET };
           if (Flight* f = _world.TryGet<Flight>(_player))
           {
             f->side = Math::Vector3d{ 1.0, 0.0, 0.0 };
@@ -550,6 +552,11 @@ namespace Neuron::GameLogic
             f->speed = 0.0;
             f->carry = Math::Vector3d{ 0.0, 0.0, 0.0 };
           }
+          // Drive the outward fly-out (idempotent: re-launch just refreshes it).
+          _world.Remove<LaunchCruise>(_player);
+          _world.Add<LaunchCruise>(_player, LaunchCruise{ st->position, LAUNCH_OFFSET, 0.35 });
+          if (Combatant* c = _world.TryGet<Combatant>(_player))
+            c->invulnTicks = RESPAWN_GRACE_TICKS;   // covers the ~95-tick bay exit
         }
         dock->docked = false;
         resp.status = Net::StationStatus::Ok;

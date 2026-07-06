@@ -18,6 +18,7 @@
 #include "MotionSystem.h"
 #include "FlightInput.h"
 #include "FlightSystem.h"
+#include "LaunchSystem.h"
 #include "Economy.h"
 #include "Galaxy.h"
 #include "GalaxyGen.h"
@@ -54,6 +55,7 @@ namespace Neuron::GameLogic
   // a fixed, deterministic order; more are appended here as behaviour moves in.
   inline void Tick(ECS::Registry& _world)
   {
+    StepLaunchCruise(_world);  // undock fly-out: force outward throttle while launching
     StepFlightInput(_world);   // intent -> flight controls (clamped to caps)
     StepFlight(_world);        // integrate orientation + position
     StepMotion(_world);        // simple velocity movers (non-steered entities)

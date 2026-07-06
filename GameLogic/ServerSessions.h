@@ -638,7 +638,7 @@ namespace Neuron::GameLogic
       _world.Add<Wanted>(e, Wanted{});
       _world.Add<CabinHeat>(e, CabinHeat{}); // G4: sun proximity heat (HUD-mirrored)
       // (C2: no PlayerRecord - name/score are the session's per-player record.)
-      _world.Add<NetType>(e, NetType{ ShipType::Viper });
+      _world.Add<NetType>(e, NetType{ ShipType::Sidewinder });
       return e;
     }
 

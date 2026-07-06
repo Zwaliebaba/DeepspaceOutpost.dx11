@@ -49,6 +49,12 @@ extern void planet_data_title(char* buf, int buflen);
 // this TU off the legacy game headers. Bound to the station menu's Launch button.
 extern void launch_player(void);
 
+// Fly-to-and-dock at the selected/nearest station (main.cpp): bound to the station
+// menu's Dock button when the hull is out in space. `docked` (elite.h) is the client
+// docked/in-space flag that selects between the two.
+extern void dock_station(void);
+extern int docked;
+
 // Equip-ship screen (docked.h / docked.cpp).
 extern int equip_do(int index);
 extern void equip_reset(void);
@@ -1001,9 +1007,13 @@ namespace
           y += 28;
         };
 
-        // Launch leaves the station (launch_player closes this hub via CloseStationMenu);
-        // the rest open the existing native screens.
-        add("Launch", "Launch", launch_player);
+        // First button reflects the ship's state: docked -> Launch (leave the bay;
+        // launch_player closes this hub via CloseStationMenu); in space -> Dock (fly
+        // back to the station and dock). The rest open the existing native screens.
+        if (docked)
+          add("Launch", "Launch", launch_player);
+        else
+          add("Dock", "Dock", dock_station);
         add("Market", "Market", OpenMarketWindow);
         add("Equip", "Equip Ship", OpenEquipWindow);
         // Charts are reachable straight from the docked hub (they are always available

@@ -5,6 +5,21 @@ The stars currently read as flat white squares with no depth. This plan turns th
 into soft, varied points of light with real depth cues, while keeping the existing
 Elite-style streaming starfield (the speed cue) intact.
 
+## Status — IMPLEMENTED ✅
+All phases below are done and in the game:
+- **Phase 1** — textured soft sprites (`Textures/Starburst.dds`), additive blending,
+  power-law magnitude. (Key gotcha: a soft glow sprite must be drawn several px wide,
+  not 1-2px, or minification averages it to invisibility.)
+- **Phase 2a/2b** — brightness falls off with distance (`z`); continuous size.
+- **Phase 2c** — dense, window-filling **parallax backdrop** that pans with look but never
+  dollies (`draw_backdrop` in stars.cpp).
+- **Phase 3** — spectral colour (`pick_spectral`).
+- **Phase 4** — gentle brightness-scaled twinkle; the brightest stars grow enough (cubic
+  size term) for the sprite's diffraction spikes to read.
+
+Also added: a texture-load-failure log in `TextureManager::LoadTexture`. Remaining knobs
+are all one-liners (`star_count`, `backdrop_count`, `mag` ranges, `sizePx`, twinkle amp).
+
 ---
 
 ## Why it looks unnatural today

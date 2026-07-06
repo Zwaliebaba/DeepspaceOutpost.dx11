@@ -39,6 +39,7 @@ namespace Neuron::GameLogic
     inline constexpr int Shuttle = 9;      // ambient trader hulls (SHIP_SHUTTLE /
     inline constexpr int Transporter = 10; // SHIP_TRANSPORTER, the legacy lane flyers)
     inline constexpr int Viper = 16;
+    inline constexpr int Sidewinder = 17;  // stock starter hull (SHIP_SIDEWINDER)
     inline constexpr int Thargoid = 29;    // witchspace ambusher (SHIP_THARGOID)
   }
 
@@ -93,5 +94,17 @@ namespace Neuron::GameLogic
     double speed = 0.0;    // world units per tick along nose
 
     Math::Vector3d carry{ 0.0, 0.0, 0.0 };  // sub-unit position remainder
+  };
+
+  // Transient launch state: while present, StepLaunchCruise forces a gentle
+  // straight-out throttle (overriding the player's normally-zero intent) so a
+  // freshly undocked hull eases out of the station bay instead of teleporting.
+  // Removed once the ship has travelled `distance` units from `origin`, handing
+  // control back to the player. `throttle` is a fraction of the hull's maxSpeed.
+  struct LaunchCruise
+  {
+    Math::Vector3i64 origin{};   // station position at launch
+    int64_t distance = 0;        // outward distance to cover before stopping
+    double throttle = 0.35;      // launch throttle (fraction of FlightCaps.maxSpeed)
   };
 }

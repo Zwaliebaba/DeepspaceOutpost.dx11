@@ -402,6 +402,26 @@ static void send_order(Neuron::Msg::OrderKind _kind, unsigned int _target, const
   set_order_toast(order_kind_name(g_order_kind), GFX_COL_YELLOW_2);   // optimistic
 }
 
+// Fly-to-and-dock, issued from the station hub's "Dock" button when the ship is out
+// in space (not static: the docked-hub UI in GameWindows.cpp binds it). Prefers the
+// currently selected station and issues the OrderKind::Dock autopilot (the ship flies
+// to the station and docks on arrival); if nothing suitable is selected it falls back
+// to request_dock(), which docks at the nearest station once within range.
+void dock_station(void)
+{
+  if (g_missile_lock_target != 0xFFFFFFFFu)
+  {
+    Neuron::Net::EntitySnapshot ts{};
+    if (Client::ReplicationClientInstance().Sample(g_missile_lock_target, 1.0, ts) &&
+        classify_pick(g_missile_lock_target, ts.type) == Neuron::Input::TargetKind::Station)
+    {
+      send_order(Neuron::Msg::OrderKind::Dock, g_missile_lock_target, nullptr);
+      return;
+    }
+  }
+  request_dock();
+}
+
 // Issue the contextual default order for an RMB click at (mx,my): an entity under
 // the cursor gets its OrderMenu default (clean players resolve to Approach - the
 // friction); empty space is a zero-elevation move.

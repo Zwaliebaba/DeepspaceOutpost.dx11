@@ -56,6 +56,15 @@ namespace Neuron::GameLogic
     Combatant* c = nullptr;
   };
 
+  // StepAi collision-avoidance snapshot: a nearby hull or landmark an NPC must
+  // steer clear of, with the clearance radius to keep from its centre.
+  struct AiObstacle
+  {
+    ECS::EntityId id;
+    Math::Vector3i64 pos;
+    int64_t radius = 0;
+  };
+
   // ScoopSystem's per-tick canister snapshot (position + a live pointer into its
   // LootItem, nulled out once claimed by a player this tick).
   struct LootCan
@@ -86,6 +95,12 @@ namespace Neuron::GameLogic
 
     // StepAi
     std::vector<ECS::EntityId> aiPilots;
+
+    // StepAi collision avoidance: the obstacle set + its broadphase grid, rebuilt
+    // once per StepAi call and queried per thinking NPC.
+    Spatial::Grid aiAvoidGrid{ BROADPHASE_CELL };
+    std::vector<AiObstacle> aiObstacles;
+    std::vector<uint64_t> aiAvoidNearby;
 
     // StepMissiles (+ the ECM-pulse out-list GameServer relays alongside it)
     std::vector<ECS::EntityId> missileIds;
