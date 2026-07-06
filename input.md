@@ -375,7 +375,11 @@ unchanged, only the disambiguation source moves:
    Shift elevation + LMB confirm; the one-gesture RMB fast path routes
    through the same states (press = enter `PlacingXZ`, drag = `AdjustingY`,
    release = confirm) so there is exactly **one** implementation.
-3. Retire the old `input_mouse_state` shim, the dead slop constants, update
+3. Introduce `flight_input_active()` (§6.5) and route the grid, band, and
+   contextual-order entries through it, replacing the ad-hoc
+   `GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked`
+   gate at `main.cpp:511` and its scattered siblings.
+4. Retire the old `input_mouse_state` shim, the dead slop constants, update
    `docs/interaction.md` §3.2/§3.4/§3.6 tables + `ARCHITECTURE.md` §7 input
    bullet (this file becomes the record of the migration; interaction.md
    remains canonical for the resulting grammar).
@@ -746,15 +750,71 @@ selection/command consumers simply don't run outside `Flight`.
 
 ### 6.5 Gate summary (what each new verb checks)
 
-Every new verb inherits the existing gates; stated once so no step drops one:
+Every new verb inherits the existing gates. Rather than re-derive the same
+multi-term condition at each call site (five scattered `if (docked)` copies
+is how the current code drifts), the migration introduces **one shared
+predicate** that names "the flight command grammar should accept pointer
+input":
+
+```cpp
+// true only in live flight with the world in front and no menu owning input.
+// The single gate every new command verb consults (replaces the ad-hoc
+// GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked copies).
+bool flight_input_active(void)
+{
+  return s_state == GameState::Flight
+      && !docked
+      && current_screen == SCR_FRONT_VIEW
+      && !GuiOverlay::IsShown();
+}
+```
+
+Each verb then reads as one call:
 
 | New verb | Runs only when |
 |---|---|
-| Band-select (LMB drag) | `Flight` && !`docked` && `current_screen == SCR_FRONT_VIEW` && !`GuiOverlay::IsShown()` |
-| Movement grid (M / RMB-empty) | same as band-select (the `handle_pointer_commands` gate at `main.cpp:511`) |
-| Focus (F) | `Flight` && `current_screen == SCR_FRONT_VIEW` (docked allowed — re-centres own ship) |
+| Band-select (LMB drag) | `flight_input_active()` |
+| Movement grid (M / RMB-empty) | `flight_input_active()` (this replaces the `handle_pointer_commands` gate at `main.cpp:511`) |
+| Contextual order / radial menu (RMB) | `flight_input_active()` |
+| Focus (F) | `Flight` && `current_screen == SCR_FRONT_VIEW` (**docked allowed** — re-centres own ship; not `flight_input_active`) |
 | Camera rotate / pan / zoom | `Flight` && !`uiOwns` (the `CameraRig` gate), plus the docked RMB exception (§6.3) |
 | Intro advance (tap) | `Intro1` / `Intro2` only |
+
+Focus and camera deliberately do **not** use `flight_input_active()`: both
+stay live while docked (§6.3), so they keep their own, looser conditions.
+The predicate is exactly the "live flight, no station, no window" set the
+command verbs share.
+
+### 6.6 Why `docked` stays a sub-mode (not a `GameState`)
+
+A natural question: should `docked` be promoted to a fourth-and-a-half
+`GameState` alongside `Intro1/Intro2/Flight/GameOver`? **No** — and the
+reason is that the two model different axes:
+
+- **`GameState` is client-owned "which top-level scene/loop":** each member
+  has its own update *and* render function, and its transitions are
+  client-driven (Space advances the intro; the 100-frame counter ends
+  game-over). Intro1/Intro2/GameOver each render a wholly different
+  camera-space scene.
+- **`docked` is server-owned "is my ship parked":** the client flag only
+  flips in reaction to server facts — `StationResponse{Dock}`
+  (`main.cpp:1352`), `TravelResponse{Hyperspace}` (`main.cpp:1326`), plus
+  the local dock/launch request flows (`space.cpp:284,1544`). It mirrors the
+  server's `DockState`.
+
+Promoting it would (a) pull a server-authoritative fact into the client's
+top-level scene machine, creating a second source of truth that must be kept
+synchronized on every undock path (death-respawn, hyperspace, escape pod);
+(b) buy nothing structurally, since docked and flying **share** the
+`game_*_flight` update/render (the station is simply in view, HUD dashboard
+swapped for `StationMenuWindow`) — a `Docked` state would just call back into
+the same functions and still branch on the flag internally; and (c) duplicate
+what is already modelled by the `StationMenuWindow` overlay
+(`OpenStationMenu`/`CloseStationMenu`). The render *forks* for intros/
+game-over but only *toggles a HUD* for docked — which is exactly why the
+first three are states and docked is a boolean. `flight_input_active()`
+(§6.5) gives the centralization a `Docked` state would promise, without the
+authority-duplication cost.
 
 ---
 
