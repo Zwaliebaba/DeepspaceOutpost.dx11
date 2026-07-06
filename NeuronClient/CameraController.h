@@ -120,6 +120,10 @@ namespace Neuron::Client
     // so no animation survives a scene change).
     void CancelFocusAnim() { m_focusT = 1.0f; }
 
+    // True once a FocusOn ease has finished (or none is running) - the rig
+    // resumes per-frame entity following only after the animated re-centre lands.
+    [[nodiscard]] bool FocusSettled() const { return m_focusT >= 1.0f; }
+
     [[nodiscard]] float YawAngle() const { return m_yaw; }
     [[nodiscard]] float PitchAngle() const { return m_pitch; }
     [[nodiscard]] double Distance() const { return m_distance; }
