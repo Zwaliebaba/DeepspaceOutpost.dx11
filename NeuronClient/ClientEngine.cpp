@@ -6,6 +6,7 @@
 #include "Render2D.h"
 #include "Scene3D.h"
 #include "SceneGlow.h"
+#include "SceneParticles.h"
 #include "Strings.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
@@ -134,6 +135,7 @@ namespace Neuron::Client
     Graphics::Render2D::Startup();
     Graphics::Scene3D::Startup();
     Graphics::SceneGlow::Startup();
+    Graphics::SceneParticles::Startup();
 
     Canvas::Startup();
     g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
@@ -272,6 +274,7 @@ namespace Neuron::Client
     g_gameFont.Shutdown();
     Graphics::TextureManager::Shutdown();
     Canvas::Shutdown();
+    Graphics::SceneParticles::Shutdown();
     Graphics::SceneGlow::Shutdown();
     Graphics::Scene3D::Shutdown();
     Graphics::Render2D::Shutdown();

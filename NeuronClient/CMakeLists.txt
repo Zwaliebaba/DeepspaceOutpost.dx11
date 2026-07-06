@@ -30,6 +30,7 @@ set(NEURONCLIENT_SOURCES
     graphics/Render2D.cpp
     graphics/Scene3D.cpp
     graphics/SceneGlow.cpp
+    graphics/SceneParticles.cpp
     graphics/TextureManager.cpp
     graphics/DDSTextureLoader.cpp
 
@@ -65,6 +66,7 @@ set(NEURONCLIENT_HEADERS
     graphics/Render2D.h
     graphics/Scene3D.h
     graphics/SceneGlow.h
+    graphics/SceneParticles.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 
