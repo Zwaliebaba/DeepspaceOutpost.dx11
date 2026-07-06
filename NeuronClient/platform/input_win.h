@@ -9,6 +9,8 @@
 #ifndef INPUT_WIN_H
 #define INPUT_WIN_H
 
+#include <cstdint>
+
 #include <windows.h>
 
 void input_on_key(WPARAM vk, bool down);   /* WM_KEYDOWN / WM_KEYUP */
@@ -54,5 +56,36 @@ bool input_take_double_tap(int& x, int& y);
 /* Touch pointers currently in contact (0-2); the finger lift commits a
  * touch-opened radial menu. */
 int input_touch_count(void);
+
+/* ---- H1 pointer front door (input.md) --------------------------------------- */
+/* The one place click-vs-drag-vs-hold is classified for the mouse: each mouse
+ * button is fed through the tested gesture recognizer on the same clock as
+ * touch, replacing the two hand-rolled slop machines (CameraRig / main.cpp).
+ * The LMB+RMB chord is latched here (a chord is never a click/drag/hold). New
+ * accessors live on the PointerInput successor named in interaction.md §5. */
+
+enum class PointerButton : uint8_t { Left, Right, Middle };
+
+namespace PointerInput
+{
+  /* Raw held state incl. the middle button (input_mouse_state has no mmb). */
+  void MouseState(int& x, int& y, bool& lmb, bool& rmb, bool& mmb);
+
+  /* One-shot: a click (press+release within slop) on this button this frame. */
+  bool TakeClick(PointerButton button, int& x, int& y);
+
+  /* One-shot: a long-press (held past the threshold within slop) this frame. */
+  bool TakeHold(PointerButton button, int& x, int& y);
+
+  /* An active drag on this button; dx/dy is the pixel delta since the last poll
+   * (accumulated, then cleared). Returns false when the button is not dragging. */
+  bool DragState(PointerButton button, float& dx, float& dy);
+
+  /* The LMB+RMB pan chord: dx/dy is the pixel delta since the last poll. */
+  bool ChordPan(float& dx, float& dy);
+
+  /* A tap on any button or finger this frame (the intro "tap anywhere"). */
+  bool TakeAnyTap(void);
+}
 
 #endif /* INPUT_WIN_H */

@@ -22,9 +22,13 @@ void camera_rig_update (void);
  * intro and game-over scenes, whose local objects animate in camera space. */
 void camera_rig_reset (void);
 
-/* F12: toggle first-person <-> orbit. The orbit target is the missile-locked
- * entity when one is selected (T), else the player's own ship. */
+/* F12: toggle first-person <-> orbit (observer). Orbit is the default; FPV is the
+ * screenshot/observer mode. */
 void camera_rig_toggle_mode (void);
+
+/* Animate the focus-orbit camera onto the current selection (else the own ship)
+ * and follow it - the Homeworld F-key / double-tap focus (input.md H3). */
+void camera_rig_focus (void);
 
 /* 1 once the rig has anchored to the replicated ship (before that there is no
  * meaningful floating origin and the world is not rendered). */

@@ -13,7 +13,14 @@
 #include "CameraController.h"
 #include "ReplicationClient.h"
 #include "GuiOverlay.h"
-#include "input_win.h"           // raw mouse / wheel / key state (camera policy keys)
+#include "GraphicsCore.h"        // Graphics::Core::GetOutputSize (pan scale = units/pixel)
+#include "input_win.h"           // PointerInput front door (mouse / wheel / key state)
+
+// Defined in main.cpp: the world position the F-key focus should target (the
+// selection's primary, else the own ship), and the reset of the pointer-command
+// state (selection / grid / band) the rig's reset seam clears (input.md §6.2).
+bool SelectionFocusWorld(double _out[3]);
+void ResetCommandState(void);
 
 using namespace Neuron;
 
@@ -21,26 +28,27 @@ namespace
 {
 	Client::FirstPersonCameraController s_fpv;
 	Client::OrbitCameraController s_orbit;
-	bool s_orbitMode = false;
+	bool s_orbitMode = true;   // Homeworld default: the focus-orbit camera (FPV on F12)
 
 	bool s_ready = false;
 	long long s_origin[3] = {0, 0, 0};
 
-	/* Mouse-look drag state (deltas are computed here; the platform reports the
-	 * absolute pointer). */
+	/* The entity the focus-orbit camera FOLLOWS (0xFFFFFFFF = detached/free after a
+	 * pan). Default is the player's own ship; F / double-tap re-attaches it to the
+	 * current selection. Unlike the retired per-frame slaving, selecting an enemy
+	 * no longer moves the camera - focusing does (input.md H3, Homeworld §3.6). */
+	unsigned int s_followEntity = 0xFFFFFFFFu;
+
+	/* Middle-button zoom drag: dragging up/down while MMB is held dollies. */
+	constexpr double MMB_ZOOM_PER_PIXEL = 0.03;
+	bool s_prevMmb = false;
+	bool s_prevFocusKey = false;   // rising-edge detector for the F focus key
+
+	/* Previous pointer, for the MMB zoom-drag delta (RMB/chord deltas come from the
+	 * gesture recognizer via PointerInput). */
 	int s_prevMouseX = 0;
 	int s_prevMouseY = 0;
 	bool s_prevRmb = false;
-
-	/* I2 pointer selection: an LMB press-then-release that stayed within the slop
-	 * is a CLICK (select the entity under the cursor); a drag beyond it is not (it
-	 * is reserved for the camera - RMB orbits today, so LMB-drag is simply ignored).
-	 */
-	bool s_prevLmb = false;
-	int  s_lmbDownX = 0;
-	int  s_lmbDownY = 0;
-	bool s_lmbMoved = false;
-	constexpr int CLICK_SLOP = 6;   // pixels of travel that still counts as a click
 
 	/* Starfield motion cue state: the previous look angles + eye, so the dust can
 	 * stream/pan with the camera the way it used to with the ship. */
@@ -96,15 +104,24 @@ namespace
 
 		s_orbit.SetTarget(ship);
 		s_orbit.SetOrbit(s_fpv.YawAngle() + 3.14159265f, -0.35f, 900.0);
+
+		/* Follow the own ship by default; F re-attaches the follow to the selection. */
+		s_followEntity = Client::ReplicationClientInstance().LocalPlayer();
 	}
 }
 
 void camera_rig_reset(void)
 {
 	s_ready = false;
-	s_orbitMode = false;
+	s_orbitMode = true;   // orbit is the default; a fresh scene starts in it
 	s_origin[0] = s_origin[1] = s_origin[2] = 0;
 	s_haveTime = false;
+
+	/* Homeworld-state teardown (input.md §6.2): no focus ease, latched pan or
+	 * live selection/grid survives a scene change (death -> intro -> flight). */
+	s_orbit.CancelFocusAnim();
+	s_followEntity = 0xFFFFFFFFu;
+	ResetCommandState();            // clears selection / grid / band (main.cpp)
 	Client::MainCamera().SetViewParams(DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
 									   DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f),
 									   DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f));
@@ -147,6 +164,26 @@ int camera_rig_ready(void) { return s_ready ? 1 : 0; }
 
 const long long* camera_rig_origin(void) { return s_origin; }
 
+void camera_rig_focus(void)
+{
+	/* Animate the focus point onto the current selection (else the own ship) and
+	 * re-attach the follow to it (input.md H3: F key / double-tap). */
+	const unsigned int want = g_missile_lock_target != 0xFFFFFFFFu
+	                        ? g_missile_lock_target
+	                        : Client::ReplicationClientInstance().LocalPlayer();
+
+	/* Already following that unit and settled on it: nothing to animate (avoids a
+	 * pointless half-second follow-pause when F re-targets the current subject). */
+	if (want == s_followEntity && s_orbit.FocusSettled())
+		return;
+
+	double target[3];
+	if (!SelectionFocusWorld(target))
+		return;
+	s_orbit.FocusOn(target);
+	s_followEntity = want;
+}
+
 void camera_rig_update(void)
 {
 	Client::ReplicationClient& rc = Client::ReplicationClientInstance();
@@ -174,28 +211,30 @@ void camera_rig_update(void)
 	if (!s_ready)
 		return;   // nothing replicated yet: keep the identity camera
 
-	/* The orbit "selected object": the missile-locked entity (T key) while it is
-	 * still replicated, else the player's own ship. Fed every frame - targets move. */
-	if (g_missile_lock_target != 0xFFFFFFFFu)
+	/* Follow the focus ENTITY (input.md H3): the orbit camera tracks whatever
+	 * s_followEntity names - the own ship by default, the selection after F /
+	 * double-tap, or nothing (a free focus point) after a manual pan. Unlike the
+	 * retired per-frame slaving, selecting an enemy does NOT move the camera. The
+	 * per-frame snap resumes only once a FocusOn ease has landed, so the animated
+	 * re-centre plays out first. A followed entity that despawns detaches. */
+	if (s_orbitMode && s_followEntity != 0xFFFFFFFFu && s_orbit.FocusSettled())
 	{
 		Neuron::Net::EntitySnapshot ts{};
-		if (rc.Sample(g_missile_lock_target, rc.InterpolationAlpha(), ts))
+		if (rc.Sample(s_followEntity, rc.InterpolationAlpha(), ts))
 		{
 			const double target[3] = {static_cast<double>(ts.x), static_cast<double>(ts.y), static_cast<double>(ts.z)};
 			s_orbit.SetTarget(target);
 		}
-	}
-	else if (haveMe)
-	{
-		const double target[3] = {static_cast<double>(me.x), static_cast<double>(me.y), static_cast<double>(me.z)};
-		s_orbit.SetTarget(target);
+		else if (s_followEntity != rc.LocalPlayer())
+		{
+			s_followEntity = 0xFFFFFFFFu;   // it left the world; the focus point stays put
+		}
 	}
 
-	/* Docked, the camera orbits the station-parked ship so the player can look
-	 * around the station while the menu window is up (the RMB-drag that drives it
-	 * is fed below, even though the GUI owns the pointer). Force orbit mode for the
-	 * whole docked stay; on launch, drop back to the free camera anchored behind
-	 * the hull as it heads into space. */
+	/* Docked: force the orbit camera around the station-parked ship for the whole
+	 * docked stay; on launch, drop to the free (FPV) camera anchored behind the
+	 * hull. RMB-drag rotate is now the GLOBAL binding (below), so no separate
+	 * docked RMB path is needed - it just stays live while the menu owns LMB. */
 	static bool s_prevDocked = false;
 	if (docked)
 	{
@@ -204,104 +243,105 @@ void camera_rig_update(void)
 			const double t[3] = {static_cast<double>(me.x), static_cast<double>(me.y), static_cast<double>(me.z)};
 			s_orbit.SetTarget(t);
 			s_orbit.SetOrbit(s_fpv.YawAngle() + 3.14159265f, -0.30f, 3000.0);
+			s_followEntity = rc.LocalPlayer();
 		}
 		s_orbitMode = true;
 	}
 	else if (s_prevDocked)
 	{
-		s_orbitMode = false;
 		if (haveMe)
-			AnchorBehindShip(me);
+			AnchorBehindShip(me);   // resets s_followEntity to the own ship
 	}
 	s_prevDocked = (docked != 0);
 
-	/* Gather this frame's camera input. The GUI overlay owns the pointer and the
-	 * keys while a window is up, and on the non-flight screens (charts, status)
-	 * the arrows belong to the chart crosshair - the camera goes quiet in both
-	 * cases, and it leaves the wheel unconsumed so an open window (the chart) can
-	 * zoom with it (I6). */
+	/* Gather this frame's camera input through the H1 pointer front door. The GUI
+	 * overlay owns the pointer/keys while a window is up, and on the non-flight
+	 * screens the arrows belong to the chart crosshair - the camera goes quiet in
+	 * both, leaving the wheel for an open window (the chart) to zoom with. A docked
+	 * station menu owns LMB but RMB-drag still rotates around the station. */
 	Client::CameraInput in{};
 	in.dt = static_cast<float>(dt);
+	in.tanHalfFovY = Client::CameraTanHalfFovY(Client::MainCamera());
+	in.viewportH = static_cast<float>(Neuron::Graphics::Core::GetOutputSize().Height);
 
 	int mx = 0, my = 0;
-	bool lmb = false, rmb = false;
-	input_mouse_state(mx, my, lmb, rmb);
+	bool lmb = false, rmb = false, mmb = false;
+	PointerInput::MouseState(mx, my, lmb, rmb, mmb);
 
-	/* The camera also goes quiet while a radial command menu is open (I3/I5): the
-	 * finger driving the menu highlight must not orbit or select underneath it. */
 	const bool uiOwns = GuiOverlay::IsShown() || (current_screen != SCR_FRONT_VIEW) || g_radial_open;
-	if (!uiOwns)
-	{
-		/* Consume the wheel only when the camera owns input; when a GUI window is up
-		 * (e.g. the chart) it leaves the wheel for that window to zoom with (I6). */
-		in.wheelSteps = input_take_mouse_wheel();
+	const bool cameraLive = !uiOwns || docked;   // docked keeps RMB rotate live
+	bool panned = false;
 
-		/* I3: camera orbit is LMB-DRAG now (an LMB click without a drag is I2
-		 * selection; RMB is freed for the pointer commands in main.cpp). Look only
-		 * once the press has crossed the slop, so a click never nudges the view. A
-		 * press that began on the I4 ability bar belongs to the bar, not the camera. */
-		const bool lmbDrag = lmb && s_lmbMoved
-		                  && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0
-		                  && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0;
-		if (lmbDrag && s_prevLmb)
+	/* Always DRAIN the recognizer's drag/chord/pan deltas (even when the camera is
+	 * not live), so nothing accumulates across a window/radial period and snaps the
+	 * view when input becomes live again. They are only APPLIED when cameraLive. */
+	float rdx = 0.f, rdy = 0.f;
+	const bool rDrag = PointerInput::DragState(PointerButton::Right, rdx, rdy);
+	float cdx = 0.f, cdy = 0.f;
+	const bool chord = PointerInput::ChordPan(cdx, cdy);
+	float tdx = 0.f, tdy = 0.f;
+	input_take_pan(tdx, tdy);                    // two-finger touch pan (finally consumed)
+
+	if (cameraLive)
+	{
+		if (!uiOwns)
+			in.wheelSteps = input_take_mouse_wheel();   // wheel + touch pinch (I6 leaves it for windows)
+
+		/* RMB-drag = ROTATE (the global binding). A drag owned by an in-progress
+		 * move gizmo or an open radial menu is a command, not a camera rotate. */
+		if (rDrag && !g_gizmo_active && !g_radial_open)
 		{
-			in.lookDX = static_cast<float>(mx - s_prevMouseX);
-			in.lookDY = static_cast<float>(my - s_prevMouseY);
+			in.lookDX = rdx; in.lookDY = rdy; in.looking = true;
 		}
-		in.looking = lmbDrag;
 
-		/* Camera movement keys: the arrows + PgUp/PgDn, freed by the piloting
-		 * removal (WASD stays with the combat bindings: A fires, D is chart
-		 * distance, S is menu-up). Shift boosts. */
-		in.moveForward = KeyAxis(VK_UP, VK_DOWN);
-		in.moveRight = KeyAxis(VK_RIGHT, VK_LEFT);
-		in.moveUp = KeyAxis(VK_PRIOR, VK_NEXT);
-		in.boost = input_key_down(VK_SHIFT);
-	}
-
-	/* Docked exception: the station menu window owns the pointer (uiOwns is true),
-	 * but a RIGHT-mouse drag still orbits the camera around the station - RMB is
-	 * unused at a station, so it is bound to the view here. The wheel is left alone
-	 * so an open chart/market window can still zoom with it. */
-	if (docked)
-	{
-		if (rmb && s_prevRmb)
+		if (!uiOwns)
 		{
-			in.lookDX = static_cast<float>(mx - s_prevMouseX);
-			in.lookDY = static_cast<float>(my - s_prevMouseY);
+			/* Pan: the LMB+RMB chord, the touch two-finger drag, and the arrow/WASD
+			 * key axes all slide the focus point in the screen plane. */
+			if (chord && (cdx != 0.f || cdy != 0.f))
+			{
+				in.panDX += cdx; in.panDY += cdy; in.panning = true;
+			}
+			if (tdx != 0.f || tdy != 0.f) { in.panDX += tdx; in.panDY += tdy; in.panning = true; }
+
+			in.keyPanRight = KeyAxis(VK_RIGHT, VK_LEFT) + KeyAxis('D', 'A');
+			in.keyPanUp    = KeyAxis(VK_UP, VK_DOWN)    + KeyAxis('W', 'S');
+			if (in.keyPanRight != 0.f || in.keyPanUp != 0.f) in.panning = true;
+
+			/* MMB-drag = zoom (vertical): dragging up dollies in, down dollies out. */
+			if (mmb && s_prevMmb)
+				in.wheelSteps += static_cast<float>((s_prevMouseY - my) * MMB_ZOOM_PER_PIXEL);
+
+			/* FPV observer keeps the free-fly axes; Shift boosts only there (in orbit
+			 * Shift is the move-grid's elevation modifier and does nothing to the view). */
+			if (!s_orbitMode)
+			{
+				in.moveForward = KeyAxis(VK_UP, VK_DOWN);
+				in.moveRight = KeyAxis(VK_RIGHT, VK_LEFT);
+				in.moveUp = KeyAxis(VK_PRIOR, VK_NEXT);
+				in.boost = input_key_down(VK_SHIFT);
+			}
+
+			/* Focus (F): animate the focus onto the selection (else the own ship) and
+			 * re-attach the follow to it. A manual pan this frame detaches it. */
+			const bool focusKey = input_key_down('F');
+			if (focusKey && !s_prevFocusKey)
+				camera_rig_focus();
+			s_prevFocusKey = focusKey;
+
+			panned = in.panning;
 		}
-		in.looking = rmb;
 	}
 
-	/* I2 pointer selection: track the LMB press so a release inside the slop is a
-	 * click. On the flight screen with no UI in front, a click selects the entity
-	 * under the cursor (empty space clears) - the reticle, orbit subject and missile
-	 * target all follow g_missile_lock_target. A drag beyond the slop is left to the
-	 * camera. */
-	if (lmb && !s_prevLmb)
-	{
-		s_lmbDownX = mx;
-		s_lmbDownY = my;
-		s_lmbMoved = false;
-	}
-	else if (lmb)
-	{
-		int ddx = mx - s_lmbDownX; if (ddx < 0) ddx = -ddx;
-		int ddy = my - s_lmbDownY; if (ddy < 0) ddy = -ddy;
-		if (ddx > CLICK_SLOP || ddy > CLICK_SLOP)
-			s_lmbMoved = true;
-	}
-	else if (s_prevLmb && !s_lmbMoved && !uiOwns
-	         && ability_bar_button_at(s_lmbDownX, s_lmbDownY) < 0     // not a bar click (I4)
-	         && nav_strip_button_at(s_lmbDownX, s_lmbDownY) < 0)      // not a nav-strip click (I4)
-	{
-		g_missile_lock_target = pick_entity_at_screen(mx, my);
-	}
-	s_prevLmb = lmb;
+	/* A manual pan detaches the follow: the focus point becomes free until the next
+	 * F / double-tap re-attaches it (Homeworld grab-the-world feel). */
+	if (panned)
+		s_followEntity = 0xFFFFFFFFu;
 
 	s_prevMouseX = mx;
 	s_prevMouseY = my;
 	s_prevRmb = rmb;
+	s_prevMmb = mmb;
 
 	Client::CameraController& active = Active();
 	active.Update(in);

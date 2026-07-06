@@ -62,6 +62,8 @@ float g_panDX = 0.0f, g_panDY = 0.0f;                  /* accumulated two-finger
 bool  g_longPress = false; int g_longPressX = 0, g_longPressY = 0;  /* one-shot */
 bool  g_doubleTap = false; int g_doubleTapX = 0, g_doubleTapY = 0;  /* one-shot */
 bool  g_touchSuppress = false;   /* a long-press fired this contact: no synth select */
+bool  g_anyTap = false;          /* a tap on any button/finger (intro "tap anywhere") */
+bool  g_touchTap = false; int g_touchTapX = 0, g_touchTapY = 0;  /* touch tap -> Left click-select */
 
 void handle_gesture(const Neuron::Input::GestureEvent& e)
 {
@@ -78,9 +80,98 @@ void handle_gesture(const Neuron::Input::GestureEvent& e)
 		case GT::PanMove:
 			g_panDX += e.dx; g_panDY += e.dy;
 			break;
+		case GT::Tap:
+			g_anyTap = true;                 // intro "tap anywhere"
+			g_touchTap = true;               // and a Left click-select (mouse taps use g_mbtn)
+			g_touchTapX = static_cast<int>(e.x); g_touchTapY = static_cast<int>(e.y);
+			break;
 		default:
-			break;   // Tap/Drag/Pinch are handled by the synthesis path above
+			break;   // DoubleTap/Drag/Pinch are handled by the synthesis path above
 	}
+}
+
+/* ---- H1 mouse pointer front door (input.md) --------------------------------- */
+bool g_mmb = false;                    /* middle button held (capture-correct) */
+
+/* Per-mouse-button gesture recognizer (Left, Right), fed from the WM mouse
+ * messages on the SAME clock as touch, so click-vs-drag-vs-hold is classified
+ * once in the tested core for the mouse too. */
+struct MouseButtonState
+{
+  Neuron::Input::GestureRecognizer rec;
+  bool  clickPending = false; int   clickX = 0, clickY = 0;
+  bool  holdPending  = false; int   holdX  = 0, holdY  = 0;
+  bool  dragActive   = false; float dragDX = 0.f, dragDY = 0.f;
+};
+MouseButtonState g_mbtn[2];            /* [0] = Left, [1] = Right */
+
+bool  g_mouseChord = false;            /* LMB+RMB held together = the pan chord */
+float g_chordDX = 0.f, g_chordDY = 0.f;
+int   g_prevMouseX = 0, g_prevMouseY = 0;
+
+void apply_mouse_gesture(int _idx, const Neuron::Input::GestureEvent& _e)
+{
+  using GT = Neuron::Input::GestureType;
+  MouseButtonState& b = g_mbtn[_idx];
+  switch (_e.type)
+  {
+    case GT::Tap:
+      b.clickPending = true; b.clickX = static_cast<int>(_e.x); b.clickY = static_cast<int>(_e.y);
+      g_anyTap = true;
+      break;
+    case GT::LongPress:
+      b.holdPending = true; b.holdX = static_cast<int>(_e.x); b.holdY = static_cast<int>(_e.y);
+      break;
+    case GT::DragBegin: b.dragActive = true; b.dragDX = 0.f; b.dragDY = 0.f; break;
+    case GT::DragMove:  b.dragDX += _e.dx; b.dragDY += _e.dy; break;
+    case GT::DragEnd:   b.dragActive = false; break;
+    default: break;    /* DoubleTap/Pan/Pinch are not meaningful for one button */
+  }
+}
+
+void feed_mouse_button(int _idx, Neuron::Input::PointerPhase _phase, int _x, int _y)
+{
+  Neuron::Input::PointerSample s;
+  s.id = static_cast<uint32_t>(1000 + _idx);   /* fixed ids, distinct from touch */
+  s.x = static_cast<float>(_x);
+  s.y = static_cast<float>(_y);
+  s.timeMs = static_cast<uint32_t>(GetTickCount());
+  s.phase = _phase;
+  for (const auto& e : g_mbtn[_idx].rec.Push(s))
+    apply_mouse_gesture(_idx, e);
+}
+
+/* Enter/leave the LMB+RMB pan chord. On entry both button recognizers are
+ * cancelled so the chord can never surface as a click, drag or hold. */
+void update_mouse_chord(void)
+{
+  const bool both = g_lmb && g_rmb;
+  if (both && !g_mouseChord)
+  {
+    g_mouseChord = true;
+    g_chordDX = g_chordDY = 0.f;
+    Neuron::Input::PointerSample c;
+    c.phase = Neuron::Input::PointerPhase::Cancel;
+    c.timeMs = static_cast<uint32_t>(GetTickCount());
+    for (int i = 0; i < 2; ++i)
+    {
+      c.id = static_cast<uint32_t>(1000 + i);
+      for (const auto& e : g_mbtn[i].rec.Push(c))
+        apply_mouse_gesture(i, e);
+      g_mbtn[i].dragActive = false;
+    }
+  }
+  else if (!both && g_mouseChord)
+  {
+    g_mouseChord = false;
+  }
+}
+
+void maybe_release_capture(HWND _hwnd)
+{
+  if (!g_lmb && !g_rmb && !g_mmb)
+    ReleaseCapture();
+  (void) _hwnd;
 }
 
 /* WM_CHAR ring queue */
@@ -126,17 +217,44 @@ LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		case WM_MOUSEMOVE:
 			g_mouseX = GET_X_LPARAM(lparam);
 			g_mouseY = GET_Y_LPARAM(lparam);
+			/* Feed the per-button recognizers (drag deltas) while a button is held;
+			 * a latched chord takes the raw delta instead (its buttons are cancelled). */
+			if (g_mouseChord)
+			{
+				g_chordDX += static_cast<float>(g_mouseX - g_prevMouseX);
+				g_chordDY += static_cast<float>(g_mouseY - g_prevMouseY);
+			}
+			else
+			{
+				if (g_lmb) feed_mouse_button(0, Neuron::Input::PointerPhase::Move, g_mouseX, g_mouseY);
+				if (g_rmb) feed_mouse_button(1, Neuron::Input::PointerPhase::Move, g_mouseX, g_mouseY);
+			}
+			g_prevMouseX = g_mouseX; g_prevMouseY = g_mouseY;
 			return 0;
+		/* Every button captures: a drag/chord must keep feeding deltas when the
+		 * pointer leaves the client area. */
 		case WM_LBUTTONDOWN:
-			g_lmb = true;  SetCapture(hwnd); return 0;
+			g_lmb = true;  SetCapture(hwnd);
+			feed_mouse_button(0, Neuron::Input::PointerPhase::Down, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+			update_mouse_chord();
+			return 0;
 		case WM_LBUTTONUP:
-			g_lmb = false; if (!g_rmb) ReleaseCapture(); return 0;
-		/* RMB captures too: it is the camera look-drag, and the drag must keep
-		 * feeding deltas when the pointer leaves the client area. */
+			feed_mouse_button(0, Neuron::Input::PointerPhase::Up, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+			g_lmb = false; update_mouse_chord(); maybe_release_capture(hwnd);
+			return 0;
 		case WM_RBUTTONDOWN:
-			g_rmb = true;  SetCapture(hwnd); return 0;
+			g_rmb = true;  SetCapture(hwnd);
+			feed_mouse_button(1, Neuron::Input::PointerPhase::Down, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+			update_mouse_chord();
+			return 0;
 		case WM_RBUTTONUP:
-			g_rmb = false; if (!g_lmb) ReleaseCapture(); return 0;
+			feed_mouse_button(1, Neuron::Input::PointerPhase::Up, GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+			g_rmb = false; update_mouse_chord(); maybe_release_capture(hwnd);
+			return 0;
+		case WM_MBUTTONDOWN:
+			g_mmb = true;  SetCapture(hwnd); return 0;
+		case WM_MBUTTONUP:
+			g_mmb = false; maybe_release_capture(hwnd); return 0;
 
 		case WM_MOUSEWHEEL:
 			g_wheelSteps += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA);
@@ -285,8 +403,14 @@ float input_take_mouse_wheel(void)
  * fires without a pointer message). One clock with the WM_POINTER samples. */
 void input_pointer_tick(void)
 {
-	for (const auto& e : g_gestures.Tick(static_cast<uint32_t>(GetTickCount())))
+	const uint32_t now = static_cast<uint32_t>(GetTickCount());
+	for (const auto& e : g_gestures.Tick(now))
 		handle_gesture(e);
+	/* The mouse button recognizers need the same time tick so a stationary press
+	 * fires its long-press (the RMB-hold radial menu) without a pointer message. */
+	for (int i = 0; i < 2; ++i)
+		for (const auto& e : g_mbtn[i].rec.Tick(now))
+			apply_mouse_gesture(i, e);
 }
 
 /* I5 two-finger pan delta since the last poll (accumulated, then cleared). */
@@ -317,6 +441,74 @@ bool input_take_double_tap(int& x, int& y)
 int input_touch_count(void)
 {
 	return (g_touch[0].active ? 1 : 0) + (g_touch[1].active ? 1 : 0);
+}
+
+/* ---- H1 PointerInput accessors (input.md) ----------------------------------- */
+
+namespace
+{
+	int pointer_button_index(PointerButton _b)
+	{
+		return _b == PointerButton::Left ? 0 : (_b == PointerButton::Right ? 1 : -1);
+	}
+}
+
+namespace PointerInput
+{
+	void MouseState(int& x, int& y, bool& lmb, bool& rmb, bool& mmb)
+	{
+		x = g_mouseX; y = g_mouseY; lmb = g_lmb; rmb = g_rmb; mmb = g_mmb;
+	}
+
+	bool TakeClick(PointerButton button, int& x, int& y)
+	{
+		const int i = pointer_button_index(button);
+		if (i < 0) return false;
+		if (g_mbtn[i].clickPending)
+		{
+			x = g_mbtn[i].clickX; y = g_mbtn[i].clickY; g_mbtn[i].clickPending = false;
+			return true;
+		}
+		/* A touch single-finger tap resolves to a Left click-select (touch feeds the
+		 * shared gesture recognizer, not the per-button mouse recognizers). */
+		if (button == PointerButton::Left && g_touchTap)
+		{
+			x = g_touchTapX; y = g_touchTapY; g_touchTap = false;
+			return true;
+		}
+		return false;
+	}
+
+	bool TakeHold(PointerButton button, int& x, int& y)
+	{
+		const int i = pointer_button_index(button);
+		if (i < 0 || !g_mbtn[i].holdPending) return false;
+		x = g_mbtn[i].holdX; y = g_mbtn[i].holdY; g_mbtn[i].holdPending = false;
+		return true;
+	}
+
+	bool DragState(PointerButton button, float& dx, float& dy)
+	{
+		const int i = pointer_button_index(button);
+		if (i < 0) { dx = dy = 0.f; return false; }
+		dx = g_mbtn[i].dragDX; dy = g_mbtn[i].dragDY;
+		g_mbtn[i].dragDX = g_mbtn[i].dragDY = 0.f;
+		return g_mbtn[i].dragActive;
+	}
+
+	bool ChordPan(float& dx, float& dy)
+	{
+		dx = g_chordDX; dy = g_chordDY;
+		g_chordDX = g_chordDY = 0.f;
+		return g_mouseChord;
+	}
+
+	bool TakeAnyTap(void)
+	{
+		if (!g_anyTap) return false;
+		g_anyTap = false;
+		return true;
+	}
 }
 
 /* ---- keyboard.h contract ---- */

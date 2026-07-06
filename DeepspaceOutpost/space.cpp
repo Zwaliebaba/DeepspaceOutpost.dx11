@@ -744,6 +744,61 @@ unsigned int pick_entity_at_screen (int mx, int my)
 }
 
 
+// H5 (input.md): project every replicated entity to screen pixels, so band-select
+// and picking share one set of optics (camera_view_point -> CameraSpaceToPixels
+// over the live viewport). Returns the count written (<= cap). In-flight missiles
+// and the own hull are still projected here (callers filter by ownership); the
+// z<=0 (behind the eye) entities are dropped.
+std::size_t ProjectEntitiesToScreen (ScreenEntity *out, std::size_t cap)
+{
+	Neuron::Client::ReplicationClient& rc = Neuron::Client::ReplicationClientInstance();
+	if (!rc.IsOpen() || !camera_rig_ready() || cap == 0)
+		return 0;
+
+	const auto sz = Neuron::Graphics::Core::GetOutputSize();
+	const int vw = static_cast<int>(sz.Width);
+	const int vh = static_cast<int>(sz.Height);
+	Neuron::Client::Camera& camera = Neuron::Client::MainCamera();
+
+	const long long* org = camera_rig_origin();
+	std::vector<Neuron::Net::EntitySnapshot> ents = rc.SampleAll (1.0);
+	std::vector<Neuron::Client::RenderRecord> records =
+		Neuron::Client::BuildRenderRecords (ents, org[0], org[1], org[2]);
+
+	std::size_t n = 0;
+	for (const Neuron::Client::RenderRecord& rec : records)
+	{
+		if (n >= cap)
+			break;
+		struct vector camPos = rec.location;
+		camera_view_point (&camPos);
+		if (camPos.z <= 0.0)               // behind the eye
+			continue;
+		double sx = 0.0, sy = 0.0;
+		if (!Neuron::Client::CameraSpaceToPixels (camera, camPos.x, camPos.y, camPos.z, vw, vh, sx, sy))
+			continue;
+		out[n].id = rec.id; out[n].sx = sx; out[n].sy = sy; out[n].type = rec.type;
+		++n;
+	}
+	return n;
+}
+
+
+// H5: the rubber-band marquee (state in main.cpp). A plain rectangle outline in the
+// full-view frame; the selection happens on release (band_select, main.cpp).
+void draw_selection_band (void)
+{
+	if (!g_band_active)
+		return;
+	hud_set_origin (0, 0);
+	const int x0 = g_band_x0 < g_band_x1 ? g_band_x0 : g_band_x1;
+	const int x1 = g_band_x0 < g_band_x1 ? g_band_x1 : g_band_x0;
+	const int y0 = g_band_y0 < g_band_y1 ? g_band_y0 : g_band_y1;
+	const int y1 = g_band_y0 < g_band_y1 ? g_band_y1 : g_band_y0;
+	hud_rect (x0, y0, x1, y1, GFX_COL_WHITE);
+}
+
+
 
 
 // ---- Native flight-HUD primitives -------------------------------------------
@@ -1512,6 +1567,7 @@ void update_console (void)
 	// full-view placement, so they must run after the dashboard-anchored draws.
 	display_selection_info();
 	display_order_feedback();
+	draw_selection_band();
 	draw_move_gizmo();
 	draw_radial_menu();
 	draw_ability_bar();
