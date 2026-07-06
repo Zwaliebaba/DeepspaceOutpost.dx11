@@ -6,6 +6,22 @@ residues verified in source). This document plans the transition of the
 client's interaction model from the current *pointer-first order grammar* to a
 **Homeworld-style interaction model**.
 
+**Implementation (2026-07-06):** H1–H6 are implemented on this branch. The two
+headless-testable pure cores — `NeuronClient/input/Selection.h` (H2) and
+`NeuronClient/input/MovePlan.h` (H6 grid state machine) — plus the
+`OrbitCameraController` focus/pan changes ship with GoogleTest suites
+(`Tests/NeuronClient/`); the pure cores are verified compiling clean under
+`-Wall -Wextra -std=c++20` and passing. The Win32 pointer front door
+(`input_win.*`, H1), the camera rig rebind (`CameraRig.cpp`, H3), and the
+selection / band / movement-grid glue (`main.cpp`, `space.*`, H2/H4/H5/H6)
+are written but require a **Windows/MSVC/DX11 build and the manual
+mouse+touch pass** (§3 "Testing") to validate — they cannot be compiled on a
+Linux host. Minor wiring refinements vs. this plan: pan is fed through
+`CameraInput` fields (like `looking`/`wheelSteps`) rather than a separate
+`Pan()` method; the F-key/double-tap focus is centralised in
+`camera_rig_focus()`; the rig↔command bridge functions are
+`SelectionFocusWorld()` / `ResetCommandState()`.
+
 **Naming.** All *new* identifiers proposed here follow the canonical project
 standard in [`.github/coding-standards.md`](.github/coding-standards.md):
 types and functions in `PascalCase`, locals in `camelCase`, private members
