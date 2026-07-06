@@ -9,6 +9,8 @@
 #ifndef SPACE_H
 #define SPACE_H
 
+#include <cstddef>
+
 #include "vector.h"
 #include "shipdata.h"
 
@@ -70,6 +72,17 @@ void move_local_object (struct local_object *obj);
 void update_local_objects (void);
 void render_replicated_objects (void);
 unsigned int pick_entity_at_screen (int mx, int my);   // I2: select the entity under the cursor
+
+// H5 band-select (input.md): one replicated entity projected to screen pixels, and
+// the projection of every entity (band and pick share the same optics). Defined in
+// space.cpp.
+struct ScreenEntity { unsigned int id; double sx; double sy; int type; };
+std::size_t ProjectEntitiesToScreen (ScreenEntity *out, std::size_t cap);
+
+// H5 band-select rectangle (state defined in main.cpp, drawn by draw_selection_band).
+extern bool g_band_active;
+extern int  g_band_x0, g_band_y0, g_band_x1, g_band_y1;
+void draw_selection_band (void);
 
 // I4 ability bar (defined in main.cpp): draw the flight ability strip, and report
 // which bar button (if any) is under the cursor so the camera's select can ignore

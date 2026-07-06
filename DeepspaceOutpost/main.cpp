@@ -37,6 +37,8 @@
 #include "Messages/Defs/ExplosionAt.h"       // ExplosionAt (G1 kill VFX)
 #include "input/OrderMenu.h"                  // contextual orders + radial-menu legality (I3 core)
 #include "input/MoveGizmo.h"                  // move-gizmo geometry (I3 core)
+#include "input/Selection.h"                  // selected-unit set (input.md H2)
+#include "input/MovePlan.h"                   // movement-grid state machine (input.md H6)
 #include "GuiOverlay.h"
 #include "GameWindows.h"
 #include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
@@ -279,14 +281,6 @@ static bool cursor_ray(int _mx, int _my, Neuron::Input::GVec3& _ro, Neuron::Inpu
   return true;
 }
 
-// The camera's up vector (a direction, so origin-independent - the render frame and
-// world frame agree on it). This is the move-gizmo's command-plane normal.
-static Neuron::Input::GVec3 camera_up_vec(void)
-{
-  const DirectX::XMFLOAT3 u = Client::MainCamera().Up();
-  return { static_cast<double>(u.x), static_cast<double>(u.y), static_cast<double>(u.z) };
-}
-
 // The player's own ship position in the render (origin-relative) frame.
 static bool ship_relative(Neuron::Input::GVec3& _out)
 {
@@ -301,15 +295,18 @@ static bool ship_relative(Neuron::Input::GVec3& _out)
   return true;
 }
 
-// Begin a move gizmo at cursor (mx,my): fix the command plane (ship + camera-up)
-// and its in-plane base point, and derive the elevation-per-pixel scale from the
-// base's depth so a vertical drag tracks the pointer 1:1 on screen. False if the
-// ship is not currently sampleable.
+// Begin a move gizmo at cursor (mx,my): fix the command plane and its in-plane
+// base point, and derive the elevation-per-pixel scale from the base's depth so a
+// vertical drag tracks the pointer 1:1 on screen. False if the ship is not
+// currently sampleable. The plane is the Homeworld tactical grid: HORIZONTAL,
+// normal = world +Y through the ship (input.md C6/H6) - so a destination reads
+// the same however the camera is orbited, and a Shift/second-finger drag along
+// the normal IS the Y-axis (altitude) modification.
 static bool gizmo_begin(int _mx, int _my)
 {
   using namespace Neuron::Input;
   GVec3 ro, rd, ship;
-  const GVec3 up = camera_up_vec();
+  const GVec3 up{0.0, 1.0, 0.0};
   if (!cursor_ray(_mx, _my, ro, rd) || !ship_relative(ship))
     return false;
 
@@ -499,36 +496,270 @@ static void radial_commit(void)
   g_radial_hot = -1;
 }
 
+// ---- H2/H5/H6 selection, focus, band-select, movement grid (input.md) ----------
+
+namespace
+{
+  // H2: the selected-unit SET. g_missile_lock_target stays as the DERIVED enemy
+  // handle (reticle + missile target) so its many readers are untouched; s_selection
+  // is the set the band fills and the command grammar consults.
+  Neuron::Input::Selection s_selection;
+
+  bool IsOwnUnit(unsigned int _id)
+  {
+    return _id != 0xFFFFFFFFu
+        && _id == Client::ReplicationClientInstance().LocalPlayer();
+  }
+
+  // H6: the movement-grid state. g_gridMode is the two-step machine (MovePlan.h);
+  // s_gridElev is the accumulated Y offset; s_gridAnchorY is the pointer y when the
+  // vertical modifier (Shift) engaged.
+  Neuron::Input::GridMode g_gridMode = Neuron::Input::GridMode::Off;
+  double s_gridElev = 0.0;
+  int    s_gridAnchorY = 0;
+}
+
+// H5 band-select rectangle (drawn by draw_selection_band, space.cpp).
+bool g_band_active = false;
+int  g_band_x0 = 0, g_band_y0 = 0, g_band_x1 = 0, g_band_y1 = 0;
+
+// The world point the F-key / double-tap focus targets: the selected entity if any,
+// else the own ship. False if nothing is sampleable. Called by the camera rig.
+bool SelectionFocusWorld(double _out[3])
+{
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+  const unsigned int id = (g_missile_lock_target != 0xFFFFFFFFu)
+                        ? g_missile_lock_target : rc.LocalPlayer();
+  Neuron::Net::EntitySnapshot s{};
+  if (!rc.IsOpen() || !rc.Sample(id, rc.InterpolationAlpha(), s))
+    return false;
+  _out[0] = static_cast<double>(s.x);
+  _out[1] = static_cast<double>(s.y);
+  _out[2] = static_cast<double>(s.z);
+  return true;
+}
+
+// Clear all pointer-command state. Called from the camera rig's reset seam so
+// nothing survives a scene change (input.md §6.2).
+void ResetCommandState(void)
+{
+  s_selection.Clear();
+  g_missile_lock_target = 0xFFFFFFFFu;
+  g_gridMode = Neuron::Input::GridMode::Off;
+  g_gizmo_active = false;
+  g_band_active = false;
+}
+
+// The single gate the flight command verbs consult (input.md §6.5): world in
+// front, not docked, no modal window. (s_state == Flight is guaranteed by the
+// call sites, which run only in the flight update.)
+static bool FlightInputActive(void)
+{
+  return !docked && current_screen == SCR_FRONT_VIEW && !GuiOverlay::IsShown();
+}
+
+// Re-place the grid's in-plane (X/Z) point from the cursor ray against the FIXED
+// horizontal plane captured at grid open (g_gizmo_ship + world-up normal).
+static void grid_replace_xz(int _mx, int _my)
+{
+  using namespace Neuron::Input;
+  GVec3 ro, rd;
+  if (!cursor_ray(_mx, _my, ro, rd))
+    return;
+  const GVec3 ship{g_gizmo_ship[0], g_gizmo_ship[1], g_gizmo_ship[2]};
+  const GVec3 up{g_gizmo_normal[0], g_gizmo_normal[1], g_gizmo_normal[2]};
+  const PlaneHit hit = RayPlanePoint(ro, rd, ship, up);
+  g_gizmo_base[0] = hit.point.x; g_gizmo_base[1] = hit.point.y; g_gizmo_base[2] = hit.point.z;
+}
+
+// H6: the M-key persistent movement grid. Returns true while the grid owns pointer
+// input (so the caller skips the RMB machine and selection). The transitions run
+// through the headless-tested StepGrid core; this glue does the geometry + order.
+static bool HandleMovementGrid(int _mx, int _my)
+{
+  using namespace Neuron::Input;
+  Client::ReplicationClient& rc = Client::ReplicationClientInstance();
+
+  static bool s_prevM = false;
+  const bool mDown = input_key_down('M');
+  const bool mEdge = mDown && !s_prevM;
+  s_prevM = mDown;
+
+  if (g_gridMode == GridMode::Off)
+  {
+    // M spawns the horizontal tactical grid over the cursor (RMB-on-empty enters
+    // via the one-gesture fast path in handle_pointer_commands instead).
+    if (mEdge && rc.IsOpen() && gizmo_begin(_mx, _my))
+    {
+      g_gridMode = GridMode::PlacingXZ;
+      s_gridElev = 0.0;
+      g_gizmo_active = true;   // the gizmo renders + suppresses RMB-rotate while open
+    }
+    return g_gridMode != GridMode::Off;
+  }
+
+  // Cancel on M-again / Esc / an RMB press edge; confirm on an LMB click.
+  static bool s_prevRmbGrid = false;
+  int mx = 0, my = 0; bool lmb = false, rmb = false, mmb = false;
+  PointerInput::MouseState(mx, my, lmb, rmb, mmb);
+  const bool rmbEdge = rmb && !s_prevRmbGrid;
+  s_prevRmbGrid = rmb;
+
+  const bool shift = input_key_down(VK_SHIFT);
+  int cx = 0, cy = 0;
+  bool has = false;
+  GridEvent ev = GridEvent::Cancel;
+  if (mEdge || input_key_down(VK_ESCAPE) || rmbEdge)
+  { ev = GridEvent::Cancel; has = true; }
+  else if (PointerInput::TakeClick(PointerButton::Left, cx, cy))
+  { ev = GridEvent::Confirm; has = true; }
+  else if (shift && g_gridMode == GridMode::PlacingXZ)
+  { ev = GridEvent::ShiftDown; has = true; s_gridAnchorY = _my; }
+  else if (!shift && g_gridMode == GridMode::AdjustingY)
+  { ev = GridEvent::ShiftUp; has = true; }
+
+  // Live marker: hover the X/Z point while placing; slide Y while adjusting. The
+  // elevation is KEPT across a Shift release, so both modes preview base + elev.
+  if (g_gridMode == GridMode::PlacingXZ)
+    grid_replace_xz(_mx, _my);
+  else // AdjustingY: dragging UP (smaller y) raises the marker
+    s_gridElev = static_cast<double>(s_gridAnchorY - _my) * g_gizmo_scale;
+
+  long long pt[3];
+  gizmo_apply(s_gridElev, pt);
+
+  if (has)
+  {
+    const GridTransition tr = StepGrid(g_gridMode, ev, /*hasOwnUnit*/ rc.IsOpen());
+    g_gridMode = tr.next;
+    if (tr.confirm)
+    {
+      gizmo_apply(s_gridElev, pt);
+      send_order(Neuron::Msg::OrderKind::Move, 0xFFFFFFFFu, pt);
+    }
+    if (tr.confirm || tr.cancel)
+      g_gizmo_active = false;
+  }
+  return true;   // the grid owns pointer input while active
+}
+
+// Select every OWN unit whose projected position lands inside the band rectangle.
+// Pre-F1 the only own unit is the primary ship, so this is degenerate but exercises
+// the multi-select mechanism (input.md H5).
+static void band_select(int _x0, int _y0, int _x1, int _y1)
+{
+  const int lox = _x0 < _x1 ? _x0 : _x1, hix = _x0 < _x1 ? _x1 : _x0;
+  const int loy = _y0 < _y1 ? _y0 : _y1, hiy = _y0 < _y1 ? _y1 : _y0;
+
+  ScreenEntity ents[64];
+  const std::size_t n = ProjectEntitiesToScreen(ents, 64);
+  s_selection.Clear();
+  for (std::size_t i = 0; i < n; ++i)
+  {
+    if (!IsOwnUnit(ents[i].id))
+      continue;
+    if (ents[i].sx >= lox && ents[i].sx <= hix && ents[i].sy >= loy && ents[i].sy <= hiy)
+      s_selection.Add(ents[i].id);
+  }
+}
+
+// H2/H5: LMB click selects the entity under the cursor (empty space clears); an LMB
+// drag rubber-bands and selects the own units inside. Runs after the camera and the
+// command handler; a press that began on the ability/nav bar is theirs, and the grid
+// (when active) owns input instead.
+void handle_selection(void)
+{
+  if (!FlightInputActive() || g_gridMode != Neuron::Input::GridMode::Off)
+  {
+    g_band_active = false;
+    return;
+  }
+
+  int mx = 0, my = 0; bool lmb = false, rmb = false, mmb = false;
+  PointerInput::MouseState(mx, my, lmb, rmb, mmb);
+
+  static bool s_prevLmb = false;
+  static int  s_downX = 0, s_downY = 0;
+  static bool s_downOnBar = false;
+  if (lmb && !s_prevLmb)
+  {
+    s_downX = mx; s_downY = my;
+    s_downOnBar = ability_bar_button_at(mx, my) >= 0 || nav_strip_button_at(mx, my) >= 0;
+  }
+
+  // Band: an active LMB drag not begun on a bar draws the rubber-band rectangle.
+  float dx = 0.f, dy = 0.f;
+  const bool dragging = PointerInput::DragState(PointerButton::Left, dx, dy);
+  if (dragging && !s_downOnBar)
+  {
+    g_band_active = true;
+    g_band_x0 = s_downX; g_band_y0 = s_downY;
+    g_band_x1 = mx;      g_band_y1 = my;
+  }
+
+  // Band release -> select the own units inside; then drop the rectangle.
+  if (!lmb && s_prevLmb && g_band_active)
+  {
+    band_select(g_band_x0, g_band_y0, g_band_x1, g_band_y1);
+    g_band_active = false;
+  }
+
+  // Click select (a press+release within slop): the entity under the cursor, else
+  // clear. The reticle / missile target is the selected ENEMY (never the own hull).
+  int cx = 0, cy = 0;
+  if (PointerInput::TakeClick(PointerButton::Left, cx, cy))
+  {
+    if (ability_bar_button_at(cx, cy) < 0 && nav_strip_button_at(cx, cy) < 0)
+    {
+      const unsigned int t = pick_entity_at_screen(cx, cy);
+      s_selection.Set(t);
+      g_missile_lock_target = (t != 0xFFFFFFFFu && !IsOwnUnit(t)) ? t : 0xFFFFFFFFu;
+    }
+  }
+
+  s_prevLmb = lmb;
+}
+
 // Per-frame pointer-command polling (called from the flight update, after the
 // camera). RMB drives the command grammar: a click issues the contextual default,
 // a HOLD over an entity opens the radial menu, and a press on empty space is the
-// move gizmo (vertical drag = elevation). Camera orbit (LMB-drag) and selection
-// (LMB click, I2) live in CameraRig.
+// move gizmo (vertical drag = elevation). The M-key persistent movement grid takes
+// precedence when open. Selection (LMB) is handled by handle_selection after this.
 void handle_pointer_commands(void)
 {
-  input_pointer_tick();   // drive the I5 recognizer's long-press timer every frame
+  input_pointer_tick();   // drive the recognizers' long-press timers every frame
 
-  if (GuiOverlay::IsShown() || current_screen != SCR_FRONT_VIEW || docked)
+  if (!FlightInputActive())
   {
     g_gizmo_active = false;
     g_radial_open  = false;
+    if (g_gridMode != Neuron::Input::GridMode::Off)
+      g_gridMode = Neuron::Input::GridMode::Off;
     return;
   }
 
   int mx = 0, my = 0;
-  bool lmb = false, rmb = false;
-  input_mouse_state(mx, my, lmb, rmb);
+  bool lmb = false, rmb = false, mmb = false;
+  PointerInput::MouseState(mx, my, lmb, rmb, mmb);
+
+  // The M-key movement grid owns pointer input whenever it is open.
+  if (HandleMovementGrid(mx, my))
+    return;
 
   // I5 touch gestures. A LONG-PRESS opens the radial menu (touch equivalent of the
   // RMB-hold); the finger then drives the highlight and lifting commits. A
-  // DOUBLE-TAP focuses the camera by selecting whatever is under it.
+  // DOUBLE-TAP selects and focuses the camera on whatever is under it.
   static bool s_touchRadial = false;
   int gx = 0, gy = 0;
   if (input_take_double_tap(gx, gy))
   {
     const unsigned int t = pick_entity_at_screen(gx, gy);
     if (t != 0xFFFFFFFFu)
-      g_missile_lock_target = t;   // orbit already follows the selection = focus
+    {
+      s_selection.Set(t);
+      g_missile_lock_target = (!IsOwnUnit(t)) ? t : 0xFFFFFFFFu;
+    }
+    camera_rig_focus();   // double-tap = focus (input.md §3.2)
   }
   if (input_take_long_press(gx, gy))
   {
@@ -557,13 +788,15 @@ void handle_pointer_commands(void)
   constexpr int LONGPRESS_FRAMES = 11; // ~0.35 s at the 30 Hz command tick
   constexpr int SLOP = 6;
 
+  // The LMB+RMB pan chord is a camera pan, not a command: hide RMB from the command
+  // machine while both buttons are held so it never arms a gizmo/menu (input.md H4).
+  rmb = rmb && !lmb;
+
   if (rmb && !s_prevRmb)
   {
     s_downX = mx; s_downY = my; s_moved = false; s_downFrames = 0;
     g_radial_open = false;
     s_overEntity = (pick_entity_at_screen(mx, my) != 0xFFFFFFFFu);
-    if (!s_overEntity)
-      g_gizmo_active = gizmo_begin(mx, my);   // empty space: arm the move gizmo
   }
   else if (rmb)   // held
   {
@@ -572,22 +805,12 @@ void handle_pointer_commands(void)
     int ddy = my - s_downY; if (ddy < 0) ddy = -ddy;
     if (ddx > SLOP || ddy > SLOP) s_moved = true;
 
+    // A stationary hold over an entity opens the radial menu; a moved RMB is a
+    // camera rotate (the rig owns it while no gizmo/menu is up).
     if (g_radial_open)
-    {
       g_radial_hot = radial_slice_at(mx, my);
-    }
-    else if (s_overEntity)
-    {
-      if (s_downFrames >= LONGPRESS_FRAMES && !s_moved)
-        open_radial_menu(s_downX, s_downY);
-    }
-    else if (g_gizmo_active)
-    {
-      // Vertical drag past the initial press slides the marker along the plane
-      // normal: dragging UP (smaller y) raises it. The in-plane point stays put.
-      long long pt[3];
-      gizmo_apply(static_cast<double>(s_downY - my) * g_gizmo_scale, pt);
-    }
+    else if (s_overEntity && s_downFrames >= LONGPRESS_FRAMES && !s_moved)
+      open_radial_menu(s_downX, s_downY);
   }
   else if (s_prevRmb)   // release
   {
@@ -595,16 +818,21 @@ void handle_pointer_commands(void)
     {
       radial_commit();
     }
-    else if (g_gizmo_active)
-    {
-      long long pt[3];
-      gizmo_apply(static_cast<double>(s_downY - my) * g_gizmo_scale, pt);
-      send_order(Neuron::Msg::OrderKind::Move, 0xFFFFFFFFu, pt);
-      g_gizmo_active = false;
-    }
     else if (!s_moved)
     {
-      dispatch_context_order(mx, my);   // a plain click over an entity
+      // A plain RMB click (no drag): an entity issues its contextual default order;
+      // empty space opens the movement grid (input.md §0.1) - the same grid the M
+      // key opens, where Shift then sets the altitude.
+      if (s_overEntity)
+      {
+        dispatch_context_order(mx, my);
+      }
+      else if (gizmo_begin(mx, my))
+      {
+        g_gridMode = Neuron::Input::GridMode::PlacingXZ;
+        s_gridElev = 0.0;
+        g_gizmo_active = true;
+      }
     }
   }
   s_prevRmb = rmb;
@@ -1730,7 +1958,8 @@ static void game_update_flight(void)
 
   camera_rig_update();
 
-  handle_pointer_commands();   // I3: RMB contextual orders (after the camera reads input)
+  handle_pointer_commands();   // RMB contextual orders + the M-key movement grid
+  handle_selection();          // H2/H5: LMB click-select + drag-band (after commands)
 
   handle_flight_keys();
 

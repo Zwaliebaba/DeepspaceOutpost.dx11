@@ -63,6 +63,7 @@ bool  g_longPress = false; int g_longPressX = 0, g_longPressY = 0;  /* one-shot 
 bool  g_doubleTap = false; int g_doubleTapX = 0, g_doubleTapY = 0;  /* one-shot */
 bool  g_touchSuppress = false;   /* a long-press fired this contact: no synth select */
 bool  g_anyTap = false;          /* a tap on any button/finger (intro "tap anywhere") */
+bool  g_touchTap = false; int g_touchTapX = 0, g_touchTapY = 0;  /* touch tap -> Left click-select */
 
 void handle_gesture(const Neuron::Input::GestureEvent& e)
 {
@@ -80,7 +81,9 @@ void handle_gesture(const Neuron::Input::GestureEvent& e)
 			g_panDX += e.dx; g_panDY += e.dy;
 			break;
 		case GT::Tap:
-			g_anyTap = true;   // touch tap = the intro "tap anywhere" (select stays on the synth path)
+			g_anyTap = true;                 // intro "tap anywhere"
+			g_touchTap = true;               // and a Left click-select (mouse taps use g_mbtn)
+			g_touchTapX = static_cast<int>(e.x); g_touchTapY = static_cast<int>(e.y);
 			break;
 		default:
 			break;   // DoubleTap/Drag/Pinch are handled by the synthesis path above
@@ -460,9 +463,20 @@ namespace PointerInput
 	bool TakeClick(PointerButton button, int& x, int& y)
 	{
 		const int i = pointer_button_index(button);
-		if (i < 0 || !g_mbtn[i].clickPending) return false;
-		x = g_mbtn[i].clickX; y = g_mbtn[i].clickY; g_mbtn[i].clickPending = false;
-		return true;
+		if (i < 0) return false;
+		if (g_mbtn[i].clickPending)
+		{
+			x = g_mbtn[i].clickX; y = g_mbtn[i].clickY; g_mbtn[i].clickPending = false;
+			return true;
+		}
+		/* A touch single-finger tap resolves to a Left click-select (touch feeds the
+		 * shared gesture recognizer, not the per-button mouse recognizers). */
+		if (button == PointerButton::Left && g_touchTap)
+		{
+			x = g_touchTapX; y = g_touchTapY; g_touchTap = false;
+			return true;
+		}
+		return false;
 	}
 
 	bool TakeHold(PointerButton button, int& x, int& y)
