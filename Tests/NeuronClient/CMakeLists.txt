@@ -15,6 +15,8 @@ add_executable(NeuronClient.Tests
     GestureRecognizerTests.cpp
     OrderMenuTests.cpp
     MoveGizmoTests.cpp
+    SelectionTests.cpp
+    MovePlanTests.cpp
     RenderTableTests.cpp
     LineExpandTests.cpp
     InstanceDataTests.cpp
