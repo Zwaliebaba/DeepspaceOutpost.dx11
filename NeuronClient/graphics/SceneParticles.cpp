@@ -54,7 +54,7 @@ namespace Neuron::Graphics
     // effects subsystem will use for real particles, and the same u_MVP = view-projection path,
     // so proving this quad proves the pass the simulation plugs into. The quad is symmetric in
     // +-right/+-up, so the sign of `right` only mirrors the sprite - it stays visible either way.
-    void buildSmokeQuad(Neuron::Client::Camera& _cam, SceneParticles::ParticleVertex _out[6])
+    void buildSmokeQuad(Neuron::Client::Camera& _cam, ParticleVertex _out[6])
     {
       const XMFLOAT3 eyeF = _cam.Eye();
       const XMFLOAT3 atF = _cam.LookAt();
@@ -77,7 +77,7 @@ namespace Neuron::Graphics
 
       // Additive white at half alpha (0xAABBGGRR): visible over black, obviously additive.
       constexpr uint32_t COL = 0x80FFFFFFu;
-      const auto put = [](SceneParticles::ParticleVertex& _v, FXMVECTOR _p, float _u, float _vv)
+      const auto put = [](ParticleVertex& _v, FXMVECTOR _p, float _u, float _vv)
       {
         XMFLOAT3 f;
         XMStoreFloat3(&f, _p);

@@ -20,6 +20,8 @@ set(NEURONCLIENT_SOURCES
     CameraController.cpp
     ReplicationClient.cpp
     AdminClient.cpp
+    ParticleSystem.cpp
+    Effects.cpp
     Strings.cpp
     vector.cpp
 
@@ -67,6 +69,7 @@ set(NEURONCLIENT_HEADERS
     graphics/Scene3D.h
     graphics/SceneGlow.h
     graphics/SceneParticles.h
+    graphics/ParticleVertex.h
     graphics/TextureManager.h
     graphics/DDSTextureLoader.h
 
@@ -82,6 +85,8 @@ set(NEURONCLIENT_HEADERS
     Strings.h
     Camera.h
     CameraController.h
+    ParticleSystem.h
+    Effects.h
     Mesh.h
     ReplicatedScene.h
     ModelDraw.h

@@ -44,6 +44,7 @@
 #include "ChartData.h"    // ChartData::Kind for the F5/F6/F7 chart overlay
 #include "Scene3D.h"
 #include "SceneGlow.h"
+#include "Effects.h"                          // Neuron::Client::EffectsInstance() (explosion VFX)
 #include "Camera.h"                           // MainCamera() (I3 move-order unprojection)
 #include "input_win.h"                        // input_mouse_state (I3 pointer commands)
 #include "GraphicsCore.h"                     // Graphics::Core::GetOutputSize (viewport size)
@@ -1542,6 +1543,28 @@ int roster_wanted(unsigned int _id)
   return it == g_playerRoster.end() ? -1 : it->second.wanted;
 }
 
+// Emit a short-lived additive-particle burst at an absolute world point - the new engine VFX
+// (explosion.md phase 2), spawned alongside the legacy debris pop until the legacy path is
+// retired in phase 4. Random outward velocities on the game-side PRNG (exe-side, so random.h is
+// fine here). The engine subsystem integrates + draws it; the game only spawns.
+static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count)
+{
+  using namespace DirectX;
+  Neuron::Client::Effects& fx = Neuron::Client::EffectsInstance();
+  for (int i = 0; i < _count; ++i)
+  {
+    const float x = (rand255() - 128) / 128.0f;
+    const float y = (rand255() - 128) / 128.0f;
+    const float z = (rand255() - 128) / 128.0f;
+    XMVECTOR dir = XMVectorSet(x, y, z, 0.0f);
+    if (XMVectorGetX(XMVector3LengthSq(dir)) < 1e-4f)
+      dir = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); // avoid a zero-length direction
+    dir = XMVector3Normalize(dir);
+    const float speed = 200.0f + (rand255() / 255.0f) * 300.0f;
+    fx.CreateParticle(_pos, XMVectorScale(dir, speed), Neuron::Client::ParticleTypeId::ExplosionCore, 0.0f);
+  }
+}
+
 static void register_client_event_handlers(void)
 {
   static bool registered = false;
@@ -1650,7 +1673,10 @@ static void register_client_event_handlers(void)
     // play a debris burst where it died (the server just vanishes the entity).
     Net::EntitySnapshot vs;
     if (rc.Sample(_death.victim, 1.0, vs))
+    {
       spawn_replicated_explosion(vs);
+      emit_effect_burst(Neuron::Math::Vector3i64{ vs.x, vs.y, vs.z }, 24);
+    }
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
   });
@@ -1661,6 +1687,8 @@ static void register_client_event_handlers(void)
   g_clientBus.Subscribe<Neuron::Msg::ExplosionAt>([](const Neuron::Msg::ExplosionAt& _boom)
   {
     spawn_explosion_at(Neuron::Math::Vector3i64{ _boom.x, _boom.y, _boom.z }, _boom.scale);
+    const int scale = (_boom.scale > 0) ? ((_boom.scale < 4) ? _boom.scale : 4) : 1;
+    emit_effect_burst(Neuron::Math::Vector3i64{ _boom.x, _boom.y, _boom.z }, 24 * scale);
     snd_play_sample(SND_EXPLODE);
   });
 
@@ -1949,6 +1977,14 @@ static void game_update_flight(void)
   handle_chat_input();         // G3: chat text entry (Enter opens/sends)
 
   camera_rig_update();
+
+  // Hand the engine-owned effects subsystem this frame's floating origin (it can't reach the
+  // game-side CameraRig). Its particles/debris rebase against this when their vertices are built
+  // in ClientEngine::Frame's Advance, just after this update returns.
+  {
+    const long long* org = camera_rig_origin();
+    Neuron::Client::EffectsInstance().SetOrigin(Neuron::Math::Vector3i64{ org[0], org[1], org[2] });
+  }
 
   handle_pointer_commands();   // RMB contextual orders + the M-key movement grid
   handle_selection();          // H2/H5: LMB click-select + drag-band (after commands)

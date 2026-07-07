@@ -9,9 +9,10 @@
 #include <memory>
 #include <vector>
 
-#include "Mesh.h"           // Neuron::Graphics::MeshVertex - the debris triangle vertex
-#include "Camera.h"         // Neuron::Client::Camera - the view + projection source
-#include "TextureManager.h" // Neuron::Graphics::Texture - the Particle.dds sprite
+#include "Mesh.h"            // Neuron::Graphics::MeshVertex - the debris triangle vertex
+#include "ParticleVertex.h"  // Neuron::Graphics::ParticleVertex - the additive billboard vertex
+#include "Camera.h"          // Neuron::Client::Camera - the view + projection source
+#include "TextureManager.h"  // Neuron::Graphics::Texture - the Particle.dds sprite
 
 // Native Direct3D 11 particle / debris renderer (Neuron::Graphics) - the GPU pass for the
 // ported Darwinia explosion effects (see explosion.md). It draws two batches the client
@@ -43,11 +44,9 @@ namespace Neuron::Graphics
       static void Startup();
       static void Shutdown();
 
-      // One additive billboard corner: render-frame position, sprite uv, and a packed RGBA8
-      // colour (0xAABBGGRR, R in the low byte - the same order Render2D / the palette use).
-      // The simulation builds camera-facing quads (6 verts each) and hands the whole batch
-      // over via SetParticles.
-      struct ParticleVertex { float x, y, z; float u, v; uint32_t rgba; };
+      // The additive billboard vertex (Neuron::Graphics::ParticleVertex, in ParticleVertex.h):
+      // one camera-facing quad corner the simulation builds (6 verts each) and hands the whole
+      // batch over via SetParticles.
 
       // This frame's batches, rebuilt every frame by the effects subsystem (the SetDust
       // precedent). A null or empty batch clears it, so a frame with no effects draws nothing.
@@ -64,10 +63,10 @@ namespace Neuron::Graphics
       static void Render(ID3D11RenderTargetView* _rtv, ID3D11DepthStencilView* _dsv,
                          Neuron::Client::Camera& _camera, int _vpX, int _vpY, int _vpW, int _vpH);
 
-      // Phase-1 bring-up smoke test (default on): when there is no live particle batch, draw one
+      // Bring-up smoke test (default OFF): when on and there is no live particle batch, draw one
       // additive quad in front of the camera to prove the particle pass - blend / depth / shader
-      // / texture / matrix upload - in isolation, before the simulation exists to feed real
-      // vertices. Phase 2 turns this off once SetParticles carries the live burst.
+      // / texture / matrix upload - in isolation. It proved the phase-1 skeleton; phase 2 feeds
+      // real particles through SetParticles, so it stays off. Kept as a manual bring-up toggle.
       static void SetSmokeTest(bool _on) { s_smokeTest = _on; }
 
     private:
@@ -105,7 +104,7 @@ namespace Neuron::Graphics
       inline static size_t s_meshCapacity = 0;
       inline static std::vector<MeshVertex> s_debris;
 
-      inline static bool s_smokeTest = true; // phase-1 bring-up quad (removed in phase 2)
+      inline static bool s_smokeTest = false; // bring-up quad, off by default (see SetSmokeTest)
       inline static bool s_ready = false;
   };
 }

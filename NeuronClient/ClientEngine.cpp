@@ -7,6 +7,7 @@
 #include "Scene3D.h"
 #include "SceneGlow.h"
 #include "SceneParticles.h"
+#include "Effects.h"
 #include "Strings.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
@@ -212,6 +213,12 @@ namespace Neuron::Client
         // bookkeeping. dt is the fixed timestep the game is paced to. Inert outside the
         // in-flight/docked loop.
         m_main->Update(capMs / 1000.0f);
+
+        // Advance the engine-owned visual-effects subsystem with the same fixed timestep, after
+        // the game has set this frame's origin (game_update_flight) and camera (camera_rig_update)
+        // and before the scene is drawn. It integrates the particles/debris and rebuilds the
+        // SceneParticles vertex batches this frame's render pass draws.
+        Neuron::Client::EffectsInstance().Advance(capMs / 1000.0f);
 
         // Scene hook (GameApp::RenderScene -> game_render_scene): record the 2D HUD into the
         // batch and draw the depth-tested 3D scene straight to the back buffer (the game calls
