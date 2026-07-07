@@ -57,12 +57,19 @@ namespace Neuron::GameLogic
   };
 
   // StepAi collision-avoidance snapshot: a nearby hull or landmark an NPC must
-  // steer clear of, with the clearance radius to keep from its centre.
+  // steer clear of, with the clearance radius to keep from its centre. `team` is
+  // the hull's Team as an int (Team lives in CombatSystem.h, which includes this
+  // header, so it can't be named here); `avoidAlways` marks the stationary lethal
+  // landmarks (stations/planets/suns) that every NPC gives a berth regardless of
+  // team. NPCs otherwise avoid only same-team allies - enemy/prey ships are left
+  // to the combat/flee logic, never treated as mere obstacles.
   struct AiObstacle
   {
     ECS::EntityId id;
     Math::Vector3i64 pos;
     int64_t radius = 0;
+    int team = 0;
+    bool avoidAlways = false;
   };
 
   // ScoopSystem's per-tick canister snapshot (position + a live pointer into its

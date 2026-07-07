@@ -390,11 +390,12 @@ TEST(Station, ProcessUndock)
   EXPECT_TRUE(r.status == Net::StationStatus::Ok);
   EXPECT_TRUE(!w.Get<GameLogic::DockState>(p).docked);
 
-  // Ejected a fixed distance in front of the station (so a forward burn leaves
-  // rather than instantly re-docking).
+  // Placed at the station bay and handed a LaunchCruise that flies it out over the
+  // launch distance (StepLaunchCruise), rather than teleporting a fixed jump ahead.
   const Math::Vector3i64 station = w.Get<GameLogic::WorldTransform>(stn).position;
-  EXPECT_TRUE((w.Get<GameLogic::WorldTransform>(p).position ==
-         station + Math::Vector3i64{ 0, 0, GameLogic::LAUNCH_OFFSET }));
+  EXPECT_TRUE(w.Get<GameLogic::WorldTransform>(p).position == station);
+  ASSERT_TRUE(w.Has<GameLogic::LaunchCruise>(p));
+  EXPECT_EQ(w.Get<GameLogic::LaunchCruise>(p).distance, GameLogic::LAUNCH_OFFSET);
 }
 
 TEST(Station, UndockResetsFlightToFaceOutward)
@@ -419,14 +420,15 @@ TEST(Station, UndockResetsFlightToFaceOutward)
 
   const GameLogic::Flight& f = w.Get<GameLogic::Flight>(p);
   EXPECT_TRUE((f.nose.x == 0.0 && f.nose.y == 0.0 && f.nose.z == 1.0));   // pointing outward (+z)
-  EXPECT_TRUE(f.speed == 0.0);
+  EXPECT_TRUE(f.speed == 0.0);   // at rest pre-tick; StepLaunchCruise throttles it out
   EXPECT_TRUE(f.roll == 0.0);
 
-  // Outward nose + ejected ahead of the station => station is behind the player,
-  // so the forgiving "station ahead" dock check cannot re-trigger on launch.
+  // Starts at the station bay facing outward; the LaunchCruise (+ launch immunity)
+  // carries it clear along +z, so a forward launch never instantly re-docks.
   const Math::Vector3i64 player = w.Get<GameLogic::WorldTransform>(p).position;
   const Math::Vector3i64 station = w.Get<GameLogic::WorldTransform>(stn).position;
-  EXPECT_TRUE(station.z < player.z);   // station is behind (smaller z) the outward-facing player
+  EXPECT_TRUE(player == station);
+  EXPECT_TRUE(w.Has<GameLogic::LaunchCruise>(p));
 }
 
 // --- name-chosen spawn (account creation) -------------------------------------

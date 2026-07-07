@@ -233,13 +233,15 @@ namespace Neuron::GameLogic
       _grid.Clear();
       _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant& _c)
       {
-        const int64_t r = (_c.team == Team::Station) ? AVOID_STATION_R : AVOID_SHIP_R;
-        _out.push_back(AiObstacle{ _id, _t.position, r });
+        const bool station = (_c.team == Team::Station);
+        _out.push_back(AiObstacle{ _id, _t.position, station ? AVOID_STATION_R : AVOID_SHIP_R,
+                                   _c.team, /*avoidAlways*/ station });
       });
       _world.Each<WorldTransform, NetType>([&](ECS::EntityId _id, WorldTransform& _t, NetType& _nt)
       {
         if (_nt.type == ShipType::Planet || _nt.type == ShipType::Sun)
-          _out.push_back(AiObstacle{ _id, _t.position, AVOID_PLANET_R });
+          _out.push_back(AiObstacle{ _id, _t.position, AVOID_PLANET_R,
+                                     Team::Station, /*avoidAlways*/ true });
       });
       for (std::size_t i = 0; i < _out.size(); ++i)
         _grid.Insert(i, _out[i].pos);
@@ -252,7 +254,7 @@ namespace Neuron::GameLogic
     // fixed side for the rare dead-ahead tie-break.
     [[nodiscard]] inline bool AvoidObstacles(const std::vector<AiObstacle>& _obstacles,
                                              const Spatial::Grid& _grid, std::vector<uint64_t>& _nearby,
-                                             ECS::EntityId _self, uint32_t _targetIndex,
+                                             ECS::EntityId _self, uint32_t _targetIndex, int _selfTeam,
                                              const Math::Vector3i64& _pos, const Flight& _f, FlightIntent& _intent)
     {
       QuerySortedNeighbours(_grid, _pos, CellsForRange(AVOID_LOOKAHEAD), _nearby);
@@ -265,6 +267,10 @@ namespace Neuron::GameLogic
       {
         const AiObstacle& o = _obstacles[idx];
         if (o.id == _self || o.id.index == _targetIndex)
+          continue;
+        // Only give a berth to lethal landmarks and our own allies; enemy/prey
+        // ships belong to the combat and flee logic, not obstacle avoidance.
+        if (!o.avoidAlways && o.team != _selfTeam)
           continue;
 
         const Math::Vector3d to{ static_cast<double>(o.pos.x - _pos.x),
@@ -432,7 +438,7 @@ namespace Neuron::GameLogic
       // prey) sits on the path ahead, spend this think steering clear rather than
       // ramming it and dying on contact. Ease off the throttle while turning out.
       if (Detail::AvoidObstacles(_scratch.aiObstacles, _scratch.aiAvoidGrid, _scratch.aiAvoidNearby,
-                                 self, c->focus, t->position, *f, *intent))
+                                 self, c->focus, c->team, t->position, *f, *intent))
       {
         Detail::Nudge(*ai, -AI_BRAKE_STEP);
         intent->throttle = ai->throttle;

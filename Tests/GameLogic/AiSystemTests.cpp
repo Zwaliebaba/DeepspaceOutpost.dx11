@@ -105,7 +105,7 @@ TEST(AiSystem, HuntsATargetAhead)
 {
   const HuntResult r = Hunt({ 0, 0, 9000 });
   EXPECT_GT(r.bestAlign, 0.9);
-  EXPECT_LT(r.bestDist, 4000.0);   // it closed most of the 9000
+  EXPECT_LT(r.bestDist, 5000.0);   // it closed most of the 9000 (slower hull: wider standoff)
 }
 
 TEST(AiSystem, TurnsOntoATargetAbove)
@@ -182,7 +182,7 @@ TEST(AiSystem, ThrottlesUpOnADistantChase)
   uint32_t rng = 7u;
   RunSim(w, tick, rng, 200);
 
-  EXPECT_GT(w.Get<Flight>(npc).speed, 50.0);         // it is genuinely moving
+  EXPECT_GT(w.Get<Flight>(npc).speed, 40.0);         // it is genuinely moving (60-unit cap)
   EXPECT_LT(DistTo(w, npc, prey), 15000.0);          // and closing
 }
 
@@ -516,6 +516,55 @@ TEST(AiSystem, StepTradersLaunchesOntoTheStationPlanetLane)
   EXPECT_TRUE(toStation || toPlanetGate);
 
   EXPECT_EQ(dir.CountTraders(w), 1);
+}
+
+// --- Collision avoidance -----------------------------------------------------
+
+TEST(AiSystem, SteersOffACollisionCourseWithAStation)
+{
+  ECS::Registry w;
+  const ECS::EntityId npc = SpawnNpc(w, { 0, 0, 0 });   // nose +z
+  // A station dead ahead, inside the lookahead - not prey (nobody attack-runs one).
+  const ECS::EntityId station = w.Create();
+  w.Add<WorldTransform>(station, WorldTransform{ { 0, 0, 3000 } });
+  w.Add<Combatant>(station, Combatant{ Team::Station, 1000000, 0, 1, false });
+
+  uint32_t rng = 1u;
+  std::ignore = StepAi(w, npc.index & 7u, rng);
+
+  // It turns off the collision course rather than boring straight in.
+  const FlightIntent& in = w.Get<FlightIntent>(npc);
+  EXPECT_TRUE(in.pitchAxis != 0.0 || in.rollAxis != 0.0);
+}
+
+TEST(AiSystem, DoesNotRamAStationItIsHeadedInto)
+{
+  ECS::Registry w;
+  const ECS::EntityId npc = SpawnNpc(w, { 0, 0, 0 });
+  const ECS::EntityId station = w.Create();
+  w.Add<WorldTransform>(station, WorldTransform{ { 0, 0, 3000 } });
+  w.Add<Combatant>(station, Combatant{ Team::Station, 1000000, 0, 1, false });
+
+  uint32_t tick = 0;
+  uint32_t rng = 5u;
+  double minDist = 1.0e18;
+  for (int i = 0; i < 300; ++i)
+  {
+    RunSim(w, tick, rng, 1);
+    const double d = DistTo(w, npc, station);
+    if (d < minDist) minDist = d;
+  }
+  // It steers clear: never scrapes the station contact range.
+  EXPECT_GT(minDist, static_cast<double>(STATION_CONTACT_RANGE));
+}
+
+TEST(AiSystem, StillChargesPreyInsideTheAvoidLookahead)
+{
+  // The prey sits well inside AVOID_LOOKAHEAD; because it is an enemy (not an ally
+  // or a landmark) the NPC presses the attack instead of treating it as an
+  // obstacle to steer around.
+  const HuntResult r = Hunt({ 0, 0, 4000 });
+  EXPECT_GT(r.bestAlign, 0.9);
 }
 
 // --- Spawn wiring -----------------------------------------------------------
