@@ -1426,17 +1426,22 @@ static void enter_flight(void)
   s_state = GameState::Flight;
 }
 
-// Enter the game-over animation: a dead Cobra tumbling through wreckage for 100 frames.
-// The scene animates in camera space against the identity camera (camera_rig_reset):
-// the wreck spawns well ahead at +z and drifts toward the eye; +1000 with speed 6
-// keeps it in front for the whole 100-frame animation.
+// Death VFX helpers (defined below, next to the bus handlers that also use them).
+static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count);
+static DirectX::XMFLOAT3X3 identity_basis(void);
+
+// Enter the game-over animation: your hull shatters into tumbling debris while cargo
+// wreckage drifts past, for 100 frames. The scene animates in camera space against the
+// identity camera (camera_rig_reset), so the effects origin is pinned to zero and the
+// wreck point {0,0,1000} sits ahead on +z. The debris shatter (EXPLOSION_LIFETIME ~ 3s)
+// burns out just before the animation ends.
 static void enter_game_over(void)
 {
   current_screen = SCR_GAME_OVER;
   camera_rig_reset();
   gfx_set_clip_region(1, 1, 510, 383);
 
-  PlayerFlight().speed = 6;   // presentation only: paces the drift toward the wreck
+  PlayerFlight().speed = 6;   // presentation only: paces the cargo drift past the wreck
   PlayerFlight().roll = 0;
   PlayerFlight().climb = 0;
   clear_local_objects();
@@ -1444,13 +1449,21 @@ static void enter_game_over(void)
   Matrix rotmat;
   set_init_matrix(rotmat);
 
-  int newship = add_new_ship(SHIP_COBRA3, 0, 0, 1000, rotmat, 0, 0);
-  local_objects[newship].flags |= FLG_DEAD;
+  // Your hull's death: the engine debris/particle effect at the wreck point (the legacy
+  // FLG_DEAD pixel-spray cobra is retired - explosion.md decision 1). The rig was just
+  // reset, so the origin is zero for the whole animation.
+  {
+    const Neuron::Math::Vector3i64 wreck{ 0, 0, 1000 };
+    auto& fx = Neuron::Client::EffectsInstance();
+    fx.SetOrigin(Neuron::Math::Vector3i64{ 0, 0, 0 });
+    fx.AddExplosion(SHIP_COBRA3, wreck, identity_basis(), 1.0f);
+    emit_effect_burst(wreck, 24);
+  }
 
   for (int i = 0; i < 5; i++)
   {
     const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
-    newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, 1000, rotmat, 0, 0);
+    const int newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, 1000, rotmat, 0, 0);
     local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
     local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
     local_objects[newship].velocity = rand255() & 15;
@@ -1543,10 +1556,9 @@ int roster_wanted(unsigned int _id)
   return it == g_playerRoster.end() ? -1 : it->second.wanted;
 }
 
-// Emit a short-lived additive-particle burst at an absolute world point - the new engine VFX
-// (explosion.md phase 2), spawned alongside the legacy debris pop until the legacy path is
-// retired in phase 4. Random outward velocities on the game-side PRNG (exe-side, so random.h is
-// fine here). The engine subsystem integrates + draws it; the game only spawns.
+// Emit a short-lived additive-particle burst at an absolute world point - the fireball half
+// of the death VFX (explosion.md). Random outward velocities on the game-side PRNG (exe-side,
+// so random.h is fine here). The engine subsystem integrates + draws it; the game only spawns.
 static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count)
 {
   using namespace DirectX;
@@ -1563,6 +1575,32 @@ static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count)
     const float speed = 200.0f + (rand255() / 255.0f) * 300.0f;
     fx.CreateParticle(_pos, XMVectorScale(dir, speed), Neuron::Client::ParticleTypeId::ExplosionCore, 0.0f);
   }
+}
+
+static DirectX::XMFLOAT3X3 identity_basis(void)
+{
+  DirectX::XMFLOAT3X3 b;
+  DirectX::XMStoreFloat3x3(&b, DirectX::XMMatrixIdentity());
+  return b;
+}
+
+// The dying hull's world basis for the debris shatter, from its last snapshot's nose/roof
+// (side = roof x nose - the BuildRenderRecords convention). Rows [side, roof, nose], the
+// ModelDraw/RenderRecord row-vector layout the Effects subsystem expects.
+static DirectX::XMFLOAT3X3 snapshot_basis(const Neuron::Net::EntitySnapshot& _s)
+{
+  using namespace DirectX;
+  const XMVECTOR noseRaw = XMVectorSet(_s.noseX, _s.noseY, _s.noseZ, 0.0f);
+  const XMVECTOR roofRaw = XMVectorSet(_s.roofX, _s.roofY, _s.roofZ, 0.0f);
+  if (XMVectorGetX(XMVector3LengthSq(noseRaw)) < 1e-6f ||
+      XMVectorGetX(XMVector3LengthSq(roofRaw)) < 1e-6f)
+    return identity_basis();   // degenerate snapshot -> unrotated shatter
+  const XMVECTOR nose = XMVector3Normalize(noseRaw);
+  const XMVECTOR roof = XMVector3Normalize(roofRaw);
+  const XMVECTOR side = XMVector3Cross(roof, nose);
+  XMFLOAT3X3 b;
+  XMStoreFloat3x3(&b, XMMATRIX(side, roof, nose, XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f)));
+  return b;
 }
 
 static void register_client_event_handlers(void)
@@ -1669,26 +1707,31 @@ static void register_client_event_handlers(void)
     if (_death.victim == g_missile_lock_target)
       g_missile_lock_target = 0xFFFFFFFFu;
     g_playerRoster.erase(_death.victim);
-    // Capture the dying ship's last position/type BEFORE forgetting it, so we can
-    // play a debris burst where it died (the server just vanishes the entity).
+    // Capture the dying ship's last position/type/orientation BEFORE forgetting it, so
+    // the death is visible where it happened (the server just vanishes the entity):
+    // shatter the hull mesh into tumbling debris + a fireball burst (explosion.md).
     Net::EntitySnapshot vs;
     if (rc.Sample(_death.victim, 1.0, vs))
     {
-      spawn_replicated_explosion(vs);
-      emit_effect_burst(Neuron::Math::Vector3i64{ vs.x, vs.y, vs.z }, 24);
+      const Neuron::Math::Vector3i64 at{ vs.x, vs.y, vs.z };
+      if (vs.type >= 1 && vs.type <= NO_OF_SHIPS)   // real hulls only (not planet/sun)
+        Neuron::Client::EffectsInstance().AddExplosion(vs.type, at, snapshot_basis(vs), 1.0f);
+      emit_effect_burst(at, 24);
     }
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
   });
 
   // G1: a world-anchored kill VFX (a player death the killer/bystanders should see;
-  // the victim itself got a private EntityDeath and respawned elsewhere). Play the
-  // debris burst at the broadcast point.
+  // the victim itself got a private EntityDeath and respawned elsewhere). Shatter a
+  // fighter hull at the broadcast point (player hulls are Vipers; the message carries
+  // no entity/orientation, so the debris mesh and basis are representative).
   g_clientBus.Subscribe<Neuron::Msg::ExplosionAt>([](const Neuron::Msg::ExplosionAt& _boom)
   {
-    spawn_explosion_at(Neuron::Math::Vector3i64{ _boom.x, _boom.y, _boom.z }, _boom.scale);
+    const Neuron::Math::Vector3i64 at{ _boom.x, _boom.y, _boom.z };
     const int scale = (_boom.scale > 0) ? ((_boom.scale < 4) ? _boom.scale : 4) : 1;
-    emit_effect_burst(Neuron::Math::Vector3i64{ _boom.x, _boom.y, _boom.z }, 24 * scale);
+    Neuron::Client::EffectsInstance().AddExplosion(SHIP_VIPER, at, identity_basis(), 1.0f);
+    emit_effect_burst(at, 24 * scale);
     snd_play_sample(SND_EXPLODE);
   });
 
