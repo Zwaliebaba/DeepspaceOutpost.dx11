@@ -52,7 +52,7 @@
 #include "Messages/Defs/PlayerSession.h" // Msg::ClientHello / HelloAck / HelloReject / PlayerInfo
 
 #include "SimComponents.h"
-#include "FlightInput.h"       // FlightIntent / FlightCaps (applied in OnInput/SpawnPlayer)
+#include "FlightInput.h"       // FlightIntent / FlightCaps (SpawnPlayer components; SafeParkSilent zeroes)
 #include "StationServices.h"
 #include "CombatSystem.h"
 #include "EquipmentSystem.h"   // ShipGear (laser heat + ECM recharge, G8)
@@ -139,11 +139,14 @@ namespace Neuron::GameLogic
   class ServerSessions
   {
   public:
-    // Handle an input datagram carrying session `_token` from `_ep`. Input is
+    // Handle a heartbeat datagram carrying session `_token` from `_ep`. Input is
     // authenticated (B2): a token-less (0) or wrong/unknown token is ignored - only
-    // a live, correctly-tokened session applies intent. The endpoint re-binds to
-    // `_ep` if the token arrived from a new address. Returns the session's entity,
-    // or an INVALID id when unauthenticated / not yet live.
+    // a live, correctly-tokened session is touched. A fresh heartbeat marks the
+    // session seen (liveness for SafeParkSilent/Reap) and applies its snapshot ack;
+    // movement rides UnitOrders and abilities ride AbilityRequests, so no flight
+    // intent is written here. The endpoint re-binds to `_ep` if the token arrived
+    // from a new address. Returns the session's entity, or an INVALID id when
+    // unauthenticated / not yet live.
     ECS::EntityId OnInput(ECS::Registry& _world, const Net::Endpoint& _ep, uint64_t _token,
                           const Msg::InputCommand& _in, uint32_t _tick)
     {
@@ -160,17 +163,13 @@ namespace Neuron::GameLogic
         session->inputsThisWindow = 0;
       }
       if (session->inputsThisWindow >= MAX_INPUTS_PER_TICK)
-        return ECS::EntityId{};   // capped: drop this input (and its fire) entirely
+        return ECS::EntityId{};   // capped: drop this input (and its ack) entirely
       ++session->inputsThisWindow;
 
       if (_in.sequence > session->lastInputSeq)
       {
         session->lastInputSeq = _in.sequence;
         session->ackedSnapshotTick = _in.ackSnapshotTick;   // E2b: freshest input carries the freshest ack
-        FlightIntent& fi = _world.Get<FlightIntent>(session->entity);
-        fi.rollAxis = _in.rollAxis;
-        fi.pitchAxis = _in.pitchAxis;
-        fi.throttle = _in.throttle;
       }
       return session->entity;
     }

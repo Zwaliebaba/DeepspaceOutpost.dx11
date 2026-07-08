@@ -248,23 +248,10 @@ namespace DSOServer
       if (!Msg::DecodeRecord(rec, in))
         continue;
 
-      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
-
-      // Player weapon/equipment intent becomes FireWeapon commands on the bus;
-      // the combat subscriber resolves them to facts after the receive loop.
-      if (m_world.IsValid(player))
-      {
-        if (in.fire)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
-        if (in.fireMissile)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
-        if (in.ecm)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Msg::NO_MISSILE_TARGET });
-        if (in.energyBomb)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET });
-        if (in.escapePod)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Msg::NO_MISSILE_TARGET });
-      }
+      // The heartbeat carries only freshness + the snapshot ack. Equipment
+      // activations arrive as reliable AbilityRequests (HandleAbilityRequest)
+      // and movement as UnitOrders - nothing on this lane fires a weapon.
+      m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
     }
   }
 

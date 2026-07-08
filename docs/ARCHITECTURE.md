@@ -168,7 +168,7 @@ Bulk. Idle lanes are silent. `ReliableChannel` is TCP-like at message level
 (ordered, deduplicated, resent until acked) but stays on UDP.
 
 **Framing** (`Messages/Framing.h`): an `'NMSG'` packet is
-`magic u32 | PROTOCOL_VERSION u16 (=3) | lane u8 | token u64` followed by zero
+`magic u32 | PROTOCOL_VERSION u16 (=4) | lane u8 | token u64` followed by zero
 or more records, each `MessageId u16 | length u16 | payload`. The mandatory
 per-record length bounds every decoder to exactly its own bytes — a malformed
 message cannot run the reader into the next record.
@@ -315,23 +315,17 @@ client sends `{sender ignored, text}`; the server rate-limits and sanitizes it
 #### Input
 
 **`InputCommand`** — `0x0100` · Wire · Command · **Unreliable** lane · C→S.
-The per-frame heartbeat. Self-superseding: the server keeps the highest
-`sequence` and drops stale datagrams. A static trait forbids queuing it on a
-reliable lane. With the pointer-first client the flight axes are always sent
-as **zero** (movement is a `UnitOrder`); the ability flags are still the live
-activation path (see `AbilityRequest` below), and `ackSnapshotTick` carries
-the delta-stream ack.
+The per-frame heartbeat — since protocol v4 that is *all* it is. The legacy
+flight axes and ability flags are gone from the wire: movement is a
+`UnitOrder`, abilities are an `AbilityRequest`, and nothing on the unreliable
+lane can fire a weapon or move a hull. Self-superseding: the server keeps the
+highest `sequence` and drops stale datagrams. A static trait forbids queuing
+it on a reliable lane. Its cadence is also the liveness signal
+`SafeParkSilent` watches.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `sequence` | u32 | monotonic; latest wins |
-| `rollAxis` / `pitchAxis` / `throttle` | f32 | legacy flight axes — always 0 from the pointer-first client; the server still clamps and applies them |
-| `fire` | bool | fire the front laser this frame (unused by the client; attack is an order) |
-| `fireMissile` | bool | launch a missile this frame |
-| `missileTarget` | u32 | locked target index, or `0xFFFFFFFF` (none) — validated server-side (range + cone) |
-| `ecm` | bool | fire the ECM burst |
-| `energyBomb` | bool | detonate the energy bomb |
-| `escapePod` | bool | eject in the escape pod |
 | `ackSnapshotTick` | u32 | latest snapshot baseline the client holds (delta ack) |
 
 #### Orders & abilities
@@ -356,10 +350,12 @@ on a protected victim is a crime attributed to the owner at order time.
 
 **`AbilityRequest`** — `0x1014` · Wire · Command · Gameplay · C→S. One-shot
 equipment activation on a reliable lane: `{kind u8, target u32}` with
-`AbilityKind`: `FireMissile=1`, `Ecm=2`, `EnergyBomb=3`, `EscapePod=4`.
-The server handler is live and tested, but **the client still activates
-abilities through the `InputCommand` flags** — unifying onto this message and
-retiring the unreliable flags is an open protocol item (§14).
+`AbilityKind`: `FireMissile=1` (`target` = locked index, validated server-side
+with the same range + cone gate as the laser), `Ecm=2`, `EnergyBomb=3`,
+`EscapePod=4`. **This is the one activation path** (protocol v4): the client's
+ability bar publishes a LocalOnly `ActionTriggered`, a subscriber maps it onto
+this message, and the reliable lane guarantees a button press is never lost —
+the old unreliable `InputCommand` flags are retired.
 
 #### Lifecycle & VFX
 
@@ -520,7 +516,7 @@ the non-wire half, not `REGISTER_MESSAGE`'d — they never serialize):
 
 | Message | Id | Meaning |
 |---|---|---|
-| `FireWeapon{shooter, weapon, target}` | `0x8101` | a fire request (from `InputCommand` flags or an Attack order); resolved against the world |
+| `FireWeapon{shooter, weapon, target}` | `0x8101` | a fire request (from an `AbilityRequest` or an Attack order); resolved against the world |
 | `Crime{offender, victimTeam, firstOffence}` | `0x8102` | a protected victim was fired on; police dispatch on first offence |
 | `EntityKilled{victim, killer}` | `0x8103` | something died; ONE subscriber decides what a death does |
 | `EcmFired{ship}` | `0x8104` | an ECM burst fired → the server broadcasts `EcmPulse` |
@@ -570,8 +566,8 @@ Every 33 ms tick (`GameServer::RunTick`), in this order:
 
 1. **Drain the socket.** Route datagrams by magic: `InputCommand` →
    `ServerSessions::OnInput` (applied only to a live, handshaken session — an
-   unknown endpoint is ignored; stale-sequence drop; intent applied to
-   `FlightIntent`; ability flags become `FireWeapon` bus messages) · reliable
+   unknown endpoint is ignored; stale-sequence drop; the heartbeat marks the
+   session seen and applies its snapshot ack — nothing else rides it) · reliable
    datagrams → `ServerSessions::OnReliable` (an unknown endpoint gets a
    pending, entity-less shell so its `ClientHello` can be received) →
    per-session `MessageEndpoint`.
@@ -686,7 +682,7 @@ only the intent's author differs (an `ActiveOrder`, the AI, or legacy axes).
   auto-fights; player primaries (autoEngage=false) fire only on command but may
   target **other players** — that is how PvP exists at all. Player-owned
   escorts auto-engage in defence of their owner.
-- **Player laser:** an Attack order (or a legacy `fire` flag) resolves through
+- **Player laser:** an Attack order resolves through
   `ResolvePlayerFire`: nearest enemy within 6000 units inside a cos ≥ 0.9
   (~25°) aiming cone; damage is the ship's laser strength. The shot is
   **lag-compensated**: the target is rewound through a 15-tick transform
@@ -938,8 +934,8 @@ score.
 ### 6.12 Equipment
 
 The purchased items work, all server-validated (`EquipmentSystem`); one-shot
-activations arrive as `InputCommand` flags (or `AbilityRequest`) and resolve
-through `FireWeapon`:
+activations arrive as reliable `AbilityRequest`s and resolve through
+`FireWeapon`:
 
 - **ECM** (activation, 32 energy, 32-tick recharge): downs EVERY in-flight
   missile within 12 000 units — anyone's, including your own (the legacy burst
@@ -1066,9 +1062,10 @@ The client is deliberately dumb. It keeps:
   gesture recognizer (tap/double-tap/long-press/drag/pan/pinch) maps one
   finger to camera rotate, **two fingers to pan** (consumed by the rig),
   pinch to zoom and double-tap to focus. Ability presses publish
-  `ActionTriggered` (LocalOnly bus) and currently ride the `InputCommand`
-  flags (§4.4). The per-frame `InputCommand` continues as the heartbeat that
-  carries the delta-stream ack, with **zero flight axes**. The keyboard is
+  `ActionTriggered` (LocalOnly bus); a subscriber maps them onto the reliable
+  `AbilityRequest` (§4.4) so a press is never lost. The per-frame
+  `InputCommand` is the pure heartbeat that carries the delta-stream ack —
+  nothing else rides the unreliable lane. The keyboard is
   optional accelerators only — F1–F12, F (focus), M (grid), Esc
   (window-close), and the camera pan/fly keys; the legacy combat keys are
   retired. *(Caveat: the H1–H6 pure cores are unit-tested, but the
@@ -1306,7 +1303,9 @@ default, band select, movement grid, MMB/chord/two-finger pan) has **landed**
 missile-lock validation, chat, suns/cabin heat) are **done**; the first
 ordered unit (escort) is **done**; the legacy math-stack retirement is
 **done** (no `LegacyVector*`/`Matrix33` left in source); the starfield visual
-pass (`stars.md`) is **done**. Open: the 4X feature tier (fog of war,
+pass (`stars.md`) is **done**; the ability-path unification onto
+`AbilityRequest` + the `InputCommand` heartbeat re-cut (protocol v4) is
+**done**. Open: the 4X feature tier (fog of war,
 territory, living economy, factions), missions, the render residues, and the
 engineering items in §13–§14. The full build history lives in
 `docs/IMPLEMENTATION.md`.
@@ -1325,13 +1324,12 @@ as-built in §3–§7 and logged in `IMPLEMENTATION.md`.)
 
 ### 13.1 Protocol & simplification
 
-- **Unify ability activation onto `AbilityRequest`.** Both activation paths
-  are live today: the client sets the unreliable `InputCommand` flags, while
-  the reliable `AbilityRequest 0x1014` handler sits ready server-side. Move
-  the client onto `AbilityRequest`, then re-cut `InputCommand` to the pure
-  heartbeat/ack `{sequence, ackSnapshotTick}` it already is in spirit (the
-  axes are always zero). One activation path, one less unreliable-loss edge
-  case on one-shot items (bomb/pod).
+- **Ability activation unified onto `AbilityRequest` — DONE (protocol v4).**
+  The client maps ability presses onto the reliable `AbilityRequest` and
+  `InputCommand` is re-cut to the pure heartbeat/ack
+  `{sequence, ackSnapshotTick}`. One activation path, no unreliable-loss edge
+  case on one-shot items (bomb/pod), and the unreliable lane can no longer
+  fire a weapon or move a hull.
 - **Two math stacks, not three (S6) — DONE.** DirectXMath for presentation,
   `Vector3i64`/`Vector3d` for simulation. The third stack is gone: the
   `LegacyVector*`/`Matrix33` wrappers have been fully retired — no source
@@ -1433,7 +1431,7 @@ what's open. Effort: S ≤ a day-ish, M = days, L = week(s).
 | 3 | Drifting markets + traders-as-supply + hauler `Route` orders | §13.2-3 | Feature | L | exploit, emergence |
 | 4 | `FactionId` + standings | §13.2-4 | Feature | M | diplomacy, mass PvP |
 | 5 | Missions (after the 4X tier settles) | §12 | Feature | L | quests, direction |
-| 6 | Ability path unification (`AbilityRequest`) + `InputCommand` re-cut | §13.1 | Simplify | S | protocol hygiene |
+| 6 | ~~Ability path unification + `InputCommand` re-cut~~ **done 2026-07-08** (protocol v4) | §13.1 | Simplify | — | protocol hygiene |
 | 7 | Render residues: in-app visual pass → instancing/glow default-on; vector glyph set + grid-backed client cull; GPU explosion debris (plan: `explosion.md`) | §7 | Render | M | fleet battles, style |
 | 8 | Interaction residues: widget drag-scroll/steppers, chart pointer name-search *(two-finger camera pan shipped with the `input.md` migration)* | §7 | UX | S | touch polish |
 | 9 | Escort persistence + respawn re-target | §6.13 | Feature | S–M | durable fleets |
@@ -1446,6 +1444,6 @@ what's open. Effort: S ≤ a day-ish, M = days, L = week(s).
 | 16 | SIMD hot paths under `/fp:strict` discipline | §13.3 | Perf | M | fleet scale |
 | 17 | Phase-parallel tick (only after profiling shows the budget breaking) | §13.3 | Perf | L | entity counts |
 
-Sequencing spine: **1 → 2 → 3 → 4 → 5** for the 4X tier, with 6–9 (hygiene +
+Sequencing spine: **1 → 2 → 3 → 4 → 5** for the 4X tier, with 7–9 (hygiene +
 polish) parallelizable at any point, 15 gating any entity-cap increase, and
 16–17 strictly profile-driven.
