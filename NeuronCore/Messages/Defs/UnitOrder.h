@@ -47,6 +47,7 @@ namespace Neuron::Msg
     Escort = 7,     // follow `target` (F1: the owner's ship); reserved semantics
     Patrol = 8,     // reserved (F-track): patrol a point/region
     Route = 9,      // reserved (F-track): run a trade route
+    Mine = 10,      // fly to `target` rock/belt anchor and cut ore (scene.md 3.7)
   };
 
   // How the server received a UnitOrder. Accepted = the order is now active;
@@ -60,6 +61,8 @@ namespace Neuron::Msg
     OutOfRange = 4,  // reserved: the target/point is beyond an allowed distance
     Docked = 5,      // the unit is docked and cannot take a flight order
     Rejected = 6,    // catch-all refusal
+    HoldFull = 7,    // a Mine order needs cargo room the hold does not have
+    NoGear = 8,      // a Mine order needs a mining laser the unit is not carrying
   };
 
   // client -> server: order a unit you own. `target` is the entity the order acts

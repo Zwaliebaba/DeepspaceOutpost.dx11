@@ -41,6 +41,8 @@ namespace Neuron::GameLogic
     inline constexpr int Viper = 16;
     inline constexpr int Sidewinder = 17;  // stock starter hull (SHIP_SIDEWINDER)
     inline constexpr int Thargoid = 29;    // witchspace ambusher (SHIP_THARGOID)
+    inline constexpr int Beacon = 30;      // scene POI anchor marker (nav/encounter/salvage);
+                                           // drawn as chart symbology (RenderTable glyph, client TODO)
   }
 
   // An in-flight homing missile - a real entity that chases its locked target and

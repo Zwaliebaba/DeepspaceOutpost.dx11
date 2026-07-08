@@ -60,7 +60,8 @@ namespace Neuron::GameLogic
                    | (e->ecm          ? Persist::EQUIP_ECM              : 0u)
                    | (e->fuelScoop    ? Persist::EQUIP_FUEL_SCOOP       : 0u)
                    | (e->energyBomb   ? Persist::EQUIP_ENERGY_BOMB      : 0u)
-                   | (e->escapePod    ? Persist::EQUIP_ESCAPE_POD       : 0u);
+                   | (e->escapePod    ? Persist::EQUIP_ESCAPE_POD       : 0u)
+                   | (e->miningLaser  ? Persist::EQUIP_MINING_LASER     : 0u);
     }
     s.inWitchspace = _world.Has<Witchspace>(_entity);
 
@@ -101,6 +102,7 @@ namespace Neuron::GameLogic
       e->fuelScoop     = (_s.equipFlags & Persist::EQUIP_FUEL_SCOOP) != 0;
       e->energyBomb    = (_s.equipFlags & Persist::EQUIP_ENERGY_BOMB) != 0;
       e->escapePod     = (_s.equipFlags & Persist::EQUIP_ESCAPE_POD) != 0;
+      e->miningLaser   = (_s.equipFlags & Persist::EQUIP_MINING_LASER) != 0;
     }
 
     // Witchspace is a tag: add/remove to match the snapshot.

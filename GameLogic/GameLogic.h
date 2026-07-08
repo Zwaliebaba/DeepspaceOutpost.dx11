@@ -44,6 +44,9 @@
 #include "EscortSpawn.h"     // F1: player-owned escort NPC (SpawnEscort)
 #include "CabinHeatSystem.h" // G4: suns + cabin heat + fuel scooping (StepCabinHeat)
 #include "ChatModeration.h"  // G3: chat rate limit + sanitisation
+#include "SceneTypes.h"      // scene.md: POI/ore/pool components
+#include "SceneSystem.h"     // scene.md: SceneIndex + MaterializeScenePoi + StepSceneRegen
+#include "MiningSystem.h"    // scene.md: StepMining (the Mine order beam cycle)
 
 namespace Neuron::GameLogic
 {

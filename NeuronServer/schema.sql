@@ -130,3 +130,49 @@ ALTER TABLE dbo.station_markets
 -- insert above). Idempotent - only advances a v1 row.
 IF EXISTS (SELECT * FROM dbo.world_meta WHERE meta_key = 'schema_version' AND meta_value = '1')
 UPDATE dbo.world_meta SET meta_value = '2' WHERE meta_key = 'schema_version';
+
+-- ===========================================================================
+-- v3: per-system scenes (scene.md).
+--
+-- Each system holds a set of POINTS OF INTEREST (belts, encounter sites, nav
+-- beacons; later factories/guns/gates) authored from scene templates and placed
+-- deterministically around the planet. `system_pois` stores one row per POI -
+-- ANCHORS + parameters only; the server materializes in-area detail (belt rocks)
+-- from the poi seed, so the table stays small (a few rows per system). tools/dbseed
+-- populates it once (idempotent MERGE); rows are then hand/script/editor editable,
+-- and `authored`/`enabled` let hand edits and re-seeding coexist. Static anchors in
+-- the DB honour §12's "never per-tick positions" rule (like dbo.systems).
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'system_pois')
+CREATE TABLE dbo.system_pois (
+  poi_id        INT PRIMARY KEY,       -- stable id; assigned by the seeder (not IDENTITY)
+  system_id     INT NOT NULL REFERENCES dbo.systems(system_id),
+  kind          TINYINT NOT NULL,      -- GameLogic::PoiKind (1 NavBeacon .. 7 SalvageField)
+  x             BIGINT NOT NULL,       -- absolute int64 anchor position
+  y             BIGINT NOT NULL,
+  z             BIGINT NOT NULL,
+  radius        INT NOT NULL,          -- area extent (units)
+  seed          INT NOT NULL,          -- in-area procedural detail (rock scatter)
+  commodity     TINYINT NULL,          -- AsteroidBelt: ore commodity index
+  richness      INT NULL,              -- AsteroidBelt: baseline pool (units of ore)
+  encounter_def SMALLINT NULL,         -- EncounterSite: designai.md EncounterDef id
+  owner_empire  INT NULL REFERENCES dbo.empires(empire_id),  -- future: factories/guns
+  link_poi      INT NULL,              -- future: JumpGate pairing (a poi_id)
+  enabled       BIT NOT NULL DEFAULT 1,-- editor kill switch (row kept, POI off)
+  template_id   SMALLINT NOT NULL,     -- provenance: which template authored it
+  authored      BIT NOT NULL DEFAULT 0 -- 1 = hand-edited: dbseed MERGE must not touch
+);
+
+-- One durable resource pool per minable POI (scene.md 3.7b). Mining drains it and
+-- StepSceneRegen drifts it back toward baseline; persisted on the slow cadence
+-- (like station_markets drift), never per-tick, never per-rock.
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'poi_resources')
+CREATE TABLE dbo.poi_resources (
+  poi_id        INT PRIMARY KEY REFERENCES dbo.system_pois(poi_id),
+  units         INT NOT NULL,          -- current pool
+  baseline      INT NOT NULL,          -- regen ceiling (= richness at seed time)
+  updated_tick  BIGINT NOT NULL
+);
+
+-- Bump to v3 now that its objects exist (append-only: never edit the blocks above).
+IF EXISTS (SELECT * FROM dbo.world_meta WHERE meta_key = 'schema_version' AND meta_value = '2')
+UPDATE dbo.world_meta SET meta_value = '3' WHERE meta_key = 'schema_version';

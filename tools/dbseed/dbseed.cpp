@@ -23,8 +23,9 @@
 #include <vector>
 
 #include "GalaxyRows.h"        // BuildSystemRows / BaselineMarketRows (Server-side, header-only)
+#include "SceneRows.h"         // BuildPoiRows / BaselinePoiResourceRows (scene.md, header-only)
 #include "OdbcStore.h"         // MakeOdbcStore
-#include "PersistenceStore.h"  // IPersistenceStore / SystemRow / MarketRow
+#include "PersistenceStore.h"  // IPersistenceStore / SystemRow / MarketRow / PoiRow
 
 using namespace Neuron;
 
@@ -68,6 +69,15 @@ int main(int _argc, char** _argv)
   store->UpsertSystems(systems);
   store->UpsertMarketRows(markets);
 
+  // Scene POIs (scene.md): match each system to its template, place the recipe
+  // deterministically, and write the anchor rows + baseline belt pools. Same
+  // discipline as the market baseline (updated_tick = 0 = "as seeded"). The store's
+  // MERGE leaves hand-edited (authored=1) rows untouched.
+  const std::vector<Persist::PoiRow> pois = DSOServer::BuildPoiRows(cfg);
+  const std::vector<Persist::PoiResourceRow> poiResources = DSOServer::BaselinePoiResourceRows(pois, /*tick*/ 0);
+  store->UpsertPois(pois);
+  store->UpsertPoiResources(poiResources);
+
   // Provenance: record the seed the galaxy was generated from, and initialize the
   // world tick if this is a fresh DB (never clobber an advancing counter).
   {
@@ -78,7 +88,8 @@ int main(int _argc, char** _argv)
       store->WriteMeta("world_tick", "0");
   }
 
-  std::printf("dbseed: wrote %zu systems and %zu market rows (seed 0x%llX).\n",
-              systems.size(), markets.size(), static_cast<unsigned long long>(cfg.seed));
+  std::printf("dbseed: wrote %zu systems, %zu market rows, %zu scene POIs, %zu belt pools (seed 0x%llX).\n",
+              systems.size(), markets.size(), pois.size(), poiResources.size(),
+              static_cast<unsigned long long>(cfg.seed));
   return 0;
 }

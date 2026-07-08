@@ -32,6 +32,7 @@
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
 #include "Messages/Defs/ExplosionAt.h"    // ExplosionAt (G1 kill VFX broadcast)
+#include "Messages/Defs/SceneChunks.h"    // SceneChunkRequest / SceneChunk / MiningTick (scene.md)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
@@ -119,6 +120,9 @@ namespace DSOServer
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
     void HandleBuyEscort(Neuron::GameLogic::Session& _session);   // F1: purchase + spawn an owned escort
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
+    // scene.md: reply with a system's scene (its POIs) so the client can list local
+    // areas and target a POI jump.
+    void HandleSceneChunkRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::SceneChunkRequest& _req);
     // I1: order a unit (validate ownership/target/range, record the ActiveOrder, ack)
     // and route a discrete equipment activation to the combat bus.
     void HandleUnitOrder(Neuron::GameLogic::Session& _session, const Neuron::Msg::UnitOrder& _req);
@@ -149,6 +153,7 @@ namespace DSOServer
     Neuron::GameLogic::ServerSessions m_sessions;
     Neuron::GameLogic::DespawnTracker m_despawns;
     Neuron::GameLogic::SpawnDirector m_spawner;
+    Neuron::GameLogic::SceneIndex m_sceneIndex;   // scene.md: systemId/poiId -> POI anchors
     Neuron::GameLogic::TransformHistory m_combatHistory;   // E1: per-tick rewind buffer for lag comp
     Neuron::Msg::MessageBus m_bus;
 

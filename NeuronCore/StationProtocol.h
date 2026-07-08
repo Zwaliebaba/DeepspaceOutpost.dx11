@@ -46,6 +46,7 @@ namespace Neuron::Net
     // escort NPC instead of setting an Equipment flag. Handled by the GameServer
     // escort path, not EquipPlayer (which only knows the fitted booleans above).
     EscortFighter = 7,
+    MiningLaser = 8,   // a fitted upgrade: enables the Mine order's beam cycle (scene.md 3.7)
   };
 
   // Result of a station request (also returned by the server-side services).
