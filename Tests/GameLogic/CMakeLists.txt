@@ -22,6 +22,7 @@ add_executable(GameLogic.Tests
     EquipmentSystemTests.cpp
     FlightInputTests.cpp
     FlightTests.cpp
+    LaunchSystemTests.cpp
     MissileSystemTests.cpp
     GalaxyGenTests.cpp
     GalaxyTests.cpp
@@ -39,6 +40,7 @@ add_executable(GameLogic.Tests
     ChatModerationTests.cpp
     SceneTests.cpp
     MiningTests.cpp
+    DeterminismTests.cpp
 )
 
 target_compile_features(GameLogic.Tests PRIVATE cxx_std_23)
