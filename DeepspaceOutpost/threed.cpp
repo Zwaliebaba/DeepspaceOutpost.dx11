@@ -19,7 +19,6 @@
 #include "threed.h"
 #include "space.h"
 #include "RenderTable.h"   // H1: NetType -> render descriptor table
-#include "random.h"
 
 
 static struct point point_list[100];
@@ -136,159 +135,14 @@ void draw_sun (struct local_object *planet)
 
 
 
-void draw_explosion (struct local_object *obj)
-{
-	int i;
-	int z;
-	int q;
-	int pr;
-	int px,py;
-	int cnt;
-	int sizex,sizey,psx,psy;
-	Matrix trans_mat;
-	int sx,sy;
-	double rx,ry,rz;
-	int visible[32];
-	struct vector vec;
-	struct vector camera_vec;
-	double cos_angle;
-	double tmp;
-	struct ship_face_normal *ship_norm;
-	struct ship_point *sp;
-	struct ship_data *ship;
-	int np;
-	int old_seed;
-	
-	
-	if (obj->exp_delta > 251)
-	{
-		obj->flags |= FLG_REMOVE;
-		return;
-	}
-	
-	obj->exp_delta += 4;
-
-	if (obj->location.z <= 0)
-		return;
-
-	ship = ship_list[obj->type];
-	
-	for (i = 0; i < 3; i++)
-		trans_mat[i] = obj->rotmat[i];
-		
-	camera_vec = obj->location;
-	mult_vector (&camera_vec, trans_mat);
-	camera_vec = unit_vector (&camera_vec);
-	
-	ship_norm = ship->normals;
-	
-	for (i = 0; i < ship->num_faces; i++)
-	{
-		vec.x = ship_norm[i].x;
-		vec.y = ship_norm[i].y;
-		vec.z = ship_norm[i].z;
-
-		vec = unit_vector (&vec);
-		cos_angle = vector_dot_product (&vec, &camera_vec);
-
-		visible[i] = (cos_angle < -0.13);
-	}
-
-	tmp = trans_mat[0].y;
-	trans_mat[0].y = trans_mat[1].x;
-	trans_mat[1].x = tmp;
-
-	tmp = trans_mat[0].z;
-	trans_mat[0].z = trans_mat[2].x;
-	trans_mat[2].x = tmp;
-
-	tmp = trans_mat[1].z;
-	trans_mat[1].z = trans_mat[2].y;
-	trans_mat[2].y = tmp;
-	
-	sp = ship->points;
-	np = 0;
-	
-	for (i = 0; i < ship->num_points; i++)
-	{
-		if (visible[sp[i].face1] || visible[sp[i].face2] ||
-			visible[sp[i].face3] || visible[sp[i].face4])
-		{
-			vec.x = sp[i].x;
-			vec.y = sp[i].y;
-			vec.z = sp[i].z;
-
-			mult_vector (&vec, trans_mat);
-
-			rx = vec.x + obj->location.x;
-			ry = vec.y + obj->location.y;
-			rz = vec.z + obj->location.z;
-
-			project_to_screen (rx, ry, rz, &sx, &sy);
-
-			point_list[np].x = sx;
-			point_list[np].y = sy;
-			np++;
-		}
-	}
-
-	
-	z = (int)obj->location.z;
-	
-	if (z >= 0x2000)
-		q = 254;
-	else
-		q = (z / 32) | 1;
-
-	pr = (obj->exp_delta * 256) / q;
-	
-//	if (pr > 0x1C00)
-//		q = 254;
-//	else
-
-	q = pr / 32;	
-		
-	old_seed = get_rand_seed();
-	set_rand_seed (obj->exp_seed);
-
-	for (cnt = 0; cnt < np; cnt++)
-	{
-		sx = point_list[cnt].x;
-		sy = point_list[cnt].y;
-	
-		for (i = 0; i < 16; i++)
-		{
-			px = rand255() - 128;
-			py = rand255() - 128;		
-
-			px = (px * q) / 256;
-			py = (py * q) / 256;
-		
-			px = px + px + sx;
-			py = py + py + sy;
-
-			sizex = (randint() & 1) + 1;
-			sizey = (randint() & 1) + 1;
-
-			for (psy = 0; psy < sizey; psy++)
-				for (psx = 0; psx < sizex; psx++)		
-					hud_plot_pixel (px+psx, py+psy, GFX_COL_WHITE);
-		}
-	}
-
-	set_rand_seed (old_seed);
-}
-
-
-
 /*
  * Draws an object handed in the WORLD frame (floating-origin-relative position +
  * world basis). The camera is decoupled from the ship: a camera-space copy is
  * built here through the Camera's view matrix for everything the CPU still does
- * (behind-the-eye and frustum culls, the explosion debris, the firing beam),
- * while the meshes are submitted world-frame and Scene3D applies view*projection
- * on the GPU. Explosion state advanced on the copy is written back to the
- * caller's object (the animation persists across frames).
+ * (behind-the-eye and frustum culls, the firing beam), while the meshes are
+ * submitted world-frame and Scene3D applies view*projection on the GPU.
+ * (The legacy 2D pixel-spray explosion is retired: deaths go through the
+ * Neuron::Client::Effects debris/particle subsystem now - see explosion.md.)
  */
 
 void draw_ship (struct local_object *ship)
@@ -296,27 +150,11 @@ void draw_ship (struct local_object *ship)
 
 	if ((current_screen != SCR_FRONT_VIEW) &&
 		(current_screen != SCR_INTRO_ONE) && (current_screen != SCR_INTRO_TWO) &&
-		(current_screen != SCR_GAME_OVER) && (current_screen != SCR_ESCAPE_POD))
+		(current_screen != SCR_ESCAPE_POD))
 		return;
 
 	struct local_object cam = *ship;
 	camera_view_object (&cam);
-
-	if ((cam.flags & FLG_DEAD) && !(cam.flags & FLG_EXPLOSION))
-	{
-		cam.flags |= FLG_EXPLOSION;
-		cam.exp_seed = randint();
-		cam.exp_delta = 18;
-	}
-
-	if (cam.flags & FLG_EXPLOSION)
-	{
-		draw_explosion (&cam);
-		ship->flags = cam.flags;
-		ship->exp_seed = cam.exp_seed;
-		ship->exp_delta = cam.exp_delta;
-		return;
-	}
 
 	if (cam.location.z <= 0)	/* Only display objects in front of the camera. */
 		return;

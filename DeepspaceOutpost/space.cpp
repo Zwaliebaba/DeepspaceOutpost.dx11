@@ -30,7 +30,6 @@
 #include "Camera.h"      // NeuronClient: MainCamera() + CPU projection helpers
 #include "CameraRig.h"   // the free camera: origin, world->camera transforms
 #include "ReplicationClient.h"
-#include "Vector3i64.h"             // Neuron::Math::Vector3i64 (spawn_explosion_at full def)
 #include "Messages/Defs/Travel.h"   // TravelRequest (hyperspace / jump drive)
 #include "ReplicatedScene.h"
 #include "Render2D.h"       // native 2D pass the flight HUD now draws straight into
@@ -430,57 +429,10 @@ void update_local_objects (void)
 // the server's proximity gate so it never optimistically docks from across AOI.
 static double s_nearest_station_dist = 1.0e18;
 
-// Client-side explosion effects for replicated ships that die. The server sends an
-// EntityDeath (which vanishes the ship); the client turns it into a short debris
-// burst here so a kill is visible, not just audible. Each holds the dying ship's
-// absolute world position and a persistent local_object carrying the legacy
-// explosion state (exp_seed/exp_delta, grown by draw_ship/draw_explosion). It is
-// world-anchored - rebased around the moving player every frame like the ships -
-// until the legacy animation finishes (FLG_REMOVE) or a safety lifetime elapses.
-namespace
-{
-	struct ReplicatedExplosion
-	{
-		Neuron::Math::Vector3i64 worldPos{};
-		struct local_object obj;   // memset in spawn_replicated_explosion
-		int frames = 0;
-	};
-	std::vector<ReplicatedExplosion> s_explosions;
-	constexpr int MAX_EXPLOSION_FRAMES = 120;   // ~2s safety cap if it never faces us
-}
-
-// Start an explosion for a dying replicated ship, from its last snapshot (captured
-// before the entity is forgotten). Skips non-ship types (planet/sun/untyped).
-void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap)
-{
-	const int type = snap.type;
-	if (type <= 0 || type > NO_OF_SHIPS)
-		return;
-
-	ReplicatedExplosion ex;
-	ex.worldPos = Neuron::Math::Vector3i64{ snap.x, snap.y, snap.z };
-	memset (&ex.obj, 0, sizeof (ex.obj));
-	ex.obj.type = type;
-	ex.obj.flags = FLG_DEAD;          // draw_ship promotes this to an animated explosion
-	set_init_matrix (ex.obj.rotmat);
-	s_explosions.push_back (ex);
-}
-
-// G1: start a world-anchored explosion at an absolute point, from an ExplosionAt
-// broadcast (a player kill the killer/bystanders should see, decoupled from the
-// respawned victim entity). Uses a fighter hull for the debris mesh; the server's
-// `scale` is a size hint the legacy animation doesn't parameterise, so it is unused
-// for now beyond gating a sane minimum.
-void spawn_explosion_at (const Neuron::Math::Vector3i64& world_pos, int /*scale*/)
-{
-	ReplicatedExplosion ex;
-	ex.worldPos = world_pos;
-	memset (&ex.obj, 0, sizeof (ex.obj));
-	ex.obj.type = SHIP_VIPER;          // player hulls are Vipers; a fighter-sized pop
-	ex.obj.flags = FLG_DEAD;
-	set_init_matrix (ex.obj.rotmat);
-	s_explosions.push_back (ex);
-}
+// (The legacy client-side explosion book-keeping - ReplicatedExplosion /
+// spawn_replicated_explosion / spawn_explosion_at - is retired: EntityDeath and
+// ExplosionAt now feed the Neuron::Client::Effects debris/particle subsystem
+// directly from the main.cpp bus handlers. See explosion.md, decision 1.)
 
 void render_replicated_objects (void)
 {
@@ -632,49 +584,11 @@ void render_replicated_objects (void)
 		// opens the docked menu (OrderSystem / CompleteDockOrders -> see main.cpp).
 	}
 
-	// Replicated explosions: draw each dying ship's debris burst, world-anchored via
-	// the same floating-origin rebasing the ships use, until the legacy animation
-	// finishes (FLG_REMOVE) or the safety lifetime elapses. draw_ship writes the
-	// per-frame explosion progress back into the persistent object.
-	if (!s_explosions.empty())
-	{
-		std::vector<Neuron::Net::EntitySnapshot> es;
-		es.reserve (s_explosions.size());
-		for (size_t i = 0; i < s_explosions.size(); i++)
-		{
-			Neuron::Net::EntitySnapshot s;   // defaults: nose +z, roof +y
-			s.id = 0x80000000u | (uint32_t) i;   // synthetic id, distinct from real + local
-			s.x = s_explosions[i].worldPos.x;
-			s.y = s_explosions[i].worldPos.y;
-			s.z = s_explosions[i].worldPos.z;
-			s.type = (int16_t) s_explosions[i].obj.type;
-			es.push_back (s);
-		}
-
-		std::vector<Neuron::Client::RenderRecord> exrecs =
-			Neuron::Client::BuildRenderRecords (es, org[0], org[1], org[2]);   // order matches s_explosions
-
-		for (size_t i = 0; i < exrecs.size() && i < s_explosions.size(); i++)
-		{
-			struct local_object& o = s_explosions[i].obj;
-			o.location = exrecs[i].location;
-			o.rotmat[0] = exrecs[i].rotmat[0];
-			o.rotmat[1] = exrecs[i].rotmat[1];
-			o.rotmat[2] = exrecs[i].rotmat[2];
-			o.distance = (int) exrecs[i].distance;
-			draw_ship (&o);   // FLG_DEAD -> explosion; grows exp_delta; sets FLG_REMOVE when done
-		}
-
-		for (ReplicatedExplosion& ex : s_explosions)
-			ex.frames++;
-		std::erase_if (s_explosions, [](const ReplicatedExplosion& e)
-		{
-			return (e.obj.flags & FLG_REMOVE) || e.frames > MAX_EXPLOSION_FRAMES;
-		});
-	}
-
 	/* The frame's replicated 3D scene is fully submitted: draw it now, onto the cleared
-	   back buffer, under the 2D HUD (the game drives the pass; no scene-marker flag). */
+	   back buffer, under the 2D HUD (the game drives the pass; no scene-marker flag).
+	   Death explosions are no longer drawn here: the Neuron::Client::Effects subsystem
+	   simulates them engine-side and the same gfx_render_3d_scene call renders its
+	   debris + particle batches after the ships (SceneParticles). */
 	gfx_render_3d_scene();
 }
 
@@ -986,23 +900,20 @@ void RenderOverlayText (void)
 	s_overlay_text.clear();
 }
 
-// ---- Deferred scene overlays (points + sprites) -----------------------------
+// ---- Deferred scene overlays (sprites) --------------------------------------
 //
-// The last drawing that still went through the gfx2d batch: the ship-death debris spray
-// (screen-projected points, threed.cpp), the per-ship target reticle and the intro title
-// art (sprites, space.cpp / intro.cpp). Like the centred text they are emitted from the
-// RenderScene phase, so they queue here and RenderSceneOverlays draws them natively from
-// RenderGameHud - BEFORE the dashboard and the overlay text, matching the old order where
-// the batch flushed under the HUD. With this the gfx2d 2D batch has no producers left.
+// The per-ship target reticle and the intro title art (sprites, space.cpp / intro.cpp).
+// Like the centred text they are emitted from the RenderScene phase, so they queue here
+// and RenderSceneOverlays draws them natively from RenderGameHud - BEFORE the dashboard
+// and the overlay text, matching the old order where the batch flushed under the HUD.
+// (The ship-death debris points are gone with the legacy draw_explosion - death VFX are
+// the Neuron::Client::Effects 3D pass now, see explosion.md.)
 
 namespace {
-struct OverlayPoint  { int x, y, col; };
 struct OverlaySprite { int img, x, y, w, h; };   // w <= 0 -> the sprite's native size
-std::vector<OverlayPoint>  s_overlay_points;
 std::vector<OverlaySprite> s_overlay_sprites;
 }
 
-void hud_plot_pixel (int x, int y, int col) { s_overlay_points.push_back({ x, y, col }); }
 void hud_sprite_deferred (int img, int x, int y) { s_overlay_sprites.push_back({ img, x, y, 0, 0 }); }
 void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h)
 {
@@ -1011,9 +922,6 @@ void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h)
 
 void RenderSceneOverlays (void)
 {
-	for (const OverlayPoint& p : s_overlay_points)
-		Render2D::PlotPoint((float)p.x + 0.5f, (float)p.y + 0.5f, hud_col(p.col));
-
 	if (!s_overlay_sprites.empty())
 	{
 		const auto sz = Neuron::Graphics::Core::GetOutputSize();
@@ -1033,7 +941,6 @@ void RenderSceneOverlays (void)
 		}
 	}
 
-	s_overlay_points.clear();
 	s_overlay_sprites.clear();
 }
 

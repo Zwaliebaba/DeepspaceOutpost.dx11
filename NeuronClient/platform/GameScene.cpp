@@ -20,6 +20,7 @@
 #include "GraphicsCore.h"
 #include "Scene3D.h"
 #include "SceneGlow.h"
+#include "SceneParticles.h"
 #include "Camera.h"
 
 #include "GameScene.h"
@@ -128,9 +129,17 @@ void gfx_render_3d_scene(void)
 	ID3D11RenderTargetView* sceneRtv = SceneGlow::Begin();
 	ID3D11RenderTargetView* target = sceneRtv ? sceneRtv : backRtv;
 
+	const int vpW = static_cast<int>(cp.vw * cp.scale);
+	const int vpH = static_cast<int>(cp.vh * cp.scale);
+
 	Neuron::Graphics::Scene3D::RenderModels(target, Core::GetDepthStencilView(),
-											Neuron::Client::MainCamera(), cp.dstX, cp.dstY,
-											static_cast<int>(cp.vw * cp.scale), static_cast<int>(cp.vh * cp.scale));
+											Neuron::Client::MainCamera(), cp.dstX, cp.dstY, vpW, vpH);
+
+	// Explosion effects (debris + additive particles) draw over the ship pass, into the same
+	// target and depth buffer - so they depth-test against the world and, when glow is on, land
+	// in the offscreen target and pick up bloom before the composite below (see explosion.md).
+	Neuron::Graphics::SceneParticles::Render(target, Core::GetDepthStencilView(),
+											Neuron::Client::MainCamera(), cp.dstX, cp.dstY, vpW, vpH);
 
 	if (sceneRtv)
 		SceneGlow::Composite(backRtv);

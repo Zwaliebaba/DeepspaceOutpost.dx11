@@ -1,8 +1,20 @@
 # explosion.md — Porting the Darwinia Particle & Explosion Systems into Deepspace Outpost
 
+> **Implementation status.** Phases 1–5 (§8) are implemented on this plan:
+> `SceneParticles` (renderer, §5), `ParticleSystem` + `Effects`/`EffectsInstance()` (§6a),
+> `ExplosionManager` (§6b, via `Scene3D::BuildMeshData`), the `EntityDeath`/`ExplosionAt`/
+> game-over trigger wiring, and the deletion of the legacy `draw_explosion` /
+> `ReplicatedExplosion` path (§7, decision 1) — plus hull-radius scaling of the burst
+> (phase 5). Unit tests live in `Tests/NeuronClient/ParticleSystemTests.cpp` and
+> `ExplosionManagerTests.cpp`. **Open items:** the donor `Expl/` sources were unavailable, so
+> the `ParticleType` table and debris constants are plausible placeholders flagged in-code —
+> tune by eye against a Windows build; the optional camera shake and the `RocketTrail`
+> child-spawn were not ported.
+
 ## 1. Goal
 
-Bring the two Darwinia source pairs from `Expl/` — `ParticleSystem.{h,cpp}` (a billboard
+Bring the two Darwinia source pairs from `Expl/` (donor sources kept outside this repo —
+`Expl/` is **not** committed) — `ParticleSystem.{h,cpp}` (a billboard
 particle engine) and `explosion.{h,cpp}` (a mesh-shatter "flying triangles" effect) — into
 Deepspace Outpost as a real 3D visual-effects layer that:
 
@@ -66,21 +78,21 @@ into a slow drift), per-fragment tumbling, additive glowing particles, and lifet
 
 | Donor construct | Deepspace Outpost replacement | Source of truth |
 |---|---|---|
-| `LegacyVector3` (arithmetic vector) | `Neuron::Math::Vector3d` (`+ - *`, `Dot`, `Cross`, `Length`, `Normalized`) in new modern code | `NeuronCore/Vector3d.h` |
+| `LegacyVector3` (arithmetic vector) | `DirectX::XMFLOAT3` **storage** + `XMVECTOR` **compute** via `Neuron::Math` (explicit load→compute→store boundary; never arithmetic on `XMFLOAT3`). `Neuron::Math::Vector3i64` only for absolute world anchors | `NeuronCore/GameMath.h`, `NeuronCore/Vector3i64.h` (AGENTS.md §DirectXMath) |
 | `Matrix33` / `Matrix34` (tumble/transform) | `XMMATRIX` + `Neuron::Math::CreateRotationMatrix` / `RotateAround`; store `XMFLOAT3X3`/`XMFLOAT4X4` | `NeuronCore/GameMath.h` (AGENTS.md §DirectXMath) |
 | `RGBAColor` / `rgb_colour` | palette index `int` (`GFX_COL_*`) → `Renderer::paletteColour(idx)` → packed `uint32_t` `0xAABBGGRR`; or store `uint32_t`/`XMFLOAT4` directly | `NeuronClient/GamePalette.h`, `platform/Renderer.h` |
-| `Shape` / `ShapeFragment` / `ShapeTriangle` / `VertexPosCol` | `Neuron::Graphics::MeshData` / `MeshVertex{pos,normal,rgba}`, **already fan-triangulated** (triangle *t* = indices[3t..3t+2]) | `NeuronClient/Mesh.h`, `DeepspaceOutpost/SceneMeshes.cpp::build_ship_mesh` |
+| `Shape` / `ShapeFragment` / `ShapeTriangle` / `VertexPosCol` | `Neuron::Graphics::MeshData` / `MeshVertex{x,y,z, nx,ny,nz, rgba}`, **already fan-triangulated** (triangle *t* = indices[3t..3t+2]) | `NeuronClient/Mesh.h`, `DeepspaceOutpost/SceneMeshes.cpp::build_ship_mesh` |
 | `FastDArray<T>`, `LList<T*>`, `SliceDArray<T>` | `std::vector<T>` (swap-erase / `std::erase_if` to cull) — these custom containers **do not exist and must not be reintroduced** | AGENTS.md §Native-First |
 | `NEW T[]` / `delete[]` / manual pool | value semantics inside `std::vector`; no manual `new` | — |
-| `frand()` → [0,1) | `randint() / 2147483647.0f` (add a small local `frand01()` helper) | `DeepspaceOutpost/random.h` |
-| `sfrand(x)` / `syncsfrand(x)` → [-x,x] | `((rand255() - 128) / 128.0f) * x` (local `sfrand(x)` helper) | `DeepspaceOutpost/random.h` |
-| `darwiniaRandom()` | `randint()` | `DeepspaceOutpost/random.h` |
+| `frand()` → [0,1) | `RandomFloat01()` on the subsystem's **own seedable PRNG** (`std::minstd_rand`) — `DeepspaceOutpost/random.h` is exe-side and `NeuronClient` must **not** depend on it (dependency direction) | `<random>` (STL; VFX-only, no sim-determinism contract) |
+| `sfrand(x)` / `syncsfrand(x)` → [-x,x] | `RandomSpread(_x)` = `(RandomFloat01() * 2.0f - 1.0f) * _x`, same engine PRNG | `<random>` |
+| `darwiniaRandom()` | the same engine PRNG, reseedable via `Effects::SetRandomSeed(uint32_t)` for deterministic tests | `<random>` |
 | `g_gameTime` / `g_advanceTime` / `SERVER_ADVANCE_PERIOD` | **fixed per-frame dt** — the client is frame-count driven; advance per-frame by a fixed step (mirror `local_object.exp_delta` / `ReplicatedExplosion.frames`). No wall clock. | `NeuronClient/ClientEngine.cpp::Frame` |
 | `GRAVITY`, landscape bounce, vertical speed | **removed** (space, zero-g) | — |
 | `glBegin/glColor/glTexCoord/glVertex/glEnd` | build a `std::vector<ParticleVertex>` / `MeshVertex` and upload to a **dynamic VB**, draw with a shader | `NeuronClient/graphics/Scene3D.cpp` (`renderDust`, `renderBillboard` templates) |
 | `glBlendFunc(GL_SRC_ALPHA, GL_ONE)` (additive) | a **new** `ID3D11BlendState` (`SrcBlend=SRC_ALPHA, DestBlend=ONE, Op=ADD`) — none exists yet | create in the new pass |
 | depth for transparent tris | a **new** depth state: `DepthEnable=TRUE, DepthWriteMask=ZERO` (test against ships, don't occlude each other) — none exists yet | create in the new pass |
-| `Resource::GetTexture("textures\\particle.bmp")` | `TextureManager::LoadTexture("Textures/Particle.dds")` (`.dds` assets already present) | `NeuronClient/graphics/TextureManager.h`; `GameData/Textures/Particle.dds`, `Glow.dds`, `Shapewireframe.dds`, `Starburst.dds` |
+| `Resource::GetTexture("textures\\particle.bmp")` | `TextureManager::LoadTexture("Textures\\Particle.dds")` (backslash path, matching the existing callers; `.dds` assets already present) | `NeuronClient/graphics/TextureManager.h`; `GameData/Textures/Particle.dds`, `Glow.dds`, `Shapewireframe.dds`, `Starburst.dds` |
 | `g_app->m_renderer->SetObjectLighting()` | reuse the `Scene3D` lit/flat mesh path for debris; particles are unlit additive | `Scene3D::SetLightingEnabled` |
 | `g_app->m_particleSystem->CreateParticle(...)` | `Neuron::Client::EffectsInstance().CreateParticle(...)` (engine subsystem singleton) | this doc |
 | `g_explosionManager.AddExplosion(shape, mat)` | `Neuron::Client::EffectsInstance().AddExplosion(shipType, worldPos, rotmat, fraction)` (pulls `MeshData` from the already-registered `Scene3D` mesh provider) | this doc |
@@ -112,8 +124,11 @@ supplies the per-frame origin:
   at `EffectsInstance().AddExplosion(...)` + `EffectsInstance().CreateParticle(...)`.
   `snd_play_sample(SND_EXPLODE)` stays.
 * **Origin (game)** — once per frame the game passes the floating-origin the render frame is
-  measured against: `EffectsInstance().SetOrigin(camera_rig_origin())` (the engine can't reach
-  the game-side `CameraRig`). This is the `Scene3D::SetDust` precedent — a per-frame setter.
+  measured against: `camera_rig_origin()` returns `const long long*`, so the call is
+  `const long long* org = camera_rig_origin();
+  EffectsInstance().SetOrigin({ org[0], org[1], org[2] });` (a `Neuron::Math::Vector3i64`;
+  the engine can't reach the game-side `CameraRig`). This is the `Scene3D::SetDust`
+  precedent — a per-frame setter.
 * **Render (engine)** — the subsystem's GPU pass is invoked from `gfx_render_3d_scene()`
   (`NeuronClient/platform/GameScene.cpp`) **after** `Scene3D::RenderModels` and before
   `SceneGlow::Composite`, so debris/particles depth-test against the world and pick up bloom.
@@ -162,10 +177,12 @@ matrices uploaded **transposed**, consumed as `mul(u_MVP, pos)`; see `Scene3D` c
   but particles don't occlude each other). Linear sampler.
 * Camera-facing quads: build each particle's 4 corners in **camera space** exactly like
   `Scene3D::renderBillboard` (offset ±half-size in camera x/y at the particle's view-space depth),
-  or in world space using `MainCamera().Up()` and `right = normalize(cross(forward, up))` — the
-  donor's `cameraController->GetUp()/GetRight()` equivalent. Batch **all** particles into one
+  or in world space from the camera basis — load `MainCamera().Up()` and `LookAt() - Eye()` into
+  `XMVECTOR` and take `right = XMVector3Normalize(XMVector3Cross(forward, up))` (the donor's
+  `cameraController->GetUp()/GetRight()` equivalent; all vector arithmetic stays in `XMVECTOR`
+  per AGENTS.md). Batch **all** particles into one
   dynamic VB and issue a single draw (donor did one `glBegin(GL_QUADS)` per particle; we batch).
-* Texture: `TextureManager::LoadTexture("Textures/Particle.dds")` (soft dot) for cores/sparks;
+* Texture: `TextureManager::LoadTexture("Textures\\Particle.dds")` (soft dot) for cores/sparks;
   `Glow.dds` / `Starburst.dds` are alternatives for the fireball flash.
 
 ### 5c. Where the pass is invoked
@@ -197,11 +214,17 @@ Straight port of the donor with the space adaptations from §2:
 
 ```cpp
 // Storage-only members (XMFLOAT3), compute in XMVECTOR per AGENTS.md.
+enum class ParticleTypeId : int8_t {  // scoped enum per coding-standards (donor: TypeXxx ints)
+  Invalid = -1,
+  ExplosionCore, ExplosionDebris, Spark, MuzzleFlash, Fire, MissileTrail, MissileFire,
+  Count                               // donor's TypeNumTypes sentinel
+};
+
 struct Particle {
   Neuron::Math::Vector3i64 anchor;  // absolute world point the offset is measured from
   DirectX::XMFLOAT3 offset;         // render-frame position = (anchor - camOrigin) + offset
   DirectX::XMFLOAT3 vel;            // world units / step
-  int   typeId;
+  ParticleTypeId typeId;
   float size;
   float age;                        // frames (or seconds) lived
   uint32_t colour;                  // 0xAABBGGRR, lerped colour1→colour2 at spawn
@@ -216,24 +239,27 @@ struct Particle {
   the last quarter of life (donor's `startFade` logic); cull when `age > life`. **Remove** the
   landscape bounce and the `ExplosionDebris`→`RocketTrail` child-spawn (or keep the child-spawn
   as a pure-VFX option). Use `std::erase_if` to compact the pool (donor used a slice pool).
-* `CreateParticle(worldPos, vel, typeId, size)` replaces the donor signature; it pushes into the
-  `std::vector<Particle>`.
+* `void XM_CALLCONV CreateParticle(const Neuron::Math::Vector3i64& _worldPos,
+  DirectX::FXMVECTOR _vel, ParticleTypeId _typeId, float _size)` replaces the donor signature
+  (vector parameter as `FXMVECTOR` + `XM_CALLCONV`, underscore-prefixed parameters — both per
+  the engine's modern-code conventions); it pushes into the `std::vector<Particle>`.
 * `BuildVertices(camOrigin, camera) -> std::vector<ParticleVertex>`: per particle, compute the
   camera-facing quad and append 6 verts; hand to `SceneParticles::SetParticles`.
 
 Port the **space-relevant subset** (decision 3): `ExplosionCore`, `ExplosionDebris`, `Spark`,
 `MuzzleFlash`, `Fire`, `MissileTrail`, `MissileFire`. Drop the Darwinia-only `Leaf`,
 `DarwinianFire`, `Brass`, `ControlFlash`, `BlueSpark`, and `RocketTrail` (or keep `RocketTrail`
-only if the `ExplosionDebris` child-spawn trail is wanted). The `TypeInvalid`/`TypeNumTypes`
-enum sentinels carry over.
+only if the `ExplosionDebris` child-spawn trail is wanted). The donor's `TypeInvalid` /
+`TypeNumTypes` int sentinels become the `Invalid` / `Count` enumerators of the scoped
+`ParticleTypeId` above.
 
 ### 6b. `Tumbler` / `ExplodingTri` / `Explosion` / `ExplosionManager`
 
 ```cpp
 struct Tumbler {              // per-fragment spin; donor Matrix33 → XMFLOAT3X3 + angular vel
-  DirectX::XMFLOAT3X3 rot;    // nudged each Advance()
+  DirectX::XMFLOAT3X3 rot;    // storage only — load to XMMATRIX to compute, store back
   DirectX::XMFLOAT3   angVel;
-  void Advance(float step);   // rot = rot * rotationFromAngVel(step); angVel *= rotFriction
+  void Advance(float _step);  // rot = rot * Neuron::Math::CreateRotationMatrix(axis, |angVel|*_step); angVel *= rotFriction
 };
 
 struct ExplodingTri {
@@ -260,7 +286,8 @@ struct ExplodingTri {
     from the hull centre × speed** (donor `(center - fragCenter) * MAX_INITIAL_SPEED`, **without**
     the `+= INITIAL_VERTICAL_SPEED`); assign a random tumbler; `age = 0`. Skip degenerate/tiny
     triangles (donor's `circum < 6` guard, rescaled to hull size).
-  * `fraction < 1` randomly drops that share of triangles (donor behaviour; use `frand01()`).
+  * `fraction < 1` randomly drops that share of triangles (donor behaviour; use
+    `RandomFloat01()` on the subsystem PRNG).
   * Allocate `NUM_TUMBLERS` `Tumbler`s in a `std::vector` (donor used `NEW Tumbler[]`).
 * `Advance(step)`: advance tumblers; integrate each tri's `offset += vel*step`, apply light
   friction, **no gravity**; return `true` when the whole explosion outlives `EXPLOSION_LIFETIME`.
@@ -279,8 +306,8 @@ explosion/particle's spawn point as a `Neuron::Math::Vector3i64` **anchor**, int
 a small `XMFLOAT3` **offset**, and each frame compute the render position as
 `(anchor - camOrigin) + offset`. Because the subsystem lives in `NeuronClient` and can't reach
 the game-side `CameraRig`, the game hands it the current origin each frame via
-`EffectsInstance().SetOrigin(camera_rig_origin())`; `Advance`/`BuildVertices` use that stored
-origin. This keeps precision near the player and lets a blast stay put in the world while the
+`SetOrigin({ org[0], org[1], org[2] })` from `camera_rig_origin()`'s `const long long*`;
+`Advance`/`BuildVertices` use that stored origin. This keeps precision near the player and lets a blast stay put in the world while the
 camera moves — the donor never needed this (single small world), so it is **new logic** we add.
 
 ---
@@ -291,18 +318,22 @@ The donor's `Building::Destroy` becomes the body of the existing bus handlers in
 `DeepspaceOutpost/main.cpp` — no new call site, we fill in the two that already fire:
 
 ```cpp
-// EntityDeath handler (was spawn_replicated_explosion)
+// EntityDeath handler (was spawn_replicated_explosion). vs = the victim's last
+// Net::EntitySnapshot, captured via ReplicationClientInstance().Sample(...) before Forget.
+// Helper names below are snake_case: main.cpp is legacy-tier, match the file.
 auto& fx = Neuron::Client::EffectsInstance();
-fx.AddExplosion(snap.type, {snap.x,snap.y,snap.z}, snap_rotmat, 1.0f);   // pulls MeshData via provider
-for (int i = 0; i < sparkCount(snap); ++i)                    // donor's intensity/4 loop
-  fx.CreateParticle({snap.x,snap.y,snap.z},
-      randomOutwardVel(100.0f), Particle::TypeExplosionCore, 100.0f);
+fx.AddExplosion(vs.type, {vs.x, vs.y, vs.z}, rotmat, 1.0f);   // pulls MeshData via provider
+for (int i = 0; i < spark_count(vs); ++i)                     // donor's intensity/4 loop
+  fx.CreateParticle({vs.x, vs.y, vs.z},
+      random_outward_vel(100.0f), ParticleTypeId::ExplosionCore, 100.0f);
 snd_play_sample(SND_EXPLODE);                                 // was TriggerBuildingEvent(...)
 // (optional) publish a camera-shake reaction on g_clientBus — the Bang() analogue
 ```
 
-`EffectsInstance().SetOrigin(camera_rig_origin())` is called once per frame from
-`game_update_flight()`; `Advance` is engine-driven (§4).
+The origin is set once per frame from `game_update_flight()`:
+`const long long* org = camera_rig_origin();
+Neuron::Client::EffectsInstance().SetOrigin({ org[0], org[1], org[2] });`
+`Advance` is engine-driven (§4).
 
 `ExplosionAt` (player-kill broadcast) does the same at `{_boom.x,_boom.y,_boom.z}` using a Viper
 hull for the debris mesh (matching today's `spawn_explosion_at`), scaled by `_boom.scale`.
@@ -317,7 +348,8 @@ hull for the debris mesh (matching today's `spawn_explosion_at`), scaled by `_bo
    `NeuronClient/CMakeLists.txt` (shaders auto-glob via the existing fxc step). Prove it by
    drawing one hard-coded additive quad at the origin.
 2. **Particle system + subsystem** — port `ParticleType`/`Particle`/`ParticleSystem`
-   (space-adapted subset), the `frand01`/`sfrand` helpers, and add the `Neuron::Client::Effects`
+   (space-adapted subset), the seedable engine PRNG (`RandomFloat01`/`RandomSpread` on
+   `std::minstd_rand`), and add the `Neuron::Client::Effects`
    subsystem + `EffectsInstance()` accessor holding it and the renderer, with `SetOrigin`,
    `CreateParticle`, `Advance` (builds + pushes the particle batch). Drive `Advance` from
    `ClientEngine::Frame`/`game_update_flight`. Test with a manual burst on a keypress.
@@ -336,7 +368,8 @@ hull for the debris mesh (matching today's `spawn_explosion_at`), scaled by `_bo
 * **Headless unit tests** (GoogleTest, `Tests/NeuronClient/`): the pure simulation is
   device-free — cover `Tumbler::Advance` (rotation stays orthonormal, ang-vel decays),
   `Explosion` construction from a synthetic `MeshData` (one tri in → one `ExplodingTri` out,
-  degenerate tris skipped, `fraction` culls the right share with a seeded `set_rand_seed`),
+  degenerate tris skipped, `fraction` culls the right share with the subsystem PRNG seeded via
+  `Effects::SetRandomSeed` — engine-local, no dependency on the exe's `random.h`),
   `Particle::Advance` fade/cull, and the floating-origin rebase math (anchor + offset −
   camOrigin). No D3D needed for any of these.
 * **Manual**: build x64 Debug + Release; kill an NPC and a player, confirm debris + fireball at
@@ -371,7 +404,8 @@ hull for the debris mesh (matching today's `spawn_explosion_at`), scaled by `_bo
 * `NeuronClient/ClientEngine.cpp` — advance `EffectsInstance()` with the frame step.
 * `NeuronClient/CMakeLists.txt` — add the new engine sources (shaders auto-glob).
 * `DeepspaceOutpost/main.cpp` — re-point the `EntityDeath` / `ExplosionAt` bus handlers at
-  `EffectsInstance()`; call `SetOrigin(camera_rig_origin())` each frame.
+  `EffectsInstance()`; call `SetOrigin({org[0], org[1], org[2]})` from `camera_rig_origin()`
+  each frame.
 * `DeepspaceOutpost/space.cpp` — **delete** `ReplicatedExplosion` / `spawn_replicated_explosion` /
   `spawn_explosion_at` and the `s_explosions` draw block.
 * `DeepspaceOutpost/threed.cpp` — **delete** the legacy 2D `draw_explosion` and its

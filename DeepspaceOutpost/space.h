@@ -36,8 +36,6 @@ struct local_object
 	int missiles;
 	int target;
 	int bravery;
-	int exp_delta;
-	int exp_seed;
 	int distance;
 };
 
@@ -117,12 +115,10 @@ void hud_text (int x, int y, const char *str, int col);
 void hud_centre_text (int y, const char *str, int psize, int col);
 void RenderOverlayText (void);
 
-// Deferred scene overlays: the ship-death debris points (threed.cpp), the target reticle
-// (space.cpp) and the intro title sprite (intro.cpp). Recorded during RenderScene; drawn by
-// RenderSceneOverlays from RenderGameHud, replacing the last gfx2d batch draws (gfx_plot_pixel
-// / gfx_draw_sprite / gfx_draw_sprite_scaled). x == -1 centres a sprite on the window; a
-// sprite w <= 0 uses its native size.
-void hud_plot_pixel (int x, int y, int col);
+// Deferred scene overlays: the target reticle (space.cpp) and the intro title sprite
+// (intro.cpp). Recorded during RenderScene; drawn by RenderSceneOverlays from
+// RenderGameHud. x == -1 centres a sprite on the window; a sprite w <= 0 uses its
+// native size. (hud_plot_pixel is retired with the legacy 2D debris spray.)
 void hud_sprite_deferred (int img, int x, int y);
 void hud_sprite_scaled_deferred (int img, int x, int y, int w, int h);
 void RenderSceneOverlays (void);
@@ -201,11 +197,8 @@ void launch_player (void);
 
 void engage_docking_computer (void);
 
-// Start a client-side explosion for a replicated ship that just died, from its last
-// snapshot. Defined in space.cpp; called by the EntityDeath handler (main.cpp).
-namespace Neuron::Net { struct EntitySnapshot; }
-namespace Neuron::Math { struct Vector3i64; }   // full def in NeuronCore/Vector3i64.h (space.cpp)
-void spawn_replicated_explosion (const Neuron::Net::EntitySnapshot& snap);
-void spawn_explosion_at (const Neuron::Math::Vector3i64& world_pos, int scale);   // G1: world-anchored kill VFX
+// (spawn_replicated_explosion / spawn_explosion_at are retired: the EntityDeath and
+// ExplosionAt handlers in main.cpp feed the Neuron::Client::Effects subsystem directly,
+// and the legacy 2D pixel-spray draw_explosion is gone with them. See explosion.md.)
 
 #endif

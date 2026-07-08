@@ -18,7 +18,8 @@
 #define SCR_INVENTORY		13
 #define SCR_LOAD_CMDR		16
 #define SCR_SAVE_CMDR		17
-#define SCR_GAME_OVER		19
+// (SCR_GAME_OVER 19 retired: death holds the live flight view on the wreck - the
+//  DeathWatch state - then respawns docked; there is no synthetic game-over scene.)
 #define SCR_ESCAPE_POD		21
 // (SCR_MARKET_PRICES, SCR_EQUIP_SHIP, SCR_OPTIONS, SCR_QUIT, SCR_SETTINGS retired with
 //  the legacy gfx_display_* screens; those screens are GUI windows now.)

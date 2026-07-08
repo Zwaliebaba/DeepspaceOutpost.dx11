@@ -47,6 +47,12 @@ namespace Neuron::Graphics
       using MeshProvider = std::function<bool(int /*type*/, MeshData& /*out*/)>;
       static void SetMeshProvider(MeshProvider _provider);
 
+      // Invoke the registered provider to fill a CPU MeshData for a ship type (no GPU
+      // resources). The effects subsystem shatters hulls into debris through this, so it
+      // reuses the game's one registration instead of needing its own (explosion.md §6b).
+      // Returns false when no provider is set or the type has no model.
+      static bool BuildMeshData(int _type, MeshData& _out);
+
       // Opt-in faceted directional lighting for ships (Phase 5). Off by default, which
       // reproduces the faithful flat per-face colour exactly. Planet/sun billboards are
       // unaffected. The game toggles this from its "Ship Shading" setting.

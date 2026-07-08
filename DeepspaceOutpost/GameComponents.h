@@ -59,12 +59,8 @@ namespace Neuron::Game
     int bravery = 0;
   };
 
-  // local_object: exp_delta, exp_seed
-  struct Explosion
-  {
-    int delta = 0;
-    int seed = 0;
-  };
+  // (The legacy explosion mirror - exp_delta/exp_seed - is retired with the 2D
+  //  pixel-spray effect; death VFX live in the Neuron::Client::Effects subsystem.)
 
   // player_ship (myship): per-ship capability limits, on the player entity.
   struct ShipCaps

@@ -6,6 +6,8 @@
 #include "Render2D.h"
 #include "Scene3D.h"
 #include "SceneGlow.h"
+#include "SceneParticles.h"
+#include "Effects.h"
 #include "Strings.h"
 #include "TextRenderer.h"
 #include "TextureManager.h"
@@ -134,6 +136,7 @@ namespace Neuron::Client
     Graphics::Render2D::Startup();
     Graphics::Scene3D::Startup();
     Graphics::SceneGlow::Startup();
+    Graphics::SceneParticles::Startup();
 
     Canvas::Startup();
     g_gameFont.Startup("Fonts/SpeccyFontENG.dds");
@@ -211,6 +214,12 @@ namespace Neuron::Client
         // in-flight/docked loop.
         m_main->Update(capMs / 1000.0f);
 
+        // Advance the engine-owned visual-effects subsystem with the same fixed timestep, after
+        // the game has set this frame's origin (game_update_flight) and camera (camera_rig_update)
+        // and before the scene is drawn. It integrates the particles/debris and rebuilds the
+        // SceneParticles vertex batches this frame's render pass draws.
+        Neuron::Client::EffectsInstance().Advance(capMs / 1000.0f);
+
         // Scene hook (GameApp::RenderScene -> game_render_scene): record the 2D HUD into the
         // batch and draw the depth-tested 3D scene straight to the back buffer (the game calls
         // gfx_render_3d_scene at the end of its world draw), before the canvas phase composites
@@ -272,6 +281,7 @@ namespace Neuron::Client
     g_gameFont.Shutdown();
     Graphics::TextureManager::Shutdown();
     Canvas::Shutdown();
+    Graphics::SceneParticles::Shutdown();
     Graphics::SceneGlow::Shutdown();
     Graphics::Scene3D::Shutdown();
     Graphics::Render2D::Shutdown();

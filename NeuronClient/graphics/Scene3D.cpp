@@ -133,6 +133,8 @@ namespace Neuron::Graphics
 
   void Scene3D::SetMeshProvider(MeshProvider _provider) { s_provider = std::move(_provider); }
 
+  bool Scene3D::BuildMeshData(int _type, MeshData& _out) { return s_provider && s_provider(_type, _out); }
+
   bool Scene3D::EnsureResources()
   {
     if (s_ready)

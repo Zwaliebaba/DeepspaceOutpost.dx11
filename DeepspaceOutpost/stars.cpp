@@ -351,7 +351,6 @@ void update_starfield(void)
   case SCR_INTRO_ONE:
   case SCR_INTRO_TWO:
   case SCR_ESCAPE_POD:
-  case SCR_GAME_OVER:
     front_starfield();
     break;
   }
