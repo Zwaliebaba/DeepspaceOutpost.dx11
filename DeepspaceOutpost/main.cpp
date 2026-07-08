@@ -1427,8 +1427,9 @@ static void enter_flight(void)
 }
 
 // Death VFX helpers (defined below, next to the bus handlers that also use them).
-static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count);
+static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, float _radius);
 static DirectX::XMFLOAT3X3 identity_basis(void);
+static float hull_radius(int _type);
 
 // Enter the game-over animation: your hull shatters into tumbling debris while cargo
 // wreckage drifts past, for 100 frames. The scene animates in camera space against the
@@ -1457,7 +1458,7 @@ static void enter_game_over(void)
     auto& fx = Neuron::Client::EffectsInstance();
     fx.SetOrigin(Neuron::Math::Vector3i64{ 0, 0, 0 });
     fx.AddExplosion(SHIP_COBRA3, wreck, identity_basis(), 1.0f);
-    emit_effect_burst(wreck, 24);
+    emit_effect_burst(wreck, hull_radius(SHIP_COBRA3));
   }
 
   for (int i = 0; i < 5; i++)
@@ -1556,14 +1557,33 @@ int roster_wanted(unsigned int _id)
   return it == g_playerRoster.end() ? -1 : it->second.wanted;
 }
 
+// The hull's rough world radius for effect sizing: ship_data.size is the legacy SQUARED
+// collision radius, so the radius is its square root. ~50 (a fighter) when out of range.
+static float hull_radius(int _type)
+{
+  if (_type < 1 || _type > NO_OF_SHIPS || ship_list[_type] == nullptr)
+    return 50.0f;
+  const double sz = ship_list[_type]->size;
+  return (sz > 1.0) ? static_cast<float>(sqrt(sz)) : 50.0f;
+}
+
 // Emit a short-lived additive-particle burst at an absolute world point - the fireball half
-// of the death VFX (explosion.md). Random outward velocities on the game-side PRNG (exe-side,
-// so random.h is fine here). The engine subsystem integrates + draws it; the game only spawns.
-static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count)
+// of the death VFX (explosion.md). _radius (the hull's rough world radius) scales the count,
+// sprite size and outward speeds, so a canister pops and a station erupts. Random outward
+// velocities on the game-side PRNG (exe-side, so random.h is fine here). The engine subsystem
+// integrates + draws it; the game only spawns.
+static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, float _radius)
 {
   using namespace DirectX;
   Neuron::Client::Effects& fx = Neuron::Client::EffectsInstance();
-  for (int i = 0; i < _count; ++i)
+
+  const float rel = _radius / 50.0f;                 // 1.0 = fighter-sized baseline
+  int count = static_cast<int>(24.0f * rel);
+  count = (count < 12) ? 12 : ((count > 96) ? 96 : count);
+  const float size = 150.0f * ((rel < 0.6f) ? 0.6f : ((rel > 2.5f) ? 2.5f : rel));
+  const float speedScale = (rel < 0.7f) ? 0.7f : ((rel > 2.5f) ? 2.5f : rel);
+
+  for (int i = 0; i < count; ++i)
   {
     const float x = (rand255() - 128) / 128.0f;
     const float y = (rand255() - 128) / 128.0f;
@@ -1572,8 +1592,8 @@ static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, int _count)
     if (XMVectorGetX(XMVector3LengthSq(dir)) < 1e-4f)
       dir = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); // avoid a zero-length direction
     dir = XMVector3Normalize(dir);
-    const float speed = 200.0f + (rand255() / 255.0f) * 300.0f;
-    fx.CreateParticle(_pos, XMVectorScale(dir, speed), Neuron::Client::ParticleTypeId::ExplosionCore, 0.0f);
+    const float speed = (200.0f + (rand255() / 255.0f) * 300.0f) * speedScale;
+    fx.CreateParticle(_pos, XMVectorScale(dir, speed), Neuron::Client::ParticleTypeId::ExplosionCore, size);
   }
 }
 
@@ -1716,7 +1736,7 @@ static void register_client_event_handlers(void)
       const Neuron::Math::Vector3i64 at{ vs.x, vs.y, vs.z };
       if (vs.type >= 1 && vs.type <= NO_OF_SHIPS)   // real hulls only (not planet/sun)
         Neuron::Client::EffectsInstance().AddExplosion(vs.type, at, snapshot_basis(vs), 1.0f);
-      emit_effect_burst(at, 24);
+      emit_effect_burst(at, hull_radius(vs.type));
     }
     rc.Forget(_death.victim);
     snd_play_sample(SND_EXPLODE);
@@ -1731,7 +1751,7 @@ static void register_client_event_handlers(void)
     const Neuron::Math::Vector3i64 at{ _boom.x, _boom.y, _boom.z };
     const int scale = (_boom.scale > 0) ? ((_boom.scale < 4) ? _boom.scale : 4) : 1;
     Neuron::Client::EffectsInstance().AddExplosion(SHIP_VIPER, at, identity_basis(), 1.0f);
-    emit_effect_burst(at, 24 * scale);
+    emit_effect_burst(at, hull_radius(SHIP_VIPER) * static_cast<float>(scale));
     snd_play_sample(SND_EXPLODE);
   });
 

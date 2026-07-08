@@ -1,5 +1,16 @@
 # explosion.md — Porting the Darwinia Particle & Explosion Systems into Deepspace Outpost
 
+> **Implementation status.** Phases 1–5 (§8) are implemented on this plan:
+> `SceneParticles` (renderer, §5), `ParticleSystem` + `Effects`/`EffectsInstance()` (§6a),
+> `ExplosionManager` (§6b, via `Scene3D::BuildMeshData`), the `EntityDeath`/`ExplosionAt`/
+> game-over trigger wiring, and the deletion of the legacy `draw_explosion` /
+> `ReplicatedExplosion` path (§7, decision 1) — plus hull-radius scaling of the burst
+> (phase 5). Unit tests live in `Tests/NeuronClient/ParticleSystemTests.cpp` and
+> `ExplosionManagerTests.cpp`. **Open items:** the donor `Expl/` sources were unavailable, so
+> the `ParticleType` table and debris constants are plausible placeholders flagged in-code —
+> tune by eye against a Windows build; the optional camera shake and the `RocketTrail`
+> child-spawn were not ported.
+
 ## 1. Goal
 
 Bring the two Darwinia source pairs from `Expl/` (donor sources kept outside this repo —
