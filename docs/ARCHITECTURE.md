@@ -1449,6 +1449,7 @@ what's open. Effort: S ≤ a day-ish, M = days, L = week(s).
 | 5 | Missions (after the 4X tier settles; encounter substrate: `designai.md` §3.7/A6) | §12 | Feature | L | quests, direction |
 | 5a | Homeworld-style fleet AI: avoidance, stances, formations, queues, launch cycle, encounters (plan: `designai.md`, phases A1–A7) | §6.7, §6.13 | Feature | L | fleet play, missions |
 | 5b | Per-system scenes: POI layer, targeted in-system jump, EVE-style mining + depletion, encounter anchors (plan: `scene.md`, phases S1–S6) | §6.10 | Feature | L | mining, exploration, encounters |
+| 5c | ServerManager app + management channel: separate admin UDP port, shared-secret handshake, roster/event/health push, read-only status dashboard (plan: `sm.md`, phases SM1–SM5; SM1–SM4 landed 2026-07-08) | §9 | Ops/Tooling | M | live ops, remote settings (future) |
 | 6 | ~~Ability path unification + `InputCommand` re-cut~~ **done 2026-07-08** (protocol v4) | §13.1 | Simplify | — | protocol hygiene |
 | 7 | Render residues: in-app visual pass → instancing/glow default-on; vector glyph set + grid-backed client cull; GPU explosion debris (plan: `explosion.md`) | §7 | Render | M | fleet battles, style |
 | 8 | Interaction residues: widget drag-scroll/steppers, chart pointer name-search *(two-finger camera pan shipped with the `input.md` migration)* | §7 | UX | S | touch polish |

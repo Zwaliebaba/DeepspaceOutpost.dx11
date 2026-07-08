@@ -39,7 +39,30 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  DSOServer::GameServer server(socket);
+  // sm.md ServerManager management channel: a SEPARATE UDP socket on the game port + 1,
+  // opened only when DSO_ADMIN_KEY is set (else the feature is entirely off). The key
+  // authenticates a manager's hello; keep this port firewalled to the operator's
+  // network - the shared secret crosses it in the clear on connect (sm.md §6).
+  Net::UdpSocket adminSocket;
+  Net::UdpSocket* adminSocketPtr = nullptr;
+  const char* adminKey = std::getenv("DSO_ADMIN_KEY");
+  if (adminKey != nullptr && adminKey[0] != '\0')
+  {
+    const uint16_t adminPort = static_cast<uint16_t>(port + 1);
+    if (adminSocket.Open(adminPort))
+    {
+      adminSocketPtr = &adminSocket;
+      printf("ServerManager admin channel on UDP %u (keep firewalled to the operator network)\n",
+             static_cast<unsigned>(adminPort));
+    }
+    else
+    {
+      printf("Failed to bind admin UDP %u; management channel DISABLED\n",
+             static_cast<unsigned>(adminPort));
+    }
+  }
+
+  DSOServer::GameServer server(socket, adminSocketPtr, port);
 
   // D3: a fixed-timestep accumulator instead of a bare Sleep. Each iteration we
   // measure the real elapsed time, run as many fixed ticks as it earned (bounded,

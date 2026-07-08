@@ -21,6 +21,7 @@ add_executable(NeuronClient.Tests
     RenderTableTests.cpp
     LineExpandTests.cpp
     InstanceDataTests.cpp
+    AdminClientTests.cpp
 )
 
 target_compile_features(NeuronClient.Tests PRIVATE cxx_std_23)

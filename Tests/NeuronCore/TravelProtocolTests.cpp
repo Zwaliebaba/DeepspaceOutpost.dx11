@@ -17,19 +17,24 @@ TEST(Travel, RequestRoundTripsAndMatchesGoldenBytes)
   Msg::TravelRequest in;
   in.kind = Msg::TravelKind::Hyperspace;
   in.systemId = 42;
+  in.poiId = 7;
 
   const std::vector<uint8_t> payload = Msg::Encode(in);
 
-  // Golden layout: kind u8, systemId u32 (LE).
+  // Golden layout: kind u8, systemId u32 (LE), poiId u32 (LE). poiId was added for
+  // the scene.md targeted-POI jump; it is always on the wire (ignored by the other
+  // kinds), so the golden carries it too.
   Net::DataWriter golden;
   golden.WriteU8(1);
   golden.WriteU32(42);
+  golden.WriteU32(7);
   EXPECT_EQ(payload, golden.Bytes());
 
   Msg::TravelRequest out;
   ASSERT_TRUE(Msg::Decode(payload, out));
   EXPECT_TRUE(out.kind == Msg::TravelKind::Hyperspace);
   EXPECT_EQ(out.systemId, 42u);
+  EXPECT_EQ(out.poiId, 7u);
 }
 
 TEST(Travel, ResponseRoundTripsAndMatchesGoldenBytes)

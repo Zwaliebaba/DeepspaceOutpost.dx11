@@ -37,6 +37,7 @@ before doing architecture work.
 | **DeepspaceOutpost** | Win32 GUI executable | Game client: main loop, input, game-specific rendering (wireframe/HUD via the render queue), UI, audio. Entry point `wWinMain`. Links NeuronClient. |
 | **BotClient** | Console executable | **Headless test client** — scripted/AI bots, **no render/audio**, driving the real net stack for load/soak testing (incl. the 100-player test). Its `--smoke` mode (spawn the Server + 8 bots on loopback) runs as the `BotClient.Smoke` CTest test in CI. Links NeuronClient (headless, no graphics init). |
 | **Server** | Console executable | Dedicated-server host: main loop, sessions, fixed-tick scheduler. Entry point `main`. Links NeuronServer, GameLogic. |
+| **ServerManager** | Win32 GUI executable | **Server management/status app** ([`sm.md`](sm.md)): connects to a running server over a **separate management UDP port** (game port + 1, opt-in via `DSO_ADMIN_KEY`) and renders a live dashboard (roster, event feed, health) with the `ClientEngine`/`Canvas`/`GuiWindow` stack. Uses `Neuron::Client::AdminClient`. Links NeuronClient. |
 
 **Target dependency graph** (each project depends on its parent; arrows omitted for clarity):
 
@@ -100,6 +101,7 @@ NeuronCore                 engine + SHARED DATA ONLY: ECS container, component/p
 | [coding-standards.md](.github/coding-standards.md) | Naming, formatting, language conventions, native-first rule |
 | [copilot-instructions.md](.github/copilot-instructions.md) | Code-generation guidance for this repository |
 | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | Execution companion to ARCHITECTURE.md: audit findings, dead/legacy-code inventory, and the work-item-level implementation plan |
+| [sm.md](sm.md) | **ServerManager** design + plan: the standalone management/status app, its separate management channel (`AdminChannel`/`AdminClient`, admin message range `0x0F00`), and the SM1–SM5 phases |
 
 ## Setup Commands
 
