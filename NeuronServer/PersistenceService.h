@@ -86,6 +86,10 @@ namespace Neuron::Persist
     [[nodiscard]] std::vector<SystemRow> LoadSystems();
     // Every persisted market row, to restore drifted trade state at boot.
     [[nodiscard]] std::vector<MarketRow> LoadMarkets();
+    // Every scene POI row (scene.md anchors + params), to materialize scenes at boot.
+    [[nodiscard]] std::vector<PoiRow> LoadPois();
+    // Every persisted POI resource pool, to restore drained belts at boot.
+    [[nodiscard]] std::vector<PoiResourceRow> LoadPoiResources();
 
     // Request an async load for `_commanderName`; the result arrives via DrainLoads.
     void RequestLoad(const std::string& _commanderName);
