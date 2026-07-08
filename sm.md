@@ -3,7 +3,21 @@
 **Status:** design document, written 2026-07-08 against the as-built code
 (`Server/GameServer.h`, `GameLogic/ServerSessions.h`, `NeuronServer/TickMetrics.h`,
 `NeuronCore/Messages/*`, `NeuronClient/ClientEngine.h`, `NeuronClient/gui/*`
-verified in source). Designs **ServerManager** — a standalone Windows GUI
+verified in source).
+
+**Implementation status (2026-07-08):** SM1–SM4 landed on branch
+`claude/servermanager-app-architecture-p4b3g8`. The headless layers are
+unit-tested — the wire schema (`NeuronCore/Messages/Defs/Admin.h`,
+`Tests/NeuronCore/AdminTests.cpp`), the server-side `AdminChannel`
+(`NeuronServer/AdminChannel.h`, `Tests/NeuronServer/AdminChannelTests.cpp`),
+and the client-side `AdminClient` (`NeuronClient/AdminClient.*`,
+`Tests/NeuronClient/AdminClientTests.cpp`). The server wiring
+(`Server/GameServer.cpp` + `Main.cpp`, gated on `DSO_ADMIN_KEY`) and the
+`ServerManager/` GUI executable are in place; the GUI exe needs a Windows/MSVC
+build to validate (the CI toolchain). SM5 (hardening polish) is the remaining
+follow-up. The section numbering below is the original design.
+
+Designs **ServerManager** — a standalone Windows GUI
 application that connects to a running dedicated server by IP over a **dedicated
 management channel** and shows a live status screen: who is connected, what is
 happening (events), and the server's health. The channel and app are shaped so
