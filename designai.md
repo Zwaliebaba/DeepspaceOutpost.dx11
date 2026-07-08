@@ -528,7 +528,10 @@ the same cadence, seeded LCG stream of its own):
 
 - **Placement & trigger:** instances are armed at deterministic world
   anchors (per-system, from the galaxy seed — e.g. "the derelict 40k above
-  the gate") or by explicit hooks (a mission acceptance, a misjump). A
+  the gate") or by explicit hooks (a mission acceptance, a misjump). *The
+  anchor supply is designed in [`scene.md`](scene.md): an `EncounterSite`
+  POI in a system's scene binds an `EncounterDef` to its anchor (scene.md
+  §3.5, phase S5).* A
   player entering the trigger radius activates the instance; waves spawn on
   their delays via the existing component-assembly path, each member tagged
   `EncounterMember{encounterId, waveIndex}`.
