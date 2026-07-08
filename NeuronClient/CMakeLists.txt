@@ -21,6 +21,7 @@ set(NEURONCLIENT_SOURCES
     ReplicationClient.cpp
     AdminClient.cpp
     ParticleSystem.cpp
+    ExplosionManager.cpp
     Effects.cpp
     Strings.cpp
     vector.cpp
@@ -86,6 +87,7 @@ set(NEURONCLIENT_HEADERS
     Camera.h
     CameraController.h
     ParticleSystem.h
+    ExplosionManager.h
     Effects.h
     Mesh.h
     ReplicatedScene.h

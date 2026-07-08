@@ -5,14 +5,15 @@
 
 #include <DirectXMath.h>
 
-#include "Vector3i64.h"       // Neuron::Math::Vector3i64
-#include "ParticleSystem.h"   // Neuron::Client::ParticleSystem + ParticleTypeId
-#include "ParticleVertex.h"   // Neuron::Graphics::ParticleVertex (no D3D)
+#include "Vector3i64.h"        // Neuron::Math::Vector3i64
+#include "ParticleSystem.h"    // Neuron::Client::ParticleSystem + ParticleTypeId
+#include "ExplosionManager.h"  // Neuron::Client::ExplosionManager - the mesh-shatter sim
+#include "ParticleVertex.h"    // Neuron::Graphics::ParticleVertex (no D3D)
 
 // The engine-owned client visual-effects subsystem (explosion.md §6, decision 2). It owns the
-// ported particle simulation (and, from phase 3, the mesh-shatter ExplosionManager) plus the
-// per-frame origin, and feeds the SceneParticles GPU pass. Reached through a Meyers-singleton
-// accessor EffectsInstance(), exactly like ReplicationClientInstance() / MainCamera().
+// ported particle simulation and the mesh-shatter ExplosionManager plus the per-frame origin,
+// and feeds the SceneParticles GPU pass. Reached through a Meyers-singleton accessor
+// EffectsInstance(), exactly like ReplicationClientInstance() / MainCamera().
 //
 // Lifecycle is engine-owned: ClientEngine::Frame advances it each frame. The game only spawns
 // into it (CreateParticle / AddExplosion) and supplies the floating origin (SetOrigin) - it
@@ -36,20 +37,35 @@ namespace Neuron::Client
         m_particles.CreateParticle(_worldPos, _vel, _type, _size);
       }
 
-      // Advance the simulation by _dt seconds, rebuild this frame's particle vertex batch against
-      // the stored origin + camera, and push it to the SceneParticles renderer. Engine-driven
-      // from ClientEngine::Frame; the game never ticks it.
+      // Shatter a hull into tumbling debris at absolute world point _worldPos. _shipType selects
+      // the mesh through the game-registered Scene3D mesh provider (the subsystem never touches
+      // the ship tables itself); _basis rows are the hull's world basis ([0]=side, [1]=roof,
+      // [2]=nose - the RenderRecord convention; pass identity when the orientation is unknown).
+      // _fraction in (0,1] keeps that share of triangles. No-op if the type has no mesh.
+      void AddExplosion(int _shipType, const Neuron::Math::Vector3i64& _worldPos,
+                        const DirectX::XMFLOAT3X3& _basis, float _fraction = 1.0f);
+
+      // Advance both simulations by _dt seconds, rebuild this frame's particle + debris vertex
+      // batches against the stored origin + camera, and push them to the SceneParticles
+      // renderer. Engine-driven from ClientEngine::Frame; the game never ticks it.
       void Advance(float _dt);
 
-      // Reseed the VFX PRNG (deterministic tests); engine-local, no dependency on the exe.
-      void SetRandomSeed(uint32_t _seed) { m_particles.SetSeed(_seed); }
+      // Reseed the VFX PRNGs (deterministic tests); engine-local, no dependency on the exe.
+      void SetRandomSeed(uint32_t _seed)
+      {
+        m_particles.SetSeed(_seed);
+        m_explosions.SetSeed(_seed);
+      }
 
       [[nodiscard]] ParticleSystem& Particles() { return m_particles; }
+      [[nodiscard]] ExplosionManager& Explosions() { return m_explosions; }
 
     private:
       ParticleSystem m_particles;
+      ExplosionManager m_explosions;
       Neuron::Math::Vector3i64 m_origin;
-      std::vector<Neuron::Graphics::ParticleVertex> m_vertScratch; // reused each frame
+      std::vector<Neuron::Graphics::ParticleVertex> m_vertScratch;   // reused each frame
+      std::vector<Neuron::Graphics::MeshVertex> m_debrisScratch;     // reused each frame
   };
 
   // Process-wide effects subsystem (mirrors ReplicationClientInstance()). Engine-owned.

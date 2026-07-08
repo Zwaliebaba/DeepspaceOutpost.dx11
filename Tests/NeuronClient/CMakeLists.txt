@@ -23,6 +23,7 @@ add_executable(NeuronClient.Tests
     InstanceDataTests.cpp
     AdminClientTests.cpp
     ParticleSystemTests.cpp
+    ExplosionManagerTests.cpp
 )
 
 target_compile_features(NeuronClient.Tests PRIVATE cxx_std_23)
