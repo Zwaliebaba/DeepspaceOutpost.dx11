@@ -62,6 +62,37 @@ namespace Neuron::Persist
     int32_t marketSeed = 0;         // fed to GenerateMarket() for the baseline
   };
 
+  // One scene POI (v3 schema, dbo.system_pois). Anchors + parameters only - the
+  // server materializes in-area detail (belt rocks) from the seed. Nullable SQL
+  // columns are carried as sentinels (-1 = "null") so the plain struct stays POD.
+  struct PoiRow
+  {
+    int32_t poiId = 0;             // stable id (assigned by the seeder, not IDENTITY)
+    int32_t systemId = 0;
+    int32_t kind = 0;              // GameLogic::PoiKind
+    int64_t x = 0, y = 0, z = 0;   // absolute int64 anchor position
+    int32_t radius = 0;
+    int32_t seed = 0;              // in-area procedural detail
+    int32_t commodity = -1;        // AsteroidBelt ore, else -1
+    int32_t richness = -1;         // AsteroidBelt baseline pool, else -1
+    int32_t encounterDef = -1;     // EncounterSite def id, else -1
+    int32_t ownerEmpire = -1;      // future (factory/gun), else -1
+    int32_t linkPoi = -1;          // future (jump-gate pairing), else -1
+    bool    enabled = true;
+    int32_t templateId = 0;        // provenance
+    bool    authored = false;      // 1 = hand-edited: dbseed MERGE must not touch it
+  };
+
+  // One minable POI's durable resource pool (v3 schema, dbo.poi_resources). Loaded
+  // at boot, drift-persisted on the slow cadence (scene.md 3.7b).
+  struct PoiResourceRow
+  {
+    int32_t  poiId = 0;
+    int32_t  units = 0;
+    int32_t  baseline = 0;
+    uint64_t updatedTick = 0;
+  };
+
   class IPersistenceStore
   {
   public:
@@ -82,6 +113,15 @@ namespace Neuron::Persist
     virtual void UpsertSystems(const std::vector<SystemRow>& _batch) = 0;
     // Every system row (loaded at boot to lay out the universe). Empty ⇒ unseeded.
     virtual std::vector<SystemRow> LoadSystems() = 0;
+    // Insert-or-replace a batch of scene POI rows (seeding tool + editor). The
+    // running server only reads them.
+    virtual void UpsertPois(const std::vector<PoiRow>& _batch) = 0;
+    // Every POI row (loaded at boot to materialize scenes). Empty ⇒ no scenes yet.
+    virtual std::vector<PoiRow> LoadPois() = 0;
+    // Insert-or-replace a batch of POI resource rows (drift persisted on cadence).
+    virtual void UpsertPoiResources(const std::vector<PoiResourceRow>& _batch) = 0;
+    // Every POI resource row (loaded at boot to restore drained belt pools).
+    virtual std::vector<PoiResourceRow> LoadPoiResources() = 0;
     // World metadata (schema_version, galaxy_seed, world_tick).
     virtual std::optional<std::string> ReadMeta(const std::string& _key) = 0;
     virtual void WriteMeta(const std::string& _key, const std::string& _value) = 0;
@@ -141,6 +181,36 @@ namespace Neuron::Persist
       return out;
     }
 
+    void UpsertPois(const std::vector<PoiRow>& _batch) override
+    {
+      for (const PoiRow& r : _batch)
+        m_pois[r.poiId] = r;
+    }
+
+    std::vector<PoiRow> LoadPois() override
+    {
+      std::vector<PoiRow> out;
+      out.reserve(m_pois.size());
+      for (const auto& kv : m_pois)
+        out.push_back(kv.second);
+      return out;
+    }
+
+    void UpsertPoiResources(const std::vector<PoiResourceRow>& _batch) override
+    {
+      for (const PoiResourceRow& r : _batch)
+        m_poiResources[r.poiId] = r;
+    }
+
+    std::vector<PoiResourceRow> LoadPoiResources() override
+    {
+      std::vector<PoiResourceRow> out;
+      out.reserve(m_poiResources.size());
+      for (const auto& kv : m_poiResources)
+        out.push_back(kv.second);
+      return out;
+    }
+
     std::optional<std::string> ReadMeta(const std::string& _key) override
     {
       const auto it = m_meta.find(_key);
@@ -165,6 +235,8 @@ namespace Neuron::Persist
     std::vector<CommandLogEntry> m_commands;
     std::map<std::pair<int32_t, int32_t>, MarketRow> m_markets;   // (system,commodity) -> row
     std::map<int32_t, SystemRow> m_systems;                       // system_id -> row
+    std::map<int32_t, PoiRow> m_pois;                             // poi_id -> row
+    std::map<int32_t, PoiResourceRow> m_poiResources;            // poi_id -> pool row
     std::unordered_map<std::string, std::string> m_meta;
   };
 }

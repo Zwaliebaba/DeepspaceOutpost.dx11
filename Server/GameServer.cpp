@@ -42,13 +42,15 @@ namespace DSOServer
     }
   }
 
-  GameServer::GameServer(Net::UdpSocket& _socket)
+  GameServer::GameServer(Net::UdpSocket& _socket, Net::UdpSocket* _adminSocket, uint16_t _gamePort)
     : m_socket(_socket)
+    , m_adminSocket(_adminSocket)
     , m_aoi(Cfg::AOI_CELL_SIZE)
     , m_spawner(Cfg::SPAWN_SEED, Cfg::PIRATE_SPAWN_INTERVAL, Cfg::MAX_NPCS)
     , m_lootRng(Cfg::LOOT_SEED)
     , m_aiRng(Cfg::AI_SEED)
     , m_hyperRng(Cfg::HYPER_SEED)
+    , m_admin(MakeAdminChannel())
   {
     // Persistence (B4): null unless DSO_DB is set (then the connect flow defers the
     // spawn until the commander's durable state loads). Built BEFORE the world so
@@ -61,10 +63,14 @@ namespace DSOServer
     // manifest on connect.
     std::vector<Neuron::Persist::SystemRow> systems;
     std::vector<Neuron::Persist::MarketRow> markets;
+    std::vector<Neuron::Persist::PoiRow> pois;
+    std::vector<Neuron::Persist::PoiResourceRow> poiResources;
     if (m_persist)
     {
       systems = m_persist->LoadSystems();   // boot-only synchronous read (writer idle)
       markets = m_persist->LoadMarkets();
+      pois = m_persist->LoadPois();                   // scene.md: POI anchors + params
+      poiResources = m_persist->LoadPoiResources();   // drained belt pools (drift restore)
       if (systems.empty())
         std::fprintf(stderr,
             "[persist] DSO_DB is set but dbo.systems is empty - run tools/dbseed to seed the galaxy. "
@@ -73,9 +79,10 @@ namespace DSOServer
         m_marketsPersisted = true;   // the FK targets exist, so drift can be written back
     }
 
-    WorldSetup setup = BuildWorld(m_world, systems, markets);
+    WorldSetup setup = BuildWorld(m_world, systems, markets, pois, poiResources);
     m_landmarks = std::move(setup.landmarks);
     m_sessions.SetManifest(std::move(setup.manifest));
+    m_sceneIndex = std::move(setup.sceneIndex);   // scene.md: kept for scene-chunk + POI-jump
 
     // Session tokens (B2) come from the OS CSPRNG, not a gameplay RNG stream: a
     // token must be unguessable, and determinism rules stop at the GameLogic edge.
@@ -94,6 +101,21 @@ namespace DSOServer
     };
 
     RegisterSubscribers();
+
+    // sm.md management channel: only live when DSO_ADMIN_KEY was set AND main opened
+    // an admin socket. Stamp the identity the manager's header bar shows, wire the
+    // admin socket's reliable-magic route, and record that the server came up.
+    if (m_adminSocket != nullptr && m_admin.Enabled())
+    {
+      const uint16_t gamePort = (_gamePort != 0) ? _gamePort : Cfg::SERVER_PORT;
+      m_admin.SetIdentity(GameLogic::Version(), Cfg::TICK_SLEEP_MS, gamePort);
+      m_adminRoutes = {
+        { Msg::RELIABLE_MAGIC,
+          [this](const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
+          { m_admin.OnDatagram(_from, _data, _size, m_tick); } },
+      };
+      AdminNote(Msg::AdminEventKind::ServerStarted, 0, "server started");
+    }
   }
 
   GameServer::~GameServer()
@@ -134,6 +156,36 @@ namespace DSOServer
     return std::make_unique<Neuron::Persist::PersistenceService>(std::move(store), /*startThread*/ true);
   }
 
+  Neuron::Server::AdminChannel GameServer::MakeAdminChannel()
+  {
+    // The management channel is OFF unless DSO_ADMIN_KEY is set: an empty-key channel
+    // ignores every datagram, and main never opens the socket. Tokens come from the OS
+    // CSPRNG (SecureRandom64), like session tokens - an admin token must be unguessable.
+    const char* key = std::getenv("DSO_ADMIN_KEY");
+    if (key == nullptr || key[0] == '\0')
+      return Neuron::Server::AdminChannel{};
+    return Neuron::Server::AdminChannel{ std::string(key), &SecureRandom64 };
+  }
+
+  void GameServer::NoteOverrun()
+  {
+    m_metrics.NoteOverrun();
+    ++m_lifetimeOverruns;
+    // Surface overruns on the management feed, but rate-limited: a sustained overload
+    // must not flood the event ring (one line per health window is plenty).
+    if (m_admin.Enabled() && m_tick - m_lastOverrunEventTick >= Cfg::ADMIN_HEALTH_INTERVAL)
+    {
+      m_lastOverrunEventTick = m_tick;
+      AdminNote(Msg::AdminEventKind::TickOverrun, 0, "server tick overran the fixed step");
+    }
+  }
+
+  void GameServer::AdminNote(Msg::AdminEventKind _kind, uint32_t _subject, std::string _text)
+  {
+    if (m_admin.Enabled())
+      m_admin.PushEvent(m_tick, _kind, _subject, std::move(_text));
+  }
+
   void GameServer::RunTick()
   {
     const double tickStartMs = QpcMs();
@@ -150,6 +202,10 @@ namespace DSOServer
     //    happen in their subscribers) before the simulation advances.
     ReceiveDatagrams();
     m_bus.Dispatch();
+
+    // 1a''. Drain the SEPARATE management socket (sm.md) into the AdminChannel. Its
+    //       own small budget means an admin-port flood can't steal game-tick time.
+    PumpAdmin();
 
     // 1b. Process the reliable channel: the ClientHello handshake (which connects
     //     a client and broadcasts the refreshed roster), plus station/travel/chart
@@ -182,6 +238,10 @@ namespace DSOServer
 
     // 4. Per-viewer snapshots + on-change private status + reliable flush.
     PublishState();
+
+    // 4b. Management channel (sm.md): roster deltas + a periodic health sample to
+    //     every connected ServerManager, then flush the admin socket. No-op when off.
+    PublishAdmin();
 
     // 5. Persist changed players on a slow cadence (B4). No-op when disabled.
     if (m_persist && m_tick % Cfg::PERSIST_INTERVAL == 0)
@@ -226,6 +286,16 @@ namespace DSOServer
     Server::PumpDatagrams(m_socket, m_recv, sizeof(m_recv), Cfg::RECV_BUDGET, m_routes);
   }
 
+  void GameServer::PumpAdmin()
+  {
+    // Drain the management socket with its OWN small budget and route (reliable
+    // 'NRLB' only). Reuses the shared recv buffer - this runs to completion before
+    // any other socket read this tick, so there is no aliasing.
+    if (m_adminSocket == nullptr || !m_admin.Enabled())
+      return;
+    Server::PumpDatagrams(*m_adminSocket, m_recv, sizeof(m_recv), Cfg::ADMIN_RECV_BUDGET, m_adminRoutes);
+  }
+
   void GameServer::OnInputPacket(const Net::Endpoint& _from, const uint8_t* _data, std::size_t _size)
   {
     // Unified 'NMSG' framing. Today the client uses the UNRELIABLE lane for its
@@ -248,23 +318,10 @@ namespace DSOServer
       if (!Msg::DecodeRecord(rec, in))
         continue;
 
-      const ECS::EntityId player = m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
-
-      // Player weapon/equipment intent becomes FireWeapon commands on the bus;
-      // the combat subscriber resolves them to facts after the receive loop.
-      if (m_world.IsValid(player))
-      {
-        if (in.fire)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
-        if (in.fireMissile)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Missile, in.missileTarget });
-        if (in.ecm)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::Ecm, Msg::NO_MISSILE_TARGET });
-        if (in.energyBomb)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EnergyBomb, Msg::NO_MISSILE_TARGET });
-        if (in.escapePod)
-          m_bus.Publish(GameLogic::FireWeapon{ player, GameLogic::Weapon::EscapePod, Msg::NO_MISSILE_TARGET });
-      }
+      // The heartbeat carries only freshness + the snapshot ack. Equipment
+      // activations arrive as reliable AbilityRequests (HandleAbilityRequest)
+      // and movement as UnitOrders - nothing on this lane fires a weapon.
+      m_sessions.OnInput(m_world, _from, hdr.token, in, m_tick);
     }
   }
 
@@ -324,6 +381,8 @@ namespace DSOServer
             m_lastStatus.Forget(GameLogic::EndpointKey(s.endpoint));
             if (out.nameChanged)
               BroadcastPlayerInfo(out.entity.index);
+            AdminNote(Msg::AdminEventKind::PlayerReconnected, s.playerId,
+                      std::string("commander ") + s.name + " reconnected");
           }
           continue;
         }
@@ -338,6 +397,7 @@ namespace DSOServer
         Msg::UnitOrder order;
         Msg::AbilityRequest ability;
         Msg::GalaxyChunkRequest chunkReq;
+        Msg::SceneChunkRequest sceneReq;
         Msg::Ping ping;
         Msg::Chat chat;
         if (Msg::TryDecode(msg, req))
@@ -359,6 +419,8 @@ namespace DSOServer
           HandleAbilityRequest(s, ability);   // a fire action; not logged (like input fire)
         else if (Msg::TryDecode(msg, chunkReq))
           m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
+        else if (Msg::TryDecode(msg, sceneReq))
+          HandleSceneChunkRequest(s, sceneReq);   // scene.md: system POIs (Bulk lane, not logged)
         else if (Msg::TryDecode(msg, ping))
         {
           // Time sync (E1): record the client's reported RTT for lag compensation
@@ -389,6 +451,7 @@ namespace DSOServer
     if (text.empty())
       return;
     m_sessions.Broadcast(Msg::Chat{ _session.playerId, text });
+    AdminNote(Msg::AdminEventKind::Chat, _session.playerId, _session.name + ": " + text);
   }
 
   void GameServer::ApplyCompletedLoads()
@@ -607,8 +670,36 @@ namespace DSOServer
       const GameLogic::JumpDriveOutcome jd = GameLogic::InSystemJump(m_world, _session.entity);
       resp.status = jd.status;
     }
+    else if (_req.kind == Msg::TravelKind::PoiJump)
+    {
+      // scene.md 3.6: targeted in-system jump to a scene POI. Resolve the anchor
+      // from the request's poiId via the scene index; JumpToPoi validates it is
+      // system-local + not mass-locked, then places the hull off the anchor.
+      const ECS::EntityId anchor = m_sceneIndex.Anchor(_req.poiId);
+      const GameLogic::JumpDriveOutcome jd = GameLogic::JumpToPoi(m_world, _session.entity, anchor, m_tick);
+      resp.status = jd.status;
+    }
 
     _session.events.Send(resp);   // Gameplay lane
+  }
+
+  void GameServer::HandleSceneChunkRequest(GameLogic::Session& _session, const Msg::SceneChunkRequest& _req)
+  {
+    // scene.md 3.9: reply with the requested system's POIs (anchors + kinds +
+    // positions) so the client can list local areas and target a POI jump. Cold
+    // chart data on the Bulk lane; a system is small (a handful of POIs), so one
+    // chunk suffices.
+    Msg::SceneChunk chunk;
+    chunk.systemId = _req.systemId;
+    const auto it = m_sceneIndex.bySystem.find(static_cast<int32_t>(_req.systemId));
+    if (it != m_sceneIndex.bySystem.end())
+      for (const ECS::EntityId anchor : it->second)
+        if (const GameLogic::ScenePoi* poi = m_world.TryGet<GameLogic::ScenePoi>(anchor))
+          if (const GameLogic::WorldTransform* t = m_world.TryGet<GameLogic::WorldTransform>(anchor))
+            chunk.pois.push_back(Msg::ScenePoiEntry{
+                poi->poiId, static_cast<uint8_t>(poi->kind),
+                t->position.x, t->position.y, t->position.z, poi->radius });
+    _session.events.Send(chunk);   // Bulk lane
   }
 
   void GameServer::HandleUnitOrder(GameLogic::Session& _session, const Msg::UnitOrder& _req)
@@ -724,6 +815,16 @@ namespace DSOServer
       m_bus.Publish(GameLogic::FireWeapon{ shooter, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
     m_bus.Dispatch();
 
+    // scene.md: the Mine order flies its unit onto a rock and runs the beam cycle
+    // (StepOrders skips Mine so the two don't fight over the FlightIntent). Each
+    // extraction broadcasts a MiningTick cue and resends the miner's cargo manifest
+    // (the hold already changed authoritatively). Runs pre-Tick, like StepOrders.
+    for (const GameLogic::MiningEvent& ev : GameLogic::StepMining(m_world, m_tick))
+    {
+      m_sessions.Broadcast(Msg::MiningTick{ ev.unitIndex, ev.rockIndex, ev.commodity, ev.units });
+      SendCargoTo(ev.unitIndex);
+    }
+
     // NPC tactics decide their flight intents (pursue/break-off/flee + panic
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
@@ -731,6 +832,10 @@ namespace DSOServer
     GameLogic::StepAi(m_world, m_tick, m_aiRng, m_scratch);
     GameLogic::Tick(m_world);
     ++m_tick;
+
+    // scene.md 3.7b: belt pools drift back toward baseline on a slow, staggered
+    // cadence (self-gated on SCENE_REGEN_INTERVAL), repopulating mined-out rocks.
+    GameLogic::StepSceneRegen(m_world, m_tick);
 
     // I1: a ship carrying a Dock order that has now reached dock range docks (via the
     // tested station path) and drops the order.
@@ -878,6 +983,87 @@ namespace DSOServer
     m_lastStatus.Prune([this](uint64_t _key) { return m_sessions.All().count(_key) != 0; });
   }
 
+  void GameServer::PublishAdmin()
+  {
+    if (m_adminSocket == nullptr || !m_admin.Enabled())
+      return;
+
+    // Roster: build each real player's row, push it only when a displayed field
+    // changed (the on-change cache), and fold join/leave into the same diff so those
+    // feed lines never need a tap at the connect/reap sites.
+    std::unordered_set<uint32_t> current;
+    for (auto& [key, s] : m_sessions.All())
+    {
+      if (s.playerId == 0)
+        continue;   // a pending/loading shell is not a roster player yet
+
+      current.insert(s.playerId);
+      const bool isNew = (m_adminRosterIds.count(s.playerId) == 0);
+      if (isNew)
+        m_adminJoinTick[s.playerId] = m_tick;
+
+      Msg::AdminPlayerInfo row;
+      row.playerId = s.playerId;
+      row.entityId = s.entity.index;
+      row.name = s.name;
+      row.address = s.endpoint.address;
+      row.port = s.endpoint.port;
+      row.rttMs = s.rttMs;
+      row.score = s.score;
+      row.state = s.loading ? static_cast<uint8_t>(Msg::AdminPlayerState::Loading)
+                : (s.Live()  ? static_cast<uint8_t>(Msg::AdminPlayerState::Live)
+                             : static_cast<uint8_t>(Msg::AdminPlayerState::Pending));
+      row.connectedTick = m_adminJoinTick[s.playerId];
+
+      if (isNew)
+        AdminNote(Msg::AdminEventKind::PlayerJoined, s.playerId,
+                  std::string("commander ") + s.name + " joined");
+      if (m_adminRoster.Changed(s.playerId, row))
+        m_admin.PushRoster(row);
+    }
+
+    // Leaves: a playerId that was in the roster last time but isn't now has gone.
+    for (uint32_t oldId : m_adminRosterIds)
+      if (current.count(oldId) == 0)
+      {
+        m_admin.PushPlayerGone(oldId, Msg::AdminGoneReason::Disconnected);
+        AdminNote(Msg::AdminEventKind::PlayerLeft, oldId, "a commander left");
+        m_adminRoster.Forget(oldId);
+        m_adminJoinTick.erase(oldId);
+      }
+    m_adminRosterIds.swap(current);
+
+    // Health: a rolling sample at ~1 Hz. The window-so-far is read WITHOUT resetting
+    // m_metrics (the D3 console line owns the reset), so avg/max smooth over the
+    // current window and overruns are the lifetime count.
+    if (m_tick % Cfg::ADMIN_HEALTH_INTERVAL == 0)
+    {
+      const double windowSec = (QpcMs() - m_metricsWindowStartMs) / 1000.0;
+      const Server::TickSummary s = m_metrics.Snapshot(windowSec > 0.0 ? windowSec : 1.0);
+      Msg::AdminHealth h;
+      h.tick = m_tick;
+      h.uptimeSeconds = static_cast<uint32_t>(static_cast<uint64_t>(m_tick) * Cfg::TICK_SLEEP_MS / 1000);
+      h.avgTickMs = static_cast<float>(s.avgMs);
+      h.maxTickMs = static_cast<float>(s.maxMs);
+      h.overruns = static_cast<uint32_t>(m_lifetimeOverruns);
+      h.entities = static_cast<uint32_t>(m_world.AliveCount());
+      h.sessions = static_cast<uint32_t>(m_sessions.Count());
+      h.bytesPerSecond = s.bytesPerSecond;
+      h.droppedEntities = s.droppedEntities;
+      m_admin.PushHealth(h);
+    }
+
+    // Flush the admin socket. Server datagrams carry token 0 (the manager trusts the
+    // server by address). Reaping of silent managers happens inside WriteDatagrams.
+    std::vector<std::pair<Net::Endpoint, std::vector<uint8_t>>> out;
+    m_admin.WriteDatagrams(m_tick, out);
+    for (const auto& [ep, dg] : out)
+    {
+      m_adminSocket->SendTo(ep, dg.data(), dg.size());
+      m_bytesThisTick += dg.size();   // count admin bytes in the D3 total too
+    }
+  }
+
   void GameServer::PublishStrategicFor(GameLogic::Session& _s)
   {
     // The viewer's current system = the station nearest their ship (works docked or
@@ -964,6 +1150,8 @@ namespace DSOServer
 
     if (!_c.firstOffence || !m_world.IsValid(_c.offender))
       return;
+    AdminNote(Msg::AdminEventKind::Crime, _c.offender.index,
+              "a commander turned wanted; police dispatched");
     const GameLogic::WorldTransform* t = m_world.TryGet<GameLogic::WorldTransform>(_c.offender);
     if (t == nullptr)
       return;
@@ -996,6 +1184,8 @@ namespace DSOServer
         if (entry.second.entity.index == _k.victim.index)
         {
           entry.second.events.Send(Msg::EntityDeath{ _k.victim.index, _k.killer });
+          AdminNote(Msg::AdminEventKind::Kill, entry.second.playerId,
+                    std::string("commander ") + entry.second.name + " was destroyed");
           break;
         }
 

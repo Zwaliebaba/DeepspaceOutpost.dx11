@@ -8,6 +8,8 @@
 
 #include "GameLogic.h"
 #include "GalaxyRows.h"   // row <-> generator/manifest/market conversions
+#include "SceneRows.h"    // BuildPoiRows / BaselinePoiResourceRows (scene fallback)
+#include "SceneSystem.h"  // GameLogic::MaterializeScenePoi (scene.md)
 
 using namespace Neuron;
 
@@ -69,7 +71,9 @@ namespace DSOServer
 
   WorldSetup BuildWorld(ECS::Registry& _world,
                         const std::vector<Persist::SystemRow>& _systems,
-                        const std::vector<Persist::MarketRow>& _marketDrift)
+                        const std::vector<Persist::MarketRow>& _marketDrift,
+                        const std::vector<Persist::PoiRow>& _pois,
+                        const std::vector<Persist::PoiResourceRow>& _poiResources)
   {
     WorldSetup setup;
 
@@ -89,11 +93,42 @@ namespace DSOServer
     for (const Persist::SystemRow& sys : systems)
       MaterializeSystem(_world, setup, sys, drift);
 
+    // Scenes (scene.md): the loaded POI rows, or - when the DB is unseeded /
+    // persistence is off - the default scenes generated from the same seed, so the
+    // no-persistence world still has belts/sites. Belt pools are restored from the
+    // persisted resource rows (drained state survives a restart); a POI with no
+    // saved pool falls back to its richness baseline.
+    const std::vector<Persist::PoiRow> genPois =
+        _pois.empty() ? BuildPoiRows(GALAXY_CFG) : std::vector<Persist::PoiRow>{};
+    const std::vector<Persist::PoiRow>& pois = _pois.empty() ? genPois : _pois;
+    std::map<int32_t, Persist::PoiResourceRow> pools;
+    for (const Persist::PoiResourceRow& r : _poiResources)
+      pools[r.poiId] = r;
+
+    for (const Persist::PoiRow& p : pois)
+    {
+      if (!p.enabled)
+        continue;
+      const auto it = pools.find(p.poiId);
+      const int32_t baseline = p.richness > 0 ? p.richness : 0;
+      const int32_t poolUnits = (it != pools.end()) ? it->second.units : baseline;
+      const ECS::EntityId anchor = GameLogic::MaterializeScenePoi(
+          _world, setup.sceneIndex,
+          static_cast<uint32_t>(p.poiId), p.systemId,
+          static_cast<GameLogic::PoiKind>(p.kind), { p.x, p.y, p.z },
+          p.radius, static_cast<uint32_t>(p.seed),
+          static_cast<uint8_t>(p.commodity < 0 ? 0 : p.commodity),
+          baseline, poolUnits,
+          static_cast<uint16_t>(p.encounterDef < 0 ? 0 : p.encounterDef),
+          /*tick*/ 0);
+      setup.landmarks.push_back(anchor);   // anchors stay resident like planets/stations
+    }
+
     // No hand-placed home system or starter pirate: the universe is a uniform field
     // of systems, and dynamic spawning (SpawnDirector) provides pirates near
     // players. New commanders are placed docked at a name-chosen system (§6.10).
 
-    printf("Galaxy: %zu systems %s.\n", systems.size(),
+    printf("Galaxy: %zu systems, %zu scene POIs %s.\n", systems.size(), pois.size(),
            _systems.empty() ? "generated (unseeded DB / no persistence)" : "loaded from the store");
 
     return setup;

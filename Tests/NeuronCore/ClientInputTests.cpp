@@ -18,17 +18,9 @@ TEST(Input, RoundTripsOverUnreliableLane)
 {
   Msg::InputCommand in;
   in.sequence = 7;
-  in.rollAxis = -1.0f;
-  in.pitchAxis = 0.5f;
-  in.throttle = 0.25f;
-  in.fire = true;
-  in.fireMissile = true;
-  in.missileTarget = 4242;
-  in.ecm = true;
-  in.energyBomb = false;
-  in.escapePod = true;
+  in.ackSnapshotTick = 0xABCD;
 
-  // The input rides the unified 'NMSG' unreliable lane as one record.
+  // The heartbeat rides the unified 'NMSG' unreliable lane as one record.
   Msg::PacketWriter pw(Msg::MessageLane::Unreliable);
   pw.Add(in);
 
@@ -42,50 +34,24 @@ TEST(Input, RoundTripsOverUnreliableLane)
   Msg::InputCommand out;
   ASSERT_TRUE(Msg::DecodeRecord(recs[0], out));
   EXPECT_TRUE(out.sequence == 7);
-  EXPECT_TRUE(out.rollAxis == -1.0f);
-  EXPECT_TRUE(out.pitchAxis == 0.5f);
-  EXPECT_TRUE(out.throttle == 0.25f);
-  EXPECT_TRUE(out.fire == true);
-  EXPECT_TRUE(out.fireMissile == true);
-  EXPECT_TRUE(out.missileTarget == 4242u);
-  EXPECT_TRUE(out.ecm == true);
-  EXPECT_TRUE(out.energyBomb == false);
-  EXPECT_TRUE(out.escapePod == true);
+  EXPECT_TRUE(out.ackSnapshotTick == 0xABCDu);
 }
 
-// Byte-parity: the InputCommand payload is the legacy 'NCMD' field layout
-// (sequence u32, three f32, two u8, target u32 - all LE) with the G8 equipment
-// bits (three u8) APPENDED - the legacy prefix is unchanged, so folding onto
-// the new framing and the G8 extension never rewrote the original fields.
-TEST(Input, PayloadMatchesLegacyByteLayout)
+// Golden bytes: the protocol-v4 heartbeat is exactly {sequence u32, ack u32},
+// little-endian - 8 bytes, nothing else. (The legacy 'NCMD' axes/flags layout
+// retired with the v3->v4 re-cut: movement is a UnitOrder, abilities ride the
+// reliable AbilityRequest, and PROTOCOL_VERSION gates out old clients.)
+TEST(Input, PayloadMatchesTheHeartbeatByteLayout)
 {
   Msg::InputCommand in;
   in.sequence = 7;
-  in.rollAxis = -1.0f;
-  in.pitchAxis = 0.5f;
-  in.throttle = 0.25f;
-  in.fire = true;
-  in.fireMissile = true;
-  in.missileTarget = 4242;
-  in.ecm = true;
-  in.energyBomb = false;
-  in.escapePod = true;
   in.ackSnapshotTick = 0xABCD;
 
   const std::vector<uint8_t> payload = Msg::Encode(in);
 
   Net::DataWriter golden;
-  golden.WriteU32(7);
-  golden.WriteF32(-1.0f);
-  golden.WriteF32(0.5f);
-  golden.WriteF32(0.25f);
-  golden.WriteU8(1);
-  golden.WriteU8(1);
-  golden.WriteU32(4242);
-  golden.WriteU8(1);        // ecm        (G8, appended)
-  golden.WriteU8(0);        // energyBomb (G8, appended)
-  golden.WriteU8(1);        // escapePod  (G8, appended)
-  golden.WriteU32(0xABCD);  // ackSnapshotTick (E2b, appended)
+  golden.WriteU32(7);       // sequence
+  golden.WriteU32(0xABCD);  // ackSnapshotTick (E2b)
   EXPECT_EQ(payload, golden.Bytes());
 }
 

@@ -19,6 +19,19 @@
 // plan (it gates entity-cap increases). Per-bot RTT/loss instrumentation arrives
 // with E1's Ping/Pong; until then the harness reports frames-to-connect and
 // snapshot progress, which loopback CI can assert meaningfully.
+//
+// Adverse-condition lane: --churn-seconds N forces every bot through one full
+// reconnect (a brand-new ReplicationClient / session, i.e. real socket teardown and
+// re-handshake over live UDP) partway through the run; the verdict then requires
+// each bot to recover - reconnect and resume an advancing authoritative snapshot
+// stream with a fresh identity. (The galaxy chart re-pull is best-effort here: the
+// pre-churn sessions linger under their grace window and briefly ~double server
+// load, so that bulk transfer may not finish in the remaining window - the plain
+// lane is what pins chart completion.) Registered as the BotClient.Smoke.Churn CTest.
+// (Deliberately-still-manual: artificial packet loss/reorder needs a drop hook in
+// the NeuronCore UdpSocket - a change to the shared net stack - so it is not wired
+// in here yet; run it from a Windows dev box where CI + local runs can confirm the
+// reliability layer recovers.)
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -28,6 +41,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -50,6 +64,7 @@ namespace
     bool smoke = false;
     std::string serverExe;      // --smoke: the server binary to spawn
     uint64_t maxOverruns = 3;   // --smoke: tolerated tick overruns (CI runners stall)
+    int churnSeconds = 0;       // >0: each bot force-reconnects (fresh session) once, ~this many seconds in
   };
 
   Options Parse(int _argc, char** _argv)
@@ -65,6 +80,7 @@ namespace
       else if (a == "--smoke")        o.smoke = true;
       else if (a == "--server-exe")   o.serverExe = next();
       else if (a == "--max-overruns") o.maxOverruns = static_cast<uint64_t>(atoll(next()));
+      else if (a == "--churn-seconds") o.churnSeconds = atoi(next());
     }
     if (o.bots < 1) o.bots = 1;
     if (o.seconds < 1) o.seconds = 1;
@@ -78,33 +94,72 @@ namespace
     int connectFrame = -1;   // frame the HelloAck landed (-1 = not yet)
     bool sawSnapshot = false;
     int lastOrderFrame = -1000;  // I1: throttle how often the order bot re-orders
+    uint32_t firstTick = 0;      // first snapshot tick observed (advance check)
+    uint32_t lastTick = 0;       // most recent snapshot tick observed
+    bool haveFirstTick = false;
+    int reconnects = 0;          // churn: times this bot was dropped + re-handshook
   };
 
+  // Bind a fresh bot's socket, point it at the server, and send its hello. The hello
+  // rides the reliable Control lane and is redelivered by Pump() until acked, so one
+  // call is enough. Shared by initial connect and the churn reconnect.
+  bool OpenAndHello(Bot& _b, std::size_t _i, const Net::Endpoint& _server)
+  {
+    if (!_b.rc.Open(/*ephemeral*/ 0))
+    {
+      printf("bot %zu: socket open failed\n", _i);
+      return false;
+    }
+    _b.rc.SetServerEndpoint(_server);
+    _b.rc.SendHello(Msg::PROTOCOL_VERSION, "Bot-" + std::to_string(_i + 1));
+    return true;
+  }
+
   // Run the bot fleet against `server` for the configured duration. Returns true
-  // when every bot connected, streamed snapshots, and completed the chart pull.
+  // when every bot connected, streamed advancing snapshots, and completed the chart
+  // pull. With churnSeconds > 0 each bot is forced through one full reconnect (a
+  // brand-new ReplicationClient / session) partway through, and must recover to the
+  // same verdict - exercising real socket teardown + re-handshake + a fresh galaxy
+  // pull over the live UDP stack, which the deterministic gtest suites cannot.
   bool RunBots(const Options& _o, const Net::Endpoint& _server)
   {
-    std::vector<Bot> bots(static_cast<std::size_t>(_o.bots));
-    for (std::size_t i = 0; i < bots.size(); ++i)
+    // Bots are heap-owned so a reconnect can drop one and construct a fresh session
+    // in its place (ReplicationClient owns a UdpSocket and is intentionally
+    // non-movable, so the fleet cannot live in a value vector across a reconnect).
+    const std::size_t count = static_cast<std::size_t>(_o.bots);
+    std::vector<std::unique_ptr<Bot>> bots;
+    bots.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
     {
-      if (!bots[i].rc.Open(/*ephemeral*/ 0))
-      {
-        printf("bot %zu: socket open failed\n", i);
+      bots.push_back(std::make_unique<Bot>());
+      if (!OpenAndHello(*bots[i], i, _server))
         return false;
-      }
-      bots[i].rc.SetServerEndpoint(_server);
-      // The hello rides the reliable Control lane and is redelivered by Pump()
-      // until the server acks it, so one call here is enough.
-      bots[i].rc.SendHello(Msg::PROTOCOL_VERSION, "Bot-" + std::to_string(i + 1));
     }
 
-    const ULONGLONG endMs = GetTickCount64() + static_cast<ULONGLONG>(_o.seconds) * 1000ull;
+    const ULONGLONG startMs = GetTickCount64();
+    const ULONGLONG endMs = startMs + static_cast<ULONGLONG>(_o.seconds) * 1000ull;
     int frame = 0;
     for (; GetTickCount64() < endMs; ++frame)
     {
+      const ULONGLONG now = GetTickCount64();
       for (std::size_t i = 0; i < bots.size(); ++i)
       {
-        Bot& b = bots[i];
+        // Churn: force a single reconnect once we pass the scheduled moment. The
+        // drops are staggered per bot (100 ms apart) so the fleet does not all
+        // re-handshake on the same server tick.
+        if (_o.churnSeconds > 0 && bots[i]->reconnects == 0 &&
+            now >= startMs + static_cast<ULONGLONG>(_o.churnSeconds) * 1000ull + i * 100ull)
+        {
+          bots[i]->rc.Close();                 // real teardown of the live session
+          bots[i] = std::make_unique<Bot>();   // fresh, clean-state client
+          bots[i]->reconnects = 1;
+          if (!OpenAndHello(*bots[i], i, _server))
+            return false;
+          printf("bot %zu: forced reconnect (fresh session)\n", i);
+          continue;   // re-handshake begins next frame
+        }
+
+        Bot& b = *bots[i];
         b.rc.Pump();
 
         if (b.rc.HelloRejected())
@@ -117,13 +172,18 @@ namespace
 
         if (b.connectFrame < 0)
           b.connectFrame = frame;
-        if (b.rc.LatestTick() > 0)
+        const uint32_t tick = b.rc.LatestTick();
+        if (tick > 0)
+        {
           b.sawSnapshot = true;
+          if (!b.haveFirstTick) { b.firstTick = tick; b.haveFirstTick = true; }
+          b.lastTick = tick;
+        }
 
-        // Heartbeat only: the flight axes are camera-only now (like the real
-        // client), so movement comes from orders. InputCommand still carries the
-        // sequence + the E2b snapshot ack, and feeds the server's safe-park silence
-        // detection, so keep sending it every frame with zero intent.
+        // Heartbeat only (protocol v4: InputCommand IS just the heartbeat):
+        // movement comes from orders. The command carries the sequence + the E2b
+        // snapshot ack, and feeds the server's safe-park silence detection, so
+        // keep sending it every frame.
         Msg::InputCommand in;
         in.sequence = ++b.inputSeq;
         b.rc.SendInput(in);
@@ -158,17 +218,33 @@ namespace
     bool ok = true;
     for (std::size_t i = 0; i < bots.size(); ++i)
     {
-      Bot& b = bots[i];
+      Bot& b = *bots[i];
       const bool connected = b.connectFrame >= 0;
       const bool chart = b.rc.GalaxyComplete();
-      printf("bot %zu: connected=%s (frame %d) snapshots=%s entities=%zu chart=%s token=%s playerId=%u\n",
+      // The snapshot stream must have ADVANCED, not merely produced a single frame:
+      // a server that froze after one tick would pass the old sawSnapshot check.
+      const bool advanced = b.haveFirstTick && b.lastTick > b.firstTick;
+      printf("bot %zu: connected=%s (frame %d) snapshots=%s advanced=%s entities=%zu chart=%s token=%s playerId=%u reconnects=%d\n",
              i, connected ? "yes" : "NO", b.connectFrame,
-             b.sawSnapshot ? "yes" : "NO", b.rc.Count(),
+             b.sawSnapshot ? "yes" : "NO", advanced ? "yes" : "NO", b.rc.Count(),
              chart ? "complete" : "INCOMPLETE",
              b.rc.SessionToken() != 0 ? "yes" : "NO",
-             b.rc.PlayerId());
-      ok = ok && connected && b.sawSnapshot && chart && b.rc.SessionToken() != 0
-              && b.rc.PlayerId() != 0;   // the C identity layer arrived end-to-end
+             b.rc.PlayerId(), b.reconnects);
+
+      // Core recovery signal: the session is up, identified (C layer), and the
+      // authoritative stream is flowing AND advancing.
+      const bool recovered = connected && b.sawSnapshot && advanced
+                          && b.rc.SessionToken() != 0 && b.rc.PlayerId() != 0;
+      // A steady-state connect must also complete the galaxy chart pull. In the
+      // churn lane the post-reconnect re-pull is a full bulk transfer that may not
+      // finish in the remaining window (the lingering pre-churn sessions briefly
+      // ~double server load), so there the verdict is that the forced reconnect
+      // happened and the session fully recovered - the property this lane exists to
+      // prove - with the chart re-pull treated as best-effort.
+      const bool botOk = (_o.churnSeconds > 0)
+                       ? (recovered && b.reconnects > 0)
+                       : (recovered && chart);
+      ok = ok && botOk;
       b.rc.Close();
     }
     return ok;

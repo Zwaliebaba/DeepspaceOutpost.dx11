@@ -46,6 +46,7 @@
 #include "CombatSystem.h"     // Combatant (Attack range + focus)
 #include "StationServices.h"  // DockState / ServerStation (dock gating + target type)
 #include "LootSystem.h"       // LootItem (Collect target type)
+#include "SceneTypes.h"       // ScenePoi / OreBody / PoiKind (Mine target types)
 #include "Messages/Defs/UnitOrder.h"   // Msg::OrderKind / OrderStatus
 
 namespace Neuron::GameLogic
@@ -156,6 +157,7 @@ namespace Neuron::GameLogic
       case Msg::OrderKind::Attack:
       case Msg::OrderKind::Collect:
       case Msg::OrderKind::Escort:
+      case Msg::OrderKind::Mine:
       {
         const ECS::EntityId tgt = _world.LiveEntity(_req.target);
         if (!_world.IsValid(tgt) || tgt.index == unit.index)
@@ -169,6 +171,13 @@ namespace Neuron::GameLogic
           case Msg::OrderKind::Dock:    ok = _world.Has<ServerStation>(tgt); break;
           case Msg::OrderKind::Attack:  ok = _world.Has<Combatant>(tgt);     break;
           case Msg::OrderKind::Collect: ok = _world.Has<LootItem>(tgt);      break;
+          // Mine: a specific rock (OreBody) or a whole belt (an AsteroidBelt anchor).
+          case Msg::OrderKind::Mine:
+          {
+            const ScenePoi* sp = _world.TryGet<ScenePoi>(tgt);
+            ok = _world.Has<OreBody>(tgt) || (sp != nullptr && sp->kind == PoiKind::AsteroidBelt);
+            break;
+          }
           default:                      ok = _world.Has<WorldTransform>(tgt); break;
         }
         if (!ok)
@@ -176,6 +185,25 @@ namespace Neuron::GameLogic
           plan.status = Msg::OrderStatus::BadTarget;
           return plan;
         }
+
+        // Mine has two extra preconditions: the unit must carry a mining laser and
+        // have cargo room right now (scene.md 3.7). Checked here so the anti-cheat
+        // matrix stays the single validation point.
+        if (_req.order == Msg::OrderKind::Mine)
+        {
+          const Equipment* eq = _world.TryGet<Equipment>(unit);
+          if (eq == nullptr || !eq->miningLaser)
+          {
+            plan.status = Msg::OrderStatus::NoGear;
+            return plan;
+          }
+          if (const CargoHold* hold = _world.TryGet<CargoHold>(unit); hold != nullptr && TotalTonnage(*hold) >= hold->capacity)
+          {
+            plan.status = Msg::OrderStatus::HoldFull;
+            return plan;
+          }
+        }
+
         plan.order.target = _req.target;
         break;
       }
@@ -263,6 +291,12 @@ namespace Neuron::GameLogic
         holdStation();
         return;
       }
+
+      // Mine is steered AND extracted by StepMining (it retargets rocks and runs the
+      // beam cycle), so StepOrders leaves its intent alone - don't fly it to the belt
+      // centre here or the two systems would fight over the FlightIntent.
+      if (_o.order == Msg::OrderKind::Mine)
+        return;
 
       // Resolve the destination point. Entity-targeted orders read the target's
       // CURRENT position (generation-safe); a dead/removed target ends the order.

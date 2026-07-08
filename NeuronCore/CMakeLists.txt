@@ -58,6 +58,7 @@ set(NEURONCORE_HEADERS
     Messages/Defs/EquipmentEvents.h
     Messages/Defs/Travel.h
     Messages/Defs/GalaxyChunks.h
+    Messages/Defs/SceneChunks.h
     Messages/Defs/TimeSync.h
     Messages/Defs/Strategic.h
     Messages/Defs/ExplosionAt.h

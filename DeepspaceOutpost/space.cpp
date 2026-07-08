@@ -1653,8 +1653,8 @@ void reset_weapons (void)
 
 
 // Trigger the laser-beam visual for this frame's fire intent (the shot itself is
-// resolved by the server from InputCommand.fire; damage and heat come back via
-// PlayerStatus). Honours the server-mirrored trigger lock (laserTemp >= 242) and
+// resolved server-side by the Attack order's engagement; damage and heat come back
+// via PlayerStatus). Honours the server-mirrored trigger lock (laserTemp >= 242) and
 // the legacy pulse pacing so the beam flashes like the original. Returns the
 // number of frames to draw the beam (0 = no laser / too hot). The beam itself is
 // the ship's muzzle bolt: while draw_lasers counts down, the local hull's render

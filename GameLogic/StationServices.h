@@ -50,6 +50,7 @@ namespace Neuron::GameLogic
     bool fuelScoop = false;
     bool energyBomb = false;
     bool escapePod = false;
+    bool miningLaser = false;   // scene.md 3.7: gates the Mine order's beam cycle
   };
 
   // Hyperspace fuel (G7): legacy 0..70 tenths = 0.0..7.0 light years. Full at
@@ -198,6 +199,7 @@ namespace Neuron::GameLogic
       case Net::EquipItem::FuelScoop:      return 5250;
       case Net::EquipItem::EnergyBomb:     return 9000;
       case Net::EquipItem::EscapePod:      return 10000;
+      case Net::EquipItem::MiningLaser:    return 2000;    // 200.0 Cr
       default:                             return 0;      // unknown item
     }
   }
@@ -214,6 +216,7 @@ namespace Neuron::GameLogic
       case Net::EquipItem::FuelScoop:      return _eq.fuelScoop;
       case Net::EquipItem::EnergyBomb:     return _eq.energyBomb;
       case Net::EquipItem::EscapePod:      return _eq.escapePod;
+      case Net::EquipItem::MiningLaser:    return _eq.miningLaser;
       default:                             return false;
     }
   }
@@ -258,6 +261,7 @@ namespace Neuron::GameLogic
       case Net::EquipItem::FuelScoop:      _eq.fuelScoop = true; break;
       case Net::EquipItem::EnergyBomb:     _eq.energyBomb = true; break;
       case Net::EquipItem::EscapePod:      _eq.escapePod = true; break;
+      case Net::EquipItem::MiningLaser:    _eq.miningLaser = true; break;
       default: break;
     }
 

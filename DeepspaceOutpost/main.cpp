@@ -76,10 +76,10 @@ char find_name[20];
 
 /*
  * Piloting is retired: the player flies the CAMERA (see CameraRig), not the
- * hull. The ship's flight intent is always zero - the legacy roll/climb ramp
- * and auto-centre machinery went with the cockpit view. PlayerFlight() remains
- * as presentation state (the intro parade and game-over debris animate off its
- * speed) and as the zero source send_player_input reads.
+ * hull. The ship moves by orders - the legacy roll/climb ramp and auto-centre
+ * machinery went with the cockpit view, and the wire InputCommand carries no
+ * flight axes at all (protocol v4). PlayerFlight() remains as presentation
+ * state (the intro parade and game-over debris animate off its speed).
  */
 
 /*
@@ -143,9 +143,9 @@ void initialise_game(void)
 // window now (ChartWindow) - it is mouse-driven and the overlay suppresses game keys
 // while open - so that whole keyboard subsystem is retired.
 
-// Pending fire-missile intent + the locked target it launches at, for the next
-// input packet (thin-client mode). Set by launch_missile(), consumed and cleared by
-// send_player_input().
+// Pending fire-missile intent + the locked target it launches at. Set by
+// launch_missile(), published as a LaunchMissile ActionTriggered (and cleared) by
+// send_player_input(); the subscriber turns it into a reliable AbilityRequest.
 static bool s_fire_missile_intent = false;
 static unsigned int s_fire_missile_target = 0xFFFFFFFFu;
 
@@ -1506,16 +1506,6 @@ void info_message(const char* message)
 // results, plus entity despawns and deaths. Removing the entity on despawn/death
 // is what stops destroyed things (a detonated missile, a killed ship) from
 // lingering as motionless ghosts; a death also plays the explosion sound.
-// This frame's discrete combat input, accumulated from ActionTriggered messages and
-// consumed by send_player_input. Continuous flight (roll/pitch/throttle) is NOT here -
-// it stays the legacy rate-based PlayerFlight state, normalized to axes at send time.
-static bool     s_frameFire = false;
-static bool     s_frameMissile = false;
-static unsigned int s_frameMissileTarget = 0xFFFFFFFFu;
-static bool     s_frameEcm = false;
-static bool     s_frameEnergyBomb = false;
-static bool     s_frameEscapePod = false;
-
 // The other players in view, keyed by entity id: their commander name + legal
 // status, as replicated by PlayerInfo. Used to label ships and (later) chat; an
 // entry is dropped when its ship despawns/dies. This is presentation-only mirror
@@ -1783,29 +1773,33 @@ static void register_client_event_handlers(void)
       snd_play_sample(SND_BEEP);   // scooped something
   });
 
-  // Input command-builder: a discrete combat action sets this frame's intent, which
-  // send_player_input folds into the outgoing InputCommand.
+  // Ability dispatch: the input layer publishes WHAT the player did (a LocalOnly
+  // ActionTriggered on the client bus); this subscriber maps it onto the reliable
+  // AbilityRequest so a button press is never lost to datagram loss (roadmap #6 -
+  // the one activation path). Movement is a UnitOrder; the per-frame InputCommand
+  // is only the heartbeat/ack.
   g_clientBus.Subscribe<Neuron::Msg::ActionTriggered>([](const Neuron::Msg::ActionTriggered& _a)
   {
+    Neuron::Msg::AbilityRequest req;
     switch (_a.action)
     {
-      case Neuron::Msg::InputAction::Fire:
-        s_frameFire = true;
-        break;
       case Neuron::Msg::InputAction::LaunchMissile:
-        s_frameMissile = true;
-        s_frameMissileTarget = _a.param;
+        req.kind = Neuron::Msg::AbilityKind::FireMissile;
+        req.target = _a.param;
         break;
       case Neuron::Msg::InputAction::Ecm:
-        s_frameEcm = true;
+        req.kind = Neuron::Msg::AbilityKind::Ecm;
         break;
       case Neuron::Msg::InputAction::EnergyBomb:
-        s_frameEnergyBomb = true;
+        req.kind = Neuron::Msg::AbilityKind::EnergyBomb;
         break;
       case Neuron::Msg::InputAction::EscapePod:
-        s_frameEscapePod = true;
+        req.kind = Neuron::Msg::AbilityKind::EscapePod;
         break;
+      default:
+        return;   // Fire (the manual laser) is retired - attack is an order (I7)
     }
+    Client::ReplicationClientInstance().SendAbility(req);
   });
 }
 
@@ -1867,35 +1861,18 @@ static int is_flight_view(int scr)
   return scr == SCR_FRONT_VIEW;
 }
 
-// Send the player's per-frame intent to the server. Piloting is retired (the
-// player flies the CAMERA; the hull idles), so the flight axes are always zero -
-// but the command still carries the discrete combat intents AND the snapshot ack
-// the delta stream depends on, so the cadence must not stop. Thin-client only.
+// Send the player's per-frame heartbeat to the server. Piloting is retired (the
+// player flies the CAMERA; the hull moves by orders) and the discrete abilities
+// ride the reliable AbilityRequest, so the command carries only the sequence and
+// the snapshot ack the delta stream depends on - the cadence must not stop (it is
+// also the liveness signal that keeps the ship from safe-parking). Thin-client only.
 static void send_player_input(void)
 {
   static uint32_t seq = 0;
 
-  Msg::InputCommand in;
-  in.sequence = ++seq;
-  // Zero flight intent: the ship holds station (the server clamps and decays
-  // motion authoritatively; a zero throttle brings the hull to rest).
-  in.rollAxis = 0.0f;
-  in.pitchAxis = 0.0f;
-  in.throttle = 0.0f;
-
-  // Discrete combat actions flow as LocalOnly ActionTriggered messages through the
-  // client bus into this frame's intent (the command-builder pattern): the input
-  // layer publishes what the player did, the subscriber accumulates it here.
+  // A latched missile intent (launch_missile) publishes this frame's LaunchMissile
+  // action; the ActionTriggered subscriber sends the reliable AbilityRequest.
   register_client_event_handlers();
-  s_frameFire = false;
-  s_frameMissile = false;
-  s_frameMissileTarget = Msg::NO_MISSILE_TARGET;
-  s_frameEcm = false;
-  s_frameEnergyBomb = false;
-  s_frameEscapePod = false;
-  // (I7: manual A=fire is retired - the Attack order drives the ship's laser
-  //  server-side now. in.fire therefore stays false; the ability bar / orders own
-  //  the other actions.)
   if (s_fire_missile_intent)
   {
     g_clientBus.Publish(Neuron::Msg::ActionTriggered{ Neuron::Msg::InputAction::LaunchMissile, s_fire_missile_target });
@@ -1903,14 +1880,9 @@ static void send_player_input(void)
   }
   g_clientBus.Dispatch();
 
-  in.fire = s_frameFire;
-  in.fireMissile = s_frameMissile;
-  in.missileTarget = s_frameMissile ? s_frameMissileTarget : Msg::NO_MISSILE_TARGET;
-  in.ecm = s_frameEcm;
-  in.energyBomb = s_frameEnergyBomb;
-  in.escapePod = s_frameEscapePod;
-
-  Client::ReplicationClientInstance().SendInput(in);
+  Msg::InputCommand in;
+  in.sequence = ++seq;
+  Client::ReplicationClientInstance().SendInput(in);   // SendInput stamps ackSnapshotTick
 }
 
 // The client's connection configuration (read once from the environment in

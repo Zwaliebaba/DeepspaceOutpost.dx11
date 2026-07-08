@@ -11,11 +11,11 @@ using namespace Neuron;
 
 namespace
 {
-  Msg::InputCommand Input(uint32_t _seq, float _throttle)
+  Msg::InputCommand Input(uint32_t _seq, uint32_t _ack = 0)
   {
     Msg::InputCommand in;
     in.sequence = _seq;
-    in.throttle = _throttle;
+    in.ackSnapshotTick = _ack;
     return in;
   }
 
@@ -72,8 +72,8 @@ TEST(Session, InputFromUnknownEndpointIsIgnored)
   // No hello yet: input from an unknown endpoint neither spawns nor connects,
   // whether it is token-less or carries a bogus token.
   const Net::Endpoint a{ 0x7F000001, 1001 };
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(1, 0.5f), 1)));
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0xDEADBEEFu, Input(2, 0.5f), 1)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(1), 1)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0xDEADBEEFu, Input(2), 1)));
   EXPECT_TRUE(sessions.Count() == 0);
 }
 
@@ -107,14 +107,14 @@ TEST(Session, InputAppliesOnlyWithTheRightToken)
   ASSERT_TRUE(world.IsValid(e));
   const uint64_t token = TokenOf(sessions, a);
 
-  // Right token from the session's endpoint: applied.
-  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(1, 0.5f), 2) == e);
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
+  // Right token from the session's endpoint: applied (the heartbeat's ack lands).
+  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(1, /*ack*/ 50), 2) == e);
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 50u);
 
   // Wrong token (spoofed source with a bad token) and token-less input: ignored.
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token ^ 0x1u, Input(2, 0.9f), 3)));
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(3, 0.9f), 4)));
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);   // unchanged
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token ^ 0x1u, Input(2, /*ack*/ 90), 3)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, /*token*/ 0, Input(3, /*ack*/ 90), 4)));
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 50u);   // unchanged
 }
 
 TEST(Session, InputCadenceCapDropsAFloodWithinATick)
@@ -129,15 +129,15 @@ TEST(Session, InputCadenceCapDropsAFloodWithinATick)
   const uint64_t token = TokenOf(sessions, a);
 
   for (uint16_t i = 0; i < GameLogic::MAX_INPUTS_PER_TICK; ++i)
-    EXPECT_TRUE(sessions.OnInput(world, a, token, Input(i + 1u, 0.0f), /*tick*/ 5) == e);
+    EXPECT_TRUE(sessions.OnInput(world, a, token, Input(i + 1u, /*ack*/ 10), /*tick*/ 5) == e);
 
   // One past the cap, same tick: dropped even though it is authenticated.
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(100, 1.0f), /*tick*/ 5)));
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0f);   // the dropped intent never applied
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(100, /*ack*/ 99), /*tick*/ 5)));
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 10u);   // the dropped ack never applied
 
   // The next tick reopens the budget.
-  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(101, 0.5f), /*tick*/ 6) == e);
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.5f);
+  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(101, /*ack*/ 50), /*tick*/ 6) == e);
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 50u);
 }
 
 TEST(Session, DistinctEndpointsGetDistinctEntities)
@@ -161,12 +161,12 @@ TEST(Session, SameEndpointReusesSessionAndAppliesLatestInput)
   ECS::EntityId e = Connect(world, sessions, a);
   const uint64_t token = TokenOf(sessions, a);
 
-  sessions.OnInput(world, a, token, Input(5, 0.9f), 2);    // newer -> applied
+  EXPECT_TRUE(sessions.OnInput(world, a, token, Input(5, /*ack*/ 90), 2) == e);   // newer -> applied
   EXPECT_TRUE(sessions.Count() == 1);
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 90u);
 
-  sessions.OnInput(world, a, token, Input(3, 0.1f), 3);    // stale seq -> ignored
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.9f);
+  sessions.OnInput(world, a, token, Input(3, /*ack*/ 10), 3);    // stale seq -> ignored
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(a)).ackedSnapshotTick, 90u);
 }
 
 TEST(Session, AuthenticatedEndpointChangeKeepsTheSession)
@@ -182,12 +182,12 @@ TEST(Session, AuthenticatedEndpointChangeKeepsTheSession)
   const uint64_t token = TokenOf(sessions, a);
 
   // Input arrives from the new endpoint with the same token: same entity, migrated.
-  EXPECT_TRUE(sessions.OnInput(world, b, token, Input(1, 0.7f), 2) == e);
+  EXPECT_TRUE(sessions.OnInput(world, b, token, Input(1, /*ack*/ 70), 2) == e);
   EXPECT_TRUE(sessions.Count() == 1);
   EXPECT_TRUE(sessions.Has(b));
   EXPECT_FALSE(sessions.Has(a));                       // old key vacated
   EXPECT_EQ(TokenOf(sessions, b), token);             // token index followed the move
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.7f);
+  EXPECT_EQ(sessions.All().at(GameLogic::EndpointKey(b)).ackedSnapshotTick, 70u);   // applied on the migrated session
 }
 
 TEST(Session, WrongTokenReliableDatagramIsDropped)
@@ -294,7 +294,7 @@ TEST(Session, IdleSessionsAreReapedAndTokensForgotten)
 
   // The token index was pruned with the session: the stale token authenticates
   // nothing (and doesn't resurrect a session).
-  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(1, 0.5f), 101)));
+  EXPECT_FALSE(world.IsValid(sessions.OnInput(world, a, token, Input(1), 101)));
   EXPECT_TRUE(sessions.Count() == 0);
 }
 
@@ -341,16 +341,17 @@ TEST(Session, SafeParkZeroesTheIntentOfASilentShip)
   const Net::Endpoint a{ 0x7F000001, 1001 };
   ECS::EntityId e = Connect(world, sessions, a);
   const uint64_t token = TokenOf(sessions, a);
-  sessions.OnInput(world, a, token, Input(1, 1.0f), /*tick*/ 2);   // full throttle
-  ASSERT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0f);
+  sessions.OnInput(world, a, token, Input(1), /*tick*/ 2);         // heartbeat: last seen tick 2
+  world.Get<GameLogic::FlightIntent>(e).throttle = 1.0;            // an order left the hull under power
+  ASSERT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0);
 
   // Not silent long enough yet (2 < parkAfter 45): intent stays.
   sessions.SafeParkSilent(world, /*tick*/ 40, /*parkAfter*/ 45);
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0f);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 1.0);
 
   // Silent past the park threshold (tick 100, last seen tick 2): intent zeroed.
   sessions.SafeParkSilent(world, /*tick*/ 100, /*parkAfter*/ 45);
-  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0f);
+  EXPECT_TRUE(world.Get<GameLogic::FlightIntent>(e).throttle == 0.0);
 }
 
 TEST(Session, NewSessionGetsADefaultName)

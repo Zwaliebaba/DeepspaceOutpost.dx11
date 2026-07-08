@@ -15,6 +15,14 @@ namespace DSOServer::Cfg
   inline constexpr int RECV_BUDGET = 256;                   // max datagrams drained per tick
   inline constexpr uint32_t TICK_SLEEP_MS = 33;             // ~30 Hz fixed tick
 
+  // ServerManager management channel (sm.md). The admin UDP port is opened only when
+  // DSO_ADMIN_KEY is set (else the whole feature is off); it is a SEPARATE socket, so
+  // admin traffic never competes with the game's per-tick receive budget and can be
+  // firewalled independently. Defaults to the game port + 1.
+  inline constexpr uint16_t ADMIN_PORT = SERVER_PORT + 1;   // 40001: ServerManager connects here
+  inline constexpr int ADMIN_RECV_BUDGET = 32;              // max admin datagrams drained per tick
+  inline constexpr uint32_t ADMIN_HEALTH_INTERVAL = 30;     // push a health sample this often (~1 s)
+
   inline constexpr int64_t AOI_CELL_SIZE = 100000;          // interest-management cell size
   inline constexpr int AOI_RADIUS_CELLS = 1;                // viewers see +/- 1 cell
   inline constexpr uint32_t SESSION_TIMEOUT_TICKS = 300;    // reap a pending (pre-hello) shell idle this long (~10s)

@@ -24,6 +24,7 @@ namespace Neuron::Msg
   {
     Hyperspace = 1,     // fuel-gated jump to another system (may misfire)
     InSystemJump = 2,   // the jump drive: a fast hop toward the planet
+    PoiJump = 3,        // targeted in-system jump to a scene POI (scene.md 3.6)
   };
 
   enum class TravelStatus : uint8_t
@@ -36,6 +37,7 @@ namespace Neuron::Msg
     UnknownSystem = 5,   // no such destination system
     MassLocked = 6,      // an in-system jump is blocked by nearby mass
     Rejected = 7,        // not travel-capable / nothing to jump toward
+    UnknownPoi = 8,      // a PoiJump named a POI that isn't in this system
   };
 
   // client -> server: take me somewhere. `systemId` is the destination system
@@ -50,9 +52,10 @@ namespace Neuron::Msg
 
     TravelKind kind = TravelKind::Hyperspace;
     uint32_t systemId = 0;
+    uint32_t poiId = 0;   // PoiJump: the destination POI (ignored by the other kinds)
 
-    auto Fields()       { return std::tie(kind, systemId); }
-    auto Fields() const { return std::tie(kind, systemId); }
+    auto Fields()       { return std::tie(kind, systemId, poiId); }
+    auto Fields() const { return std::tie(kind, systemId, poiId); }
   };
 
   // server -> client: what the travel attempt did. Position/fuel changes ride

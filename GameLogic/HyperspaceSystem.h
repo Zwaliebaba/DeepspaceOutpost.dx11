@@ -39,6 +39,8 @@
 #include "CombatSystem.h"      // Team, Combatant, Wanted, Witchspace, Bounty, PIRATE_BOUNTY
 #include "StationServices.h"   // Fuel, DockState, NearestStation, FindStationBySystem, LAUNCH_OFFSET
 #include "AiSystem.h"          // AiPilot, NpcFlightCaps, NPC_MAX_TURN_RATE, Detail::AiRand255
+#include "SceneTypes.h"        // ScenePoi + SCENE_JUMP_RANGE / POI_ARRIVAL_OFFSET (targeted jump)
+#include "GalaxyGen.h"         // Detail::Mix64 / Detail::Spread (arrival scatter)
 #include "Messages/Defs/Travel.h"   // Msg::TravelStatus (the travel wire outcomes)
 
 namespace Neuron::GameLogic
@@ -271,6 +273,83 @@ namespace Neuron::GameLogic
       static_cast<int64_t>(dy * s),
       static_cast<int64_t>(dz * s),
     };
+    out.status = Msg::TravelStatus::Jumped;
+    out.jumped = true;
+    return out;
+  }
+
+  // Targeted in-system jump to a scene POI (scene.md 3.6). `_anchor` is the POI
+  // anchor entity the caller resolved from the request's poiId (via SceneIndex);
+  // keeping the lookup out of here leaves this pure and index-agnostic. Rules:
+  //   - the anchor must be a live ScenePoi within SCENE_JUMP_RANGE of the player
+  //     (a POI in another system is too far - that is hyperspace's job): UnknownPoi;
+  //   - departure is mass-locked exactly like InSystemJump (any Combatant hull in
+  //     MASS_LOCK_RANGE pins you - you cannot jump out of a fight): MassLocked;
+  //   - on success the hull arrives POI_ARRIVAL_OFFSET off the anchor along a
+  //     deterministic per-player-per-tick scatter direction (no RNG state), outside
+  //     every contact range, WITHOUT spawn grace - a hot beacon is exposed by design.
+  // No fuel cost (the in-system drive is free; risk gates it, not fuel).
+  inline JumpDriveOutcome JumpToPoi(ECS::Registry& _world, ECS::EntityId _player, ECS::EntityId _anchor, uint32_t _tick)
+  {
+    JumpDriveOutcome out;
+    out.status = Msg::TravelStatus::Rejected;
+
+    WorldTransform* pt = _world.TryGet<WorldTransform>(_player);
+    const ScenePoi* poi = _world.IsValid(_anchor) ? _world.TryGet<ScenePoi>(_anchor) : nullptr;
+    const WorldTransform* at = _world.IsValid(_anchor) ? _world.TryGet<WorldTransform>(_anchor) : nullptr;
+    if (pt == nullptr)
+      return out;
+    if (poi == nullptr || at == nullptr)
+    {
+      out.status = Msg::TravelStatus::UnknownPoi;
+      return out;
+    }
+    const Math::Vector3i64 self = pt->position;
+
+    // POI must be system-local (within reach of the drive), else it is not "in this
+    // system" for this player.
+    {
+      const int64_t dx = at->position.x > self.x ? at->position.x - self.x : self.x - at->position.x;
+      const int64_t dy = at->position.y > self.y ? at->position.y - self.y : self.y - at->position.y;
+      const int64_t dz = at->position.z > self.z ? at->position.z - self.z : self.z - at->position.z;
+      if (dx > SCENE_JUMP_RANGE || dy > SCENE_JUMP_RANGE || dz > SCENE_JUMP_RANGE)
+      {
+        out.status = Msg::TravelStatus::UnknownPoi;
+        return out;
+      }
+    }
+
+    // Mass-lock: any other combatant hull too close pins the drive (same rule +
+    // radius as InSystemJump).
+    bool locked = false;
+    _world.Each<WorldTransform, Combatant>([&](ECS::EntityId _id, WorldTransform& _t, Combatant&)
+    {
+      if (_id == _player)
+        return;
+      const int64_t ax = _t.position.x > self.x ? _t.position.x - self.x : self.x - _t.position.x;
+      const int64_t ay = _t.position.y > self.y ? _t.position.y - self.y : self.y - _t.position.y;
+      const int64_t az = _t.position.z > self.z ? _t.position.z - self.z : self.z - _t.position.z;
+      if (ax <= MASS_LOCK_RANGE && ay <= MASS_LOCK_RANGE && az <= MASS_LOCK_RANGE)
+        locked = true;
+    });
+    if (locked)
+    {
+      out.status = Msg::TravelStatus::MassLocked;
+      return out;
+    }
+
+    // Deterministic arrival scatter direction (hash of playerId ^ tick; no RNG
+    // state, no wall clock) so a fleet doesn't stack on one exact point.
+    const uint64_t h = Detail::Mix64((static_cast<uint64_t>(_player.index) << 21) ^ Detail::Mix64(_tick + 1ull));
+    const int64_t ox = Detail::Spread(Detail::Mix64(h + 1ull), POI_ARRIVAL_OFFSET);
+    const int64_t oy = Detail::Spread(Detail::Mix64(h + 2ull), POI_ARRIVAL_OFFSET);
+    const int64_t oz = Detail::Spread(Detail::Mix64(h + 3ull), POI_ARRIVAL_OFFSET);
+    // Guarantee a minimum clearance so the offset never lands inside a contact range.
+    Math::Vector3i64 arrive = at->position + Math::Vector3i64{ ox, oy, oz };
+    if (arrive == at->position)
+      arrive.x += POI_ARRIVAL_OFFSET;
+    pt->position = arrive;
+
     out.status = Msg::TravelStatus::Jumped;
     out.jumped = true;
     return out;

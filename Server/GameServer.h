@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -32,10 +34,13 @@
 #include "Messages/Defs/TimeSync.h"       // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"      // StrategicSummary (E3 strategic tier)
 #include "Messages/Defs/ExplosionAt.h"    // ExplosionAt (G1 kill VFX broadcast)
+#include "Messages/Defs/SceneChunks.h"    // SceneChunkRequest / SceneChunk / MiningTick (scene.md)
 #include "DatagramPump.h"     // NeuronServer: bounded drain + magic routing
 #include "OnChangeCache.h"    // NeuronServer: send-on-change suppression
 #include "PersistenceService.h"  // NeuronServer: async off-sim-thread durable writes (B4)
 #include "TickMetrics.h"      // NeuronServer: always-on tick counters (D3)
+#include "AdminChannel.h"     // NeuronServer: ServerManager management channel (sm.md)
+#include "Messages/Defs/Admin.h"  // Msg::AdminPlayerInfo (roster change-gate value type)
 
 #include "GameLogic.h"
 #include "PlayerPersistence.h"   // GameLogic: component <-> PlayerPersistState converters (B4)
@@ -46,8 +51,13 @@ namespace DSOServer
   {
   public:
     // Builds the world, provisions the services and registers the combat
-    // subscribers. The socket stays owned by main (it is process lifetime).
-    explicit GameServer(Neuron::Net::UdpSocket& _socket);
+    // subscribers. The sockets stay owned by main (they are process lifetime).
+    // `_adminSocket` is the management-channel socket (sm.md): null unless
+    // DSO_ADMIN_KEY is set, in which case the AdminChannel is enabled and served
+    // through it. When null the whole management feature is off. `_gamePort` is the
+    // UDP port the game is actually served on (echoed to managers); 0 => the default.
+    explicit GameServer(Neuron::Net::UdpSocket& _socket, Neuron::Net::UdpSocket* _adminSocket = nullptr,
+                        uint16_t _gamePort = 0);
 
     // On a graceful stop, snapshots every live player one last time; the
     // persistence service then flushes on destruction (bounded).
@@ -58,7 +68,8 @@ namespace DSOServer
 
     // D3: the server loop reports a dropped-backlog tick (fell behind the fixed
     // step), and reads the rolling metrics (also read by the D5 BotClient harness).
-    void NoteOverrun() { m_metrics.NoteOverrun(); }
+    // Also feeds a (rate-limited) TickOverrun event to the management channel.
+    void NoteOverrun();
     [[nodiscard]] const Neuron::Server::TickMetrics& Metrics() const { return m_metrics; }
 
   private:
@@ -66,6 +77,16 @@ namespace DSOServer
     struct StatusFieldsEqual
     {
       bool operator()(const Neuron::Msg::PlayerStatus& _a, const Neuron::Msg::PlayerStatus& _b) const
+      {
+        return _a.Fields() == _b.Fields();
+      }
+    };
+
+    // Roster rows compare by Fields() too, so a manager only re-learns a player when a
+    // displayed field (name/score/rtt/state/...) actually changed (sm.md).
+    struct AdminRowEqual
+    {
+      bool operator()(const Neuron::Msg::AdminPlayerInfo& _a, const Neuron::Msg::AdminPlayerInfo& _b) const
       {
         return _a.Fields() == _b.Fields();
       }
@@ -99,6 +120,7 @@ namespace DSOServer
 
     // --- tick phases (in run order) ---
     void ReceiveDatagrams();
+    void PumpAdmin();             // sm.md: drain the management socket into AdminChannel
     void ProcessReliableRequests();
     void ApplyCompletedLoads();   // B4: finish deferred handshakes whose load returned
     void AdvanceSimulation();
@@ -108,6 +130,7 @@ namespace DSOServer
     void ReapAndDespawn();
     void PublishState();
     void PublishStrategicFor(Neuron::GameLogic::Session& _s);   // E3: per-system rollup to one viewer
+    void PublishAdmin();          // sm.md: roster deltas + health to managers, then flush
     void SavePlayers();           // B4: cadence snapshot of live players (on change)
     void SaveMarkets();           // v2: cadence snapshot of drifted station markets (on change)
 
@@ -119,6 +142,9 @@ namespace DSOServer
     void HandleStationRequest(Neuron::GameLogic::Session& _session, const Neuron::Net::StationRequest& _req);
     void HandleBuyEscort(Neuron::GameLogic::Session& _session);   // F1: purchase + spawn an owned escort
     void HandleTravelRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::TravelRequest& _req);
+    // scene.md: reply with a system's scene (its POIs) so the client can list local
+    // areas and target a POI jump.
+    void HandleSceneChunkRequest(Neuron::GameLogic::Session& _session, const Neuron::Msg::SceneChunkRequest& _req);
     // I1: order a unit (validate ownership/target/range, record the ActiveOrder, ack)
     // and route a discrete equipment activation to the combat bus.
     void HandleUnitOrder(Neuron::GameLogic::Session& _session, const Neuron::Msg::UnitOrder& _req);
@@ -141,14 +167,21 @@ namespace DSOServer
     // as the message's own encoded bytes. No-op when persistence is disabled.
     void LogCommand(const Neuron::GameLogic::Session& _s, const Neuron::Net::ReliableMessage& _msg);
 
+    // sm.md: build the AdminChannel from DSO_ADMIN_KEY (disabled/empty when unset),
+    // and push one management-channel event (cheap no-op when the channel is off).
+    static Neuron::Server::AdminChannel MakeAdminChannel();
+    void AdminNote(Neuron::Msg::AdminEventKind _kind, uint32_t _subject, std::string _text);
+
     // --- state ---
     Neuron::Net::UdpSocket& m_socket;
+    Neuron::Net::UdpSocket* m_adminSocket = nullptr;   // sm.md: management channel (null = off)
     Neuron::ECS::Registry m_world;
     std::vector<Neuron::ECS::EntityId> m_landmarks;
     Neuron::GameLogic::AreaOfInterest m_aoi;
     Neuron::GameLogic::ServerSessions m_sessions;
     Neuron::GameLogic::DespawnTracker m_despawns;
     Neuron::GameLogic::SpawnDirector m_spawner;
+    Neuron::GameLogic::SceneIndex m_sceneIndex;   // scene.md: systemId/poiId -> POI anchors
     Neuron::GameLogic::TransformHistory m_combatHistory;   // E1: per-tick rewind buffer for lag comp
     Neuron::Msg::MessageBus m_bus;
 
@@ -196,5 +229,17 @@ namespace DSOServer
     // Rate-limited respawn logging.
     uint32_t m_lastRespawnLogTick = 0;
     int m_suppressedRespawns = 0;
+
+    // sm.md management channel. Disabled (empty key) unless DSO_ADMIN_KEY is set and
+    // main handed us an admin socket. The roster is pushed as per-player deltas gated
+    // by an on-change cache keyed by playerId; a lifetime overrun counter and a
+    // rate-limit tick keep health accurate and the overrun feed from flooding.
+    Neuron::Server::AdminChannel m_admin;
+    std::vector<Neuron::Server::MagicRoute> m_adminRoutes;   // admin socket magic -> handler
+    Neuron::Server::OnChangeCache<uint32_t, Neuron::Msg::AdminPlayerInfo, AdminRowEqual> m_adminRoster;
+    std::unordered_set<uint32_t> m_adminRosterIds;   // playerIds pushed last PublishAdmin (leave diff)
+    std::unordered_map<uint32_t, uint32_t> m_adminJoinTick;   // playerId -> tick it first appeared
+    uint64_t m_lifetimeOverruns = 0;                 // cumulative overruns (health; m_metrics resets)
+    uint32_t m_lastOverrunEventTick = 0;             // rate-limit the TickOverrun feed line
   };
 }

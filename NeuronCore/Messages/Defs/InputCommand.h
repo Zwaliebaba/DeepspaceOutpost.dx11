@@ -1,22 +1,21 @@
 #pragma once
 
-// InputCommand - the client -> server flight/fire intent, as a catalog message.
+// InputCommand - the client -> server per-frame heartbeat, as a catalog message.
 //
-// This is the first of the existing hand-rolled protocols folded onto the unified
-// message system (the wire-folding phases). It replaces the bespoke 'NCMD' packet
-// (the old WriteInput/ReadInput): the same fields now ride the 'NMSG' UNRELIABLE
-// lane as a length-prefixed record, encoded/decoded by the generic Serialize codec
-// from the single Fields() description below.
+// Re-cut to the pure heartbeat/ack (protocol v4, roadmap #6). The pointer-first
+// client does not fly the hull (movement is a UnitOrder) and the discrete
+// equipment activations ride the reliable AbilityRequest, so the legacy flight
+// axes and ability flags are gone from the wire. What remains is exactly what
+// must ride the highest-frequency client->server stream:
+//   * `sequence`        - self-superseding freshness (latest wins server-side)
+//                         and the liveness signal SafeParkSilent watches;
+//   * `ackSnapshotTick` - the snapshot-stream ack (E2b) the server's delta
+//                         encoder baselines against.
 //
 // Self-superseding, latest-sequence-wins (the server keeps the highest `sequence`
 // and drops stale/duplicate datagrams), so it is sent unreliably and often - it is
 // never queued on a reliable lane (a static trait enforces this). Shared protocol
-// only: the server maps it onto its authoritative FlightIntent (no behaviour here).
-//
-// The field order/layout is byte-identical to the legacy 'NCMD' payload, so the
-// migration is a framing change, not a wire-format change (see the parity test).
-// `missileTarget` stays a bare entity index for now; promoting it to a generation-
-// stamped NetEntityId is a separate, later step.
+// only: no behaviour here.
 
 #include <cstdint>
 #include <tuple>
@@ -25,7 +24,8 @@
 
 namespace Neuron::Msg
 {
-  // Sentinel: the player has nothing locked for a missile.
+  // Sentinel: no entity target. Shared by AbilityRequest.target (a missile launch
+  // without a lock) and the server-internal FireWeapon commands.
   inline constexpr uint32_t NO_MISSILE_TARGET = 0xFFFFFFFFu;
 
   struct InputCommand
@@ -36,29 +36,11 @@ namespace Neuron::Msg
     static constexpr MessageLane  Lane  = MessageLane::Unreliable;
     static constexpr Direction    Dir   = Direction::ClientToServer;
 
-    uint32_t sequence = 0;       // monotonically increasing; latest wins on the server
-    float    rollAxis = 0.0f;    // [-1, 1] desired roll  (right positive)
-    float    pitchAxis = 0.0f;   // [-1, 1] desired pitch (up positive)
-    float    throttle = 0.0f;    // [ 0, 1] desired forward throttle
-    bool     fire = false;       // fire the front laser this frame
-    bool     fireMissile = false;// launch a missile this frame
-    uint32_t missileTarget = NO_MISSILE_TARGET;   // entity index the missile is locked to
+    uint32_t sequence = 0;          // monotonically increasing; latest wins on the server
+    uint32_t ackSnapshotTick = 0;   // latest snapshot tick held as a complete baseline (0 = none yet)
 
-    // Equipment activation intents (G8) - server-validated against ownership,
-    // energy, cooldown and dock state; appended after the legacy layout.
-    bool ecm = false;            // fire the ECM burst this frame
-    bool energyBomb = false;     // detonate the energy bomb this frame
-    bool escapePod = false;      // eject in the escape pod this frame
-
-    // Snapshot-stream acknowledgement (E2b): the latest snapshot tick the client
-    // holds as a complete baseline. Piggybacked on the input stream (the highest-
-    // frequency client->server traffic) so the server can delta the next snapshot
-    // against a baseline the client provably has. 0 = nothing acked yet. Appended
-    // after the G8 fields (the legacy prefix stays byte-identical).
-    uint32_t ackSnapshotTick = 0;
-
-    auto Fields()       { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod, ackSnapshotTick); }
-    auto Fields() const { return std::tie(sequence, rollAxis, pitchAxis, throttle, fire, fireMissile, missileTarget, ecm, energyBomb, escapePod, ackSnapshotTick); }
+    auto Fields()       { return std::tie(sequence, ackSnapshotTick); }
+    auto Fields() const { return std::tie(sequence, ackSnapshotTick); }
   };
 }
 

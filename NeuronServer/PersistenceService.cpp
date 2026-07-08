@@ -80,6 +80,16 @@ namespace Neuron::Persist
     return m_store->LoadMarketRows();   // boot-only: writer thread is idle (see header)
   }
 
+  std::vector<PoiRow> PersistenceService::LoadPois()
+  {
+    return m_store->LoadPois();   // boot-only: writer thread is idle (see header)
+  }
+
+  std::vector<PoiResourceRow> PersistenceService::LoadPoiResources()
+  {
+    return m_store->LoadPoiResources();   // boot-only: writer thread is idle (see header)
+  }
+
   void PersistenceService::RequestLoad(const std::string& _commanderName)
   {
     {

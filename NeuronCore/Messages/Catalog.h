@@ -19,7 +19,9 @@
 #include "Messages/Defs/EquipmentEvents.h"  // EcmPulse / EscapePodUsed
 #include "Messages/Defs/Travel.h"           // TravelRequest / TravelResponse
 #include "Messages/Defs/GalaxyChunks.h"     // GalaxyChunkRequest / GalaxyChunk
+#include "Messages/Defs/SceneChunks.h"      // SceneChunkRequest / SceneChunk / MiningTick (scene.md)
 #include "Messages/Defs/TimeSync.h"         // Ping / Pong (E1 time sync)
 #include "Messages/Defs/Strategic.h"        // StrategicSummary (E3 strategic tier)
 #include "Messages/Defs/ExplosionAt.h"      // ExplosionAt (G1 kill VFX broadcast)
+#include "Messages/Defs/Admin.h"            // ServerManager management channel (sm.md)
 #include "StationProtocol.h"   // StationRequest / StationResponse (REGISTER_MESSAGE'd)

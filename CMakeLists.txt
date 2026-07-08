@@ -78,6 +78,10 @@ add_subdirectory ("Server")
 # real UDP stack; its --smoke mode (server + 8 bots on loopback) is a CTest test.
 add_subdirectory ("BotClient")
 
+# ServerManager (sm.md): standalone Win32 GUI app that connects to a running server's
+# management port and shows a live status dashboard. Links NeuronClient.
+add_subdirectory ("ServerManager")
+
 # Galaxy seeding tool (v2): populates dbo.systems + baseline markets so the server
 # loads the universe from the DB. Windows/ODBC only, same gate as the server's
 # persistence backend, so a default (CI) configure skips it entirely. (Server's

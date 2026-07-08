@@ -16,7 +16,8 @@
 
 #include "ECS.h"
 #include "Messages/Defs/GalaxyChunks.h"   // Net::GalaxySystemInfo
-#include "PersistenceStore.h"             // Neuron::Persist::SystemRow / MarketRow
+#include "SceneSystem.h"                   // GameLogic::SceneIndex (scene.md)
+#include "PersistenceStore.h"             // Neuron::Persist::SystemRow / MarketRow / PoiRow
 
 namespace DSOServer
 {
@@ -29,13 +30,23 @@ namespace DSOServer
 
     // The chart manifest: every system in the galaxy (no special home system).
     std::vector<Neuron::Net::GalaxySystemInfo> manifest;
+
+    // The scene index: systemId/poiId -> POI anchor entities (scene.md). Populated
+    // as POIs materialize; the server keeps it for the scene-chunk and POI-jump
+    // paths. POI anchors are also appended to `landmarks` so belt anchors stay
+    // resident and rocks replicate through AOI like any entity.
+    Neuron::GameLogic::SceneIndex sceneIndex;
   };
 
   // Build the world into `_world` from the given system rows (empty ⇒ generate the
   // default galaxy from the seed), overlaying `_marketDrift` onto each station's
-  // baseline market. Returns the landmarks + manifest the send path and sessions
-  // need.
+  // baseline market and materializing each system's scene from `_pois`
+  // (empty ⇒ generate the scenes from the seed too), restoring drained belt pools
+  // from `_poiResources`. Returns the landmarks + manifest + scene index the send
+  // path and sessions need.
   [[nodiscard]] WorldSetup BuildWorld(Neuron::ECS::Registry& _world,
                                       const std::vector<Neuron::Persist::SystemRow>& _systems,
-                                      const std::vector<Neuron::Persist::MarketRow>& _marketDrift);
+                                      const std::vector<Neuron::Persist::MarketRow>& _marketDrift,
+                                      const std::vector<Neuron::Persist::PoiRow>& _pois,
+                                      const std::vector<Neuron::Persist::PoiResourceRow>& _poiResources);
 }

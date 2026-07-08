@@ -202,6 +202,11 @@ void input_on_char(WPARAM ch)
 	q_push(static_cast<int>(ch));
 }
 
+int input_take_char(void)
+{
+	return q_pop();
+}
+
 namespace {
 
 /* Keyboard processor for the EventManager chain. Returns 0 for messages it consumes,

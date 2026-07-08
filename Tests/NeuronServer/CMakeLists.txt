@@ -11,6 +11,7 @@ add_executable(NeuronServer.Tests
     OnChangeCacheTests.cpp
     PersistenceTests.cpp
     TickTests.cpp
+    AdminChannelTests.cpp
 )
 
 target_compile_features(NeuronServer.Tests PRIVATE cxx_std_23)
