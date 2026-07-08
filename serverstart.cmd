@@ -99,7 +99,7 @@ rem  4. Reset persisted data so every launch starts from clean schema tables.
 rem ============================================================================
 echo(
 echo === [4/6] Resetting persisted database data ===
-sqlcmd -S "%DSO_SQLSERVER%" -U "%DSO_DBUSER%" -P "%DSO_DBPASS%" -d "%DSO_DBNAME%" -b -Q "SET NOCOUNT ON; DELETE FROM dbo.player_cargo; DELETE FROM dbo.players; DELETE FROM dbo.empires; DELETE FROM dbo.accounts; DELETE FROM dbo.command_log; DELETE FROM dbo.station_markets; DELETE FROM dbo.systems; DELETE FROM dbo.world_meta WHERE meta_key <> N'schema_version'; DBCC CHECKIDENT (N'dbo.accounts', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.empires', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.players', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.command_log', RESEED, 0) WITH NO_INFOMSGS; PRINT 'Persisted gameplay data reset.';"
+sqlcmd -S "%DSO_SQLSERVER%" -U "%DSO_DBUSER%" -P "%DSO_DBPASS%" -d "%DSO_DBNAME%" -b -Q "SET NOCOUNT ON; DELETE FROM dbo.poi_resources; DELETE FROM dbo.system_pois; DELETE FROM dbo.player_cargo; DELETE FROM dbo.players; DELETE FROM dbo.empires; DELETE FROM dbo.accounts; DELETE FROM dbo.command_log; DELETE FROM dbo.station_markets; DELETE FROM dbo.systems; DELETE FROM dbo.world_meta WHERE meta_key <> N'schema_version'; DBCC CHECKIDENT (N'dbo.accounts', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.empires', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.players', RESEED, 0) WITH NO_INFOMSGS; DBCC CHECKIDENT (N'dbo.command_log', RESEED, 0) WITH NO_INFOMSGS; PRINT 'Persisted gameplay data reset.';"
 if errorlevel 1 goto :fail
 
 rem ============================================================================
