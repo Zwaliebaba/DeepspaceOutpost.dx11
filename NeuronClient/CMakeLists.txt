@@ -19,6 +19,7 @@ set(NEURONCLIENT_SOURCES
     Camera.cpp
     CameraController.cpp
     ReplicationClient.cpp
+    AdminClient.cpp
     Strings.cpp
     vector.cpp
 
@@ -55,6 +56,7 @@ set(NEURONCLIENT_HEADERS
     pch.h
     ClientEngine.h
     GameMain.h
+    AdminClient.h
 
     # Native Direct3D 11 graphics core headers.
     graphics/GraphicsCore.h

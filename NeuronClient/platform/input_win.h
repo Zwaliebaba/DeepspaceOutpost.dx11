@@ -16,6 +16,11 @@
 void input_on_key(WPARAM vk, bool down);   /* WM_KEYDOWN / WM_KEYUP */
 void input_on_char(WPARAM ch);             /* WM_CHAR (text entry)  */
 
+/* Pop the next buffered typed character (WM_CHAR), or 0 when the queue is empty.
+ * Lets an app consume text entry (e.g. the ServerManager's connect fields) from the
+ * same ring the window procedure fills; drain it once per frame. */
+int input_take_char(void);
+
 /* Register the keyboard processor with EventManager so the engine's window procedure
  * feeds key/char messages into this backend. Called once from ClientEngine::Startup. */
 void input_register_event_processor(void);
