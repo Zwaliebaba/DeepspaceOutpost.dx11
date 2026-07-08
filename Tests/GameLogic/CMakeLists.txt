@@ -37,6 +37,8 @@ add_executable(GameLogic.Tests
     EscortTests.cpp
     CabinHeatTests.cpp
     ChatModerationTests.cpp
+    SceneTests.cpp
+    MiningTests.cpp
 )
 
 target_compile_features(GameLogic.Tests PRIVATE cxx_std_23)

@@ -30,6 +30,7 @@ namespace Neuron::Persist
     EQUIP_FUEL_SCOOP      = 1u << 2,
     EQUIP_ENERGY_BOMB     = 1u << 3,
     EQUIP_ESCAPE_POD      = 1u << 4,
+    EQUIP_MINING_LASER    = 1u << 5,
   };
 
   // Number of commodity stacks a hold carries; must equal GameLogic::COMMODITY_COUNT

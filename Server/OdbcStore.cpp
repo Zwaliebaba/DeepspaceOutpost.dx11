@@ -354,6 +354,124 @@ namespace DSOServer
         return out;
       }
 
+      void UpsertPois(const std::vector<PoiRow>& _batch) override
+      {
+        // scene.md: MERGE, but NEVER touch a hand-edited row (authored = 1) - the
+        // seeder re-establishes generated rows while editor edits survive. Nullable
+        // "none" values are stored as sentinels that fit their columns (commodity 0 -
+        // only read for belts; richness/encounter_def -1 fit their signed columns);
+        // owner_empire / link_poi are omitted so they default to NULL (no FK trouble)
+        // and an editor's values are preserved.
+        for (const PoiRow& r : _batch)
+          Exec(
+            "MERGE dbo.system_pois AS t USING (SELECT ? AS id) AS s ON t.poi_id = s.id "
+            "WHEN MATCHED AND t.authored = 0 THEN UPDATE SET system_id=?, kind=?, x=?, y=?, z=?, "
+            "  radius=?, seed=?, commodity=?, richness=?, encounter_def=?, enabled=?, template_id=? "
+            "WHEN NOT MATCHED THEN INSERT (poi_id, system_id, kind, x, y, z, radius, seed, "
+            "  commodity, richness, encounter_def, enabled, template_id, authored) "
+            "VALUES (s.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);",
+            [&](SQLHSTMT h)
+            {
+              SQLSMALLINT p = 1;
+              BindInt(h, p++, r.poiId);
+              for (int pass = 0; pass < 2; ++pass)   // UPDATE set-list then INSERT values (same order)
+              {
+                BindInt(h, p++, r.systemId);
+                BindInt(h, p++, r.kind);
+                BindBigInt(h, p++, static_cast<long long>(r.x));
+                BindBigInt(h, p++, static_cast<long long>(r.y));
+                BindBigInt(h, p++, static_cast<long long>(r.z));
+                BindInt(h, p++, r.radius);
+                BindInt(h, p++, r.seed);
+                BindInt(h, p++, r.commodity < 0 ? 0 : r.commodity);   // TINYINT: 0 for "none"
+                BindInt(h, p++, r.richness);                          // INT: -1 ok
+                BindInt(h, p++, r.encounterDef);                      // SMALLINT: -1 ok
+                BindInt(h, p++, r.enabled ? 1 : 0);
+                BindInt(h, p++, r.templateId);
+              }
+            });
+      }
+
+      std::vector<PoiRow> LoadPois() override
+      {
+        std::vector<PoiRow> out;
+        Stmt stmt(m_dbc);
+        const SQLHSTMT h = stmt.Handle();
+        const char* sql =
+          "SELECT poi_id, system_id, kind, x, y, z, radius, seed, commodity, richness, "
+          "  encounter_def, owner_empire, link_poi, enabled, template_id, authored FROM dbo.system_pois;";
+        if (!Ok(SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(sql)), SQL_NTS)))
+        {
+          Diag("LoadPois select", SQL_HANDLE_STMT, h);
+          return out;
+        }
+        while (Ok(SQLFetch(h)))
+        {
+          PoiRow r;
+          r.poiId        = GetInt(h, 1);
+          r.systemId     = GetInt(h, 2);
+          r.kind         = GetInt(h, 3);
+          r.x            = GetBigInt(h, 4);
+          r.y            = GetBigInt(h, 5);
+          r.z            = GetBigInt(h, 6);
+          r.radius       = GetInt(h, 7);
+          r.seed         = GetInt(h, 8);
+          r.commodity    = GetInt(h, 9);
+          r.richness     = GetInt(h, 10);
+          r.encounterDef = GetInt(h, 11);
+          r.ownerEmpire  = GetInt(h, 12);   // NULL -> 0 (unused until the EVE tier)
+          r.linkPoi      = GetInt(h, 13);
+          r.enabled      = GetInt(h, 14) != 0;
+          r.templateId   = GetInt(h, 15);
+          r.authored     = GetInt(h, 16) != 0;
+          out.push_back(std::move(r));
+        }
+        return out;
+      }
+
+      void UpsertPoiResources(const std::vector<PoiResourceRow>& _batch) override
+      {
+        for (const PoiResourceRow& r : _batch)
+          Exec("MERGE dbo.poi_resources AS t USING (SELECT ? AS id) AS s ON t.poi_id = s.id "
+               "WHEN MATCHED THEN UPDATE SET units=?, baseline=?, updated_tick=? "
+               "WHEN NOT MATCHED THEN INSERT (poi_id, units, baseline, updated_tick) "
+               "VALUES (s.id, ?, ?, ?);",
+               [&](SQLHSTMT h)
+               {
+                 SQLSMALLINT p = 1;
+                 BindInt(h, p++, r.poiId);
+                 for (int pass = 0; pass < 2; ++pass)
+                 {
+                   BindInt(h, p++, r.units);
+                   BindInt(h, p++, r.baseline);
+                   BindBigInt(h, p++, static_cast<long long>(r.updatedTick));
+                 }
+               });
+      }
+
+      std::vector<PoiResourceRow> LoadPoiResources() override
+      {
+        std::vector<PoiResourceRow> out;
+        Stmt stmt(m_dbc);
+        const SQLHSTMT h = stmt.Handle();
+        const char* sql = "SELECT poi_id, units, baseline, updated_tick FROM dbo.poi_resources;";
+        if (!Ok(SQLExecDirectA(h, reinterpret_cast<SQLCHAR*>(const_cast<char*>(sql)), SQL_NTS)))
+        {
+          Diag("LoadPoiResources select", SQL_HANDLE_STMT, h);
+          return out;
+        }
+        while (Ok(SQLFetch(h)))
+        {
+          PoiResourceRow r;
+          r.poiId       = GetInt(h, 1);
+          r.units       = GetInt(h, 2);
+          r.baseline    = GetInt(h, 3);
+          r.updatedTick = static_cast<uint64_t>(GetBigInt(h, 4));
+          out.push_back(r);
+        }
+        return out;
+      }
+
       std::optional<std::string> ReadMeta(const std::string& _key) override
       {
         Stmt stmt(m_dbc);

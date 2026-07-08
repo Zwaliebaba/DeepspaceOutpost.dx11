@@ -783,6 +783,12 @@ destroy the entity.
 
 ### 6.7 NPCs & AI
 
+> **Planned evolution:** the Homeworld-style fleet-AI layer on top of this
+> system — universal hard collision avoidance, tactics stances, formations,
+> order queues (Patrol/Route), the station launch/dock cycle, and open-world
+> PvE encounters — is designed in [`designai.md`](../designai.md) (accepted
+> 2026-07-08, phases A1–A7).
+
 All NPCs think in `StepAi`, staggered by the legacy scheduler — a ship thinks
 every 8th tick (`(index ^ tick) & 7 == 0`) — and act by writing `FlightIntent`.
 The steering is a faithful `tactics()`/`track_object()` port; the legacy
@@ -915,6 +921,12 @@ to the HUD.
   `tools/dbseed`) and as the fallback when there is no DB — an
   unseeded/persistence-off server regenerates the identical galaxy in memory.
   The one place that maps generator ↔ rows ↔ manifest is `Server/GalaxyRows.h`.
+- **Planned evolution — per-system scenes:** each system gains a criteria-
+  derived layout of areas (asteroid belts with EVE-style mining, PvE
+  encounter sites, nav beacons; later factories/sentries/gates), stored as
+  durable POI rows seeded by `dbseed` and reached by a targeted in-system
+  jump — designed in [`scene.md`](../scene.md) (accepted 2026-07-08,
+  phases S1–S6).
 - **Replicated ship types** (`NetType.type` = legacy `SHIP_*`): Sun −2,
   Planet −1, Missile 1, Coriolis 2, Alloy 4, Cargo 5, Rock 8, Shuttle 9,
   Transporter 10, Viper 16, Sidewinder 17 (the player's stock starter hull),
@@ -977,6 +989,10 @@ the anti-cheat boundary is unchanged (the client still cannot move an inch).
   the existing AI/combat/replication paths; it can be selected and re-ordered
   like the primary ship. (Escort *persistence* across server restarts is an
   open item — §14.)
+
+The next tier of this layer — order queues (the reserved `Patrol`/`Route`
+kinds), formations (the reserved `Escort` semantics), stances and the
+auto-undock cycle — is designed in [`designai.md`](../designai.md).
 
 ### 6.14 Chat
 
@@ -1430,7 +1446,9 @@ what's open. Effort: S ≤ a day-ish, M = days, L = week(s).
 | 2 | Ownership + claimable/deployable outposts | §13.2-2 | Feature | L | expand |
 | 3 | Drifting markets + traders-as-supply + hauler `Route` orders | §13.2-3 | Feature | L | exploit, emergence |
 | 4 | `FactionId` + standings | §13.2-4 | Feature | M | diplomacy, mass PvP |
-| 5 | Missions (after the 4X tier settles) | §12 | Feature | L | quests, direction |
+| 5 | Missions (after the 4X tier settles; encounter substrate: `designai.md` §3.7/A6) | §12 | Feature | L | quests, direction |
+| 5a | Homeworld-style fleet AI: avoidance, stances, formations, queues, launch cycle, encounters (plan: `designai.md`, phases A1–A7) | §6.7, §6.13 | Feature | L | fleet play, missions |
+| 5b | Per-system scenes: POI layer, targeted in-system jump, EVE-style mining + depletion, encounter anchors (plan: `scene.md`, phases S1–S6) | §6.10 | Feature | L | mining, exploration, encounters |
 | 6 | ~~Ability path unification + `InputCommand` re-cut~~ **done 2026-07-08** (protocol v4) | §13.1 | Simplify | — | protocol hygiene |
 | 7 | Render residues: in-app visual pass → instancing/glow default-on; vector glyph set + grid-backed client cull; GPU explosion debris (plan: `explosion.md`) | §7 | Render | M | fleet battles, style |
 | 8 | Interaction residues: widget drag-scroll/steppers, chart pointer name-search *(two-finger camera pan shipped with the `input.md` migration)* | §7 | UX | S | touch polish |

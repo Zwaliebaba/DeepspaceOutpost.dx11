@@ -61,10 +61,14 @@ namespace DSOServer
     // manifest on connect.
     std::vector<Neuron::Persist::SystemRow> systems;
     std::vector<Neuron::Persist::MarketRow> markets;
+    std::vector<Neuron::Persist::PoiRow> pois;
+    std::vector<Neuron::Persist::PoiResourceRow> poiResources;
     if (m_persist)
     {
       systems = m_persist->LoadSystems();   // boot-only synchronous read (writer idle)
       markets = m_persist->LoadMarkets();
+      pois = m_persist->LoadPois();                   // scene.md: POI anchors + params
+      poiResources = m_persist->LoadPoiResources();   // drained belt pools (drift restore)
       if (systems.empty())
         std::fprintf(stderr,
             "[persist] DSO_DB is set but dbo.systems is empty - run tools/dbseed to seed the galaxy. "
@@ -73,9 +77,10 @@ namespace DSOServer
         m_marketsPersisted = true;   // the FK targets exist, so drift can be written back
     }
 
-    WorldSetup setup = BuildWorld(m_world, systems, markets);
+    WorldSetup setup = BuildWorld(m_world, systems, markets, pois, poiResources);
     m_landmarks = std::move(setup.landmarks);
     m_sessions.SetManifest(std::move(setup.manifest));
+    m_sceneIndex = std::move(setup.sceneIndex);   // scene.md: kept for scene-chunk + POI-jump
 
     // Session tokens (B2) come from the OS CSPRNG, not a gameplay RNG stream: a
     // token must be unguessable, and determinism rules stop at the GameLogic edge.
@@ -325,6 +330,7 @@ namespace DSOServer
         Msg::UnitOrder order;
         Msg::AbilityRequest ability;
         Msg::GalaxyChunkRequest chunkReq;
+        Msg::SceneChunkRequest sceneReq;
         Msg::Ping ping;
         Msg::Chat chat;
         if (Msg::TryDecode(msg, req))
@@ -346,6 +352,8 @@ namespace DSOServer
           HandleAbilityRequest(s, ability);   // a fire action; not logged (like input fire)
         else if (Msg::TryDecode(msg, chunkReq))
           m_sessions.SendGalaxyChunks(s, chunkReq.baseIndex, chunkReq.count);   // Bulk lane (not logged)
+        else if (Msg::TryDecode(msg, sceneReq))
+          HandleSceneChunkRequest(s, sceneReq);   // scene.md: system POIs (Bulk lane, not logged)
         else if (Msg::TryDecode(msg, ping))
         {
           // Time sync (E1): record the client's reported RTT for lag compensation
@@ -594,8 +602,36 @@ namespace DSOServer
       const GameLogic::JumpDriveOutcome jd = GameLogic::InSystemJump(m_world, _session.entity);
       resp.status = jd.status;
     }
+    else if (_req.kind == Msg::TravelKind::PoiJump)
+    {
+      // scene.md 3.6: targeted in-system jump to a scene POI. Resolve the anchor
+      // from the request's poiId via the scene index; JumpToPoi validates it is
+      // system-local + not mass-locked, then places the hull off the anchor.
+      const ECS::EntityId anchor = m_sceneIndex.Anchor(_req.poiId);
+      const GameLogic::JumpDriveOutcome jd = GameLogic::JumpToPoi(m_world, _session.entity, anchor, m_tick);
+      resp.status = jd.status;
+    }
 
     _session.events.Send(resp);   // Gameplay lane
+  }
+
+  void GameServer::HandleSceneChunkRequest(GameLogic::Session& _session, const Msg::SceneChunkRequest& _req)
+  {
+    // scene.md 3.9: reply with the requested system's POIs (anchors + kinds +
+    // positions) so the client can list local areas and target a POI jump. Cold
+    // chart data on the Bulk lane; a system is small (a handful of POIs), so one
+    // chunk suffices.
+    Msg::SceneChunk chunk;
+    chunk.systemId = _req.systemId;
+    const auto it = m_sceneIndex.bySystem.find(static_cast<int32_t>(_req.systemId));
+    if (it != m_sceneIndex.bySystem.end())
+      for (const ECS::EntityId anchor : it->second)
+        if (const GameLogic::ScenePoi* poi = m_world.TryGet<GameLogic::ScenePoi>(anchor))
+          if (const GameLogic::WorldTransform* t = m_world.TryGet<GameLogic::WorldTransform>(anchor))
+            chunk.pois.push_back(Msg::ScenePoiEntry{
+                poi->poiId, static_cast<uint8_t>(poi->kind),
+                t->position.x, t->position.y, t->position.z, poi->radius });
+    _session.events.Send(chunk);   // Bulk lane
   }
 
   void GameServer::HandleUnitOrder(GameLogic::Session& _session, const Msg::UnitOrder& _req)
@@ -711,6 +747,16 @@ namespace DSOServer
       m_bus.Publish(GameLogic::FireWeapon{ shooter, GameLogic::Weapon::Laser, Msg::NO_MISSILE_TARGET });
     m_bus.Dispatch();
 
+    // scene.md: the Mine order flies its unit onto a rock and runs the beam cycle
+    // (StepOrders skips Mine so the two don't fight over the FlightIntent). Each
+    // extraction broadcasts a MiningTick cue and resends the miner's cargo manifest
+    // (the hold already changed authoritatively). Runs pre-Tick, like StepOrders.
+    for (const GameLogic::MiningEvent& ev : GameLogic::StepMining(m_world, m_tick))
+    {
+      m_sessions.Broadcast(Msg::MiningTick{ ev.unitIndex, ev.rockIndex, ev.commodity, ev.units });
+      SendCargoTo(ev.unitIndex);
+    }
+
     // NPC tactics decide their flight intents (pursue/break-off/flee + panic
     // missiles), then the simulation advances one tick - the same
     // intent->caps->flight path a client's input takes. Fled ships despawn
@@ -718,6 +764,10 @@ namespace DSOServer
     GameLogic::StepAi(m_world, m_tick, m_aiRng, m_scratch);
     GameLogic::Tick(m_world);
     ++m_tick;
+
+    // scene.md 3.7b: belt pools drift back toward baseline on a slow, staggered
+    // cadence (self-gated on SCENE_REGEN_INTERVAL), repopulating mined-out rocks.
+    GameLogic::StepSceneRegen(m_world, m_tick);
 
     // I1: a ship carrying a Dock order that has now reached dock range docks (via the
     // tested station path) and drops the order.
