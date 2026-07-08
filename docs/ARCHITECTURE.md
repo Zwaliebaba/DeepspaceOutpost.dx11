@@ -1,15 +1,18 @@
 # DeepspaceOutpost — Architecture & Game Design
 
-**Status:** as-built, verified against the code 2026-07-05. This is the
+**Status:** as-built, verified against the code 2026-07-08. This is the
 **single canonical design document** for the game: the client/server
 architecture, the authoritative simulation, the game rules, the network
 protocol with every message type, the locked design decisions (§12), the open
 architectural work (§13), and the remaining roadmap (§14).
 
-Sections 1–11 describe code that exists and is tested. Two companion
+Sections 1–11 describe code that exists and is tested. Three companion
 documents exist: **`docs/interaction.md`** (the canonical pointer-first
-interaction design) and **`docs/IMPLEMENTATION.md`** (the track-by-track build
-log — the *history* of how each phase landed lives there, not here).
+interaction design), **`input.md`** (repo root — the Homeworld-style
+camera/selection migration, H1–H6, now implemented; it supersedes
+interaction.md's camera and button-binding grammar) and
+**`docs/IMPLEMENTATION.md`** (the track-by-track build log — the *history* of
+how each phase landed lives there, not here).
 
 ---
 
@@ -70,7 +73,7 @@ for an endpoint until a valid, version-checked hello arrives.
 | `GameLogic/` | **Server-only** authoritative simulation: flight, combat, AI, orders, escorts, economy, stations, loot, collisions, cabin heat, hyperspace, sessions, spawning, AOI, chat moderation. Headless. | NeuronCore |
 | `NeuronServer/` | Server-side engine services: the persistence service (single writer thread + pluggable stores), datagram pump, accumulator tick pacer + tick metrics, on-change send caches. | NeuronCore |
 | `Server/` | The dedicated host: UDP socket loop, fixed tick, session I/O, world bootstrap (procedural galaxy or durable DB rows), ODBC store, CSPRNG tokens. | GameLogic, NeuronServer, NeuronCore |
-| `NeuronClient/` | Client-side engine: DX11 device (`GraphicsCore`), 3D scene pass (`Scene3D` + instancing + `SceneGlow`), native 2D (`Render2D` + `TextRenderer` + the `GuiWindow`/overlay framework), camera + controllers, input cores (gestures, move gizmo, order menu), replication client (socket + interpolation), sound. | NeuronCore |
+| `NeuronClient/` | Client-side engine: DX11 device (`GraphicsCore`), 3D scene pass (`Scene3D` + instancing + `SceneGlow`), native 2D (`Render2D` + `TextRenderer` + the `GuiWindow`/overlay framework), camera + controllers, input cores (gestures, unified pointer front door, selection + band, move gizmo + movement grid, order menu), replication client (socket + interpolation), sound. | NeuronCore |
 | `DeepspaceOutpost/` | The game client: flight HUD (`RenderGameHud`), native GUI windows (charts/market/station), pointer-first order input, camera rig, HUD mirrors of replicated state. | NeuronClient, NeuronCore |
 | `BotClient/` | Headless bot client over the real net stack (load testing; CI smoke). | NeuronCore |
 | `Tests/GameLogic/`, `Tests/NeuronCore/`, `Tests/NeuronClient/`, `Tests/NeuronServer/` | GoogleTest suites (headless). | respective libs |
@@ -85,7 +88,8 @@ nothing above it.
 
 - **DirectXMath** (`XMVECTOR`/`XMMATRIX`, `NeuronCore/GameMath.h`) is the
   standard math for client/render code; the legacy `LegacyVector*`/`Matrix33`
-  wrappers are frozen (do not extend; retire file-by-file as touched).
+  wrappers are **fully retired** — no source file references them (do not
+  reintroduce).
 - The **authoritative simulation** uses `Neuron::Math::Vector3i64` (absolute
   world position) and `Vector3d` (orientation/velocity) — double precision by
   design, for cross-run determinism the golden tests rely on.
@@ -164,7 +168,7 @@ Bulk. Idle lanes are silent. `ReliableChannel` is TCP-like at message level
 (ordered, deduplicated, resent until acked) but stays on UDP.
 
 **Framing** (`Messages/Framing.h`): an `'NMSG'` packet is
-`magic u32 | PROTOCOL_VERSION u16 (=3) | lane u8 | token u64` followed by zero
+`magic u32 | PROTOCOL_VERSION u16 (=4) | lane u8 | token u64` followed by zero
 or more records, each `MessageId u16 | length u16 | payload`. The mandatory
 per-record length bounds every decoder to exactly its own bytes — a malformed
 message cannot run the reader into the next record.
@@ -311,23 +315,17 @@ client sends `{sender ignored, text}`; the server rate-limits and sanitizes it
 #### Input
 
 **`InputCommand`** — `0x0100` · Wire · Command · **Unreliable** lane · C→S.
-The per-frame heartbeat. Self-superseding: the server keeps the highest
-`sequence` and drops stale datagrams. A static trait forbids queuing it on a
-reliable lane. With the pointer-first client the flight axes are always sent
-as **zero** (movement is a `UnitOrder`); the ability flags are still the live
-activation path (see `AbilityRequest` below), and `ackSnapshotTick` carries
-the delta-stream ack.
+The per-frame heartbeat — since protocol v4 that is *all* it is. The legacy
+flight axes and ability flags are gone from the wire: movement is a
+`UnitOrder`, abilities are an `AbilityRequest`, and nothing on the unreliable
+lane can fire a weapon or move a hull. Self-superseding: the server keeps the
+highest `sequence` and drops stale datagrams. A static trait forbids queuing
+it on a reliable lane. Its cadence is also the liveness signal
+`SafeParkSilent` watches.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `sequence` | u32 | monotonic; latest wins |
-| `rollAxis` / `pitchAxis` / `throttle` | f32 | legacy flight axes — always 0 from the pointer-first client; the server still clamps and applies them |
-| `fire` | bool | fire the front laser this frame (unused by the client; attack is an order) |
-| `fireMissile` | bool | launch a missile this frame |
-| `missileTarget` | u32 | locked target index, or `0xFFFFFFFF` (none) — validated server-side (range + cone) |
-| `ecm` | bool | fire the ECM burst |
-| `energyBomb` | bool | detonate the energy bomb |
-| `escapePod` | bool | eject in the escape pod |
 | `ackSnapshotTick` | u32 | latest snapshot baseline the client holds (delta ack) |
 
 #### Orders & abilities
@@ -352,10 +350,12 @@ on a protected victim is a crime attributed to the owner at order time.
 
 **`AbilityRequest`** — `0x1014` · Wire · Command · Gameplay · C→S. One-shot
 equipment activation on a reliable lane: `{kind u8, target u32}` with
-`AbilityKind`: `FireMissile=1`, `Ecm=2`, `EnergyBomb=3`, `EscapePod=4`.
-The server handler is live and tested, but **the client still activates
-abilities through the `InputCommand` flags** — unifying onto this message and
-retiring the unreliable flags is an open protocol item (§14).
+`AbilityKind`: `FireMissile=1` (`target` = locked index, validated server-side
+with the same range + cone gate as the laser), `Ecm=2`, `EnergyBomb=3`,
+`EscapePod=4`. **This is the one activation path** (protocol v4): the client's
+ability bar publishes a LocalOnly `ActionTriggered`, a subscriber maps it onto
+this message, and the reliable lane guarantees a button press is never lost —
+the old unreliable `InputCommand` flags are retired.
 
 #### Lifecycle & VFX
 
@@ -516,7 +516,7 @@ the non-wire half, not `REGISTER_MESSAGE`'d — they never serialize):
 
 | Message | Id | Meaning |
 |---|---|---|
-| `FireWeapon{shooter, weapon, target}` | `0x8101` | a fire request (from `InputCommand` flags or an Attack order); resolved against the world |
+| `FireWeapon{shooter, weapon, target}` | `0x8101` | a fire request (from an `AbilityRequest` or an Attack order); resolved against the world |
 | `Crime{offender, victimTeam, firstOffence}` | `0x8102` | a protected victim was fired on; police dispatch on first offence |
 | `EntityKilled{victim, killer}` | `0x8103` | something died; ONE subscriber decides what a death does |
 | `EcmFired{ship}` | `0x8104` | an ECM burst fired → the server broadcasts `EcmPulse` |
@@ -566,8 +566,8 @@ Every 33 ms tick (`GameServer::RunTick`), in this order:
 
 1. **Drain the socket.** Route datagrams by magic: `InputCommand` →
    `ServerSessions::OnInput` (applied only to a live, handshaken session — an
-   unknown endpoint is ignored; stale-sequence drop; intent applied to
-   `FlightIntent`; ability flags become `FireWeapon` bus messages) · reliable
+   unknown endpoint is ignored; stale-sequence drop; the heartbeat marks the
+   session seen and applies its snapshot ack — nothing else rides it) · reliable
    datagrams → `ServerSessions::OnReliable` (an unknown endpoint gets a
    pending, entity-less shell so its `ClientHello` can be received) →
    per-session `MessageEndpoint`.
@@ -583,7 +583,9 @@ Every 33 ms tick (`GameServer::RunTick`), in this order:
 5. **Advance simulation:** `SafeParkSilent` (zero intent of silent sessions) →
    `StepOrders` (active orders steer their units by writing `FlightIntent`;
    Attack orders publish `FireWeapon` when aligned) → `StepAi` (NPC tactics,
-   §6.7) → `GameLogic::Tick` (`StepFlightInput` → `StepFlight` → `StepMotion`)
+   §6.7) → `GameLogic::Tick` (`StepLaunchCruise` → `StepFlightInput` →
+   `StepFlight` → `StepMotion`; the launch-cruise step drives a freshly
+   undocked hull out of the station bay, §6.9)
    → `CompleteDockOrders` (a Dock order in range docks the unit) →
    `SpawnDirector::Step` (pirates near players, every 600 ticks, NPC cap 12)
    → `StepTraders` (lane traffic, every 900 ticks, cap 2) → shield regen
@@ -647,12 +649,12 @@ scans) run through the shared spatial **broadphase** (`Broadphase.h` over
 ### 5.3 A player entity (as spawned)
 
 `WorldTransform`, `Flight`, `FlightIntent`, `FlightCaps` (0.121 rad/tick roll &
-pitch, 100 u/t max speed), `Wallet` (1000 = 100.0 Cr), `CargoHold` (20 t),
+pitch, 60 u/t max speed), `Wallet` (1000 = 100.0 Cr), `CargoHold` (20 t),
 `DockState`, `Equipment` (3 missiles), `Fuel` (70/70 tenths), `PlayerTag`,
 `Combatant` (Team Player, 255 energy, laser 10, range 6000, autoEngage
 **false**, 150 ticks spawn grace), `Shields` (255/255), `Wanted` (0),
 `Owner` (the session's playerId), `ShipGear` (laser heat + ECM cooldown),
-`CabinHeat`, `NetType` (Viper hull for now). The commander name and score are
+`CabinHeat`, `NetType` (Sidewinder — the stock starter hull). The commander name and score are
 **not** components: they are per-player session records. (`Wallet`
 deliberately stays ship-borne until multiple hulls trade concurrently.)
 
@@ -680,7 +682,7 @@ only the intent's author differs (an `ActiveOrder`, the AI, or legacy axes).
   auto-fights; player primaries (autoEngage=false) fire only on command but may
   target **other players** — that is how PvP exists at all. Player-owned
   escorts auto-engage in defence of their owner.
-- **Player laser:** an Attack order (or a legacy `fire` flag) resolves through
+- **Player laser:** an Attack order resolves through
   `ResolvePlayerFire`: nearest enemy within 6000 units inside a cos ≥ 0.9
   (~25°) aiming cone; damage is the ship's laser strength. The shot is
   **lag-compensated**: the target is rewound through a 15-tick transform
@@ -795,12 +797,24 @@ remaining) maps exactly onto held intents with an NPC turn cap of
 | Laser / range | 3 / 5000 | 4 / 6000 | — (0) | 4 / 5000 |
 | Bravery | 64–127 | 113 | 0 | 120 |
 | Missiles | 2 | 1 | 0 | 1 |
-| Max speed | 114 | 114 | 30 | 114 |
+| Max speed | 60 | 60 | 30 | 60 |
 | Bounty | 50 | — (crime) | — (crime) | 100 |
 | Spawned by | every 600 ticks near a player (cap 12 NPCs) | Crime (2, station launch, warrant) | every 900 ticks on a lane (cap 2) | witchspace misjump (1–4) |
 
+NPCs are **speed-matched to the player's 60-unit cap** — the legacy
+Viper-vs-Cobra speed edge is retired in favour of a manageable pace; the
+chase pressure comes from collision avoidance + numbers instead.
+
 Behaviour building blocks (constants in `AiSystem.h`):
 
+- **Collision avoidance:** each `StepAi` call builds a shared obstacle grid
+  (`BuildAvoidGrid`: every hull, plus planets/suns) and a thinking NPC first
+  checks its forward path (`AvoidObstacles`, 6000-unit lookahead): anything
+  demanding a berth — a station (2500), a planet/sun (6000), or a
+  **same-team** hull (1200) — pulls the nose away for that think.
+  Enemy/prey hulls and the current combat `focus` are exempt, so attack runs
+  still press home. Deterministic: no RNG, integer positions, fixed
+  tie-break.
 - **Pursue:** steer with the 0.111 deadzone, roll/pitch sign coupling, hard
   pitch when the target is behind (< −0.861). Throttle: ease off ≤ −0.167,
   push ≥ 0.223, cruise floor 6/32, never below 1/32 (NPCs never stop) — the
@@ -856,9 +870,20 @@ holds (grinding, the legacy near-fatal feel):
 | ship ↔ planet | 4000 | instant death (legacy zero-altitude), killer = the planet |
 
 Exempt: docked ships (inside the station, not in space), spawn/respawn grace
-(without consuming it), and anything without a `Combatant`. All launch offsets
-(undock, police, traders: 2000) are born clear of every contact range, and
-trader lanes end at a **gate** 6000 above the planet, outside the kill zone.
+(without consuming it), and anything without a `Combatant`. Police and trader
+launches (offset 2000) are born clear of every contact range, and trader lanes
+end at a **gate** 6000 above the planet, outside the kill zone.
+
+**Undock is a fly-out, not a teleport** (`LaunchSystem.h`): undocking places
+the hull *at* the station bay facing outward and attaches a transient
+`LaunchCruise` component; `StepLaunchCruise` (the first step of
+`GameLogic::Tick`) forces a straight, level 0.35-throttle cruise until the
+ship has travelled `LAUNCH_OFFSET` (2000) units, then releases control to the
+player. The launch starts inside the station contact range, so the undock
+grants launch immunity (`invulnTicks = RESPAWN_GRACE_TICKS`, covering the
+~95-tick exit) — the station doesn't grind the ship and the vulnerable
+low-speed launch is protected. Hyperspace arrival still teleports to the
+destination station + 2000 units (§6.8).
 
 **Suns & cabin heat** (`StepCabinHeat`): every system has a sun entity
 (offset 300 000 above the planet). Inside its 60 000-unit Chebyshev heat band
@@ -892,7 +917,8 @@ to the HUD.
   The one place that maps generator ↔ rows ↔ manifest is `Server/GalaxyRows.h`.
 - **Replicated ship types** (`NetType.type` = legacy `SHIP_*`): Sun −2,
   Planet −1, Missile 1, Coriolis 2, Alloy 4, Cargo 5, Rock 8, Shuttle 9,
-  Transporter 10, Viper 16, Thargoid 29. The client maps them through
+  Transporter 10, Viper 16, Sidewinder 17 (the player's stock starter hull),
+  Thargoid 29. The client maps them through
   `RenderTable.h` onto meshes/billboards/glyphs; 0 draws a default ship.
 
 ### 6.11 Scoring & bounties
@@ -908,8 +934,8 @@ score.
 ### 6.12 Equipment
 
 The purchased items work, all server-validated (`EquipmentSystem`); one-shot
-activations arrive as `InputCommand` flags (or `AbilityRequest`) and resolve
-through `FireWeapon`:
+activations arrive as reliable `AbilityRequest`s and resolve through
+`FireWeapon`:
 
 - **ECM** (activation, 32 energy, 32-tick recharge): downs EVERY in-flight
   missile within 12 000 units — anyone's, including your own (the legacy burst
@@ -992,40 +1018,59 @@ The client is deliberately dumb. It keeps:
   flies the CAMERA; the active ship renders on screen like any other entity.
   `NeuronClient/Camera` is the one view/projection source (eye/lookAt/up →
   `View()`; the legacy ~41.1° vertical field of view at the live aspect →
-  `Projection()`), with two `CameraController`s toggled on F12: the default
-  **first-person** free camera (hold **LMB-drag** to look — RMB is reserved
-  for orders; arrow keys move, PgUp/PgDn vertical, Shift boosts, wheel
-  dollies) and an **orbit** camera that rotates around the selected object
-  (drag rotates, wheel changes distance). The game-side `CameraRig` gathers
-  input, anchors the camera behind the ship on spawn and re-anchors after
-  teleports (hyperspace/respawn), and publishes the int64 **floating origin**
-  (the eye) the frame is rebased around — float precision never degrades far
-  from the world origin (§3.2). The remaining CPU-projected effects
-  (explosion debris, firing beams, the lock reticle, the dust) derive their
-  pixel math from the SAME projection matrix, so there is one optics path.
-  (Server rules are untouched: shields still resolve front/aft by attack
-  direction on the hull.)
-- **Input — pointer-first order control** (`docs/interaction.md`). The player
-  does not fly the hull: they **select** a unit and **order** it, and the
-  server executes. The pointer grammar, as built: **LMB click** = select the
-  entity under the cursor (screen-ray pick); **LMB drag** = look/orbit;
-  **RMB click** = the contextual default order for the target under the
-  cursor — planet/sun → Approach, station → Dock, canister → Collect, ship →
-  Attack, empty space → Move to the cursor-ray ∩ camera-up-plane point (with
-  a Homeworld-style move gizmo, vertical drag for elevation) — sent as a
-  reliable `UnitOrder`, acked by `UnitOrderAck` (order toast + info card give
-  feedback); **RMB hold** = a radial menu with the full legal order set
-  (attacking a *clean* player is deliberately menu-only friction). A
-  non-modal **ability bar** puts Stop/Missile/ECM/Bomb/Pod/Jump one click
+  `Projection()`), with two `CameraController`s toggled on F12. Since the
+  Homeworld-style input migration (`input.md` H1–H6) the default is the
+  **focus-point orbit** camera: it orbits a persistent focus point,
+  **RMB-drag rotates**, wheel/pinch and **MMB-drag (vertical)** zoom, and the
+  **LMB+RMB chord**, a **two-finger touch drag**, or the arrow/WASD keys
+  **pan** the focus in the screen plane; **F / double-tap** eases the focus
+  onto the entity under the cursor and follows it (`FocusOn`/
+  `FocusSettled`). F12 switches to the **first-person free-fly** observer
+  (RMB-drag looks; arrow keys move, PgUp/PgDn vertical, Shift boosts). The
+  game-side `CameraRig` gathers input through the unified pointer front door
+  (`input_win.*` — one gesture stream for mouse and touch, with MMB and
+  chord state), anchors the camera behind the ship on spawn and re-anchors
+  after teleports (hyperspace/respawn), and publishes the int64 **floating
+  origin** (the eye) the frame is rebased around — float precision never
+  degrades far from the world origin (§3.2). The remaining CPU-projected
+  effects (explosion debris, firing beams, the lock reticle, the dust)
+  derive their pixel math from the SAME projection matrix, so there is one
+  optics path. (Server rules are untouched: shields still resolve front/aft
+  by attack direction on the hull.)
+- **Input — pointer-first order control** (`docs/interaction.md`; button
+  bindings as rebuilt by the Homeworld migration, `input.md` H1–H6). The
+  player does not fly the hull: they **select** a unit and **order** it, and
+  the server executes. The pointer grammar, as built: **LMB click** = select
+  the entity under the cursor (screen-ray pick); **LMB drag** = **band
+  (marquee) select** — the rubber-band rectangle selects every owned unit
+  inside it on release; selection is a multi-unit *set*
+  (`NeuronClient/input/Selection.h`, headless-tested) decoupled from the
+  missile-lock target, which stays a single derived output; **RMB click** =
+  the contextual default order for the target under the cursor — planet/sun
+  → Approach, station → Dock, canister → Collect, ship → Attack, empty
+  space → Move to the cursor-ray ∩ camera-up-plane point (with a
+  Homeworld-style move gizmo, vertical drag for elevation) — sent as a
+  reliable `UnitOrder`, acked by `UnitOrderAck` (order toast + info card
+  give feedback); **RMB drag** = camera rotate (§ camera above); **RMB
+  hold** = a radial menu with the full legal order set (attacking a *clean*
+  player is deliberately menu-only friction); **M** = the persistent
+  **movement grid** (`NeuronClient/input/MovePlan.h`, a two-step
+  point-then-elevation state machine with Shift as the elevation modifier).
+  A non-modal **ability bar** puts Stop/Missile/ECM/Bomb/Pod/Jump one click
   away (Bomb/Pod hold-to-confirm ~0.6 s); a **nav strip** opens
   charts/market/status/equip. **Touch** is co-primary: a `WM_POINTER`
   gesture recognizer (tap/double-tap/long-press/drag/pan/pinch) maps one
-  finger to the mouse and pinch to zoom. Ability presses publish
-  `ActionTriggered` (LocalOnly bus) and currently ride the `InputCommand`
-  flags (§4.4). The per-frame `InputCommand` continues as the heartbeat that
-  carries the delta-stream ack, with **zero flight axes**. The keyboard is
-  optional accelerators only — F1–F12, Esc (window-close), and the
-  camera-fly arrows; the legacy combat keys are retired.
+  finger to camera rotate, **two fingers to pan** (consumed by the rig),
+  pinch to zoom and double-tap to focus. Ability presses publish
+  `ActionTriggered` (LocalOnly bus); a subscriber maps them onto the reliable
+  `AbilityRequest` (§4.4) so a press is never lost. The per-frame
+  `InputCommand` is the pure heartbeat that carries the delta-stream ack —
+  nothing else rides the unreliable lane. The keyboard is
+  optional accelerators only — F1–F12, F (focus), M (grid), Esc
+  (window-close), and the camera pan/fly keys; the legacy combat keys are
+  retired. *(Caveat: the H1–H6 pure cores are unit-tested, but the
+  client-glue has not yet had its Windows/MSVC build + manual input pass —
+  see `input.md`.)*
 - **Native GUI windows** (`GuiWindow` over `Render2D`): the **charts**
   (`ChartWindow` — click a system to select, drag to pan, wheel/pinch to
   zoom, its own HYPERSPACE button → `TravelRequest`; F5/F6 open
@@ -1063,10 +1108,15 @@ The client is deliberately dumb. It keeps:
 - **Presentation effects:** death/explosion VFX (world-anchored, from
   `EntityDeath`/`ExplosionAt`, re-using the legacy debris animation), a
   star-warp flourish on jump, sounds (launch, hits, ECM, hyperspace, scoop
-  beep). The scene background is the streaming **dust starfield** — the
-  classic Elite speed cue, driven by the CAMERA's motion
-  (`set_starfield_motion`), drawn depth-disabled behind the ships. There is
-  no skybox.
+  beep). The scene background is a two-layer **starfield** (`stars.md`,
+  shipped): the streaming **dust field** — the classic Elite speed cue,
+  driven by the CAMERA's motion (`set_starfield_motion`) — now rendered as
+  textured soft sprites (`Starburst.dds`, additive blending) with a
+  power-law magnitude distribution, distance-falloff brightness, spectral
+  colour and a gentle twinkle; behind it a dense, window-filling **parallax
+  backdrop** (`draw_backdrop`) that pans with the look direction but never
+  dollies. Both draw depth-disabled behind the ships. There is no skybox
+  cubemap.
 - **No local config files.** The MMO client keeps no on-disk settings; HUD
   layout values are baked in (`elite.cpp`). The in-session Options window
   (incl. the instancing/glow toggles) applies for the running session only;
@@ -1137,7 +1187,7 @@ station screen into flight; position updates always come from snapshots.
 | Dock range | 5000 | ServerConfig.h |
 | Player laser range / cone | 6000 / cos 0.9 | ServerConfig.h |
 | Lag-compensation history | 15 ticks | TransformHistory.h |
-| Launch/undock offset | 2000 | StationServices.h |
+| Launch offset / undock fly-out distance | 2000 (cruise at 0.35 throttle) | StationServices.h, LaunchSystem.h |
 | Max shields / energy | 255 / 255 | CombatSystem.h |
 | Shield regen cadence | 8 ticks | ServerConfig.h |
 | Respawn grace | 150 ticks | CombatSystem.h |
@@ -1151,7 +1201,8 @@ station screen into flight; position updates always come from snapshots.
 | Sun heat band / heat gain / cool / cook damage | 60 000 / +6 / −3 / 4 per tick | CabinHeatSystem.h |
 | Sun-scoop fuel gain | +1 tenth per tick in band | CabinHeatSystem.h |
 | NPC turn cap / engage range | 7/152 rad/tick / 16 384 | AiSystem.h |
-| NPC / trader max speed | 114 / 30 | AiSystem.h |
+| NPC / trader / player max speed | 60 / 30 / 60 | AiSystem.h, FlightInput.h |
+| AI avoid lookahead / ship / station / planet berth | 6000 / 1200 / 2500 / 6000 | AiSystem.h |
 | Pirate spawn cadence / NPC cap | 600 ticks / 12 | ServerConfig.h, SpawnDirector.h |
 | Trader cadence / cap / dock range | 900 ticks / 2 / 1500 | SpawnDirector.h, AiSystem.h |
 | Fuel max / price / units-per-tenth-LY | 70 / 2 / 500 000 | StationServices.h, HyperspaceSystem.h |
@@ -1223,7 +1274,7 @@ These are **owner-locked**; everything in §13–§14 honors them.
 | World | One **seamless** absolute `int64³` space, no visible segments; an invisible cell partition underneath for interest management and future multi-process sharding |
 | Identity | **Account → Empire/Faction → owns N entities.** A player is *not* bound to one avatar; camera & interest are view-driven |
 | Input | Command/intent protocol (validated orders with costs/preconditions) — **unit orders**; the anti-cheat boundary |
-| Interaction | **Pointer-first indirect control** (`docs/interaction.md`): mouse and touch are the primary devices, one shared pointer grammar (select → order, context menus, move gizmo, ability bar); attack is an order the server executes; the keyboard is optional accelerators only — nothing is keyboard-exclusive |
+| Interaction | **Pointer-first indirect control** (`docs/interaction.md`, camera/selection grammar as rebuilt by `input.md`): mouse and touch are the primary devices, one shared pointer grammar (select + band-select → order, context menus, move gizmo + movement grid, ability bar) over a Homeworld-style focus-orbit camera; attack is an order the server executes; the keyboard is optional accelerators only — nothing is keyboard-exclusive |
 | Streaming | Multi-resolution AOI: a high-detail **tactical** tier + a low-detail **strategic** tier (territory/fleet summaries) |
 | Transport | Raw winsock UDP + the custom reliability layer; hand-rolled binary hot path |
 | Persistence | Microsoft SQL Server; async batched writes off the sim thread; the world simulates while players are offline; **never** per-tick positions to SQL |
@@ -1240,17 +1291,24 @@ of state lives in a plain serializable component (`Wallet`, `CargoHold`,
 record (name/score), so persistence serializes state without refactoring
 gameplay.
 
-**Track status (2026-07-05):** connection/persistence, identity,
+**Track status (2026-07-08):** connection/persistence, identity,
 performance/harness and netcode-depth tracks are **done** (handshake-first
 connect, session tokens, reconnect/resume, SQL persistence + durable galaxy,
 playerId/ownership, spatial broadphase, frame scratch, accumulator timestep,
 lag-compensated fire, quantized delta snapshots with budgets, strategic tier).
-The pointer-first interaction track is **done** except small residues; polish
-items G1–G4 (kill VFX, missile-lock validation, chat, suns/cabin heat) are
-**done**; the first ordered unit (escort) is **done**. Open: the 4X feature
-tier (fog of war, territory, living economy, factions), missions, the render
-residues, and the engineering items in §13–§14. The full build history lives
-in `docs/IMPLEMENTATION.md`.
+The pointer-first interaction track is **done** except small residues, and the
+Homeworld-style camera/selection migration (`input.md` H1–H6: focus-orbit
+default, band select, movement grid, MMB/chord/two-finger pan) has **landed**
+(pending its Windows manual input pass); polish items G1–G4 (kill VFX,
+missile-lock validation, chat, suns/cabin heat) are **done**; the first
+ordered unit (escort) is **done**; the legacy math-stack retirement is
+**done** (no `LegacyVector*`/`Matrix33` left in source); the starfield visual
+pass (`stars.md`) is **done**; the ability-path unification onto
+`AbilityRequest` + the `InputCommand` heartbeat re-cut (protocol v4) is
+**done**. Open: the 4X feature tier (fog of war,
+territory, living economy, factions), missions, the render residues, and the
+engineering items in §13–§14. The full build history lives in
+`docs/IMPLEMENTATION.md`.
 
 ---
 
@@ -1266,17 +1324,18 @@ as-built in §3–§7 and logged in `IMPLEMENTATION.md`.)
 
 ### 13.1 Protocol & simplification
 
-- **Unify ability activation onto `AbilityRequest`.** Both activation paths
-  are live today: the client sets the unreliable `InputCommand` flags, while
-  the reliable `AbilityRequest 0x1014` handler sits ready server-side. Move
-  the client onto `AbilityRequest`, then re-cut `InputCommand` to the pure
-  heartbeat/ack `{sequence, ackSnapshotTick}` it already is in spirit (the
-  axes are always zero). One activation path, one less unreliable-loss edge
-  case on one-shot items (bomb/pod).
-- **Two math stacks, not three (S6).** DirectXMath for presentation,
-  `Vector3i64`/`Vector3d` for simulation — correct. The frozen
-  `LegacyVector*`/`Matrix33` wrappers are a third stack retired file-by-file
-  as legacy presentation code is touched; freezing is a state, not a plan.
+- **Ability activation unified onto `AbilityRequest` — DONE (protocol v4).**
+  The client maps ability presses onto the reliable `AbilityRequest` and
+  `InputCommand` is re-cut to the pure heartbeat/ack
+  `{sequence, ackSnapshotTick}`. One activation path, no unreliable-loss edge
+  case on one-shot items (bomb/pod), and the unreliable lane can no longer
+  fire a weapon or move a hull.
+- **Two math stacks, not three (S6) — DONE.** DirectXMath for presentation,
+  `Vector3i64`/`Vector3d` for simulation. The third stack is gone: the
+  `LegacyVector*`/`Matrix33` wrappers have been fully retired — no source
+  file references them (verified 2026-07-08). Do not reintroduce them (the
+  `explosion.md` donor code names them; the port maps every use onto
+  DirectXMath).
 - **What is *not* over-engineered — do not "simplify" these.** The five-trait
   message catalog, the three reliable lanes, the sparse-set ECS, the separate
   seeded LCG streams, Chebyshev gating on `int64` coordinates, and
@@ -1372,19 +1431,19 @@ what's open. Effort: S ≤ a day-ish, M = days, L = week(s).
 | 3 | Drifting markets + traders-as-supply + hauler `Route` orders | §13.2-3 | Feature | L | exploit, emergence |
 | 4 | `FactionId` + standings | §13.2-4 | Feature | M | diplomacy, mass PvP |
 | 5 | Missions (after the 4X tier settles) | §12 | Feature | L | quests, direction |
-| 6 | Ability path unification (`AbilityRequest`) + `InputCommand` re-cut | §13.1 | Simplify | S | protocol hygiene |
-| 7 | Render residues: in-app visual pass → instancing/glow default-on; vector glyph set + grid-backed client cull; GPU explosion debris | §7 | Render | M | fleet battles, style |
-| 8 | Interaction residues: two-finger camera pan, widget drag-scroll/steppers, chart pointer name-search | §7 | UX | S | touch polish |
+| 6 | ~~Ability path unification + `InputCommand` re-cut~~ **done 2026-07-08** (protocol v4) | §13.1 | Simplify | — | protocol hygiene |
+| 7 | Render residues: in-app visual pass → instancing/glow default-on; vector glyph set + grid-backed client cull; GPU explosion debris (plan: `explosion.md`) | §7 | Render | M | fleet battles, style |
+| 8 | Interaction residues: widget drag-scroll/steppers, chart pointer name-search *(two-finger camera pan shipped with the `input.md` migration)* | §7 | UX | S | touch polish |
 | 9 | Escort persistence + respawn re-target | §6.13 | Feature | S–M | durable fleets |
 | 10 | Client-side prediction / reconciliation | §13.3 | Netcode | L | high-RTT feel |
 | 11 | Delta-fragment reassembly for fleet-density AOI | §13.3 | Netcode | M | extreme density |
 | 12 | Encryption (DTLS / challenge exchange) | §9 | Security | M | hostile networks |
 | 13 | Server-persisted chat mute + AOI-scoped chat | §6.14 | Social | S | abuse controls |
-| 14 | Math-stack retirement (`LegacyVector*`/`Matrix33`, file-by-file) | §13.1 | Simplify | S | codebase hygiene |
+| 14 | ~~Math-stack retirement~~ **done 2026-07-08** — no `LegacyVector*`/`Matrix33` left in source | §13.1 | Simplify | — | codebase hygiene |
 | 15 | 100-bot manual soak (BotClient) before any entity-cap increase | §12 | Test | M | validates scale |
 | 16 | SIMD hot paths under `/fp:strict` discipline | §13.3 | Perf | M | fleet scale |
 | 17 | Phase-parallel tick (only after profiling shows the budget breaking) | §13.3 | Perf | L | entity counts |
 
-Sequencing spine: **1 → 2 → 3 → 4 → 5** for the 4X tier, with 6–9 (hygiene +
+Sequencing spine: **1 → 2 → 3 → 4 → 5** for the 4X tier, with 7–9 (hygiene +
 polish) parallelizable at any point, 15 gating any entity-cap increase, and
 16–17 strictly profile-driven.

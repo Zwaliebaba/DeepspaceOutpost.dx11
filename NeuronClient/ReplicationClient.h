@@ -6,7 +6,8 @@
 // ReliableChannel (ordered events). Pump() drains every datagram waiting on the
 // socket, routes it by magic, and feeds the right stream; the render code then
 // asks for interpolated, floating-origin-rebased entities. SendInput() pushes the
-// player's intent the other way. This is where the client STOPS simulating and
+// per-frame heartbeat/ack the other way (orders and abilities ride the reliable
+// lanes). This is where the client STOPS simulating and
 // becomes a thin presentation + input terminal for the server's authoritative
 // world.
 //
@@ -56,8 +57,8 @@ namespace Neuron::Client
     // can't stall.
     void Pump();
 
-    // Send the player's intent to the server (no-op until the server endpoint is
-    // known and the socket is open).
+    // Send the per-frame heartbeat to the server, stamping the snapshot-stream ack
+    // (no-op until the server endpoint is known and the socket is open).
     void SendInput(const Msg::InputCommand& _input);
 
     // Queue any reliable catalog message to the server on its declared lane

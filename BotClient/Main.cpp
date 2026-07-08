@@ -120,10 +120,10 @@ namespace
         if (b.rc.LatestTick() > 0)
           b.sawSnapshot = true;
 
-        // Heartbeat only: the flight axes are camera-only now (like the real
-        // client), so movement comes from orders. InputCommand still carries the
-        // sequence + the E2b snapshot ack, and feeds the server's safe-park silence
-        // detection, so keep sending it every frame with zero intent.
+        // Heartbeat only (protocol v4: InputCommand IS just the heartbeat):
+        // movement comes from orders. The command carries the sequence + the E2b
+        // snapshot ack, and feeds the server's safe-park silence detection, so
+        // keep sending it every frame.
         Msg::InputCommand in;
         in.sequence = ++b.inputSeq;
         b.rc.SendInput(in);

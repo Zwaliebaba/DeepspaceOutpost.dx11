@@ -2,18 +2,17 @@
 
 // InputActions - client-local input intent, as LocalOnly catalog messages.
 //
-// The bridge between raw key polling and the wire InputCommand: as the client
-// detects discrete combat actions (fire, launch missile) it publishes an
-// ActionTriggered onto the client MessageBus; a command-builder subscriber
-// accumulates the frame's actions and the per-frame send assembles them into the
-// InputCommand. This decouples "what the player did" from "how the command is
-// built" (rebinding, recording/replay, headless bots all drive the same path).
+// The bridge between the input layer and the wire: as the client detects a
+// discrete equipment action (launch missile, ECM, bomb, pod) it publishes an
+// ActionTriggered onto the client MessageBus; a subscriber maps it onto the
+// reliable AbilityRequest and sends it. This decouples "what the player did"
+// from "what goes on the wire" (rebinding, recording/replay, headless bots all
+// drive the same path). Movement is a UnitOrder and the per-frame InputCommand
+// is only the heartbeat/ack - no flight or combat state rides it.
 //
 // MessageScope::LocalOnly - these never travel the wire (id in the non-wire half),
 // so they cannot leak into the permanent network protocol; only the resulting
-// InputCommand is sent. Continuous flight (roll/pitch/throttle) is NOT modelled
-// here: it stays the legacy rate-based PlayerFlight state, normalized to axes at
-// send time.
+// AbilityRequest is sent.
 
 #include <cstdint>
 #include <tuple>
