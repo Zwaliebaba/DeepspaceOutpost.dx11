@@ -25,3 +25,13 @@ add_test(NAME BotClient.Smoke
          COMMAND BotClient --smoke --server-exe $<TARGET_FILE:Server>
                  --bots 8 --seconds 20 --port 40123 --max-overruns 3)
 set_tests_properties(BotClient.Smoke PROPERTIES TIMEOUT 120)
+
+# Adverse-condition lane: same fleet, but every bot is forced through one full
+# reconnect (fresh session, real teardown + re-handshake + galaxy re-pull over live
+# UDP) ~8 s in, then must recover to the same verdict. A different port from the
+# plain smoke lane so the two can run concurrently under `ctest -j`. Longer run
+# (24 s) leaves ample time to recover after the churn; timeout raised to match.
+add_test(NAME BotClient.Smoke.Churn
+         COMMAND BotClient --smoke --server-exe $<TARGET_FILE:Server>
+                 --bots 8 --seconds 24 --port 40124 --max-overruns 3 --churn-seconds 8)
+set_tests_properties(BotClient.Smoke.Churn PROPERTIES TIMEOUT 150)
