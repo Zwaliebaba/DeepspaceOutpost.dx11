@@ -80,7 +80,7 @@ char find_name[20];
  * hull. The ship moves by orders - the legacy roll/climb ramp and auto-centre
  * machinery went with the cockpit view, and the wire InputCommand carries no
  * flight axes at all (protocol v4). PlayerFlight() remains as presentation
- * state (the intro parade and game-over debris animate off its speed).
+ * state (the intro parade animates off its speed).
  */
 
 /*
@@ -1373,14 +1373,15 @@ void handle_flight_keys(void)
 
 enum class GameState
 {
-  Intro1,   // "DEEPSPACE OUTPOST" title (Elite theme)
-  Intro2,   // ship parade (Blue Danube)
-  Flight,   // in-flight / docked - the live game
-  GameOver, // the death animation, then a fresh game
+  Intro1,     // "DEEPSPACE OUTPOST" title (Elite theme)
+  Intro2,     // ship parade (Blue Danube)
+  Flight,     // in-flight / docked - the live game
+  DeathWatch, // hold the view on your ship's wreck (~3s), then respawn docked
 };
 
 static GameState s_state = GameState::Intro1;
-static int s_gameOverFrame = 0;   // game-over frames rendered (the animation runs 100)
+static constexpr int DEATH_WATCH_FRAMES = 100;  // ~3s: outlives EXPLOSION_LIFETIME
+static int s_deathWatchFrame = 0;               // death-watch frames elapsed
 
 // Enter the first intro screen (title + Elite theme). The intro scenes animate
 // in camera space, so the rig resets to the identity camera.
@@ -1426,52 +1427,17 @@ static void enter_flight(void)
   s_state = GameState::Flight;
 }
 
-// Death VFX helpers (defined below, next to the bus handlers that also use them).
-static void emit_effect_burst(const Neuron::Math::Vector3i64& _pos, float _radius);
-static DirectX::XMFLOAT3X3 identity_basis(void);
-static float hull_radius(int _type);
-
-// Enter the game-over animation: your hull shatters into tumbling debris while cargo
-// wreckage drifts past, for 100 frames. The scene animates in camera space against the
-// identity camera (camera_rig_reset), so the effects origin is pinned to zero and the
-// wreck point {0,0,1000} sits ahead on +z. The debris shatter (EXPLOSION_LIFETIME ~ 3s)
-// burns out just before the animation ends.
-static void enter_game_over(void)
+// Our ship just died: hold the LIVE flight view on the wreck while the explosion plays
+// (~3s), then wake docked at the station (respawn_after_death). This replaces the old
+// synthetic GAME OVER scene (identity-camera wreck theater + "GAME OVER" text): the
+// camera, floating origin and replicated world simply freeze where they are for the
+// watch - only the engine-side death effects animate - so you see YOUR ship blow apart
+// right where it happened before starting over from the station. The EntityDeath
+// handler already spawned the explosion and dropped our entity from the local mirror.
+static void enter_death_watch(void)
 {
-  current_screen = SCR_GAME_OVER;
-  camera_rig_reset();
-  gfx_set_clip_region(1, 1, 510, 383);
-
-  PlayerFlight().speed = 6;   // presentation only: paces the cargo drift past the wreck
-  PlayerFlight().roll = 0;
-  PlayerFlight().climb = 0;
-  clear_local_objects();
-
-  Matrix rotmat;
-  set_init_matrix(rotmat);
-
-  // Your hull's death: the engine debris/particle effect at the wreck point (the legacy
-  // FLG_DEAD pixel-spray cobra is retired - explosion.md decision 1). The rig was just
-  // reset, so the origin is zero for the whole animation.
-  {
-    const Neuron::Math::Vector3i64 wreck{ 0, 0, 1000 };
-    auto& fx = Neuron::Client::EffectsInstance();
-    fx.SetOrigin(Neuron::Math::Vector3i64{ 0, 0, 0 });
-    fx.AddExplosion(SHIP_COBRA3, wreck, identity_basis(), 1.0f);
-    emit_effect_burst(wreck, hull_radius(SHIP_COBRA3));
-  }
-
-  for (int i = 0; i < 5; i++)
-  {
-    const int type = (rand255() & 1) ? SHIP_CARGO : SHIP_ALLOY;
-    const int newship = add_new_ship(type, (rand255() & 63) - 32, (rand255() & 63) - 32, 1000, rotmat, 0, 0);
-    local_objects[newship].rotz = ((rand255() * 2) & 255) - 128;
-    local_objects[newship].rotx = ((rand255() * 2) & 255) - 128;
-    local_objects[newship].velocity = rand255() & 15;
-  }
-
-  s_gameOverFrame = 0;
-  s_state = GameState::GameOver;
+  s_deathWatchFrame = 0;
+  s_state = GameState::DeathWatch;
 }
 
 // Begin a fresh game: reset the world, dock, then roll into the intro sequence.
@@ -1484,11 +1450,11 @@ static void start_new_game(void)
   enter_intro1();
 }
 
-// After the game-over animation. The server has respawned us DOCKED at the
-// nearest station (the G3 death rule, minus cargo), so enter the station menus
-// rather than resuming flight - mirroring enter_flight. dock_player()
-// re-confirms the dock with the server and resets our ship state; the replicated
-// snapshots (now at the station) drive the view when we launch.
+// After the death watch. The server has respawned us DOCKED at the nearest
+// station with a fresh hull (the G3 death rule, minus cargo), so enter the
+// station menus rather than resuming flight - mirroring enter_flight.
+// dock_player() re-confirms the dock with the server and resets our ship state;
+// the replicated snapshots (now at the station) drive the view when we launch.
 static void respawn_after_death(void)
 {
   game_over = 0;
@@ -1710,16 +1676,28 @@ static void register_client_event_handlers(void)
       cmdr.current_cargo[_resp.commodity] = _resp.cargo;
   });
 
-  // Death: our own death triggers the game-over sequence; any other entity's death
-  // drops it from the view, clears a missile lock on it, and plays the explosion.
+  // Death: our own death explodes our hull and starts the death watch (then respawn
+  // docked); any other entity's death drops it from the view, clears a missile lock
+  // on it, and plays the explosion.
   g_clientBus.Subscribe<Neuron::Msg::EntityDeath>([](const Neuron::Msg::EntityDeath& _death)
   {
     Client::ReplicationClient& rc = Client::ReplicationClientInstance();
     if (_death.victim == rc.LocalPlayer())
     {
-      // We were killed. Trigger the game-over sequence (game_update_flight picks this
-      // up next frame). The server respawns us in place, so after the animation we
-      // resume flight rather than restart - see respawn_after_death().
+      // We were killed: shatter OUR hull where it happened (the same debris + fireball
+      // as any other kill) and drop the entity from the local mirror, so the intact
+      // ship is not drawn inside its own explosion while the server respawns it at a
+      // station. game_update_flight switches to the death watch next frame - a ~3s
+      // hold on the wreck - then respawn_after_death wakes us docked.
+      Net::EntitySnapshot vs;
+      if (rc.Sample(_death.victim, 1.0, vs))
+      {
+        const Neuron::Math::Vector3i64 at{ vs.x, vs.y, vs.z };
+        if (vs.type >= 1 && vs.type <= NO_OF_SHIPS)
+          Neuron::Client::EffectsInstance().AddExplosion(vs.type, at, snapshot_basis(vs), 1.0f);
+        emit_effect_burst(at, hull_radius(vs.type));
+      }
+      rc.Forget(_death.victim);
       game_over = 1;
       snd_play_sample(SND_EXPLODE);
       return;
@@ -1946,7 +1924,7 @@ static void process_server_events(void)
 }
 
 // The in-flight scene renders the 3D full-window; every other screen (charts,
-// station, intro, game-over, save/load) stays on the retro letterboxed canvas.
+// station, intro, save/load) stays on the retro letterboxed canvas.
 static int is_flight_view(int scr)
 {
   return scr == SCR_FRONT_VIEW;
@@ -2004,12 +1982,12 @@ static void ensure_connection(void)
 
 // Per-frame logic for the in-flight/docked state: drain replicated state, advance sound,
 // choose the scene/clip mode, read input, and run the per-frame bookkeeping. Split out of
-// the old monolithic loop. Transitions to the game-over animation when the player dies.
+// the old monolithic loop. Transitions to the death watch when the player dies.
 static void game_update_flight(void)
 {
   if (game_over)
   {
-    enter_game_over();
+    enter_death_watch();
     return;
   }
 
@@ -2085,7 +2063,7 @@ static void game_render_flight(void)
   // in view with the StationMenuWindow floating over it (current_screen stays the front
   // view so this is full-window); in flight it is the live world.
   if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_INTRO_ONE) ||
-      (current_screen == SCR_INTRO_TWO) || (current_screen == SCR_GAME_OVER))
+      (current_screen == SCR_INTRO_TWO))
   {
     gfx_clear_display();
     update_starfield();
@@ -2132,7 +2110,7 @@ static void game_render_flight(void)
 }
 
 // Per-frame logic hook (GameApp::Update): step the active state. Intro screens advance on
-// Space; flight runs the live game; the game-over animation plays out then restarts.
+// Space; flight runs the live game; the death watch holds on the wreck then respawns.
 void game_update(void)
 {
   switch (s_state)
@@ -2161,13 +2139,17 @@ void game_update(void)
       game_update_flight();
       break;
 
-    case GameState::GameOver:
-      if (s_gameOverFrame >= 100)
-      {
-        respawn_after_death();   // animation done -> resume flight (MMO) or fresh game
-        break;
-      }
-      s_gameOverFrame++;
+    case GameState::DeathWatch:
+      // The net, camera and floating origin stay frozen for the watch (the old
+      // game-over froze them too); the engine-side Effects keep animating the wreck.
+      // The engine defaults every frame back to the letterboxed canvas, so re-enable
+      // the full-window flight scene here (game_update_flight, which normally does
+      // it, is not running). When the wreck burns out, wake docked at the station
+      // with the server's fresh hull.
+      gfx_set_scene_fullwindow(1);
+      gfx_set_scene_clip();
+      if (++s_deathWatchFrame >= DEATH_WATCH_FRAMES)
+        respawn_after_death();
       break;
   }
 }
@@ -2198,21 +2180,13 @@ void game_render_scene(void)
       game_render_flight();
       break;
 
-    case GameState::GameOver:
-    {
-      // Client-space scene (like the intro): the starfield + ships fill the window and
-      // "GAME OVER" is centred vertically. Needs the full-window clip or the client-space
-      // text is clipped by the default 512x514 scissor.
-      gfx_set_scene_fullwindow(1);
-      gfx_set_scene_clip();
-      int ch;
-      gfx_canvas_size(nullptr, &ch);
-      gfx_clear_display();
-      update_starfield();
-      update_local_objects();
-      hud_centre_text(ch / 2 - 10, "GAME OVER", 140, GFX_COL_GOLD);
+    case GameState::DeathWatch:
+      // The live flight view, frozen: the replicated world re-renders from the frozen
+      // mirrors (dead-reckoned drift keeps it breathing) and the effects pass draws
+      // your ship's debris + fireball over it. No "GAME OVER" card - the wreck IS the
+      // transition, and the station menu opens when the watch ends.
+      game_render_flight();
       break;
-    }
   }
 }
 
@@ -2252,8 +2226,8 @@ int game_main(void)
 
   // The whole game now runs through the GameMain lifecycle: each gfx_update_screen()
   // drives ClientEngine::Frame() -> GameApp::Update/RenderScene -> game_update()/
-  // game_render_scene(), which step the state machine (intro -> flight -> game-over ->
-  // new game). game_main() just boots the first game and pumps frames until the window
+  // game_render_scene(), which step the state machine (intro -> flight -> death watch
+  // -> respawn). game_main() just boots the first game and pumps frames until the window
   // closes (the message pump exits the process on close).
   start_new_game();
   while (!finish)
