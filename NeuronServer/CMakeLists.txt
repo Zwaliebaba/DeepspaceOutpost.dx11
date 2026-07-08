@@ -18,6 +18,7 @@ set(NEURONSERVER_HEADERS
     PersistenceService.h
     TickPacer.h
     TickMetrics.h
+    AdminChannel.h
     pch.h
 )
 
